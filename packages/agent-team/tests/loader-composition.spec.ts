@@ -12,6 +12,7 @@ import * as storageDomain from '@deepseek-ai/dsh-storage-domain'
 import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import AgentTeam from '../src/index.ts'
+import { AGENT_TEAM_RULES_VERSION } from '../src/ledger.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
@@ -154,7 +155,7 @@ describe('Agent Team real composition', () => {
         operationCount: 2,
         projectCount: 0,
         agentMemberCount: 0,
-        rulesVersion: 2,
+        rulesVersion: AGENT_TEAM_RULES_VERSION,
       }))
     } finally {
       if (previous === undefined) delete process.env.DSH_HOME
@@ -168,7 +169,7 @@ describe('Agent Team real composition', () => {
     const reopened = second.agentTeam
     const storageDomain = second.get('storageDomain')
     if (reopened === undefined || storageDomain === undefined) throw new Error('the reopened composition lost a service under test')
-    expect(reopened.status()).toEqual(expect.objectContaining({ sequence: 2, operationCount: 2, rulesVersion: 2 }))
+    expect(reopened.status()).toEqual(expect.objectContaining({ sequence: 2, operationCount: 2, rulesVersion: AGENT_TEAM_RULES_VERSION }))
     expect(storageDomain.get('agent_team')).toBeUndefined()
     expect(pool.media.size).toBe(0)
   })

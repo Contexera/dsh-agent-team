@@ -25,15 +25,17 @@ Project owner 才能发起或 promotion Thread。accountable 与执行分离，�
 | 操作 | Human | Agent |
 | --- | --- | --- |
 | 发起或 promotion Thread | 可以 | Project owner |
-| 验收 | 任意 open Task | Project owner，仅 `in_review`，且从未持有该 Task 的任何 Claim |
+| 验收 | 任意 open Task | Project owner 或该 Task 的 accountable，仅 `in_review`，且从未持有该 Task 的任何 Claim |
 | close 或 reopen | 可以 | 当前 accountable |
 | 转交 open Task | 可以 | 当前 accountable |
 | 转交已结束 Task | 可以 | 不可以 |
 
-持有过该 Task 任一 Claim 的 accountable Agent 不能自行验收；应由未参与执行的 Project owner 或 Human 验收，accountable 也可转交责任。转交目标是 enabled Project owner 或 Human，Claims 仍归执行者。accountable Agent 被撤销 owner、离开 Workspace、归档或删除时，其负责的 open Task 在同一 operation 中转回 Human；suspend 保留 accountable。
+持有过该 Task 任一 Claim 的 accountable Agent 不能自行验收；应由未参与执行的 Project owner 或 Human 验收，accountable 也可转交责任。转交目标是任意 enabled Project member 或 Human——不要求 follow 该 Thread，新 accountable 会自动 follow——Claims 仍归执行者。被撤销 owner 授权时，只要该成员仍参与 Project，它负责的 open Task 就留在它手里；失去 Workspace 参与资格、归档或删除时，这些 open Task 在同一 operation 中转回 Human；suspend 保留 accountable。
 
 ## Human Remote boundary
-Human Client 使用 `readThread`、`threadHistory`、`threadObservations` 和 `changes`。它消费 Host 的 Human Inbox 切片，作为「收件箱 / Inbox」队列。Attention 有两条入口，且都不是 model-facing 的：Agent 工具 `team_attention` 走 `changeAttentionForAgent`；`@Remote('changeAttention')` 是 Human Remote——两个 Thread 面都接到同一个共享关注控件上，Human 因此可以从 Web 面订阅一个 Thread 的普通更新。Task 责任转交走 Human `transferTask` Remote：Client 只提供 Host `view` 已投影为 Project owner 的目标加 Human，转交规则与 accept/close/reopen 权限都不在 Client 复制，仍由 Host 判定。已结束 Task 的头部同样保留转交入口——只有 Member actor 被限制在 open Task 上，而负责人已不是 Project owner 的已结束 Task 正是从这里补回负责人。
+Human Client 使用 `readThread`、`threadHistory`、`threadObservations` 和 `changes`。它消费 Host 的 Human Inbox 切片，作为「收件箱 / Inbox」队列。Attention 有两条入口，且都不是 model-facing 的：Agent 工具 `team_attention` 走 `changeAttentionForAgent`；`@Remote('changeAttention')` 是 Human Remote——两个 Thread 面都接到同一个共享关注控件上，Human 因此可以从 Web 面订阅一个 Thread 的普通更新。
+
+Task 责任转交走 Human `transferTask` Remote：Host 接受任意 enabled Project member 或 Human，Client 不复制这套规则；弹窗只列本 Thread 的 enabled followers——一次对话内的移交能落到的人，本就比整个 Project 窄——Human 只有 follow 了该 Thread 才会出现。accept/close/reopen 权限同样留在 Host。该控件在已了结的 Task 上也留着，因为只有 Member actor 被限制在 open Task 上。accepted 的 Task 保留它 Thread 的关注者，负责人已失去 Project 参与的 Task 就在那一层补回责任；closed 的 Task 所在 Thread 已经没有任何关注者——关闭会结束所有 Attention 行，closed 的 Thread 也拒绝新的关注——于是它的弹窗直说没人能接手，而不是自己编一个目标。
 
 转交成功同样在控件所在处陈述：动作带用 Host 自己 committed 的结果印出新的负责人，一旦投影不再与它一致就把这行撤掉。Host 的 transfer 活动行仍然在 feed 里记录这次转移——带里的那行是同一个事实落在控件旁，不是对它的第二个权威。
 

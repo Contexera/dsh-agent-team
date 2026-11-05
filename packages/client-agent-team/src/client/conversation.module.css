@@ -732,6 +732,52 @@
   padding-left: 18px;
 }
 
+/* The empty state speaks in the dialog's own voice rather than posing a control that cannot work. */
+.transferEmpty {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.transferList {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A candidate is one full-width row: the whole row is the hit target on touch and one tab stop on the way
+   through the dialog, so the dialog stays usable at 390px and from the keyboard alone. A row offers a person,
+   so it takes the ghost row the mention picker already uses for the same thing — no per-row border, the call
+   radius, the interactive fill under the pointer. Drawn as outlined buttons instead, the list stood level with
+   the footer's own outlined Cancel and read as five controls rather than one list. */
+.transferCandidate {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--dsw-radius-md, 8px);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.transferCandidate:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.transferCandidate:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
+
+.transferCandidate:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .refLink {
   background: none;
   border: none;

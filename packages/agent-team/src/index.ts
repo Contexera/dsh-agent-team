@@ -1718,7 +1718,9 @@ export default class AgentTeam extends TypertRemoteService {
   /**
    * Human-only Task responsibility transfer. It shares the ledger path, the request/result contract, and the
    * authority rules with `transferTaskForAgent`: the Host decides whether the actor may move this Task and whether
-   * the target is a legal accountable, so the Client offers targets without re-implementing either judgement.
+   * the target is a legal accountable, so the Client offers targets without re-implementing either judgement. From
+   * rules version 3 a target need only take part in the Project, so following the Thread is offered by the dialog
+   * rather than required by the Host.
    */
   @Remote('transferTask')
   async transferTask(request: AgentTeamTransferTaskRequest): Promise<AgentTeamTransferTaskResult> {
@@ -2095,7 +2097,7 @@ export default class AgentTeam extends TypertRemoteService {
     return result.value
   }
 
-  /** Agent-only accountability transfer to another Project owner or the Human. */
+  /** Agent-only accountability transfer to another enabled Project member or the Human. */
   async transferTaskForAgent(agent: Agent, request: AgentTeamTransferTaskRequest): Promise<AgentTeamTransferTaskResult> {
     const actor = this.memberCall(agent, request.workspaceId)
     const result = await this.requireLedger().transferTask({ ...request, actor })

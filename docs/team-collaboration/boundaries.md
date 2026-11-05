@@ -25,17 +25,23 @@ A Project owner starts or promotes Threads; accountability is separate from exec
 | Action | Human | Agent |
 | --- | --- | --- |
 | Start or promote a Thread | Yes | Project owner |
-| Accept | Any open Task | Project owner, only in `in_review`, and never held any Claim on the Task |
+| Accept | Any open Task | Project owner or the Task's own accountable, only in `in_review`, and never held any Claim on the Task |
 | Close or reopen | Yes | Current accountable |
 | Transfer an open Task | Yes | Current accountable |
 | Transfer a finished Task | Yes | No |
 
-An accountable Agent who held any Claim cannot accept that Task. An uninvolved Project owner or the Human must verify it; the accountable may instead transfer responsibility. A transfer target is an enabled Project owner or the Human, and Claims stay with their executors. Removing an accountable Agent's ownership or Workspace participation, archiving, or removing that Agent returns their open Tasks to the Human in the same operation. Suspension keeps accountability.
+An accountable Agent who held any Claim cannot accept that Task. An uninvolved Project owner or the Human must verify it; the accountable may instead transfer responsibility.
+
+A transfer target is any enabled Project member or the Human — following the Thread is not required, the new accountable starts following it — and Claims stay with their executors. Removing an accountable Agent's owner grant leaves its open Tasks with it while that Member still takes part in the Project; archiving the Project or removing that Agent returns those Tasks to the Human in the same operation. Suspension keeps accountability.
 
 ## Human Remote boundary
 The Human Client uses `readThread`, `threadHistory`, `threadObservations`, and `changes`, and it consumes the Host's Human Inbox slice as the 「收件箱 / Inbox」 queue. Attention has two entry points, neither of them model-facing: the Agent tool `team_attention` goes through `changeAttentionForAgent`, while `@Remote('changeAttention')` is the Human Remote — which both Thread faces wire to one shared follow control, so a Human subscribes to a Thread's ordinary updates from the Web surface.
 
-Task responsibility moves through the Human `transferTask` Remote. The Client offers only the targets the Host `view` already projects as Project owners, plus the Human, and re-implements neither the transfer rules nor the accept/close/reopen authority, which stay on the Host. The control also stands on a closed Task, because only a Member actor is confined to open Tasks and a finished Task whose accountable is no longer a Project owner is mended from there.
+Task responsibility moves through the Human `transferTask` Remote. The Host accepts any enabled Project member or the Human, and re-implements none of it on the Client: the dialog offers this Thread's enabled followers, which is the narrower set a handover inside one conversation can land on, and the Human appears there only by following the Thread. 
+
+The Client re-implements neither the transfer rules nor the accept/close/reopen authority, which stay on the Host.
+
+The control also stands on a finished Task, because only a Member actor is confined to open Tasks. An accepted Task keeps its Thread's followers, so a Task whose accountable left the Project is mended there; a closed Task's Thread has no follower left at all — closing ends every Attention row, and a closed Thread refuses a new follow — so its dialog says that nobody can take it instead of naming a target of its own.
 
 A committed transfer is also stated where the control stands: the band prints the new accountable from the Host's own committed result, and retires that line once the projection stops agreeing with it. The Host's transfer activity row still records the move in the feed — the band's line is the same fact at the control, not a second authority over it.
 

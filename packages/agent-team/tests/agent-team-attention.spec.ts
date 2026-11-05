@@ -17,7 +17,7 @@ import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.
 import { fabricateLegacyThreadReadSnapshot } from './helpers/legacy-thread-read.ts'
 import { rulesV1Ledger } from './fixtures/rules-v1-ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
-import { AgentTeamLedger, agentTeamHumanActor, isThreadReadSnapshot } from '../src/ledger.ts'
+import { AgentTeamLedger, agentTeamHumanActor, isThreadReadSnapshot, AGENT_TEAM_RULES_VERSION } from '../src/ledger.ts'
 import { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from '../src/index.ts'
 import type { AgentTeamThreadAttentionResult } from '../src/types.ts'
 import { addLedgerMember, alpha, beta, committed, harness, inFlight, ledgerAtBoot, makeOwner, requestId, sqliteHarness, storedPool, withTask } from './helpers/host-harness.ts'
@@ -151,10 +151,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     ledgerAtBoot(test).validate()
   })
 
-  it('boots an empty Team on rules version 2 and rejects old ledger media', async () => {
+  it('boots an empty Team on the current rules version and rejects old ledger media', async () => {
     const pool = new MemoryMediaPool()
     const first = await harness(pool)
-    expect(first.ctx.agentTeam.status()).toEqual({ initialized: true, sequence: 2, operationCount: 2, projectCount: 0, agentMemberCount: 0, humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, rulesVersion: 2 })
+    expect(first.ctx.agentTeam.status()).toEqual({ initialized: true, sequence: 2, operationCount: 2, projectCount: 0, agentMemberCount: 0, humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, rulesVersion: AGENT_TEAM_RULES_VERSION })
     const records = [...pool.media.get('agent_team')!.tables.get('operations')!.values()]
     await first.fiber.dispose()
     const replay = await first.ctx.plugin(AgentTeam)
@@ -355,8 +355,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(revivedLedger.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(0)
     // Adopting a later rules version afterwards must not re-judge the legacy accept recorded before it.
     const table = revived.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
-    await new AgentTeamLedger(table, { rulesVersion: 2 }).initialize()
-    const upgraded = new AgentTeamLedger(table, { rulesVersion: 2 })
+    await new AgentTeamLedger(table, { rulesVersion: AGENT_TEAM_RULES_VERSION }).initialize()
+    const upgraded = new AgentTeamLedger(table, { rulesVersion: AGENT_TEAM_RULES_VERSION })
     expect(() => upgraded.validate()).not.toThrow()
     expect(upgraded.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(0)
   })

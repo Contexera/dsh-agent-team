@@ -5,7 +5,7 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
+import { AgentTeamLedger, agentTeamHumanActor, AGENT_TEAM_RULES_VERSION } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import type { AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
@@ -107,10 +107,12 @@ describe('rules version markers', () => {
 
   it('refuses a ledger that a newer build has moved to a later version', async () => {
     const pool = new MemoryMediaPool()
-    await new AgentTeamLedger(await openTable(pool), { rulesVersion: 3 }).initialize()
+    // Bumped against the constant, so this test keeps testing the refusal as the version ladder grows.
+    const newer = AGENT_TEAM_RULES_VERSION + 1
+    await new AgentTeamLedger(await openTable(pool), { rulesVersion: newer }).initialize()
     await closeAll()
     const table = await openTable(pool)
-    expect(() => new AgentTeamLedger(table)).toThrow(/adopted rules version 3, but this build implements up to 2; open it with a newer release/)
+    expect(() => new AgentTeamLedger(table)).toThrow(new RegExp(`adopted rules version ${newer}, but this build implements up to ${AGENT_TEAM_RULES_VERSION}; open it with a newer release`))
   })
 
   it.each([

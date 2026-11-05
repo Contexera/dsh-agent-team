@@ -6,7 +6,7 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { AgentTeamLedger, agentTeamHumanActor, AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/ledger.ts'
+import { AgentTeamLedger, agentTeamHumanActor, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_RULES_VERSION } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamProjectRef, AgentTeamRequestId, AgentTeamThreadRef, AgentTeamThreadRepliedOperation } from '../src/types.ts'
 import { rulesV1Ledger } from './fixtures/rules-v1-ledger.ts'
@@ -50,7 +50,7 @@ const storedKinds = (pool: MemoryMediaPool) => [...pool.media.get('agent_team')!
 const memberActor = (handle: keyof typeof rulesV1Ledger.members): AgentTeamMemberActor =>
   ({ kind: 'member', memberId: rulesV1Ledger.members[handle] as AgentTeamMemberId, handle })
 
-/** A version 1 ledger over the frozen history, then a version 2 build over the same records. */
+/** A version 1 ledger over the frozen history, then a current build over the same records. */
 async function openBoth() {
   const pool = frozenPool()
   const table = await openTable(pool)
@@ -78,7 +78,7 @@ const handles = ['alice', 'bob', 'carol', 'dave'] as const
 const threadRefs = [rulesV1Ledger.task.threadRef, rulesV1Ledger.discussion.threadRef, rulesV1Ledger.standup.threadRef, rulesV1Ledger.outsider.threadRef]
 
 describe('replaying a rules version 1 ledger', () => {
-  it('adopts version 2 after the old records and keeps what each Member was following and saw', async () => {
+  it('adopts the current rules version after the old records and keeps what each Member was following and saw', async () => {
     const { pool, v1, adopt } = await openBoth()
     const bystander: AgentTeamAgentMember = { memberId: 'member:bystander' as AgentTeamMemberId, sessionId: SessionId('session:bystander'), workspaceId: alpha,
       handle: 'bystander', description: 'Test Agent', presetId: 'team-member', privateMemoryPath: '/tmp/bystander', state: 'enabled' }
@@ -87,7 +87,7 @@ describe('replaying a rules version 1 ledger', () => {
 
     const v2 = await adopt()
     expect(storedKinds(pool).slice(-2)).toEqual(['team/member-added', 'team/rules-version-adopted'])
-    expect(v2.status().rulesVersion).toBe(2)
+    expect(v2.status().rulesVersion).toBe(AGENT_TEAM_RULES_VERSION)
     expect(() => v2.validate()).not.toThrow()
     for (const handle of handles) expect(standing(v2, handle, threadRefs), `${handle} after adoption`).toEqual(before[handle])
 

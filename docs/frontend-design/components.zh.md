@@ -147,6 +147,10 @@
 - 已关注的 Thread 读起来是按下态。shipped `Button` 对 `aria-pressed` 不画任何东西，所以「已关注」与「未关注」原先只差一条描边。on-state 取 shipped 的选中语汇（ghost-active 底 + 同族描边，`Pill` 与 `ClockPicker` 已经是这样），而不是再加一块实底填充：验收是这条带上唯一的 primary，第二个实心块会把这条带本来要表达的层级重新压平。属性仍留在选择器里，让状态落在按钮自己的语义上。
 - 动作带自己的反馈行是 `errorState` 与 `error` 之外的**第三种失败形状**：每个拒绝的控件各一行 12px/18px，位于带下方、带的 padding 之内。整面失败那种形状会把它所替代的空白区居中，借到这里会把时间线按下它自己的 32px padding 推下去，而不是在控件所在处说明出了什么事。每个控件保留自己那行，两次失败因此不会压成一条需要读者自行归属的消息。
 - 转交成功在同一位置、同一字号上用次要色陈述结果：Host 的活动行会把它记进 feed，但长 Thread 会把那一行滚离刚用过的控件。回执由投影推出来，所以之后任何一次责任转移都会撤掉它，而不是留一条「Task 还在某处」的陈述。
+- 「转交」打开的是对话框而不是菜单：它给的是一份人的列表，而「没人可转交」是个真回答，空菜单则是死路。候选人就是这个 Thread 里 enabled 的关注者，别无其他——转交是对话内部的一次移动，已经在对话里的人才是它能落到的人；Host 允许的「任意 enabled Project member」是一份权限，不是一份报价单。
+- Human 只有关注这个 Thread 之后才进那份名单，因为关注者集合就是每个 Member 的 Attention。当前 accountable 不会报给自己，已离开或非 enabled 的 Member 直接被滤掉，一个候选人都没有时正文在原处说明这一点，而不是画出一按就失败的按钮。
+- 候选人是 mention picker 已经在用的那种 ghost 行——每人一行、不画边框、取调用圆角，指针下铺 interactive 填充——因为把一份人的列表画成一排描边按钮，就等于让它与对话框自己的「取消」平级。焦点进入对话框，Tab 走遍候选人，Escape 关闭；390×844 下列表在卡片内滚动，而不是把 footer 挤出可及范围。
+- 失败陈述在读的人按下的地方：Remote 报的错落在对话框内、候选人旁边；被 fence 挡下则关掉对话框，走页面自己的恢复路径重读，同一条消息因此从不画两遍。写入不做乐观更新——Host 答话前每个候选人都禁用，Task 当前的 accountable 原样留在屏幕上，对话框在落定的结果上关闭，而不是在点击上关闭。
 - 顶层栏只点名 Task 并说明它出了什么问题，**不装这个 Task 的工作队列**。Claim 以「记录它的那条事实」抵达读者：时间线里的活动行，以及 feed 入口行上画出的所有者。提前验收的确认弹窗仍会列出将一并完成的 Claim，因为那份清单就是验收据以判断的东西。没有哪个面按需列出 Claim，顶层栏因此只剩身份与真问题。
 - 运行风险行每个出错 Member 一行。行首是诊断结构化 class 的本地化名称：`session-refused`、`session-unreadable`、`preset-composition`、`rollover`、`runtime`、`activation`。这就是 `AgentTeamMemberDiagnostic.class` 这条策略轴。`restartOffered` 早已按这条轴分支。这条轴回答可本地化的「这是哪一类问题」。Host 的 `detail` 天生是英文，行内只截取 `detail` 首句。完整原文留在风险行 `title` 上。`AgentTeamClientMemberStatus` 本来就把整份 diagnostic 带到浏览器，因此这条轴不需要改 Host 协议。
 - 每个 class 一个句子 key，让可见行留在界面语言里，而不是把 Host 字符串直接贴进本地化界面。完全没有 diagnostic 的 Member 回落到 `runtime` 文案，而不是留空。

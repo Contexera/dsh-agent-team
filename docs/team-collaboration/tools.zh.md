@@ -139,7 +139,9 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 
 拒绝与 message 拒绝使用相同形式及[完整性与令牌规则](boundaries.zh.md#mutation-fences)；每次尝试仍重新检查 Task 权限。
 
-`accept`、`close`、`reopen`、`transfer` 了结的是 Task 而非 Claim，权限由 Host 判定：`accept` 属于 Human，或从未在该 Task 上持有过 Claim 的 Project owner，且仅在 in_review 时；`close`、`reopen`、`transfer` 属于 Human 与当前负责人。工具只转发 action 与写令牌，不重新推导该权限。`transfer` 取 `target`——当前 Project owner 的 memberRef、`@Handle` 或唯一 memberRef 前缀，或 `human`——只转移责任，Claim 仍留在其 owner 手上。commit 的了结结果点名动作、结果 status 与 resolution、负责人，以及它完成或释放的 Claims。`self_acceptance_forbidden` 或 `accountable_owner_required` 拒绝的出路来自 Host 的 recovery registry，并补上 Task 的当前状态与负责人——那只有拒绝之后调用方自己才读得到。
+`accept`、`close`、`reopen`、`transfer` 了结的是 Task 而非 Claim，权限由 Host 判定：`accept` 属于 Human、Project owner，或该 Task 自己的 accountable，且在该 Task 上持有过任何 Claim 的一律不行，Agent 只能在 in_review 时验收；`close`、`reopen`、`transfer` 属于 Human 与当前负责人。工具只转发 action 与写令牌，不重新推导该权限。
+
+`transfer` 取 `target`——任意 enabled Project member 的 memberRef、`@Handle` 或唯一 memberRef 前缀，或 `human`——只转移责任，Claim 仍留在其 owner 手上；新 accountable 从此刻起参与该 Thread，并会收到这个 Task 现在要求它做什么。commit 的了结结果点名动作、结果 status 与 resolution、负责人，以及它完成或释放的 Claims。`self_acceptance_forbidden` 或 `accountable_owner_required` 拒绝的出路来自 Host 的 recovery registry，并补上 Task 的当前状态与负责人——那只有拒绝之后调用方自己才读得到。
 
 ## `team_subscription`
 

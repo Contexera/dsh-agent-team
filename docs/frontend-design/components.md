@@ -260,6 +260,14 @@ That band's feedback line is a third failure shape beside `errorState` and `erro
 
 A committed transfer states its result in the same slot at the same grade, in the secondary ink: the Host's activity row records it in the feed, but a long Thread scrolls that row away from the control just used. The receipt is derived from the projection, so a later move retires it rather than leaving a line claiming the Task is somewhere it no longer is.
 
+The transfer control opens a dialog rather than a menu, because the offer is a list of people and "nobody to offer" is a real answer where an empty menu would be a dead end. The candidates are this Thread's enabled followers and nothing else: a handover is a move inside a conversation, so the readers already in it are the people it can land on, while the Host's wider permission of any enabled Project member is an authority rather than an offer.
+
+The Human joins that list only by following this Thread, because the follower set is every Member's Attention. The current accountable is never offered to itself, a departed or disabled member is filtered out, and with no candidate left the body states that in place of the list instead of drawing buttons that would fail. Focus enters the dialog, Tab walks the candidates, Escape closes it, and at 390×844 the list scrolls inside the card rather than pushing the footer out of reach.
+
+A candidate is the ghost row the mention picker already draws for the same job: one borderless row per person, at the call radius, with the interactive fill under the pointer. Drawn as outlined buttons the list stood level with the dialog's own Cancel and read as five controls instead of one list.
+
+A failure is stated where the reader pressed: a Remote error lands inside the dialog beside the candidates, while a fence closes the dialog and re-reads through the page's recovery path, so one message is never drawn twice. The write stays non-optimistic — every candidate is disabled until the Host answers, the Task's current accountable stays on screen untouched, and the dialog closes on the committed result rather than on the click.
+
 The band names the Task and states what is wrong with it; it does not carry the Task's work queue. A Claim reaches the reader as the fact that recorded it — the activity line in the timeline — and as the owners drawn on a feed entry row, and the early-accept dialog still lists the open Claims it will complete, because that list is what the acceptance is decided on. No surface lists Claims on demand, so the band stays identity plus a real problem.
 
 The runtime-risk row is one line per erroring Member, and its leading token is the **localized name of the diagnostic's structured class** — `session-refused`, `session-unreadable`, `preset-composition`, `rollover`, `runtime`, `activation`, the policy axis `AgentTeamMemberDiagnostic.class` already carries and `restartOffered` already branches on.

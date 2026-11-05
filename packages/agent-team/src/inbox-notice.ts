@@ -172,8 +172,10 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
               return ['Team Task update', `${activity.activityRef} (Task ${activity.taskRef}, Thread ${activity.threadRef}) — already in current context; still unread`].join('\n')
             }
             const acceptance = acceptanceNotification(fact.activity, readerId, lookup)
+            const handover = handoverNotification(fact.activity, readerId)
             return ['Team Task update', activityText(activity), `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`,
-              ...(acceptance === undefined ? [] : [acceptance])].join('\n')
+              ...(acceptance === undefined ? [] : [acceptance]),
+              ...(handover === undefined ? [] : [handover])].join('\n')
           },
           ...(onSurface ? {} : { activity }) })
       }
@@ -396,6 +398,16 @@ function memberReminderDetail(entry: AgentTeamUnreadMemberReminder): string {
 function boundedNotificationBody(body: string): string {
   const limit = NOTIFICATION_BODY_MAX_CHARACTERS
   return body.length <= limit ? body : `${body.slice(0, limit)}\n${NOTIFICATION_TRUNCATION_MARKER}`
+}
+
+/**
+ * The prompt a handover owes its new accountable. A transfer is the one Task change that hands somebody work they
+ * did not choose, and version 3 lets that Member be a plain Project member who can verify it: the wake says what the
+ * Task now asks of them, and who verifies when they worked on it themselves.
+ */
+function handoverNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined): string | undefined {
+  if (activity.kind !== 'transfer' || readerId === undefined || activity.to !== readerId) return undefined
+  return `You are the accountable for Task ${activity.taskRef} now: review what this Thread holds and accept it when the work stands, or say what still needs to change. Claims stay with their owners, so acceptance completes their work instead of moving it; if you worked on this Task yourself, another Project owner or the Human verifies it.`
 }
 
 function acceptanceNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined,

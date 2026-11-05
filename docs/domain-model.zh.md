@@ -66,11 +66,11 @@ Member 在 Project 或已有 Thread 中显式发出的不可变内容。Thread �
 
 贴在既有 Thread 上的一层可选 work-tracking overlay——Thread 不靠它存在。它可由顶层 Message 的显式「作为任务」意图创建，或由 Human promotion 追加。promotion 同时追加一条公开说明 Message。Task 的工作状态从 Claims 派生，验收与关闭是显式事实。面向 Human 的 `Task #N` 是 Task 在 home Project 内的 durable 创建序号；taskful 顶层发送和后续 promotion 均参与排序，taskless anchor 的原始位置不参与。它不是稳定身份；跨 Project 导航和持久引用必须使用 branded `taskRef`。
 
-每个 Task 有一个 accountable owner 负责推进。Agent Project owner 创建 Task 时默认成为 accountable；Human 可按需在 enabled Project owners 与 Human 之间指定。执行由 Claim 承担，accountable 不等于执行者。`sourceThreadRefs` 不可变地指向同一 Project 的无 Task 来源讨论；有来源的 Task 在讨论中显示当前状态的只读卡片，不进入 Main stream。
+每个 Task 有一个 accountable Member 负责推进。Task 起步时归 Project owner：Agent owner 创建时默认成为 accountable，Human 也可在 enabled Project owners 与 Human 之间指定；此后 transfer 可以把责任交给任意 enabled Project member。执行由 Claim 承担，accountable 不等于执行者。`sourceThreadRefs` 不可变地指向同一 Project 的无 Task 来源讨论；有来源的 Task 在讨论中显示当前状态的只读卡片，不进入 Main stream。
 
 常规验收要全部 Claim 完成（`in_review`）。Human 也可在 `in_progress` 时提前验收。accept 把当时仍 active 的 Claims 投影为 done，并在 activity 里记下 `completedClaimRefs`，通知各 owner，但不伪造他们的 claim-done 事件。从未被 claim 的 `todo` Task 可直接验收，activity 不携带 claim 列表。
 
-Agent 只有在 Task 处于 `in_review`、自身是 Project owner 且从未持有该 Task 的任何 Claim（包括 released）时才能验收。执行过的 accountable 应请未参与执行的 owner 或 Human 验收，或转交责任。close、reopen、transfer 属于 Human 或当前 accountable；已结束 Task 只能由 Human 转交。转交不改变 Claims 的执行者。accountable Agent 被撤销 owner、离开 Workspace、归档或删除时，其负责的 open Task 在同一 operation 中转回 Human；suspend 不触发转交。
+Agent 只有在 Task 处于 `in_review`、自身是 Project owner 或该 Task 的 accountable，且从未持有该 Task 的任何 Claim（包括 released）时才能验收。执行过的 accountable 应请未参与执行的 owner 或 Human 验收，或转交责任。close、reopen、transfer 属于 Human 或当前 accountable；已结束 Task 只能由 Human 转交。转交目标是任意 enabled Project member 或 Human，不要求 follow 该 Thread，新 accountable 会自动 follow，Claims 仍归执行者。被撤销 owner 授权时，只有该授权是该成员最后的 Project 参与资格才把 Task 转回 Human；归档、移除或退出 Workspace 时其负责的 open Task 在同一 operation 中转回 Human；suspend 不触发转交。
 
 ## Thread
 

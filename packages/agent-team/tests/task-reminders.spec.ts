@@ -69,12 +69,18 @@ async function claim(team: Seeded, task: AgentTeamTask, actor: AgentTeamMemberAc
   return changed.value
 }
 
+/** The verifier this spec's ledger runs under (rules version 2): an owner who never claimed, otherwise the Human. */
+function verifierOf(team: Seeded, task: AgentTeamTask): AgentTeamMemberId {
+  if (task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID) return AGENT_TEAM_HUMAN_MEMBER_ID
+  return team.ledger.getMember(task.accountable)?.state === 'enabled'
+    && !team.ledger.heldTaskClaim(task.taskRef, task.accountable)
+    && team.ledger.projectOwnerIds(task.projectRef).includes(task.accountable) ? task.accountable : AGENT_TEAM_HUMAN_MEMBER_ID
+}
 function evaluate(team: Seeded, nowMs: number, idle: ReadonlyMap<AgentTeamMemberId, number> = new Map()) {
   return planTaskReminders({ nowMs, tasks: team.ledger.reminderFacts(),
-    isOwner: (projectRef, memberId) => memberId === AGENT_TEAM_HUMAN_MEMBER_ID || team.ledger.projectOwnerIds(projectRef).includes(memberId),
+    verifierOf: task => verifierOf(team, task),
     isAvailable: memberId => memberId === AGENT_TEAM_HUMAN_MEMBER_ID || team.ledger.getMember(memberId)?.state === 'enabled',
     idleMs: memberId => idle.get(memberId),
-    heldEver: (taskRef, memberId) => team.ledger.heldTaskClaim(taskRef, memberId),
     episodeExists: (taskRef, kind, recipient, baselineSequence) => team.ledger.reminderEpisodeExists(taskRef, kind, recipient, baselineSequence),
     hasUnreadResponsibility: (taskRef, recipient) => team.ledger.hasUnreadResponsibility(taskRef, recipient),
   })

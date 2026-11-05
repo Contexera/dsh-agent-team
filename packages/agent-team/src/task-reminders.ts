@@ -1,4 +1,4 @@
-import type { AgentTeamClaim, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamTask, AgentTeamTaskRef } from './types/entities.ts'
+import type { AgentTeamClaim, AgentTeamMemberId, AgentTeamTask, AgentTeamTaskRef } from './types/entities.ts'
 
 export const REVIEW_BACKLOG_IDLE_MS = 30 * 60 * 1000
 export const STALLED_PUBLIC_MS = 24 * 60 * 60 * 1000
@@ -24,11 +24,11 @@ export interface ReminderTaskFacts {
 export interface ReminderEvaluationInput {
   readonly nowMs: number
   readonly tasks: readonly ReminderTaskFacts[]
-  readonly isOwner: (projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId) => boolean
+  /** The Member a Task's review belongs to: its accountable when that Member may verify, otherwise the Human. */
+  readonly verifierOf: (task: AgentTeamTask) => AgentTeamMemberId
   readonly isAvailable: (memberId: AgentTeamMemberId) => boolean
   /** Milliseconds idle, or undefined when this Host has not observed a complete running → idle interval. */
   readonly idleMs: (memberId: AgentTeamMemberId) => number | undefined
-  readonly heldEver: (taskRef: AgentTeamTaskRef, memberId: AgentTeamMemberId) => boolean
   readonly episodeExists: (taskRef: AgentTeamTaskRef, kind: ReminderKind, recipient: AgentTeamMemberId, baselineSequence: number) => boolean
   readonly hasUnreadResponsibility: (taskRef: AgentTeamTaskRef, recipient: AgentTeamMemberId) => boolean
 }
@@ -38,15 +38,6 @@ export interface ReminderCandidate {
   readonly kind: ReminderKind
   readonly recipient: AgentTeamMemberId
   readonly baselineSequence: number
-}
-
-export function reviewReminderRecipient(task: AgentTeamTask,
-  isOwner: (projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId) => boolean,
-  heldEver: (taskRef: AgentTeamTaskRef, memberId: AgentTeamMemberId) => boolean): AgentTeamMemberId {
-  return task.accountable === 'member:human'
-    || !isOwner(task.projectRef, task.accountable)
-    || heldEver(task.taskRef, task.accountable)
-    ? 'member:human' as AgentTeamMemberId : task.accountable
 }
 
 function eligible(input: ReminderEvaluationInput, candidate: ReminderCandidate): boolean {
@@ -61,7 +52,7 @@ export function planTaskReminders(input: ReminderEvaluationInput): readonly Remi
     const { task } = facts
     if (!facts.projectActive || task.resolution !== 'open') continue
     if (task.status === 'in_review') {
-      const recipient = reviewReminderRecipient(task, input.isOwner, input.heldEver)
+      const recipient = input.verifierOf(task)
       const idleMs = input.idleMs(recipient)
       const ready = recipient === 'member:human'
         ? input.nowMs - Date.parse(facts.statusBaselineOccurredAt) >= REVIEW_BACKLOG_IDLE_MS

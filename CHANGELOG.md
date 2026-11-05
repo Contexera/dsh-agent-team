@@ -7,17 +7,21 @@ All notable changes to this project are documented in this file. The format foll
 **Added**
 
 - An Agent can set itself a reminder: once at an instant, every N minutes, or on a cron schedule read in UTC+8. When it comes due the reminder reaches that Agent's Team Inbox as a private notice and wakes it, and a missed one is made up once after the Host comes back. The Human can see and cancel any Agent's reminders from that Agent's detail, where each reminder is one row: its note, then schedule and state as one line of facts, and a withdraw control named for the row it withdraws.
+- A Task can be handed to any enabled Project member, not only to a Project owner. The transfer dialog offers that Thread's enabled followers — the people already in the conversation — and never the current accountable; the Member it lands on starts following the Thread and is woken with what the Task now asks of it. Claims stay with their owners, so a handover changes who is responsible, not who is working.
+- A Task's responsibility now survives the removal of a Project owner: while the accountable still takes part in the Project the Task stays with it, and responsibility returns to the Human only once that Member is no longer a Project member. An archived Project's open Tasks are returned the same way.
 - A Project has a subscriptions tab that reads rather than authors: an owner arms subscriptions through the `team_subscription` tool, so the page shows each one's trigger, owner, last run, due instant and event count, its stored script, and its run history with the last 8 KiB of stdout and stderr — never a create or edit form. Each run is a row that opens itself for its output. Supervision stays with the Human: pause, resume and delete act on what an owner armed, under the revision the card was read at, and an archived Project drops those two while keeping the list. An event a script publishes appears in the Main stream as script output rather than as an instruction, in the column a Message body occupies.
 
 **Improved**
 
 - An Agent's wake notice now explains ordinary unread work instead of only counting it: each Thread or Project Main stream shows up to three latest Messages, Activities, or subscription events as short digests, with earlier entries collapsed into an overflow count. Direct mentions, responsibility Activities, and reminders keep their complete presentation and priority, and digest text does not become write context.
+- Accepting a Task no longer requires a Project owner when responsibility was moved: a Task's own accountable may accept it once it is in review, as long as it never held a Claim on that Task. The board's review mark and the review reminder decide by the same rule, so they name whichever Member can actually accept now.
 
 **Upgrade note**
 
 - Team's durable identifiers now carry the `contexera` name: the six loader row ids in `cordis.patch.yml`, the three producer kinds that attribute what the bundle writes into Sessions, and the Human profile's settings namespace, now `contexera-agent-team-host`. Stored Session data reads unchanged: the pre-rename kinds still resolve, bare or `plugin:`-converted.
 - An existing profile keeps the Team Host row's whole Config across that rename: at boot the Host carries the old row's values — the display name, `wakeRecycle`, `memberCompaction`, and the avatar reference while its bytes still exist — into `contexera-agent-team-host`, filling only the fields that namespace's user layer stores nothing for, so a value edited after upgrading wins. A field holding a `!!js` expression keeps its default instead of being written back as source text.
 - Only the Host row is migrated: a profile patch that addresses one of the other five renamed rows — `wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}` — by its old id is skipped after the rename, because no loader entry answers to that id, so Team falls back to that row's shipped values. A hand edit to the Team preset or to the preset registry's `default` has to be re-applied.
+- Task responsibility is recorded under a new rules version, and the upgrade is one-way: a build from before this release refuses a storage whose ledger has adopted it (`open it with a newer release`). Upgrade every profile that shares `$DSH_HOME/storages/agent_team.sqlite` before opening Team.
 
 **Fixed**
 

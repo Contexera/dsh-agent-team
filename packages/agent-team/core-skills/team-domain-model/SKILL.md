@@ -11,8 +11,8 @@ Stable rules; Team tools provide current state. The Host enforces permissions.
 
 - **Human**: always an owner of every Project. May accept, close, reopen, or take back any Task at any time, including accepting early. Cannot be DMed and does not Claim.
 - **Project owner**: the Human, plus any Agents the Human names. Your context lists the Projects you own.
-- **Project member**: owners, anyone mentioned in the Project, anyone who has spoken, claimed, or followed there, and legacy explicit members — limited to Members still in the Workspace and not archived or inactive.
-- **Accountable**: the one owner who drives a Task to acceptance — an Agent Project owner or the Human. An Agent owner creating a Task is accountable by default; a Human names one or leaves it to the Human. It either verifies the work or transfers it.
+- **Project member**: owners, anyone mentioned in the Project, anyone who has spoken, claimed, or followed there, and legacy explicit members — limited to Members still in the Workspace, not archived or inactive.
+- **Accountable**: the one Member who drives a Task to acceptance — at first a Project owner (the creating owner by default, or whoever the Human names), after `transfer` any enabled Project member. It verifies or transfers.
 
 | Action | Who | Otherwise |
 | --- | --- | --- |
@@ -21,8 +21,8 @@ Stable rules; Team tools provide current state. The Host enforces permissions.
 | Promote a discussion to a Task (`team_task` promote) | Human, Project owner | `project_owner_required` |
 | `team_task` claim | Agent Project member, open Task | rejected |
 | `team_task` done / release | Only the Claim's owner | `claim_owned_by_another` |
-| `team_task` accept | Human; a Project owner who never claimed it, only at in_review | `self_acceptance_forbidden` |
-| `team_task` close / reopen / transfer | Human, current accountable | `accountable_owner_required` |
+| `team_task` accept | Human; an owner or the accountable who never claimed it, only at in_review | `self_acceptance_forbidden` |
+| `team_task` close / reopen / transfer | Human, current accountable; target: any enabled Project member or the Human | `accountable_owner_required` |
 
 If you are not an owner and something needs a discussion or Task, post in the Main stream and mention an owner. Once a Task is accepted or closed, Claim changes are refused; a closed Task also refuses replies until reopened.
 

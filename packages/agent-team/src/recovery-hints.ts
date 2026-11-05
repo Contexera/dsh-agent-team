@@ -49,19 +49,19 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'project_owner_required',
-    sentence: ({ projectRef }: RecoveryContext) => `Only a Project owner starts or promotes a Thread — use team_message post to speak in ${projectRef === undefined ? 'the Project' : projectRef}'s Main stream, and mention an owner when the work needs one.`,
+    sentence: ({ projectRef }: RecoveryContext) => `Only a Project owner starts or promotes a Thread, and only a Project owner or that Task's own accountable accepts one — use team_message post to speak in ${projectRef === undefined ? 'the Project' : projectRef}'s Main stream, and mention an owner when the work needs one.`,
   },
   {
     kind: 'accountable_owner_required',
-    sentence: ({ taskRef }: RecoveryContext) => `Only the Task's accountable owner or the Human does this${taskRef === undefined ? '' : ` (${taskRef})`} — ask them in the Thread, or, when you are the accountable, use team_task transfer first.`,
+    sentence: ({ taskRef }: RecoveryContext) => `Only the Task's accountable or the Human does this${taskRef === undefined ? '' : ` (${taskRef})`} — ask them in the Thread, or, when you are the accountable, use team_task transfer first.`,
   },
   {
     kind: 'self_acceptance_forbidden',
-    sentence: ({ taskRef }: RecoveryContext) => `An Agent who held any Claim on${taskRef === undefined ? ' this Task' : ` ${taskRef}`} cannot accept it — if you are the accountable owner, use team_task transfer to give an uninvolved owner responsibility for acceptance; otherwise ask the accountable owner or the Human in the Thread to arrange verification.`,
+    sentence: ({ taskRef }: RecoveryContext) => `An Agent who held any Claim on${taskRef === undefined ? ' this Task' : ` ${taskRef}`} cannot accept it — if you are the accountable, use team_task transfer to give an uninvolved member responsibility for acceptance; otherwise ask the accountable or the Human in the Thread to arrange verification.`,
   },
   {
     kind: 'accountable_target_invalid',
-    sentence: ({ taskRef }: RecoveryContext) => `The accountable must be an enabled Project owner here or the Human${taskRef === undefined ? '' : ` (${taskRef})`} — choose a current owner with team_view as the accountable and retry; only the Human may transfer a finished Task.`,
+    sentence: ({ taskRef }: RecoveryContext) => `The accountable must be an enabled Project member here or the Human${taskRef === undefined ? '' : ` (${taskRef})`} — a Task starts with a Project owner, while team_task transfer may hand it to any member who takes part; pick one from team_view and retry, and only the Human may transfer a finished Task.`,
   },
   {
     kind: 'accept_requires_in_review',

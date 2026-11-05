@@ -2185,8 +2185,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // The durable read clears the unread: the card drops the capsule.
   await expect.poll(async () => await taskEntryRow(page, 1).getAttribute('aria-label'), { timeout: 10_000 }).toBe('打开 Task #1')
   await expect.poll(async () => await entryUnreadCapsule(page, unreadLineSelector), { timeout: 10_000 }).toBeNull()
-  // reviewer has been replying through the Host without following; the menu
-  // below asserts the all-followers shape, so reviewer follows first.
+  // reviewer has been replying through the Host without following; the transfer
+  // dialog below offers this Thread's followers, so reviewer follows first.
   const reviewerFollow = await scaffold.ctx.agentTeam.changeAttentionForAgent(reviewerAgent, {
     requestId: 'm2-06-reviewer-follow' as never, action: 'follow', workspaceId: workspace.id, taskRef: task.taskRef,
   })
@@ -2337,20 +2337,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('button', { name: '重新打开' }).click()
   await page.getByRole('button', { name: '关闭任务' }).waitFor()
 
-  // The Human hands this open Task to the reviewer Project owner: the menu's targets are exactly
-  // the ones the Host projects, and the transfer commits as the Human's own activity row. The
-  // owner grant is written before the page opens, so the page's supplemental view carries both
-  // targets from its first read — a grant written while the page stands would need a Host wake.
-  const transferOwnerIds = () => scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).owners
-    .filter((owner: { projectRef: string }) => owner.projectRef === task.projectRef)
-    .map((owner: { memberId: string }) => owner.memberId)
-  if (!transferOwnerIds().includes(reviewer.member.memberId)) {
-    await scaffold.ctx.agentTeam.addProjectOwner({ requestId: 'm2-06-transfer-owner' as never, workspaceId: workspace.id,
-      projectRef: task.projectRef, memberId: reviewer.member.memberId })
-  }
-  await expect.poll(() => transferOwnerIds().includes(reviewer.member.memberId)).toBe(true)
-  // Reopen the Thread so the page reads the projection that now carries the grant. The board is the
-  // only face that carries a Task's door, and the Project page restores whichever tab stood last.
+  // The Human hands this open Task to the reviewer: the dialog offers this Thread's enabled followers,
+  // and the reviewer followed it earlier in this journey, so it is the one candidate once the current
+  // accountable — the Human — is excluded. The board is the only face that carries a Task's door, and
+  // the Project page restores whichever tab stood last.
   await page.getByRole('button', { name: '返回项目' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   if (await page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected') !== 'true') {
@@ -2374,13 +2364,36 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(fullBand.steps).toEqual(['6px'])
   expect(fullBand.overflowing).toEqual([])
   await transferTrigger.click()
-  const transferMenu = page.getByRole('menu')
-  await transferMenu.waitFor()
-  // The Human is a target the Host never lists in `owners`: `humanMemberId` is its own answer, and
-  // handing a Task back to the Human is how a finished Task whose accountable left the Project is
-  // mended. So the menu carries both, and neither is the current accountable.
-  expect(await transferMenu.getByRole('menuitem').allTextContents()).toEqual(['转交给 @reviewer'])
-  await page.getByRole('menuitem', { name: /@reviewer/ }).click()
+  const transferDialog = page.getByRole('dialog', { name: '转交负责人' })
+  await transferDialog.waitFor()
+  // The follower set is the whole offer: builder and reviewer both follow this Thread, and the Human
+  // is its current accountable, which a transfer never offers back to itself. An owners-based menu
+  // would have listed neither builder nor this pair.
+  const transferCandidates = transferDialog.locator('li button')
+  expect(await transferCandidates.allTextContents()).toEqual(['转交给 @builder', '转交给 @reviewer'])
+  await settleAnimations(page)
+  await page.screenshot({ path: join(UI05_SHOTS, 'transfer-dialog.png') })
+  // The same list at 390×844: the card stays inside the viewport and the page gains no horizontal scroll,
+  // so a candidate row is reachable with one thumb on a phone-width column.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  const narrowTransferBox = await transferDialog.boundingBox()
+  expect(narrowTransferBox).not.toBeNull()
+  expect(narrowTransferBox!.x).toBeGreaterThanOrEqual(0)
+  expect(narrowTransferBox!.x + narrowTransferBox!.width).toBeLessThanOrEqual(390)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  await settleAnimations(page)
+  await page.screenshot({ path: join(UI05_SHOTS, 'narrow-transfer-dialog.png'), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+  // Keyboard and pointer reach the same commit: Escape closes the dialog back onto the control that opened
+  // it, and the list is one tab stop per candidate.
+  await page.keyboard.press('Escape')
+  await expect.poll(() => transferDialog.count()).toBe(0)
+  expect(await page.evaluate(() => document.activeElement?.textContent ?? '')).toContain('转交')
+  await transferTrigger.click()
+  await transferDialog.waitFor()
+  await transferDialog.getByRole('button', { name: '转交给 @reviewer' }).click()
   await expect.poll(async () =>
     JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef)))
     .toContain(`"accountable":"${reviewer.member.memberId}"`)
@@ -2395,31 +2408,51 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => page.getByRole('textbox', { name: '消息内容' }).count()).toBe(0)
   await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread.png'), fullPage: true })
 
-  // A closed Task still accepts a transfer, and the Human target is the one the Host never projects
-  // in `owners`: it is reachable only through `humanMemberId`. Once the Agent owner is gone it is
-  // the only option left — this is the mend path for a finished Task nobody can act on. The control
-  // stands on a closed Thread precisely because only a Member actor is confined to open Tasks.
-  await scaffold.ctx.agentTeam.removeProjectOwner({ requestId: 'm2-06-transfer-owner-removed' as never, workspaceId: workspace.id,
-    projectRef: task.projectRef, memberId: reviewer.member.memberId })
-  await expect.poll(() => transferOwnerIds().includes(reviewer.member.memberId)).toBe(false)
+  // The control stands on a closed Task, because the Human may transfer a finished one, but closing ended
+  // every Attention row on this Thread and a closed Thread refuses a new follow: the follower set is
+  // empty, and the dialog states that instead of inventing a target of its own.
   const mendTrigger = page.getByRole('button', { name: '转交负责人' })
   await mendTrigger.waitFor()
   await mendTrigger.click()
-  expect(await page.getByRole('menu').getByRole('menuitem').allTextContents()).toEqual(['转交给你自己'])
-  await page.getByRole('menuitem', { name: '转交给你自己' }).click()
+  const closedDialog = page.getByRole('dialog', { name: '转交负责人' })
+  await closedDialog.waitFor()
+  expect(await closedDialog.locator('li button').count()).toBe(0)
+  expect(await closedDialog.getByRole('status').textContent()).toContain('没有关注者')
+  await settleAnimations(page)
+  await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread-empty-dialog.png') })
+  await page.keyboard.press('Escape')
+  await expect.poll(() => closedDialog.count()).toBe(0)
+
+  // Reopening restores its accountable's Attention and opens the Thread to a follow; only then is the
+  // Human in the offer, and mending back to the Human is the same move as any other handover. The unread
+  // gate still fences the reopen behind a durable read, and the read is what the composer slot wants.
+  await scaffold.ctx.agentTeam.readThread({ requestId: 'm2-06-mend-human-read' as never, workspaceId: workspace.id, taskRef: task.taskRef })
+  await page.getByRole('button', { name: '重新打开' }).first().click()
+  await page.getByRole('button', { name: '关闭任务' }).waitFor()
+  await scaffold.ctx.agentTeam.changeAttention({ requestId: 'm2-06-mend-human-follow' as never, workspaceId: workspace.id,
+    taskRef: task.taskRef, action: 'follow' })
+  // Re-enter the Thread so the page's own observation read carries that follower: the board is the only
+  // face that carries a Task's door, and a follower written while the page stands would need a Host wake.
+  await page.getByRole('button', { name: '返回项目' }).click()
+  await page.getByRole('heading', { name: '# delivery' }).waitFor()
+  if (await page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected') !== 'true') {
+    await page.getByRole('tab', { name: '看板' }).click()
+    await expect.poll(async () => await page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true')
+  }
+  await taskEntryRow(page, 1).click()
+  await page.getByRole('heading', { name: /Task #1/ }).waitFor()
+  await page.getByRole('button', { name: '转交负责人' }).click()
+  const mendDialog = page.getByRole('dialog', { name: '转交负责人' })
+  await mendDialog.waitFor()
+  // The reviewer is the accountable now, so it is never offered to itself; the Human is the one follower
+  // left that may take it.
+  expect(await mendDialog.locator('li button').allTextContents()).toEqual(['转交给你自己'])
+  await settleAnimations(page)
+  await page.screenshot({ path: join(UI03_SHOTS, 'mended-dialog.png') })
+  await mendDialog.getByRole('button', { name: '转交给你自己' }).click()
   await expect.poll(async () =>
     JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef)))
     .toContain(`"accountable":"${humanMemberId}"`)
-  // Reopening is the Human's own path again, and the unread gate still fences it: the mend transfer
-  // delivered one responsibility notice, which the durable read below consumes. On a closed Thread the
-  // reopen lives only in the composer-slot notice, which is the one this beat means.
-  const reopenAfterMend = page.getByRole('button', { name: '重新打开' }).first()
-  await reopenAfterMend.waitFor()
-  await scaffold.ctx.agentTeam.readThread({ requestId: 'm2-06-mend-human-read' as never, workspaceId: workspace.id, taskRef: task.taskRef })
-  await reopenAfterMend.click()
-  await expect.poll(async () =>
-    JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef)))
-    .toContain('"resolution":"open"')
   await page.screenshot({ path: join(UI05_SHOTS, 'mended-task.png'), fullPage: true })
 
   // The mend left the Task open, which is its point: it is actionable again. Closing it here restores

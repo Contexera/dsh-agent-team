@@ -391,6 +391,9 @@ export const zh = {
   transferDoneYou: '已转交给你自己',
   transferTargetLabel: '转交给 {name}',
   transferTargetYou: '转交给你自己',
+  transferTitle: '转交负责人',
+  transferBody: '只有关注本 Thread 的人才能接手；转交只移动责任，正在做的人不因此改变。',
+  transferEmpty: '本 Thread 目前没有关注者，没有人可接手。关注了这个 Thread 的人才能接手。',
   transferUnreadRequired: '请先读取 {count} 条未读更新，再转交负责人。',
   transferStaleRevision: '此 Thread 已发生变化，请按最新状态重试转交。',
 } as const
@@ -776,6 +779,9 @@ export const en = {
   transferDoneYou: 'Transferred back to you',
   transferTargetLabel: 'Transfer to {name}',
   transferTargetYou: 'Transfer to yourself',
+  transferTitle: 'Transfer ownership',
+  transferBody: 'Only this Thread\'s followers can take it on. A transfer moves responsibility only; who is doing the work does not change.',
+  transferEmpty: 'Nobody follows this Thread yet, so there is no one to offer. A Member who follows it can take this Task on.',
   transferUnreadRequired: 'Read {count} unread update(s) before transferring this Task.',
   transferStaleRevision: 'This Thread changed; retry the transfer using the current state.',
 } as const

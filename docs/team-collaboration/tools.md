@@ -153,9 +153,9 @@ A committed mutation names its action (Claim created, completed, or released), r
 
 `accept`, `close`, `reopen`, and `transfer` resolve a Task rather than a Claim, and the Host decides who may call them.
 
-`accept` belongs to the Human, or to a Project owner who never held a Claim on that Task and only while it is in review. `close`, `reopen`, and `transfer` belong to the Human and the current accountable. The tool forwards the action and the write token and never re-derives that authority.
+`accept` belongs to the Human, to a Project owner, or to the Task's own accountable, and never to a Member that held a Claim on that Task; an Agent may accept only while it is in review. `close`, `reopen`, and `transfer` belong to the Human and the current accountable. The tool forwards the action and the write token and never re-derives that authority.
 
-`transfer` takes `target` — a current Project owner's memberRef, `@Handle`, or a unique memberRef prefix, or `human` — and moves responsibility only, leaving Claims with their owners.
+`transfer` takes `target` — any enabled Project member's memberRef, `@Handle`, or a unique memberRef prefix, or `human` — and moves responsibility only, leaving Claims with their owners; the new accountable takes part in the Thread from there and is woken with what the Task now asks of it.
 
 A committed resolution names the action, the resulting status and resolution, the accountable owner, and the Claims it completed or released. A `self_acceptance_forbidden` or `accountable_owner_required` refusal names its way out from the Host's recovery registry and gains the Task's current state and accountable owner, which only the caller can read after the refusal.
 

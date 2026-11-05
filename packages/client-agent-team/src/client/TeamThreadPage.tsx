@@ -12,7 +12,7 @@ import type {
   AgentTeamView,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { Button, IconChevronLeftOutlineRegular, Menu, Modal, Pill, Tooltip, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronLeftOutlineRegular, Modal, Pill, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
@@ -86,7 +86,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // Label source for the promote/accept buttons only: a reply send also raises
   // the shared `pending` gate, and must not retitle those buttons.
   const [mutating, setMutating] = useState<'promote' | 'accept' | undefined>()
-  const [transferMenuOpen, setTransferMenuOpen] = useState(false)
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false)
   const mountedRef = useRef(false)
   const supplementalRef = useRef<Promise<void>>()
   const supplementalPendingRef = useRef(false)
@@ -214,25 +214,21 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const messageSender = (fact: AgentTeamThreadFact): AgentTeamMemberId | undefined =>
     fact.kind === 'message' ? fact.message.sender : undefined
 
-  // Transfer targets come from the Host's own Project projection: the Agent owners are the rows the
-  // same view serves the Project settings page, and the Human owns every Project, so `humanMemberId`
-  // is the Host's own answer for the Human target — `owners` never lists it. Handing a Task back to
-  // the Human is what mends a finished Task whose accountable is no longer a Project owner. The
-  // Client offers the union without re-implementing the Host's legality rule.
-  // A finished Task still needs a mender: only a Member actor is confined to open Tasks, and this
-  // surface is the Human's, whose Remote moves a finished Task whose accountable left the Project.
-  const transferTargets = useMemo(() => {
+  // The dialog offers this Thread's enabled followers, and nothing else: a handover is a move inside a
+  // conversation, so the readers already in it are the people it can land on. The Host accepts any enabled
+  // Project member, so this is the Client's narrower offer rather than a second authority — it reads the same
+  // follower set the composer and the follow control use. The Human is a candidate only by following, because
+  // that set is every Member's Attention and the Human's own follow writes its row. The current accountable is
+  // never offered: a transfer it already holds is refused as a no-op.
+  const transferCandidates = useMemo(() => {
     if (task === undefined) return []
-    const projectOwners = (projectView?.owners ?? []).filter(owner => owner.projectRef === effectiveProjectRef).map(owner => owner.memberId)
     const human = projectView?.humanMemberId
-    const targets = human === undefined ? projectOwners : [...projectOwners, human]
-    return [...new Set(targets)].filter(memberId => memberId !== task.accountable)
-  }, [projectView?.owners, projectView?.humanMemberId, effectiveProjectRef, task?.accountable])
-
-  const transferMenuItems = useMemo<readonly MenuEntry[]>(() => transferTargets.map(memberId => ({
-    id: memberId,
-    label: memberId === projectView?.humanMemberId ? t('transferTargetYou') : t('transferTargetLabel', { name: memberName(memberId) }),
-  })), [transferTargets, projectView?.humanMemberId, memberName, t])
+    return [...followerIds]
+      .filter(memberId => memberId !== task.accountable
+        // The Human is not a row of the Agent roster, so its own id is enabled by definition.
+        && (memberId === human || members.some(status => status.member.memberId === memberId && status.member.state === 'enabled')))
+      .sort((left, right) => memberName(left).localeCompare(memberName(right)))
+  }, [followerIds, members, projectView?.humanMemberId, task?.accountable])
 
   // Identity-stable: `openRef` feeds every row's props, so a fresh destination per render would re-render the timeline. The
   // resolved ref carries its own Project, so a cross-Project discussion opens beside that Project's feed — this page's
@@ -430,14 +426,14 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     taskRef: task?.taskRef as AgentTeamTaskRef,
     revisionOf: () => thread?.revision,
     onCommitted: async (committed) => {
-      setTransferMenuOpen(false)
+      setTransferDialogOpen(false)
       await applyTaskCommit(committed)
     },
     // A fence re-reads through the page's own recovery path, exactly as accept, close, and reopen do:
     // the unread gate drains, the stale revision re-projects the Thread, and the Task's current
     // accountable stays on screen untouched while it happens.
     onRefusal: async (refusal) => {
-      setTransferMenuOpen(false)
+      setTransferDialogOpen(false)
       if (refusal.kind === 'unread_required') await refreshAfterFence()
       else await refreshPassiveFacts()
     },
@@ -501,6 +497,12 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // The transfer receipt stands only while the Host still shows the Task where the write put it, so a later
   // move — this band's or anyone else's — retires the line instead of contradicting the Task on screen.
   const transferLandedOn = transfer.landedOn !== undefined && task?.accountable === transfer.landedOn ? transfer.landedOn : undefined
+  // One failure, two placements: the band states it while the dialog is shut, and the dialog states it while
+  // open, because a modal stands over the band's line. Rendering it once keeps the wording in one place.
+  const transferFailure = transfer.error ?? (transfer.refusal === undefined ? undefined
+    : transfer.refusal.kind === 'unread_required'
+      ? t('transferUnreadRequired', { count: transfer.refusal.unreadCount })
+      : t('transferStaleRevision'))
 
   return <main className={css.surface} data-team-thread={threadRef}>
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderStacked}`}>
@@ -535,19 +537,14 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
               </Button>
             </Tooltip>
             {/* A finished Task is mended from here: only a Member actor is confined to open Tasks, so the
-                Human's transfer stands with the resolution. */}
-            {task !== undefined && transferTargets.length > 0 && <Menu
-              open={transferMenuOpen}
-              onClose={() => { setTransferMenuOpen(false) }}
-              items={transferMenuItems}
-              onSelect={id => { void transfer.transfer(id as AgentTeamMemberId) }}
-              anchor={<Tooltip label={t('transferHint')} side="bottom" delayMs={500} portal maxWidth={260}>
-                <Button size="sm" variant="outline" disabled={transfer.pending} aria-haspopup="menu"
-                  aria-label={transfer.pending ? t('transferringTask') : t('transferTask')} onClick={() => { setTransferMenuOpen(value => !value) }}>
-                  {transfer.pending ? t('transferPendingLabel') : t('transferLabel')}
-                </Button>
-              </Tooltip>}
-            />}
+                Human's transfer stands with the resolution. The dialog opens even when nobody follows yet,
+                because the empty state is the only place that says why and what to do about it. */}
+            {task !== undefined && <Tooltip label={t('transferHint')} side="bottom" delayMs={500} portal maxWidth={260}>
+              <Button size="sm" variant="outline" disabled={transfer.pending} aria-haspopup="dialog"
+                aria-label={transfer.pending ? t('transferringTask') : t('transferTask')} onClick={() => { setTransferDialogOpen(true) }}>
+                {transfer.pending ? t('transferPendingLabel') : t('transferLabel')}
+              </Button>
+            </Tooltip>}
           </div>
           {showLifecycleGroup && <div className={css.actionGroup} data-team-action-group="lifecycle">
             {task === undefined
@@ -573,11 +570,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       {/* Two failures, two lines: which control refused, and what to do next. A band's failure is not
           the whole-surface replacement `.errorState` draws, which would centre itself in the band. */}
       {follow.error !== undefined && <p className={css.actionError} role="alert">{follow.error}</p>}
-      {(transfer.error !== undefined || transfer.refusal !== undefined) && <p className={css.actionError} role="alert">
-        {transfer.error ?? (transfer.refusal?.kind === 'unread_required'
-          ? t('transferUnreadRequired', { count: transfer.refusal.unreadCount })
-          : t('transferStaleRevision'))}
-      </p>}
+      {/* The same failure, never twice: while the dialog is open it states its own error inside the dialog. */}
+      {!transferDialogOpen && transferFailure !== undefined && <p className={css.actionError} role="alert">{transferFailure}</p>}
       {/* What a committed transfer changed, where the control stands: the new accountable also lands in the
           feed as the Host's own activity row, but that row sits below the fold of a long Thread. The receipt
           is stated against the projection, so any later move of responsibility retires it instead of leaving
@@ -592,6 +586,32 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           <span title={full}><strong className={threadCss.riskClass}>{label}</strong> · {t(sentenceKey, { member: status.member.handle })} — {reason}</span>
         </p>)}
       </section>}
+      {/* The handover dialog: this Thread's enabled followers, one row each, and an empty state that says why
+          nobody is offered. A candidate is a button, so the list is reachable and dismissable by keyboard alone;
+          the write stays on the page's own hook, which keeps the Task's current accountable on screen until the
+          Host commits, and closes the dialog on that commit rather than on the click. */}
+      {task !== undefined && <Modal
+        open={transferDialogOpen}
+        onClose={() => { if (!transfer.pending) setTransferDialogOpen(false) }}
+        title={t('transferTitle')}
+        closeLabel={t('cancel')}
+        footer={<Button variant="outline" disabled={transfer.pending} onClick={() => { setTransferDialogOpen(false) }}>{t('cancel')}</Button>}
+      >
+        <p className={css.confirmBody}>{t('transferBody')}</p>
+        {transferCandidates.length === 0
+          ? <p className={css.transferEmpty} role="status">{t('transferEmpty')}</p>
+          : <ul className={css.transferList}>
+              {transferCandidates.map(memberId => <li key={memberId}>
+                <button type="button" className={css.transferCandidate} disabled={transfer.pending}
+                  onClick={() => { void transfer.transfer(memberId) }}>
+                  {memberId === projectView?.humanMemberId ? t('transferTargetYou') : t('transferTargetLabel', { name: memberName(memberId) })}
+                </button>
+              </li>)}
+            </ul>}
+        {/* A failure is stated where the reader pressed, and never twice: while the dialog is open it is the
+            dialog's own line, because the band's line sits behind the modal. */}
+        {transferFailure !== undefined && <p className={css.actionError} role="alert">{transferFailure}</p>}
+      </Modal>}
       {task !== undefined && thread !== undefined && (() => {
         const activeClaims = activeProjection?.claims.filter(claim => claim.taskRef === task.taskRef && claim.state === 'active') ?? []
         return <Modal

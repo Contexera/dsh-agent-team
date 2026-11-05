@@ -206,7 +206,7 @@ import type {
 import { formatTeamTimestamp } from './time-format.ts'
 import { resolveBodyMentions } from './mentions.ts'
 import { recoveryFor } from './recovery-hints.ts'
-import { planTaskReminders, reviewReminderRecipient } from './task-reminders.ts'
+import { planTaskReminders } from './task-reminders.ts'
 import {
   characterLength,
   isScriptHash,
@@ -255,8 +255,13 @@ const HOST_ACTOR: AgentTeamHostActor = Object.freeze({ kind: 'host', handle: 'ag
 /** Finished Tasks the board keeps per Project. */
 export const TASK_BOARD_FINISHED_PER_PROJECT = 5
 
-/** Highest validation-rules version this build implements; a ledger segment without a marker is version 1. */
-export const AGENT_TEAM_RULES_VERSION = 2
+/**
+ * Highest validation-rules version this build implements; a ledger segment without a marker is version 1.
+ * Version 3 widens Task responsibility without rewriting history: a transfer target may be any enabled Project
+ * member, a Task's own accountable may verify it, and losing an owner grant returns responsibility only when
+ * that grant was the Member's last Project participation.
+ */
+export const AGENT_TEAM_RULES_VERSION = 3
 
 function freezeActor(actor: AgentTeamActor): AgentTeamActor {
   if (actor.kind === 'host') return Object.freeze({ kind: 'host', handle: actor.handle })
@@ -1004,9 +1009,9 @@ export class AgentTeamLedger {
   planReminders(nowMs: number, idleMs: (memberId: AgentTeamMemberId) => number | undefined,
     taskRef?: AgentTeamTaskRef): readonly import('./task-reminders.ts').ReminderCandidate[] {
     return planTaskReminders({ nowMs, tasks: this.reminderFacts().filter(facts => taskRef === undefined || facts.task.taskRef === taskRef),
-      isOwner: (projectRef, memberId) => memberId === AGENT_TEAM_HUMAN_MEMBER_ID || this.projectOwnerIds(projectRef).includes(memberId),
+      verifierOf: task => this.verifierOfFrom(this.state, task),
       isAvailable: memberId => memberId === AGENT_TEAM_HUMAN_MEMBER_ID || this.getMember(memberId)?.state === 'enabled',
-      idleMs, heldEver: (taskRef, memberId) => this.heldTaskClaim(taskRef, memberId),
+      idleMs,
       episodeExists: (taskRef, kind, recipient, baselineSequence) => this.reminderEpisodeExists(taskRef, kind, recipient, baselineSequence),
       hasUnreadResponsibility: (taskRef, recipient) => this.hasUnreadResponsibility(taskRef, recipient) })
   }
@@ -2043,7 +2048,7 @@ export class AgentTeamLedger {
       const activity: AgentTeamMainActivity = Object.freeze({ activityRef: this.ref('activity'), projectRef: request.projectRef,
         kind: kind === 'team/project-owner-added' ? 'owner-added' as const : 'owner-removed' as const,
         memberId: request.memberId, actor: request.actor.memberId, sequence, occurredAt: envelope.occurredAt })
-      const returned = kind === 'team/project-owner-removed' ? this.accountabilityReturnsFrom(this.state, request.memberId, sequence, new Set([request.projectRef]))
+      const returned = kind === 'team/project-owner-removed' ? this.accountabilityReturnsFrom(this.state, request.memberId, sequence, new Set([request.projectRef]), this.state.rulesVersion >= 3)
         : { transfers: [], tasks: [], threads: [], markers: [] }
       const ownerInbox = this.ownerActivityInboxDelta(activity)
       // An owner's default attention is the Main stream, never every Thread: the
@@ -2735,7 +2740,9 @@ export class AgentTeamLedger {
         || (task.resolution !== 'open' || task.accountable !== actor.memberId))) {
         throw new Error(`Only the current accountable can transfer an open Task (accountable_owner_required) — ${recoveryFor('accountable_owner_required').sentence({ taskRef: task.taskRef })}`)
       }
-      const target = this.resolveAccountable(task.projectRef, actor, request.target)
+      const target = this.state.rulesVersion >= 3 && request.target !== AGENT_TEAM_HUMAN_MEMBER_ID
+        ? this.resolveTransferTarget(task.projectRef, request.target)
+        : this.resolveAccountable(task.projectRef, actor, request.target)
       if (target === task.accountable) throw new Error(`Task '${task.taskRef}' is already accountable to '${target}'`)
       const deferred = this.deferredThreadWrite(actor.memberId, task, thread, request.baseRevision)
       if (deferred !== undefined) return this.resolved(deferred)
@@ -2768,13 +2775,16 @@ export class AgentTeamLedger {
         const member = this.requireMember(request.actor.memberId)
         if (member.state !== 'enabled') throw new Error(`Agent Member '${member.handle}' is ${member.state}`)
         if (request.action === 'accept') {
-          if (!this.isProjectOwnerFrom(this.state, task.projectRef, request.actor.memberId)) throw new Error(`Only a Project owner can accept this Task (project_owner_required) — ${recoveryFor('project_owner_required').sentence({ projectRef: task.projectRef })}`)
+          // A Task handed to a plain member is verified by that member; everybody else still needs the
+          // owner grant, and nobody who ever held a Claim may verify. The order keeps the two refusals distinct.
           if (this.heldTaskClaimFrom(this.state, task.taskRef, request.actor.memberId)) throw new Error(`An Agent who held any Claim cannot accept this Task (self_acceptance_forbidden) — ${recoveryFor('self_acceptance_forbidden').sentence({ taskRef: task.taskRef })}`)
+          if (!this.isProjectOwnerFrom(this.state, task.projectRef, request.actor.memberId)
+            && !(this.state.rulesVersion >= 3 && task.accountable === request.actor.memberId)) throw new Error(`Only a Project owner or the accountable can accept this Task (project_owner_required) — ${recoveryFor('project_owner_required').sentence({ projectRef: task.projectRef })}`)
         } else if (task.accountable !== request.actor.memberId) {
           throw new Error(`Only the accountable owner can ${request.action} this Task (accountable_owner_required) — ${recoveryFor('accountable_owner_required').sentence({ taskRef: task.taskRef })}`)
         }
       }
-      if (request.action === 'reopen' && !this.accountableIsValidFrom(this.state, task)) throw new Error(`The previous accountable is no longer a Project owner (accountable_target_invalid) — ${recoveryFor('accountable_target_invalid').sentence({ taskRef: task.taskRef })}`)
+      if (request.action === 'reopen' && !this.accountableIsValidFrom(this.state, task)) throw new Error(`The previous accountable no longer takes part in the Project (accountable_target_invalid) — ${recoveryFor('accountable_target_invalid').sentence({ taskRef: task.taskRef })}`)
       const deferred = this.deferredThreadWrite(request.actor.memberId, task, thread, request.baseRevision)
       if (deferred !== undefined) return this.resolved(deferred)
       if (request.action === 'accept' && task.resolution !== 'open') throw new Error(`Task '${task.taskRef}' is already ${task.resolution}`)
@@ -3208,7 +3218,7 @@ export class AgentTeamLedger {
         },
         lastActivitySequence: newest.sequence, lastActivityAt: newest.occurredAt,
         relation: accountable ? 'accountable' : executor ? 'executor' : authorized.kind === 'human' || this.isProjectOwnerFrom(this.state, task.projectRef, memberId) ? 'project-owner' : 'none',
-        needsAcceptance: task.status === 'in_review' && (authorized.kind === 'human' || this.isProjectOwnerFrom(this.state, task.projectRef, memberId)) && !this.heldTaskClaimFrom(this.state, task.taskRef, memberId) })
+        needsAcceptance: task.status === 'in_review' && (authorized.kind === 'human' || this.canVerifyTaskFrom(this.state, task, memberId)) })
       if (task.status === 'done' || task.status === 'closed') {
         const finished = finishedByProject.get(task.projectRef) ?? []
         finished.push(item)
@@ -4282,7 +4292,7 @@ export class AgentTeamLedger {
       }
       this.addRef(refs, activity.activityRef)
       const returned = operation.kind === 'team/project-owner-removed'
-        ? this.accountabilityReturnsFrom(projection, operation.data.memberId, operation.sequence, new Set([operation.data.projectRef]))
+        ? this.accountabilityReturnsFrom(projection, operation.data.memberId, operation.sequence, new Set([operation.data.projectRef]), projection.rulesVersion >= 3)
         : { transfers: [], tasks: [], threads: [], markers: [] }
       const ownerInbox = this.ownerActivityInboxDelta(activity)
       // The grant writes a row only for a Member not already following the
@@ -4672,8 +4682,7 @@ export class AgentTeamLedger {
         || activity.taskRef !== task.taskRef || activity.threadRef !== thread.threadRef || activity.from !== priorTask.accountable
         || activity.to !== task.accountable || task.accountable === priorTask.accountable
         || (actor !== undefined && (priorTask.resolution !== 'open' || priorTask.accountable !== actor.memberId))
-        || (task.accountable !== AGENT_TEAM_HUMAN_MEMBER_ID
-          && (projection.members.get(task.accountable)?.state !== 'enabled' || !this.isProjectOwnerFrom(projection, task.projectRef, task.accountable)))) {
+        || !this.transferTargetIsValidFrom(projection, task)) {
         throw new Error('invalid Task accountable transfer')
       }
       this.addRef(refs, activity.activityRef)
@@ -4698,7 +4707,7 @@ export class AgentTeamLedger {
         || activity.taskRef !== task.taskRef || activity.threadRef !== thread.threadRef) throw new Error('invalid Task operation')
       if (activity.kind === 'reopen' && !this.accountableIsValidFrom(projection, priorTask)) throw new Error('invalid Task accountable on reopen')
       if (projection.rulesVersion >= 2 && operation.actor.kind === 'member') {
-        if (activity.kind === 'accept' && (!this.isProjectOwnerFrom(projection, task.projectRef, actor) || this.heldTaskClaimFrom(projection, task.taskRef, actor))) throw new Error('invalid Agent acceptance authority')
+        if (activity.kind === 'accept' && !this.canVerifyTaskFrom(projection, task, actor)) throw new Error('invalid Agent acceptance authority')
         if (activity.kind !== 'accept' && task.accountable !== actor) throw new Error('invalid accountable Task authority')
       }
       const expectedResolution = activity.kind === 'accept' ? 'accepted' : activity.kind === 'close' ? 'closed' : 'open'
@@ -5138,12 +5147,27 @@ export class AgentTeamLedger {
 
   private accountabilityReturnsForCleanup(projection: Projection, memberId: AgentTeamMemberId | undefined, sequence: number,
     projectRefs: ReadonlySet<AgentTeamProjectRef> | undefined) {
-    const members = memberId === undefined
-      ? [...new Set([...projection.owners.values()].flatMap(owners => [...owners.keys()]))].sort()
-      : [memberId]
-    const returns = members.map(owner => this.accountabilityReturnsFrom(projection, owner, sequence, projectRefs))
+    const members = memberId !== undefined ? [memberId] : this.accountableMembersInScopeFrom(projection, projectRefs)
+    const returns = members.map(accountable => this.accountabilityReturnsFrom(projection, accountable, sequence, projectRefs))
     return { transfers: returns.flatMap(item => item.transfers), tasks: returns.flatMap(item => item.tasks),
       threads: returns.flatMap(item => item.threads), markers: returns.flatMap(item => item.markers) }
+  }
+
+  /**
+   * Every Member that owes a Task inside a scope nothing will be left to hand it to: a Project being archived, or a
+   * Member leaving. Version 2 ranged over owner grants, which cannot see a Task handed to a plain member; version 3
+   * ranges over the Tasks themselves.
+   */
+  private accountableMembersInScopeFrom(projection: Projection,
+    projectRefs: ReadonlySet<AgentTeamProjectRef> | undefined): readonly AgentTeamMemberId[] {
+    if (projection.rulesVersion < 3) return [...new Set([...projection.owners.values()].flatMap(owners => [...owners.keys()]))].sort()
+    const members = new Set<AgentTeamMemberId>()
+    for (const task of projection.tasks.values()) {
+      if (task.resolution !== 'open' || task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID) continue
+      if (projectRefs !== undefined && !projectRefs.has(task.projectRef)) continue
+      members.add(task.accountable)
+    }
+    return [...members].sort()
   }
 
   private validateAccountabilityReturns(
@@ -6575,9 +6599,7 @@ export class AgentTeamLedger {
       if (marker.kind === 'review-backlog') {
         return task.status === 'in_review'
           && projection.taskStatusBaselines.get(task.taskRef)?.sequence === marker.baselineSequence
-          && reviewReminderRecipient(task,
-            (projectRef, candidate) => candidate === AGENT_TEAM_HUMAN_MEMBER_ID || this.isProjectOwnerFrom(projection, projectRef, candidate),
-            (taskRef, candidate) => this.heldTaskClaimFrom(projection, taskRef, candidate)) === memberId
+          && this.verifierOfFrom(projection, task) === memberId
       }
       return task.status === 'in_progress' && marker.memberId === task.accountable
         && (projection.factsByThread.get(task.threadRef)?.at(-1)?.sequence ?? 0) <= marker.baselineSequence
@@ -6633,6 +6655,19 @@ export class AgentTeamLedger {
     return accountable
   }
 
+  /**
+   * Who a transfer may hand a Task to. Creating a Task still names an owner, so responsibility reaches a plain
+   * Project member only through this move; version 3 therefore asks the narrower question, whether the target
+   * still takes part in the Project, and not whether it owns it. Following the Thread is never part of it.
+   */
+  private resolveTransferTarget(projectRef: AgentTeamProjectRef, requested: AgentTeamMemberId): AgentTeamMemberId {
+    const member = this.requireMember(requested)
+    if (member.state !== 'enabled' || !this.isProjectMemberFrom(this.state, projectRef, requested)) {
+      throw new Error(`Task accountable '${member.handle}' must be an enabled Project member or the Human (accountable_target_invalid) — ${recoveryFor('accountable_target_invalid').sentence({})}`)
+    }
+    return requested
+  }
+
   private validateTaskSources(projectRef: AgentTeamProjectRef, requested?: readonly AgentTeamThreadRef[]): readonly AgentTeamThreadRef[] {
     const sourceThreadRefs = Object.freeze([...new Set(requested ?? [])])
     if (sourceThreadRefs.length !== (requested?.length ?? 0)) throw new Error('sourceThreadRefs contains duplicate Threads')
@@ -6649,16 +6684,48 @@ export class AgentTeamLedger {
     return (projection.claimsByTask.get(taskRef) ?? []).some(claim => claim.owner === memberId)
   }
 
+  /**
+   * Whether this Task still has somewhere to be accountable: the Human, or a Member who still takes part in the
+   * Project. Version 2 asked for an owner grant, which stranded a Task handed to a plain member and a Task kept by
+   * a former owner who still takes part.
+   */
   private accountableIsValidFrom(projection: Projection, task: AgentTeamTask): boolean {
-    return task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID || this.isProjectOwnerFrom(projection, task.projectRef, task.accountable)
+    if (task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID) return true
+    if (projection.rulesVersion < 3) return this.isProjectOwnerFrom(projection, task.projectRef, task.accountable)
+    return projection.members.get(task.accountable)?.state === 'enabled'
+      && this.isProjectMemberFrom(projection, task.projectRef, task.accountable)
+  }
+
+  /**
+   * Who may verify this Task as an Agent: a Project owner, or the accountable the Task was handed to, and never
+   * anyone who ever held a Claim on it. The Human decides separately, because the Human is not an Agent actor.
+   */
+  private canVerifyTaskFrom(projection: Projection, task: AgentTeamTask, memberId: AgentTeamMemberId): boolean {
+    if (this.heldTaskClaimFrom(projection, task.taskRef, memberId)) return false
+    return this.isProjectOwnerFrom(projection, task.projectRef, memberId)
+      || (projection.rulesVersion >= 3 && task.accountable === memberId)
+  }
+
+  /** The target a committed transfer landed on, judged by the rules the segment that wrote it ran under. */
+  private transferTargetIsValidFrom(projection: Projection, task: AgentTeamTask): boolean {
+    if (task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID) return true
+    if (projection.members.get(task.accountable)?.state !== 'enabled') return false
+    return projection.rulesVersion >= 3
+      ? this.isProjectMemberFrom(projection, task.projectRef, task.accountable)
+      : this.isProjectOwnerFrom(projection, task.projectRef, task.accountable)
+  }
+
+  /** The one Member this Task's review belongs to: its accountable when that Member may verify, otherwise the Human. */
+  private verifierOfFrom(projection: Projection, task: AgentTeamTask): AgentTeamMemberId {
+    if (task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID) return task.accountable
+    return projection.members.get(task.accountable)?.state === 'enabled'
+      && this.canVerifyTaskFrom(projection, task, task.accountable) ? task.accountable : AGENT_TEAM_HUMAN_MEMBER_ID
   }
 
   private responsibilityActivityRecipientsFrom(projection: Projection, task: AgentTeamTask, actor: AgentTeamMemberId): readonly AgentTeamMemberId[] {
     const recipients = new Set<AgentTeamMemberId>()
-    if (task.status === 'in_review') {
-      if (task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID || !this.heldTaskClaimFrom(projection, task.taskRef, task.accountable)) recipients.add(task.accountable)
-      else recipients.add(AGENT_TEAM_HUMAN_MEMBER_ID)
-    } else if (task.status === 'todo') recipients.add(task.accountable)
+    if (task.status === 'in_review') recipients.add(this.verifierOfFrom(projection, task))
+    else if (task.status === 'todo') recipients.add(task.accountable)
     recipients.delete(actor)
     return [...recipients]
   }
@@ -6675,8 +6742,13 @@ export class AgentTeamLedger {
     return { tasks: [...taskMap.values()], threads: [...threadMap.values()] }
   }
 
+  /**
+   * The responsibility a departing Member gives back to the Human, one transfer per open Task.
+   * `keepWhenStillMember` is the owner-grant question: losing the grant is not leaving the Project, so a Member
+   * that still takes part keeps its Tasks, and only the Member whose participation ends hands them back.
+   */
   private accountabilityReturnsFrom(projection: Projection, memberId: AgentTeamMemberId, sequence: number,
-    projectRefs?: ReadonlySet<AgentTeamProjectRef>): {
+    projectRefs?: ReadonlySet<AgentTeamProjectRef>, keepWhenStillMember: boolean = false): {
     readonly transfers: readonly AgentTeamTaskActivity[]
     readonly tasks: readonly AgentTeamTask[]
     readonly threads: readonly AgentTeamThread[]
@@ -6688,6 +6760,7 @@ export class AgentTeamLedger {
     const markers: AgentTeamActivityMarker[] = []
     for (const task of projection.tasks.values()) {
       if (task.accountable !== memberId || task.resolution !== 'open' || (projectRefs !== undefined && !projectRefs.has(task.projectRef))) continue
+      if (keepWhenStillMember && this.isProjectMemberFrom(projection, task.projectRef, memberId, true)) continue
       const activity: AgentTeamTaskActivity = Object.freeze({ activityRef: this.ref('activity'), kind: 'transfer', taskRef: task.taskRef,
         threadRef: task.threadRef, actor: AGENT_TEAM_HUMAN_MEMBER_ID, from: memberId, to: AGENT_TEAM_HUMAN_MEMBER_ID, sequence })
       transfers.push(activity)
@@ -7447,7 +7520,8 @@ export class AgentTeamLedger {
     return this.isProjectMemberFrom(this.state, projectRef, memberId)
   }
 
-  private isProjectMemberFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
+  private isProjectMemberFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId,
+    withoutOwnerGrant: boolean = false): boolean {
     // Deriving stays inside the Workspace boundary: a Member who has left the
     // Workspace stops seeing its Projects even though the Threads it wrote
     // there are still on the record.
@@ -7459,7 +7533,9 @@ export class AgentTeamLedger {
       // enrolled ones included: the rule intersects every source with the Member lifecycle (spec §2).
       const state = projection.members.get(memberId)?.state
       if (state === 'inactive' || state === 'archived') return false
-      if (projection.owners.get(projectRef)?.has(memberId) === true) return true
+      // `withoutOwnerGrant` answers what participation is left once one owner grant ends: a Member who is a
+      // Project owner only because of that grant stops being a member when the grant does.
+      if (!withoutOwnerGrant && projection.owners.get(projectRef)?.has(memberId) === true) return true
       if (projection.mentionedByProject.get(projectRef)?.has(memberId) === true) return true
       if (projection.memberships.get(projectRef)?.has(memberId) === true) return true
     } else if (projection.memberships.get(projectRef)?.has(memberId) === true) {

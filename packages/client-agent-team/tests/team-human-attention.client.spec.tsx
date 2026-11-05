@@ -39,15 +39,15 @@ function actionGroup(b: Bench, group: 'thread' | 'lifecycle'): Element | null {
   return actionBand(b).querySelector(`[data-team-action-group="${group}"]`)
 }
 
-/** One Agent Project owner besides the Human, the only legal transfer target the Host projects. */
-function seedProjectOwner(b: Bench): void {
-  const baseView = b.viewProjects.getMockImplementation()!
-  b.viewProjects.mockImplementation(async (request: { threadRef?: string; topLevelOnly?: boolean }) => {
-    const result = await baseView(request)
-    if (!result.ok) return result
-    return { ok: true as const, value: { ...result.value, owners: [{ projectRef: 'project:engineering', memberId: 'member:builder' }] } }
-  })
-  b.publishProjectUpdate()
+/** Open the handover dialog: a dialog, not a menu, because an empty candidate list has to explain itself. */
+async function openTransferDialog(b: Bench): Promise<HTMLElement> {
+  fireEvent.click(await b.view.findByRole('button', { name: '转交负责人' }))
+  return b.view.findByRole('dialog', { name: '转交负责人' })
+}
+
+/** The candidate rows the dialog offers, by their visible labels, in render order. */
+function candidateLabels(dialog: HTMLElement): string[] {
+  return [...dialog.querySelectorAll('li button')].map(node => node.textContent ?? '')
 }
 
 describe('Team Human Attention and Task transfer controls', () => {
@@ -72,9 +72,8 @@ describe('Team Human Attention and Task transfer controls', () => {
 
   it('puts the Thread page actions in one band of two groups, with the pressed state only while followed', async () => {
     const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
-    // The Project grant reaches the page through its own supplemental read, so the transfer control
-    // appears once that lands; the band itself stands from the first render.
+    // The transfer control stands on any Task, even with an empty offer: its dialog is where the empty
+    // state lives, so the band does not change shape as followers come and go.
     await b.view.findByRole('button', { name: '转交负责人' })
     // One band, not four sibling containers: this is the layout claim the visual review
     // raised, and it is structural rather than cosmetic.
@@ -110,10 +109,10 @@ describe('Team Human Attention and Task transfer controls', () => {
   })
 
   it('states a committed transfer where the control stands and retires the receipt on the next move', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
-    fireEvent.click(await b.view.findByRole('button', { name: '转交负责人' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
+    const dialog = await openTransferDialog(b)
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
+    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
     // The Host's activity row lands in the feed, but a long Thread scrolls it away from the band the
     // Human just used, so the band states the result itself.
     const receipt = await b.view.findByText('已转交给 @builder')
@@ -125,19 +124,23 @@ describe('Team Human Attention and Task transfer controls', () => {
   })
 
   it('keeps each refusing control\'s failure on its own line inside the band', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     // Two controls can fail in one render; each states its own cause, so the reader is not asked to
     // work out which of two actions the one message belongs to.
     b.failAttention('关注状态不可用')
     b.seedTransferOutcome('failure')
     fireEvent.click(await b.view.findByRole('button', { name: '关注此 Thread' }))
     await waitFor(() => expect(b.view.getByRole('alert').textContent).toContain('关注状态不可用'))
-    fireEvent.click(b.view.getByRole('button', { name: '转交负责人' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    await waitFor(() => expect(b.view.getAllByRole('alert').map(node => node.textContent)).toEqual(['关注状态不可用', 'transfer unavailable (spec)']))
-    // Both lines are band lines, not the whole-surface replacement: that one centres itself in the band.
-    for (const alert of b.view.getAllByRole('alert')) expect(hasClass(alert, 'actionError')).toBe(true)
+    const dialog = await openTransferDialog(b)
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
+    // A dialog states its own failure where the reader is looking, in the same in-place band line the
+    // follow control uses rather than the whole-surface replacement that centres itself over the band.
+    await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toContain('transfer unavailable (spec)'))
+    expect(hasClass(within(dialog).getByRole('alert'), 'actionError')).toBe(true)
+    // The band's own line stands behind the dialog, unchanged and still the same kind of line.
+    const bandAlert = b.view.getAllByRole('alert').find(node => node.textContent?.includes('关注状态不可用'))
+    expect(bandAlert).toBeTruthy()
+    expect(hasClass(bandAlert ?? null, 'actionError')).toBe(true)
     await b.runtime.dispose()
   })
 
@@ -192,78 +195,85 @@ describe('Team Human Attention and Task transfer controls', () => {
     await b.runtime.dispose()
   })
 
-  it('hands an open Task to a Project owner the Host projected and merges the transfer activity', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
-    const menuButton = await b.view.findByRole('button', { name: '转交负责人' })
-    fireEvent.click(menuButton)
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+  it('offers this Thread\'s followers and hands the Task to the one the Human picks', async () => {
+    const b = await seedThreadPage({ seedFollowers: ['member:builder', 'member:human'] })
+    const dialog = await openTransferDialog(b)
+    // The follower set is the whole offer: the Human is this Task's current accountable, so the one
+    // candidate left is the Agent that follows this Thread — not every Project owner the Host knows.
+    expect(candidateLabels(dialog)).toEqual(['转交给 @builder'])
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', target: 'member:builder' })))
-    // The Host's own transfer row lands in the feed, exactly as an accept or close lands its own.
-    // The menu trigger also carries the word, so the activity row is matched by its full sentence.
+    // The Host's own transfer row lands in the feed, exactly as an accept or close lands its own, and
+    // the committed write closes the dialog instead of leaving it asking for the same decision again.
     expect(await b.view.findByText(/把负责人从/)).toBeTruthy()
+    await waitFor(() => expect(b.view.queryByRole('dialog', { name: '转交负责人' })).toBeNull())
+    await b.runtime.dispose()
+  })
+
+  it('explains an empty candidate list instead of offering nobody', async () => {
+    const b = await seedThreadPage({ seedFollowers: [] })
+    const dialog = await openTransferDialog(b)
+    expect(candidateLabels(dialog)).toEqual([])
+    // Nobody follows this Thread, so there is no one the dialog may offer; the empty state is the only
+    // place that says why, which is why the control stays pressable instead of vanishing.
+    expect(within(dialog).getByRole('status').textContent).toContain('没有关注者')
+    expect(b.view.getByRole('button', { name: '转交负责人' })).toBeTruthy()
     await b.runtime.dispose()
   })
 
   it('keeps the Task on screen when the Host fences the transfer behind the unread gate', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     b.seedTransferOutcome('unread_required')
-    fireEvent.click(await b.view.findByRole('button', { name: '转交负责人' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    const dialog = await openTransferDialog(b)
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalled())
-    // A fence is a business answer, not a crash: the Task's current accountable
-    // stands, and the refusal says what to do next.
+    // A fence is a business answer, not a crash: the Task's current accountable stands, the dialog gets
+    // out of the way, and the band states the refusal where the write started.
     expect(await b.view.findByRole('alert').then(node => node.textContent)).toContain('未读')
+    expect(b.view.queryByRole('dialog', { name: '转交负责人' })).toBeNull()
     await b.runtime.dispose()
   })
 
   it('keeps the transfer control on a closed Task so a finished one can still be mended', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     // Only a Member actor is confined to open Tasks, and this surface is the Human's: a closed Task
     // whose accountable left the Project is mended from here, so the control must not vanish with
     // the resolution. The write itself stays fenced by the Host.
     fireEvent.click(await b.view.findByRole('button', { name: '关闭任务' }))
     await waitFor(() => expect(b.changeTask).toHaveBeenCalledWith(expect.objectContaining({ action: 'close' })))
     await waitFor(() => expect(b.view.getByText('任务已关闭，重新打开后可继续讨论')).toBeTruthy())
-    const mendTrigger = b.view.getByRole('button', { name: '转交负责人' })
-    await waitFor(() => expect(mendTrigger).toBeTruthy())
-    fireEvent.click(mendTrigger)
-    await waitFor(() => expect(within(document.body).getAllByRole('menuitem').length).toBeGreaterThan(0))
-    fireEvent.click(within(document.body).getByRole('menuitem', { name: /builder/ }))
+    const dialog = await openTransferDialog(b)
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', target: 'member:builder' })))
     await b.runtime.dispose()
   })
 
-  it('offers the Human as a transfer target, which is how a broken Task is mended', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
-    // The seeded Task is accountable to the Human already, so the mend path needs one that is not:
-    // hand it to the Agent owner first, which also proves the two targets are distinct.
-    fireEvent.click(await b.view.findByRole('button', { name: '转交负责人' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', target: 'member:builder' })))
-    // The Host never lists the Human in `owners`; `humanMemberId` is its own answer, so the menu
-    // carries both. A Task whose accountable left the Project is mended this way.
-    fireEvent.click(b.view.getByRole('button', { name: '转交负责人' }))
-    await waitFor(() => expect(within(document.body).getAllByRole('menuitem').length).toBeGreaterThan(0))
-    const options = within(document.body).getAllByRole('menuitem').map(item => item.textContent ?? '')
-    expect(options).toEqual(['转交给你自己'])
-    fireEvent.click(within(document.body).getByRole('menuitem', { name: '转交给你自己' }))
-    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', target: 'member:human' })))
-    expect(await b.view.findByText(/把负责人从/)).toBeTruthy()
+  it('offers the Human only while the Human follows this Thread, which is how a broken Task is mended', async () => {
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
+    // The Human does not follow this Thread yet, so the Human is not a candidate: the offer is the
+    // follower set, and the Host's own `humanMemberId` adds no entry to it.
+    const first = await openTransferDialog(b)
+    expect(candidateLabels(first)).toEqual(['转交给 @builder'])
+    fireEvent.click(within(first).getByRole('button', { name: '转交给 @builder' }))
+    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
+    // The Human follows: the Host's observation now carries its own id, so the dialog offers it back —
+    // which is what mends a Task whose Agent accountable left the Project.
+    b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers: ['member:builder', 'member:human'] } }))
+    b.publishProjectUpdate()
+    const second = await openTransferDialog(b)
+    await waitFor(() => expect(candidateLabels(second)).toEqual(['转交给你自己']))
+    fireEvent.click(within(second).getByRole('button', { name: '转交给你自己' }))
+    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:human' })))
     await b.runtime.dispose()
   })
 
   it('re-reads the Thread after an unread fence and the wider history after a stale one', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     // An unread fence is answered with a durable read plus a drain, exactly as accept or close does.
     b.seedTransferOutcome('unread_required')
     const readsBefore = b.readThread.mock.calls.length
-    fireEvent.click(await b.view.findByRole('button', { name: '转交负责人' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    const dialog = await openTransferDialog(b)
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalled())
     await waitFor(() => expect(b.readThread.mock.calls.length).toBeGreaterThan(readsBefore))
     // The Task's accountable stays the Human: a fence moves nothing.
@@ -272,13 +282,12 @@ describe('Team Human Attention and Task transfer controls', () => {
   })
 
   it('re-reads the wider history after a stale revision so the retry sees the current Task', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     // A stale revision re-projects the Thread rather than leaving a stale one on screen.
     b.seedTransferOutcome('stale_revision')
     const historyBefore = b.loadThreadHistory.mock.calls.length
-    fireEvent.click(await b.view.findByRole('button', { name: '转交负责人' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    const dialog = await openTransferDialog(b)
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalled())
     await waitFor(() => expect(b.loadThreadHistory.mock.calls.length).toBeGreaterThan(historyBefore))
     expect(await b.view.findByRole('alert').then(node => node.textContent)).toContain('发生变化')
@@ -321,12 +330,11 @@ describe('Team Human Attention and Task transfer controls', () => {
   })
 
   it('keeps a stale transfer recoverable: the refusal re-reads and the Task stands', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     const readsBefore = b.loadThreadHistory.mock.calls.length
     b.seedTransferOutcome('stale_revision')
-    fireEvent.click(await b.view.findByRole('button', { name: '转交负责人' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    const dialog = await openTransferDialog(b)
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalled())
     expect(await b.view.findByRole('alert').then(node => node.textContent)).toContain('发生变化')
     // The page re-reads the wider history rather than stranding the reader on a stale projection.
@@ -337,28 +345,23 @@ describe('Team Human Attention and Task transfer controls', () => {
   })
 
   it('shows a failed transfer as an error that leaves the control usable', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     b.seedTransferOutcome('failure')
-    fireEvent.click(await b.view.findByRole('button', { name: '转交负责人' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    expect(await b.view.findByRole('alert').then(node => node.textContent)).toContain('transfer unavailable (spec)')
-    // A failed write is recoverable: the entry is offered again, and pressing it is allowed.
-    // The menu list is a portal the runtime re-renders between the query and the click, so the
-    // interaction itself is retried until the second call actually lands.
+    const dialog = await openTransferDialog(b)
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
+    expect(await within(dialog).findByRole('alert').then(node => node.textContent)).toContain('transfer unavailable (spec)')
+    // A failed write is recoverable in place: the row is offered again, and pressing it retries.
     await waitFor(() => {
-      fireEvent.click(b.view.getByRole('button', { name: '转交负责人' }))
-      fireEvent.click(within(document.body).getByRole('menuitem', { name: /builder/ }))
+      fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
       expect(b.transferTask).toHaveBeenCalledTimes(2)
     })
     // The second failure keeps the same recoverable surface rather than locking the control.
-    expect(b.view.getByRole('alert').textContent).toContain('transfer unavailable (spec)')
+    expect(within(dialog).getByRole('alert').textContent).toContain('transfer unavailable (spec)')
     await b.runtime.dispose()
   })
 
   it('announces a running write in the full phrase the shortened visible word cannot say', async () => {
-    const b = await seedThreadPage({ seedFollowers: [] })
-    seedProjectOwner(b)
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     await b.view.findByRole('button', { name: '转交负责人' })
     // Both writes are held open, so the pending render is a state this spec can read rather than a
     // frame that has already passed: the point under test is what the control says while it runs.
@@ -382,11 +385,13 @@ describe('Team Human Attention and Task transfer controls', () => {
     const transferGate = new Promise<void>(resolve => { releaseTransfer = resolve })
     const commitTransfer = b.transferTask.getMockImplementation()!
     b.transferTask.mockImplementationOnce(async request => { await transferGate; return commitTransfer(request) })
-    fireEvent.click(b.view.getByRole('button', { name: '转交负责人' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    const dialog = await openTransferDialog(b)
+    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
     const pendingTransfer = await b.view.findByRole('button', { name: '正在转交负责人…' })
     expect(pendingTransfer.textContent).toBe('转交中…')
     expect((pendingTransfer as HTMLButtonElement).disabled).toBe(true)
+    // While the write runs, every candidate row is disabled too: the dialog cannot start a second one.
+    expect((within(dialog).getByRole('button', { name: '转交给 @builder' }) as HTMLButtonElement).disabled).toBe(true)
     releaseTransfer()
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
     await b.runtime.dispose()

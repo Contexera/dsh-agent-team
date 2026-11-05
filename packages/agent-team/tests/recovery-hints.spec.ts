@@ -89,8 +89,8 @@ describe('every entry names an action and the value that action takes', () => {
   it('gives an executor and an accountable different routes out of self-acceptance', () => {
     const sentence = recoveryFor('self_acceptance_forbidden').sentence({ taskRef: 'task:ref' })
     expect(sentence).toContain('task:ref')
-    expect(sentence).toContain('if you are the accountable owner, use team_task transfer')
-    expect(sentence).toContain('otherwise ask the accountable owner or the Human')
+    expect(sentence).toContain('if you are the accountable, use team_task transfer')
+    expect(sentence).toContain('otherwise ask the accountable or the Human')
   })
 
   it('every kind is unique, so a lookup cannot silently bind two entries', () => {
