@@ -20,6 +20,7 @@ const REFERENCES_DIRECTORY = 'references'
 // The reviewed ceiling for one skill: dsh-developer's 8000-character active-set
 // limit minus its 150-character margin. Raising this number is a deliberate act
 // in the same change that adds the text, not a reaction to a red check.
+// Counted in UTF-16 code units like the other character budgets; nothing slices with it.
 const SKILL_CHARACTER_BUDGET = 7850
 // The description is the skill's only index entry; below this it names no
 // trigger and the catalog cannot route to it.

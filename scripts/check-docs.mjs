@@ -50,6 +50,8 @@ const PAGE_SETS = [
 // characters of source text) each maintained document may contain. A soft-wrapped paragraph is one block.
 // Each half of a pair has its own number: Chinese needs roughly half the characters.
 // A ceiling ratchets down as a document is condensed and is raised only deliberately, with the reason in the commit.
+// Counted in UTF-16 code units (`String.prototype.length`): characters for BMP text such as
+// Chinese, divergent only on astral characters, and never used to slice, so no surrogate splits.
 // Every maintained document needs a row.
 const BLOCK_CHARACTER_CEILINGS = {
   'architecture/README.md': [342, 174],

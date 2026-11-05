@@ -22,6 +22,14 @@
  * reviewed number rather than an accident, which is what the evidence showed
  * was missing.
  *
+ * A scope at its ceiling with nothing left to condense stays there: the budget is
+ * a decision point, not a quota. Lower a row only after a real condensation, and
+ * raise it only with a reason in the commit.
+ *
+ * `--budgets` prints the per-scope table without deciding, so a reader tracking
+ * a trend — or a subscription reading the numbers — sees the water line without
+ * turning a report into a gate.
+ *
  * WHY BANNED REFERENCES. A comment may cite a maintained document — `check-docs.mjs`
  * keeps those honest by resolving every relative link and heading anchor. It may
  * not cite `.scratch/`: `docs/AGENTS.md` states that work history "is not an
@@ -57,6 +65,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // change and needs several drifted commits to trip — while the drift the audit
 // found, about 14 net lines per commit, still reaches it in about ten.
 //
+// 2026-11-05: the rate since v0.2.6 is not the audit's. `packages/agent-team/src`
+// added 1757 comment lines over 46 commits (~38 each, against code's +7333), so
+// its 3% slack lasts about three commits rather than ten. Feature work carries
+// comments; the door stays, and the number above is a historical baseline.
+//
 // `scripts` was recorded at 1900 in the audit, which was the audited count
 // itself with no slack at all — the one scope the rule above was not applied to.
 // It sat at exactly 1900/1900 through v0.2.4 and went over on the first two
@@ -68,12 +81,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // while still tripping on the audited drift rate within about four commits.
 //
 // 2026-10-27: the one 4244-line `team-ui.e2e.ts` became eight scenarios under
-// `scripts/e2e/` plus a shared `support.ts`. That move is comment-neutral — the
-// narrative comments were carried verbatim (793 lines before, 800 after) — but
-// the shared module's own header and each scenario's opening raised the scope's
-// total by ~810. 2800 keeps the same ~3% headroom over the new total and absorbs
-// one ordinary scripts commit; a further split or a genuinely new constraint
-// still trips the ratchet.
+// `scripts/e2e/` plus a shared `support.ts`. The split raised the scope by 24
+// comment lines (1334 → 1358), not by the 810 this header used to claim: the
+// row went 1980 → 2800 on that wrong figure and stayed loose.
+//
+// 2026-11-05: three rows had drifted far above the ~3% rule — client held 840
+// spare lines, tool 78 against a floor of 40, scripts 1227 against a row that
+// was already loose before the split. Each is reset to its measured count plus
+// the rule's slack; agent-team was already at 3% and stays.
 //
 // `client-agent-team/src` carried the identical defect and was the other scope
 // left without slack: 1950 was the audited count of the day, and it drifted up
@@ -112,9 +127,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // slack the rule above asks for, after the previous row was left at zero slack.
 const COMMENT_BUDGETS = {
   'packages/agent-team/src': 4315,
-  'packages/client-agent-team/src': 2020,
-  'packages/tool-agent-team/src': 280,
-  'scripts': 2800,
+  'packages/client-agent-team/src': 1215,
+  'packages/tool-agent-team/src': 242,
+  'scripts': 1622,
 }
 
 const EXCLUDED_DIRECTORY = 'vendor'
@@ -156,8 +171,11 @@ const scopes = [
   'scripts',
 ]
 
+const budgetsOnly = process.argv.includes('--budgets')
+
 const violations = []
 const rows = []
+const budgetRows = []
 
 for (const scope of scopes) {
   const budget = COMMENT_BUDGETS[scope]
@@ -178,6 +196,7 @@ for (const scope of scopes) {
       if (!COMMENT_LINE.test(line)) continue
       lines += 1
       const body = COMMENT_BODY.exec(line)?.[1] ?? ''
+      if (budgetsOnly) continue
       for (const [pattern, why] of BANNED_REFERENCES) {
         if (pattern.test(body)) {
           violations.push(`${relative(root, file)}:${index + 1} cites a reference that cannot resolve — ${why}`)
@@ -189,9 +208,20 @@ for (const scope of scopes) {
   // cannot decide whether one more comment is warranted.
   const density = counted === 0 ? 0 : (lines / counted) * 100
   rows.push(`${scope} ${lines}/${budget} (${density.toFixed(1)}% of ${counted})`)
-  if (lines > budget) {
+  budgetRows.push(`${lines > budget ? 'OVER' : 'ok  '} ${String(lines).padStart(5)} / ${String(budget).padEnd(5)} (${density.toFixed(1)}% of ${counted}) ${scope}`)
+  if (lines > budget && !budgetsOnly) {
     violations.push(`${scope} holds ${lines} comment line(s), over its recorded budget of ${budget}`)
   }
+}
+
+if (budgetsOnly) {
+  if (violations.length > 0) {
+    console.error('Comment budget report failed:\n')
+    for (const violation of violations) console.error(`  ${violation}`)
+    process.exit(1)
+  }
+  console.log(budgetRows.join('\n'))
+  process.exit(0)
 }
 
 if (violations.length > 0) {
