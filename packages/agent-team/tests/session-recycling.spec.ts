@@ -34,7 +34,7 @@ describe('AgentTeam Host-initiated Session recycling ledger command', () => {
     // Identity, memory, and binding survive; only the generation moves.
     expect(recycled.member.sessionId).toBe(newSessionId)
     expect(recycled.member).toMatchObject({
-      memberId: member.memberId, handle: member.handle, state: 'enabled', privateMemoryPath: member.privateMemoryPath,
+      memberId: member.memberId, handle: member.handle, state: 'enabled', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: member.privateMemoryPath,
     })
     expect(ledger.previousSessionForMember(member.memberId)).toBe(member.sessionId)
     const operation = [...pool.media.get('agent_team')!.tables.get('operations')!.values() as Iterable<AgentTeamOperation>]

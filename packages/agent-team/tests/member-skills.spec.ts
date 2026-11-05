@@ -43,15 +43,16 @@ function memberSkillsHarness() {
   })
 }
 
-async function addMember(ctx: Context, workspaceId: WorkspaceId, handle: string): Promise<{ memberId: AgentTeamMemberId; sessionId: SessionId; privateMemoryPath: string }> {
+async function addMember(ctx: Context, workspaceId: WorkspaceId, handle: string): Promise<{ memberId: AgentTeamMemberId; sessionId: SessionId; model: { provider: 'mock', model: 'mock' }, privateMemoryPath: string }> {
   const added = await ctx.agentTeam.addMember({
     requestId: requestId(`add-${handle}`), workspaceId, handle, description: 'Skills member',
     presetId: 'team-member', projectRefs: [],
-  })
+   model: { provider: 'mock', model: 'mock' },})
   expect(added.status.availability).toBe('active')
   return {
     memberId: added.status.member.memberId,
     sessionId: added.status.member.sessionId,
+    model: { provider: 'mock', model: 'mock' },
     privateMemoryPath: added.status.member.privateMemoryPath,
   }
 }

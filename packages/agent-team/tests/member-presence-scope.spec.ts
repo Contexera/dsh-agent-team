@@ -22,7 +22,7 @@ describe('Agent Team presence-scope invalidation (issue #21)', () => {
 
   it('wakes only presence waiters on Agent running/idle and leaves workspace and scope-less waiters parked', async () => {
     const { ctx, workspaceId } = await realHarness(new EmptyAdapter())
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('presence-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+    const builder = await ctx.agentTeam.addMember({ requestId: requestId('presence-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(builder.status.member.sessionId)!
     // Presence versions are their own domain, so a presence waiter is parked
     // with a cursor sampled from the presence scope itself.
@@ -58,7 +58,7 @@ describe('Agent Team presence-scope invalidation (issue #21)', () => {
 
   it('reports Agent runtime failures through the presence scope only', async () => {
     const { ctx, workspaceId } = await realHarness(new EmptyAdapter())
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('presence-error-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+    const builder = await ctx.agentTeam.addMember({ requestId: requestId('presence-error-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(builder.status.member.sessionId)!
     const presenceBaseline = await changeBaseline(ctx.agentTeam, { kind: 'presence', workspaceId })
     const presenceWaiter = nextChange(ctx.agentTeam, { kind: 'presence', workspaceId })

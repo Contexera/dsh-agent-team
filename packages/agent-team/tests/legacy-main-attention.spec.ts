@@ -37,8 +37,8 @@ async function seed() {
   await ledger.initialize()
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'delivery', description: '', memberIds: [] })).value.project.projectRef
   const memberId = `member:owner` as AgentTeamMemberId
-  const member = { memberId, sessionId: SessionId('session:owner'), workspaceId: alpha, handle: 'owner', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/owner', state: 'enabled' as const }
-  await ledger.addMember({ requestId: requestId('add'), actor: human, member, handle: 'owner', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [projectRef] })
+  const member = { memberId, sessionId: SessionId('session:owner'), workspaceId: alpha, handle: 'owner', description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/owner', state: 'enabled' as const }
+  await ledger.addMember({ requestId: requestId('add'), actor: human, member, handle: 'owner', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
   await ledger.addProjectOwner({ requestId: requestId('own'), actor: human, workspaceId: alpha, projectRef, memberId })
   return { table, ledger, projectRef, memberId, actor: { kind: 'member', memberId, handle: 'owner' } as AgentTeamMemberActor }
 }
@@ -88,8 +88,8 @@ describe('pre-Main-stream-Attention records', () => {
     // the Member's own progress stands.
     const readerId = `member:reader` as AgentTeamMemberId
     await team.ledger.addMember({ requestId: requestId('add-reader'), actor: human,
-      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' },
-      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef] })
+      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/reader', state: 'enabled' },
+      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef], model: { provider: 'mock', model: 'mock' }})
     const reader = { kind: 'member', memberId: readerId, handle: 'reader' } as AgentTeamMemberActor
     await team.ledger.postMainMessage({ requestId: requestId('one'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'one' })
     await team.ledger.changeAttention({ requestId: requestId('follow'), actor: reader, workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
@@ -152,8 +152,8 @@ describe('pre-Main-stream-Attention records', () => {
     // refuses, and the ledger would not reopen.
     const readerId = `member:reader` as AgentTeamMemberId
     await team.ledger.addMember({ requestId: requestId('add-reader'), actor: human,
-      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' },
-      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef] })
+      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/reader', state: 'enabled' },
+      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef], model: { provider: 'mock', model: 'mock' }})
     const reader = { kind: 'member', memberId: readerId, handle: 'reader' } as AgentTeamMemberActor
     await team.ledger.postMainMessage({ requestId: requestId('mention'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: '@reader please look' })
     await team.ledger.changeAttention({ requestId: requestId('follow'), actor: reader, workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
@@ -192,8 +192,8 @@ describe('records written before Attention recorded its source', () => {
     const team = await seed()
     const readerId = `member:reader` as AgentTeamMemberId
     await team.ledger.addMember({ requestId: requestId('add-reader'), actor: human,
-      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' },
-      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef] })
+      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/reader', state: 'enabled' },
+      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef], model: { provider: 'mock', model: 'mock' }})
     const reader = { kind: 'member', memberId: readerId, handle: 'reader' } as AgentTeamMemberActor
     // The three shapes whose validators re-derive a row with a cause: the grant,
     // a Claim, and the accountable a reopen re-establishes.
@@ -215,8 +215,8 @@ describe('records written before Attention recorded its source', () => {
     const team = await seed()
     const readerId = `member:reader` as AgentTeamMemberId
     await team.ledger.addMember({ requestId: requestId('add-reader'), actor: human,
-      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' },
-      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef] })
+      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/reader', state: 'enabled' },
+      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef], model: { provider: 'mock', model: 'mock' }})
     const reader = { kind: 'member', memberId: readerId, handle: 'reader' } as AgentTeamMemberActor
     await team.ledger.postMainMessage({ requestId: requestId('one'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'one' })
     await team.ledger.changeAttention({ requestId: requestId('follow'), actor: reader, workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })

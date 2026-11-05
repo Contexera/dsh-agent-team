@@ -157,6 +157,15 @@ describe('Team agent surfaces', () => {
     fireEvent.change(agentName, { target: { value: 'reviewer' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'Reviews changes' } })
     expect(b.view.queryByRole('button', { name: /初始项目/ })).toBeNull()
+    // Creation names a route: the dialog offers no "follow the global default" row and refuses to submit without one.
+    const createDialog = b.view.getByRole('dialog', { name: '添加 Agent' })
+    const createModel = within(createDialog).getByRole('button', { name: '模型' })
+    await waitFor(() => expect(createModel.textContent).toContain('选择模型'))
+    expect((createDialog.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(createModel)
+    expect(within(document.body).queryByRole('menuitem', { name: '跟随全局默认' })).toBeNull()
+    fireEvent.click(within(document.body).getByRole('menuitem', { name: 'DeepSeek Reasoner' }))
+    await waitFor(() => expect(createModel.textContent).toContain('DeepSeek Reasoner'))
     b.addMember.mockResolvedValueOnce({ ok: false, error: { message: 'connection lost' } } as never)
     fireEvent.click(b.view.getByRole('button', { name: '创建 Agent' }))
     expect((await b.view.findByRole('alert')).textContent).toContain('connection lost')
@@ -167,6 +176,7 @@ describe('Team agent surfaces', () => {
     expect(await b.view.findByText('reviewer')).toBeTruthy()
     expect(b.addMember).toHaveBeenLastCalledWith(expect.objectContaining({
       workspaceId: 'w1', projectRefs: [], handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member',
+      model: { provider: 'deepseek-official', model: 'deepseek-reasoner' },
     }))
     expect(b.addMember.mock.calls[0]![0].requestId).toBe(b.addMember.mock.calls[1]![0].requestId)
     await waitFor(() => expect(document.activeElement).toBe(addAgentTrigger))
@@ -405,10 +415,10 @@ describe('Team agent surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: 'builder 的操作' }))
     fireEvent.click(await b.view.findByRole('menuitem', { name: '编辑 Agent' }))
     const editor = b.view.getByRole('dialog', { name: '编辑 Agent' })
-    // The Host catalog arrives session-independently; the picker rides the
-    // shared Menu primitive with the default entry leading each open.
+    // The Host catalog arrives session-independently; the picker rides the shared
+    // Menu primitive and offers routes only — no "follow the global default" row.
     const modelTrigger = await within(editor).findByRole('button', { name: '模型' })
-    await waitFor(() => { expect(modelTrigger.textContent).toContain('跟随全局默认') })
+    await waitFor(() => { expect(modelTrigger.textContent).toContain('选择模型') })
     fireEvent.click(modelTrigger)
     const modelMenu = within(document.body).getByRole('menu')
     expect(within(modelMenu).getByText('DeepSeek')).toBeTruthy()
@@ -665,9 +675,9 @@ describe('Team member editor partial update payload', () => {
     fireEvent.click(within(editor).getByRole('button', { name: '保存' }))
     await waitFor(() => { expect(b.updateMember).toHaveBeenCalled() })
     const payload = b.updateMember.mock.calls.at(-1)?.[0] as Record<string, unknown>
-    // "Follow global default" is an explicit clear now; an omitted field would
-    // keep a stuck pin. Capabilities stay out: an absent field no longer clears.
-    expect(payload.model).toBeNull()
+    // This record has no route yet, and the Host no longer accepts clearing one, so the edit leaves the field out.
+    // Capabilities stay out for the same reason: an absent field keeps a Remote-written override rather than clearing it.
+    expect('model' in payload).toBe(false)
     expect('capabilities' in payload).toBe(false)
   })
 })

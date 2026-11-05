@@ -13,7 +13,7 @@ describe('recovery notifications retain unread work within the whole-output budg
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     const first = await ctx.agentTeam.postMainMessage({ requestId: requestId('first'), workspaceId, projectRef, body: '@builder first full check' })
     if (first.kind !== 'committed') throw new Error('first post failed')
@@ -46,7 +46,7 @@ describe('recovery notifications retain unread work within the whole-output budg
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     // 8300 astral characters are 8300 characters but 16600 UTF-16 units, so a body bounded by units cuts
     // between the halves of one and leaves a lone surrogate where the reader sees a broken glyph.
@@ -75,7 +75,7 @@ describe('recovery notifications retain unread work within the whole-output budg
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Work on the package.' }], source: { kind: 'user' } }))
     await adapter.started.promise

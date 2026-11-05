@@ -64,7 +64,7 @@ async function seedMember(ctx: Context, projectRef: AgentTeamProjectRef, label: 
     requestId: requestId(`${label}-add`), workspaceId: alpha,
     handle: label, description: `${label} member`, presetId: 'team-member',
     projectRefs: [projectRef],
-  })
+   model: { provider: 'mock', model: 'mock' },})
 }
 
 describe('Agent Team display-fact updates', () => {
@@ -134,14 +134,16 @@ describe('Agent Team display-fact updates', () => {
     const kept = await ctx.agentTeam.updateMember({ requestId: requestId('keep-handle'), memberId: builder.status.member.memberId, handle: 'architect', description: 'Designs systems' })
     expect(kept.status.member.description).toBe('Designs systems')
 
-    // An absent model clears any override back to Host-default inheritance.
-    const cleared = await ctx.agentTeam.updateMember({ requestId: requestId('clear-model'), memberId: builder.status.member.memberId, handle: 'architect', description: 'Designs systems', model: null })
-    expect(cleared.status.member.model).toBeUndefined()
+    // A Member always runs an explicit route: an explicit `null` is refused instead of clearing the pin.
+    await expect(ctx.agentTeam.updateMember({ requestId: requestId('clear-model'), memberId: builder.status.member.memberId, handle: 'architect', description: 'Designs systems', model: null }))
+      .rejects.toThrow(/cannot be cleared/)
+    expect(ctx.agentTeam.membersForClient({ workspaceId: alpha }).find(status => status.member.memberId === builder.status.member.memberId)?.member.model)
+      .toEqual({ provider: 'mock', model: 'pinned' })
 
     // Retry semantics mirror every other op: same payload replays, drift collides.
-    const retried = await ctx.agentTeam.updateMember({ requestId: requestId('clear-model'), memberId: builder.status.member.memberId, handle: 'architect', description: 'Designs systems', model: null })
-    expect(retried.status.member.model).toBeUndefined()
-    await expect(ctx.agentTeam.updateMember({ requestId: requestId('clear-model'), memberId: builder.status.member.memberId, handle: 'architect', description: 'Changed after commit' })).rejects.toThrow(/was reused with a different operation or payload/)
+    const retried = await ctx.agentTeam.updateMember({ requestId: requestId('keep-handle'), memberId: builder.status.member.memberId, handle: 'architect', description: 'Designs systems' })
+    expect(retried.status.member.description).toBe('Designs systems')
+    await expect(ctx.agentTeam.updateMember({ requestId: requestId('keep-handle'), memberId: builder.status.member.memberId, handle: 'architect', description: 'Changed after commit' })).rejects.toThrow(/was reused with a different operation or payload/)
     // Clearing the description is a legal edit, matching optional creation.
     const clearedDescription = await ctx.agentTeam.updateMember({ requestId: requestId('clear-description'), memberId: builder.status.member.memberId, handle: 'architect', description: '' })
     expect(clearedDescription.status.member.description).toBe('')
@@ -154,8 +156,9 @@ describe('Agent Team display-fact updates', () => {
     const replayedWithEffort = ledgerAtBoot(facility)
     expect(() => replayedWithEffort.validate()).not.toThrow()
     expect(replayedWithEffort.getMember(builder.status.member.memberId)?.model).toEqual({ provider: 'mock', model: 'pinned', reasoningEffort: 'high' })
-    const unpinned = await ctx.agentTeam.updateMember({ requestId: requestId('unpin-effort'), memberId: builder.status.member.memberId, handle: 'architect', description: 'Designs systems', model: null })
-    expect(unpinned.status.member.model).toBeUndefined()
+    // Re-stating the route without an effort drops the tier: the route is the unit of an edit, not the tier alone.
+    const unpinned = await ctx.agentTeam.updateMember({ requestId: requestId('unpin-effort'), memberId: builder.status.member.memberId, handle: 'architect', description: 'Designs systems', model: { provider: 'mock', model: 'pinned' } })
+    expect(unpinned.status.member.model).toEqual({ provider: 'mock', model: 'pinned' })
 
     // A removed Member freezes against further edits, including its old handle.
     await ctx.agentTeam.removeMember({ requestId: requestId('remove-reviewer'), memberId: reviewer.status.member.memberId })
@@ -165,7 +168,7 @@ describe('Agent Team display-fact updates', () => {
     expect(() => replayed.validate()).not.toThrow()
     const stored = replayed.listMembers().find(member => member.memberId === builder.status.member.memberId)
     expect(stored).toMatchObject({ handle: 'architect', description: 'Designs systems' })
-    expect(stored?.model).toBeUndefined()
+    expect(stored?.model).toEqual({ provider: 'mock', model: 'pinned' })
     expect(replayed.listMembers().find(member => member.memberId === reviewer.status.member.memberId)?.state).toBe('inactive')
   })
 
@@ -179,7 +182,7 @@ describe('Agent Team display-fact updates', () => {
     const added = await ctx.agentTeam.addMember({
       requestId: requestId('capabilities-add'), workspaceId: alpha, handle: 'builder', description: 'Builds changes',
       presetId: 'team-member', projectRefs: [created.project.projectRef], capabilities,
-    })
+     model: { provider: 'mock', model: 'mock' },})
     const memberId = added.status.member.memberId
     expect(added.status.member.capabilities).toEqual(capabilities)
 
@@ -189,7 +192,7 @@ describe('Agent Team display-fact updates', () => {
     const hostile = await ctx.agentTeam.addMember({
       requestId: requestId('drift-add'), workspaceId: alpha, handle: 'drift', description: 'Old ledger entry',
       presetId: 'team-member', projectRefs: [], capabilities: { tools: { allow: ['tool-renamed-away'] } },
-    })
+     model: { provider: 'mock', model: 'mock' },})
     expect(hostile.status.member.capabilities).toEqual({ tools: { allow: ['tool-renamed-away'] } })
     expect(hostile.status.capabilityWarnings).toBeUndefined()
 
@@ -237,7 +240,7 @@ describe('Agent Team display-fact updates', () => {
 })
 
 describe('AgentTeam updateMember is a partial update (issue #43 #10)', () => {
-  it('keeps an omitted override, clears on null, and updates on an explicit value', async () => {
+  it('keeps an omitted field, replaces an explicit value, and refuses to clear the model', async () => {
     const { ctx } = await harness()
     const added = await ctx.agentTeam.addMember({
       requestId: requestId('partial-add'), workspaceId: alpha, handle: 'builder', description: 'Builds',
@@ -263,12 +266,16 @@ describe('AgentTeam updateMember is a partial update (issue #43 #10)', () => {
     expect(replaced.status.member.model).toEqual({ provider: 'mock', model: 'other' })
     expect(replaced.status.member.capabilities).toEqual({ skills: { allow: ['alpha'] } })
 
-    // Explicit null clears only the named field.
-    const cleared = await ctx.agentTeam.updateMember({
+    // The model is the one field `null` cannot clear; the capability override still clears.
+    await expect(ctx.agentTeam.updateMember({
       requestId: requestId('partial-clear'), memberId, handle: 'architect', description: 'Builds',
       model: null,
+    })).rejects.toThrow(/cannot be cleared/)
+    const cleared = await ctx.agentTeam.updateMember({
+      requestId: requestId('partial-clear-capabilities'), memberId, handle: 'architect', description: 'Builds',
+      capabilities: null,
     })
-    expect(cleared.status.member.model).toBeUndefined()
-    expect(cleared.status.member.capabilities).toEqual({ skills: { allow: ['alpha'] } })
+    expect(cleared.status.member.capabilities).toBeUndefined()
+    expect(cleared.status.member.model).toEqual({ provider: 'mock', model: 'other' })
   })
 })

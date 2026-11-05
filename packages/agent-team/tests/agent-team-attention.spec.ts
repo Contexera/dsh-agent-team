@@ -141,7 +141,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(ledger.getMember(first.member.memberId)?.state).toBe('suspended')
     const other = { ...second.member, memberId: 'member:beta-peer' as AgentTeamAgentMember['memberId'], workspaceId: beta, sessionId: SessionId('session:beta-peer') }
     await ledger.addMember({ requestId: requestId('beta-peer'), workspaceId: beta, member: other,
-      handle: 'peer', description: '', presetId: 'team-member', projectRefs: [], actor: agentTeamHumanActor() })
+      handle: 'peer', description: '', presetId: 'team-member', projectRefs: [], actor: agentTeamHumanActor(), model: { provider: 'mock', model: 'mock' }})
     await expect(ledger.updateMember({ requestId: requestId('rename-collision'), memberId: first.member.memberId,
       handle: 'PEER', description: '', actor: agentTeamHumanActor() })).rejects.toThrow(/already active/)
     await ledger.updateMember({ requestId: requestId('rename-second'), memberId: second.member.memberId,
@@ -460,11 +460,12 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       sessionId: SessionId('session:beta-peer'),
       workspaceId: beta,
       handle: 'beta-peer', description: 'Beta peer', presetId: 'team-member',
+      model: { provider: 'mock', model: 'mock' },
       privateMemoryPath: '/tmp/beta-peer', state: 'enabled' as const,
     }
     await ledger.addMember({ requestId: requestId('add-beta'), actor: agentTeamHumanActor(), member: betaLedgerMember, handle: betaLedgerMember.handle,
       description: betaLedgerMember.description, presetId: betaLedgerMember.presetId, workspaceId: beta,
-      projectRefs: [betaProject.project.projectRef] })
+      projectRefs: [betaProject.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     const receiver = await addLedgerMember(ledger, project.project.projectRef, 'member:receiver', 'receiver')
 
     await expect(ledger.sendDm({ requestId: requestId('dm-cross'), workspaceId: alpha,
@@ -578,7 +579,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('adds an Agent with initial Project membership and persists no Inbox delivery facts', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+    const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     expect(member.status.member).toMatchObject({ workspaceId: alpha, handle: 'reviewer' })
     expect(test.ctx.agentTeam.view({ workspaceId: alpha }).members).toEqual([{ projectRef: project.project.projectRef, memberId: member.status.member.memberId }])
     const records = [...(test.facility.get('agent_team')?.table('operations').entries() ?? [])].map(([, operation]) => JSON.stringify(operation))

@@ -12,7 +12,7 @@ describe('complete Activity notices supply context without acknowledging it', ()
     const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId,
       name: 'Review', description: 'Independent release review' })
     const member = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+      handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(member.status.member.sessionId)!
     adapter.enqueue(textResponse('Noted ownership.'))
     await ctx.agentTeam.addProjectOwner({ requestId: requestId('owner'), workspaceId,

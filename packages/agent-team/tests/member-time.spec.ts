@@ -89,12 +89,13 @@ async function addLedgerMember(
     handle: memberId.slice('member:'.length),
     description: 'Test Agent',
     presetId: 'team-member',
+    model: { provider: 'mock', model: 'mock' },
     privateMemoryPath: `/tmp/${memberId}`,
     state: 'enabled',
   }
   await ledger.addMember({ requestId: requestId(`add:${memberId}`), actor: agentTeamHumanActor(), member, handle: member.handle,
     description: member.description, presetId: member.presetId, workspaceId: alpha,
-    projectRefs: projectRef === undefined ? [] : [projectRef as never] })
+    projectRefs: projectRef === undefined ? [] : [projectRef as never], model: { provider: 'mock', model: 'mock' }})
   return { member, actor: { kind: 'member', memberId: member.memberId, handle: member.handle } }
 }
 

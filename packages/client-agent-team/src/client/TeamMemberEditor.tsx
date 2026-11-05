@@ -104,7 +104,8 @@ export function ModelPickerField({ model, onModelChange, loadModels, disabled, t
     return () => { mounted = false }
   }, [loadModels, reloadToken])
 
-  const items: MenuEntry[] = [{ id: '', label: t('modelFollowDefault') }]
+  // No "follow the Host default" row: a Member always runs a named route, so the picker only lists real routes.
+  const items: MenuEntry[] = []
   const byKey = new Map<string, { provider: string; id: string; name: string; efforts: readonly TeamModelEffortOption[] }>()
   for (const group of groups ?? []) {
     items.push({ type: 'label', id: `model-group:${group.id}`, text: group.name })
@@ -116,10 +117,9 @@ export function ModelPickerField({ model, onModelChange, loadModels, disabled, t
   }
   const selectedModelKey = model === undefined ? '' : modelKey(model.provider, model.model)
   const triggerLabel = model === undefined
-    ? t('modelFollowDefault')
+    ? t('modelChoose')
     : byKey.get(selectedModelKey)?.name ?? `${model.provider} / ${model.model}`
-  // The effort sub-row only makes sense for a pinned model with adapter-exposed
-  // efforts; following the Host default inherits the operator's whole selection.
+  // The effort sub-row only makes sense for a chosen model with adapter-exposed efforts.
   const efforts = model === undefined ? [] : byKey.get(selectedModelKey)?.efforts ?? []
   const effortItems: MenuEntry[] = [{ id: '', label: t('effortFollowDefault') }, ...efforts.map(effort => ({ id: effort.id, label: effort.name }))]
   const selectedEffort = model?.reasoningEffort ?? ''
@@ -154,7 +154,7 @@ export function ModelPickerField({ model, onModelChange, loadModels, disabled, t
         onSelect={key => {
           setModelOpen(false)
           const choice = byKey.get(key)
-          onModelChange(choice === undefined ? undefined : { provider: choice.provider, model: choice.id })
+          if (choice !== undefined) onModelChange({ provider: choice.provider, model: choice.id })
         }}
         onClose={() => { setModelOpen(false) }}
         anchor={
@@ -362,9 +362,9 @@ export function AgentEditorDialog({ status, updateMember, loadModels, loadMember
       memberId,
       handle: normalizedHandle,
       description: normalizedDescription,
-      // An absent model would keep the stored override, so following the Host default must say `null` explicitly.
-      // Capabilities stay out of the payload so a Remote-written override is left alone.
-      model: model ?? null,
+      // A Member always runs an explicit route and the Host refuses to clear one, so a record that has none yet simply
+      // leaves the field out. Capabilities stay out of the payload so a Remote-written override is left alone.
+      ...(model === undefined ? {} : { model }),
     }
     await save(previous => previous !== undefined && previous.memberId === payload.memberId
       && previous.handle === payload.handle && previous.description === payload.description

@@ -710,6 +710,43 @@ export default class AgentTeam extends TypertRemoteService {
     agent.model.select({ provider: selection.provider, model: selection.model, ...effort === undefined ? {} : { reasoningEffort: effort } })
   }
 
+  /**
+   * Carry the route a Member's Session actually sent into the ledger.
+   *
+   * The composer writes its choice into the Session log; this is the only bridge from there into the Team ledger, and it runs on
+   * `request/header` — after compaction and the model-switch guard have passed — rather than on the selection event, because a
+   * switch the Host refuses (a window that cannot hold the context) keeps the old route and must never become the durable one.
+   * A request whose route already equals what the Member would run next is a no-op, so the route Team writes back on activation
+   * cannot feed itself through the ledger. Only the route is recorded: the reasoning effort stays a Session-log fact that
+   * activation re-reads for that route, so adoption can neither drop an inherited tier nor pin it permanently.
+   */
+  private adoptMemberRouteFromRequest(memberId: AgentTeamMemberId, agent: Agent, event: Extract<SessionEvent, { type: 'request/header' }>): void {
+    if (this.retiringAgents.has(agent)) return
+    let ledger: AgentTeamLedger
+    try {
+      ledger = this.requireLedger()
+    } catch {
+      return
+    }
+    const member = ledger.getMember(memberId)
+    if (member === undefined || member.state !== 'enabled') return
+    const config = event.data.header.config
+    const running = member.model ?? this.ctx.agentDefaultModel.currentSelection()
+    if (running.provider === config.provider && running.model === config.model) return
+    // The route alone: the effort belongs to the Session log, where activation re-reads it for the same route. Writing it
+    // here would turn an inherited tier into a permanent one that later edits cannot lower.
+    const model: AgentTeamModelSelection = Object.freeze({ provider: config.provider, model: config.model })
+    const requestId = `${memberId}:request-${event.seq}` as AgentTeamRequestId
+    void ledger.updateMember({
+      requestId, memberId: member.memberId, handle: member.handle, description: member.description,
+      model, actor: agentTeamHumanActor(),
+    }).then((result) => {
+      if (result.committed) this.emitCommitted(result.value.receipt)
+    }).catch((error: unknown) => {
+      this.ctx.logger.warn(`agent-team: could not adopt the request route for member '${this.memberLabel(memberId)}' requestId '${requestId}': ${failureDetail(error)}`)
+    })
+  }
+
   private async recycleColdGeneration(member: AgentTeamAgentMember, agent: Agent): Promise<Error | undefined> {
     const queued = this.queuedInputOf(agent)
     if (queued.length > 0) {
@@ -2694,6 +2731,10 @@ export default class AgentTeam extends TypertRemoteService {
         // Only a resumed Session records the configured route, and it inherits the effort its own log recorded for that route; a fresh Session's route rides AgentOptions, exactly as the driver's own resume does.
         if (persisted) this.applyConfiguredRoute(agent, selection)
         installModelSelection(agentCtx)
+        agentCtx.on('session/event', (session, event) => {
+          if (session !== agent.session || event.type !== 'request/header') return
+          this.adoptMemberRouteFromRequest(member.memberId, agent, event)
+        })
         installMemberCompaction(
           agentCtx, agent, () => this.memberCompactionConfig(),
           () => this.compactionEngineFor(agent), () => this.retiringAgents.has(agent),

@@ -23,7 +23,7 @@ describe('Agent Team change version domains', () => {
   it('answers no parked Client when a Member read of its own Thread makes progress', async () => {
     const { ctx, workspaceId } = await realHarness(new EmptyAdapter())
     const project = await ctx.agentTeam.createProject({ requestId: requestId('domain-project'), workspaceId, name: 'engineering', description: 'Version domains' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('domain-add'), workspaceId, handle: 'builder', description: 'Reads work', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('domain-add'), workspaceId, handle: 'builder', description: 'Reads work', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     const live = ctx.agents.get(added.status.member.sessionId)!
     const started = await ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('domain-task'), workspaceId, projectRef: project.project.projectRef, body: '@builder Unread work' })
     if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
@@ -55,7 +55,7 @@ describe('Agent Team change version domains', () => {
 
   it('wakes a presence waiter holding another domain cursor without moving any projection cursor', async () => {
     const { ctx, workspaceId } = await realHarness(new EmptyAdapter())
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('domain-presence-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('domain-presence-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     const projection = (await changeBaseline(ctx.agentTeam)).version
 

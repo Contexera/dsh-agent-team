@@ -29,11 +29,11 @@ describe('Main notices attribute ordinary facts and keep the reader relation', (
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const follower = await ctx.agentTeam.addMember({ requestId: requestId('follower'), workspaceId,
-      handle: 'follower', description: 'Watches the Main stream', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'follower', description: 'Watches the Main stream', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(follower.status.member.sessionId)!
     await ctx.agentTeam.changeAttentionForAgent(agent, { requestId: requestId('follow'), workspaceId, projectRef, action: 'follow' })
     const target = await ctx.agentTeam.addMember({ requestId: requestId('target'), workspaceId,
-      handle: 'target', description: 'Takes ownership', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'target', description: 'Takes ownership', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     // A suspended target owns the Project without running a turn of its own.
     await ctx.agentTeam.suspendMember({ requestId: requestId('suspend'), memberId: target.status.member.memberId })
     expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing)
@@ -76,7 +76,7 @@ describe('Main notices attribute ordinary facts and keep the reader relation', (
       name: 'Beta', description: 'Second Project' })
     const added = await ctx.agentTeam.addMember({ requestId: requestId('reader'), workspaceId,
       handle: 'reader', description: 'Reads both streams', presetId: 'team-member',
-      projectRefs: [alpha.project.projectRef, beta.project.projectRef] })
+      projectRefs: [alpha.project.projectRef, beta.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     await ctx.agentTeam.changeAttentionForAgent(agent, { requestId: requestId('follow-alpha'), workspaceId,
       projectRef: alpha.project.projectRef, action: 'follow' })
@@ -115,7 +115,7 @@ describe('Main notices attribute ordinary facts and keep the reader relation', (
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     const anchor = await ctx.agentTeam.startThread({ requestId: requestId('anchor'), workspaceId,
       projectRef, kind: 'discussion', body: 'Anchor for the quoted reply' })
@@ -164,7 +164,7 @@ describe('Main notices attribute ordinary facts and keep the reader relation', (
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     const anchor = await ctx.agentTeam.postMainMessage({ requestId: requestId('anchor'), workspaceId,
       projectRef, body: 'Main anchor message' })

@@ -52,7 +52,7 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
   it('provisions new Members under a colon-free private memory path', async () => {
     const { ctx, workspaceId } = await realHarness()
     await ctx.agentTeam.createProject({ requestId: requestId('san-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('san-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', projectRefs: [] })
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('san-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const member = added.status.member
     expect(member.memberId).toContain(':')
     // The colon-free guarantee is about the directory segment: a Windows

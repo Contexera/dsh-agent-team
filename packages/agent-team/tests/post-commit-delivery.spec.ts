@@ -57,9 +57,9 @@ async function addLiveMember(ctx: Context, projectRef: AgentTeamProjectRef, hand
     projectRefs: [projectRef], actor: agentTeamHumanActor(),
     member: {
       memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle, description: 'Reads work',
-      presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' as const,
+      presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/reader', state: 'enabled' as const,
     },
-  })
+   model: { provider: 'mock', model: 'mock' },})
   return { kind: 'member', memberId, handle }
 }
 

@@ -23,7 +23,7 @@ async function idleMember(tag: string) {
   const project = await ctx.agentTeam.createProject({ requestId: requestId(`${tag}-project`), workspaceId,
     name: 'engineering', description: 'Engineering work' })
   const added = await ctx.agentTeam.addMember({ requestId: requestId(`${tag}-add`), workspaceId, handle: 'builder',
-    description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+    description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
   const agent = ctx.agents.get(added.status.member.sessionId)!
   adapter.enqueue(textResponse('First look done.'))
   agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))

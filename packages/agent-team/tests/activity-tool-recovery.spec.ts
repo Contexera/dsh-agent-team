@@ -16,7 +16,7 @@ describe('a complete Activity rejection lets the writer reconsider without a rea
       name: 'Release checks', description: 'Verify the signed installer' })
     const projectRef = project.project.projectRef
     const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: test.workspaceId,
-      handle: 'builder', description: 'Verifies releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Verifies releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const memberId = member.status.member.memberId
     const agent = test.ctx.agents.get(member.status.member.sessionId)!
     await test.ctx.agentTeam.addProjectOwner({ requestId: requestId('owner'), workspaceId: test.workspaceId, projectRef, memberId })

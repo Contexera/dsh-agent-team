@@ -20,7 +20,7 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
       const { ctx, workspaceId, pressureState, teamFiber } = await realHarness(adapter)
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('boot-wake-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('boot-wake-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
       const memberId = added.status.member.memberId
       const sessionId = added.status.member.sessionId
       const agent = ctx.agents.get(sessionId)!
@@ -54,7 +54,7 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
       const { ctx, workspaceId, pressureState, teamFiber } = await realHarness(adapter)
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('boot-pending-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('boot-pending-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
       const memberId = added.status.member.memberId
       const sessionId = added.status.member.sessionId
       const agent = ctx.agents.get(sessionId)!
@@ -106,7 +106,7 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
       const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('resume-wake-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('resume-wake-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
       const memberId = added.status.member.memberId
       const sessionId = added.status.member.sessionId
       const agent = ctx.agents.get(sessionId)!
@@ -143,7 +143,7 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
       const { ctx, workspaceId, pressureState, teamFiber } = await realHarness(adapter)
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('boot-warm-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('boot-warm-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
       const memberId = added.status.member.memberId
       const sessionId = added.status.member.sessionId
       const agent = ctx.agents.get(sessionId)!

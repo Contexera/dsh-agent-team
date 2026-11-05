@@ -1,6 +1,6 @@
 import { afterEach, it, expect } from 'vitest'
 import { join } from 'node:path'
-import { BROWSER_ARTIFACTS, closeScenario, openSidebar, openTeamPage, settleLayout } from './__external-agent-team-support.ts'
+import { BROWSER_ARTIFACTS, closeScenario, openSidebar, openTeamPage, settleLayout, chooseMemberModel } from './__external-agent-team-support.ts'
 
 /** The avatar lane's own shots: the initial is a glyph-sized fact, so it gets its own directory. */
 const AVATAR_SHOTS = join(BROWSER_ARTIFACTS, 'avatar-initial')
@@ -20,6 +20,7 @@ it('keeps an astral initial whole in the sidebar avatar', async () => {
   const dialog = page.getByRole('dialog', { name: '添加 Agent' })
   await dialog.getByLabel('名称').fill('𐐨builder')
   await dialog.getByLabel('说明').fill('astral handle')
+  await chooseMemberModel(page, dialog)
   await dialog.getByRole('button', { name: '创建 Agent' }).click()
   const row = page.locator('[class*="agentRow"]').filter({ hasText: 'builder' }).first()
   await row.waitFor({ timeout: 20_000 })

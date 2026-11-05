@@ -16,9 +16,9 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     const adapter = new GatedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
     const builder = await ctx.agentTeam.addMember({ requestId: requestId('isolation-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const reviewer = await ctx.agentTeam.addMember({ requestId: requestId('isolation-reviewer'), workspaceId,
-      handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [] })
+      handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(builder.status.member.sessionId)!
 
     // A runs a held turn: model call 1 parks until the test releases it.
@@ -60,7 +60,7 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     const adapter = new GatedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
     const builder = await ctx.agentTeam.addMember({ requestId: requestId('order-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(builder.status.member.sessionId)!
 
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue current checkout work.' }], source: { kind: 'user' } }))
@@ -98,7 +98,7 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     const adapter = new GatedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
     const builder = await ctx.agentTeam.addMember({ requestId: requestId('deferred-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(builder.status.member.sessionId)!
     const memberId = builder.status.member.memberId
 
@@ -132,7 +132,8 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
   it('activates exactly once when the same add request arrives concurrently', async () => {
     const { ctx, workspaceId } = await realHarness()
     const request = { requestId: requestId('dup-add'), workspaceId, handle: 'duplicate',
-      description: 'Concurrent duplicate', presetId: 'team-member', projectRefs: [] }
+      description: 'Concurrent duplicate', presetId: 'team-member', projectRefs: [],
+      model: { provider: 'mock', model: 'mock' } }
     const [first, second] = await Promise.all([ctx.agentTeam.addMember(request), ctx.agentTeam.addMember(request)])
 
     expect(second.status.member.memberId).toBe(first.status.member.memberId)
@@ -151,9 +152,9 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     const { ctx, workspaceId } = await realHarness()
     const [left, right] = await Promise.all([
       ctx.agentTeam.addMember({ requestId: requestId('parallel-left'), workspaceId, handle: 'left',
-        description: 'Left member', presetId: 'team-member', projectRefs: [] }),
+        description: 'Left member', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }}),
       ctx.agentTeam.addMember({ requestId: requestId('parallel-right'), workspaceId, handle: 'right',
-        description: 'Right member', presetId: 'team-member', projectRefs: [] }),
+        description: 'Right member', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }}),
     ])
 
     expect(left.status.availability).toBe('active')
@@ -171,7 +172,7 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     const adapter = new GatedAdapter()
     const { ctx, workspaceId, teamFiber } = await realHarness(adapter)
     const builder = await ctx.agentTeam.addMember({ requestId: requestId('shutdown-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(builder.status.member.sessionId)!
 
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue current checkout work.' }], source: { kind: 'user' } }))
@@ -207,7 +208,7 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     const adapter = new GatedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
     const builder = await ctx.agentTeam.addMember({ requestId: requestId('cancel-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(builder.status.member.sessionId)!
 
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue current checkout work.' }], source: { kind: 'user' } }))
@@ -239,7 +240,7 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     const adapter = new GatedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
     const builder = await ctx.agentTeam.addMember({ requestId: requestId('waitlog-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [] })
+      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const memberId = builder.status.member.memberId
     const sessionId = builder.status.member.sessionId
     const agent = ctx.agents.get(sessionId)!

@@ -2112,6 +2112,9 @@ export class AgentTeamLedger {
       const projectRefs = this.normalizeUnique(request.projectRefs, 'initial Member Projects')
       for (const projectRef of projectRefs) this.requireActiveProject(request.workspaceId, projectRef)
       this.assertHandleAvailable(request.workspaceId, handle)
+      // Creation names a route. A Member without one wakes on whatever the Host default is at that moment, so the
+      // model it runs changes under it between wakes; ledgers written before this contract still read and replay.
+      if (request.member.model === undefined) throw new Error('creating a Member requires an explicit model selection')
       this.assertModelSelection(request.member.model)
       this.assertCapabilities(request.member.capabilities)
       const member = Object.freeze({
@@ -2145,10 +2148,11 @@ export class AgentTeamLedger {
       const description = request.description.trim()
       if (handle === '') throw new Error('member handle must not be empty')
       if (handle !== prior.handle) for (const workspaceId of this.workspacesOf(prior.memberId)) this.assertHandleAvailable(workspaceId, handle, prior.memberId)
+      // A Member always runs an explicit route: editing may replace the model, never clear it back to the default.
+      if (request.model === null) throw new Error('a Member model cannot be cleared; name the route it should run')
       this.assertModelSelection(request.model)
       this.assertCapabilities(request.capabilities)
-      const nextModel = request.model === undefined ? prior.model
-        : request.model === null ? undefined : Object.freeze({ ...request.model })
+      const nextModel = request.model === undefined ? prior.model : Object.freeze({ ...request.model })
       const nextCapabilities = request.capabilities === undefined ? prior.capabilities
         : request.capabilities === null ? undefined : request.capabilities
       // Both overlays come off `prior` before being re-added, or a cleared field

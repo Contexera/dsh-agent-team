@@ -40,9 +40,9 @@ async function seed(options?: { rulesVersion?: number }) {
   const add = async (name: string, options2: { owner?: boolean; projectRefs?: readonly AgentTeamProjectRef[] } = {}) => {
     const memberId = `member:${name}` as AgentTeamMemberId
     const member: AgentTeamAgentMember = { memberId, sessionId: SessionId(`session:${name}`), workspaceId: alpha, handle: name,
-      description: '', presetId: 'team-member', privateMemoryPath: `/tmp/${name}`, state: 'enabled' }
+      description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: `/tmp/${name}`, state: 'enabled' }
     await ledger.addMember({ requestId: requestId(`add-${name}`), actor: human, member, handle: name, description: '', presetId: 'team-member',
-      workspaceId: alpha, projectRefs: [...(options2.projectRefs ?? [projectRef])] })
+      workspaceId: alpha, projectRefs: [...(options2.projectRefs ?? [projectRef])], model: { provider: 'mock', model: 'mock' }})
     if (options2.owner === true) {
       await ledger.addProjectOwner({ requestId: requestId(`own-${name}`), actor: human, workspaceId: alpha, projectRef, memberId })
     }
@@ -280,7 +280,7 @@ describe('The handover prompt under rules version 3', () => {
     const project = await ctx.agentTeam.createProject({ requestId: harnessRequestId('handover-project'), workspaceId, name: 'Packaging', description: 'Release work' })
     const projectRef = project.project.projectRef
     const reviewer = await ctx.agentTeam.addMember({ requestId: harnessRequestId('handover-reviewer'), workspaceId,
-      handle: 'reviewer', description: 'Verifies releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'reviewer', description: 'Verifies releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const finished = await ctx.agentTeam.startThread({ kind: 'task', requestId: harnessRequestId('handover-task'), workspaceId, projectRef, body: 'Cut the release' })
     if (finished.kind !== 'committed' || finished.task === undefined) throw new Error('Task did not commit')
     const humanRead = await ctx.agentTeam.readThread({ requestId: harnessRequestId('handover-read'), workspaceId, taskRef: finished.task.taskRef })

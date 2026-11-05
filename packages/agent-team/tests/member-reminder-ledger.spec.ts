@@ -46,8 +46,8 @@ async function seed() {
   const add = async (name: string) => {
     const memberId = `member:${name}` as AgentTeamMemberId
     const member: AgentTeamAgentMember = { memberId, sessionId: SessionId(`session:${name}`), workspaceId: alpha, handle: name,
-      description: '', presetId: 'team-member', privateMemoryPath: `/tmp/${name}`, state: 'enabled' }
-    await ledger.addMember({ requestId: requestId(`add-${name}`), actor: human, member, handle: name, description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [] })
+      description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: `/tmp/${name}`, state: 'enabled' }
+    await ledger.addMember({ requestId: requestId(`add-${name}`), actor: human, member, handle: name, description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     return { memberId, actor: { kind: 'member', memberId, handle: name } as AgentTeamMemberActor }
   }
   return {

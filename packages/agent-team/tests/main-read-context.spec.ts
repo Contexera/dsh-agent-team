@@ -13,7 +13,7 @@ async function mainStream() {
     name: 'Install checks', description: 'Verify the signed installer' })
   const projectRef = project.project.projectRef
   const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: test.workspaceId,
-    handle: 'builder', description: 'Checks installation', presetId: 'team-member', projectRefs: [projectRef] })
+    handle: 'builder', description: 'Checks installation', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
   const agent = test.ctx.agents.get(member.status.member.sessionId)!
   await test.ctx.agentTeam.changeAttentionForAgent(agent, { requestId: requestId('follow'), workspaceId: test.workspaceId, projectRef, action: 'follow' })
   async function post(body: string) {

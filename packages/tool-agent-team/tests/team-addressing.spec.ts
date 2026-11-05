@@ -18,7 +18,7 @@ type Harness = Awaited<ReturnType<typeof realHarness>>
 type Member = { readonly agent: NonNullable<ReturnType<Harness['ctx']['agents']['get']>> }
 
 async function addMember(ctx: Harness['ctx'], workspaceId: Harness['workspaceId'], handle: string, projectRef: AgentTeamProjectRef): Promise<Member> {
-  const added = await ctx.agentTeam.addMember({ requestId: requestId(`add-${handle}`), workspaceId, handle, description: '', presetId: 'team-member', projectRefs: [projectRef] })
+  const added = await ctx.agentTeam.addMember({ requestId: requestId(`add-${handle}`), workspaceId, handle, description: '', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
   const agent = ctx.agents.get(added.status.member.sessionId)
   if (agent === undefined) throw new Error(`Member ${handle} did not get a live Agent`)
   return { agent }

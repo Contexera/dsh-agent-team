@@ -1,5 +1,5 @@
 import { afterEach, it, expect } from 'vitest'
-import { MAIN_STREAM_SHOTS, closeScenario, focusRing, maxHorizontalScroll, openTeamPage, scaffold, settleAnimations, settleLayout } from './__external-agent-team-support.ts'
+import { MAIN_STREAM_SHOTS, closeScenario, focusRing, maxHorizontalScroll, openTeamPage, scaffold, settleAnimations, settleLayout, chooseMemberModel } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -93,6 +93,7 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   const createAgent = page.getByRole('dialog', { name: '添加 Agent' })
   await createAgent.getByLabel('名称').fill('steward')
   await createAgent.getByLabel('说明').fill('负责交付')
+  await chooseMemberModel(page, createAgent)
   await createAgent.getByRole('button', { name: '创建 Agent' }).click()
   await page.getByText('steward', { exact: true }).waitFor({ timeout: 20_000 })
   await page.getByRole('button', { name: '# stream-web', exact: true }).hover()

@@ -31,7 +31,9 @@ Workspace 概览是当前页时，概览携带 `aria-current='page'`。与原先
 
 侧栏「项目」标签旁、以及这个区块的「负责人」标签旁，各有一枚问号，悬停时把说明显示在问号右侧。盖住旁边那一行是可以的。项目是一块长期协作范围，点名项目外的人会把他加入。谁会收到一条消息，取决于关注和点名。两枚问号都是自己的按钮，看说明不会折叠分区，也不会提交编辑器。
 
-Agent 编辑器（`编辑 Agent`）：名称/说明输入框 + 模型选择。模型选择复用公共 `Menu` 原语。触发钮呈 Input 形态：当前值 + 旋转 chevron。选项首行「跟随全局默认」，其后按 provider 分组标题 + 模型行，选中尾勾。目录经宿主级 `llm.models` 取得，不依赖任何活跃会话。提交走 `updateMember` Remote。缺省模型即清除覆盖，回到 Host 默认继承。改模型对活跃 Member 原地更新 live model selection，保持 Agent 与 Session 身份不变。后续请求使用新选择。纯展示编辑不重启。
+Agent 编辑器（`编辑 Agent`）：名称/说明输入框 + 模型选择。模型选择复用公共 `Menu` 原语。触发钮呈 Input 形态：当前值 + 旋转 chevron。选项按 provider 分组标题 + 模型行，选中尾勾，**没有「跟随全局默认」一项**：创建必须先选一条具体路由，未选之前触发钮显示「选择模型」、创建钮禁用。目录经宿主级 `llm.models` 取得，不依赖任何活跃会话。提交走 `updateMember` Remote。
+
+编辑只能替换模型，不能清空回 Host 默认；既有账本里没有模型的旧记录仍按当时默认运行。改模型对活跃 Member 原地更新 live model selection，保持 Agent 与 Session 身份不变。后续请求使用新选择。纯展示编辑不重启。
 
 编辑器还带这个 Member 自己的 reminder 区块，放在表单之外而不是表单里：每行显示 note、存储的 schedule、state 与 occurrence 事实，只有仍可能触发的 reminder 才有撤回按钮。区块经 `memberReminders` Remote 读取，撤回走 `cancelMemberReminder`，全程非乐观——在 Host 以 cancelled 状态作答之前，那一行一直保留撤回按钮。
 

@@ -59,9 +59,9 @@ async function commitMemberRecordDirectlyOnLedger(ledger: AgentTeamLedger, proje
     projectRefs: [projectRef], actor: agentTeamHumanActor(),
     member: {
       memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle, description: 'Reads work',
-      presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' as const,
+      presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/reader', state: 'enabled' as const,
     },
-  })
+   model: { provider: 'mock', model: 'mock' },})
   return { kind: 'member', memberId, handle }
 }
 
@@ -181,7 +181,7 @@ describe('scoped Team change notifications', () => {
     expect(await staysPendingAcrossMacrotask(projectWaiter)).toBe(true)
     expect(await staysPendingAcrossMacrotask(workspaceWaiter)).toBe(true)
 
-    await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'scout', description: 'Scouts work', presetId: 'team-member', projectRefs: [thread.projectRef] })
+    await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'scout', description: 'Scouts work', presetId: 'team-member', projectRefs: [thread.projectRef], model: { provider: 'mock', model: 'mock' }})
     // Member lifecycle is workspace-scoped: the workspace waiter wakes, the
     // Project content waiter stays parked until Project data changes.
     expect(await workspaceWaiter).toMatchObject({ version: expect.any(Number) })
@@ -371,9 +371,9 @@ describe('ledger change scope and affected member derivation', () => {
       projectRefs: [created.project.projectRef], actor: agentTeamHumanActor(),
       member: {
         memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle: 'follower',
-        description: 'Follows work', presetId: 'team-member', privateMemoryPath: '/tmp/follower', state: 'enabled' as const,
+        description: 'Follows work', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/follower', state: 'enabled' as const,
       },
-    })
+     model: { provider: 'mock', model: 'mock' },})
     await ledger.changeAttention({ requestId: requestId('iso-follow'), workspaceId: alpha, taskRef: started.value.task!.taskRef, action: 'follow', actor: { kind: 'member', memberId, handle: 'follower' } })
 
     const committed = started.value

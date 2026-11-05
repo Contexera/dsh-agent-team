@@ -18,7 +18,7 @@ describe('Agent Team private memory scaffold language (issue #43 #4)', () => {
     const added = await ctx.agentTeam.addMember({
       requestId: requestId('scaffold-add'), workspaceId, handle: 'builder',
       description: 'Builds the implementation', presetId: 'team-member', projectRefs: [],
-    })
+     model: { provider: 'mock', model: 'mock' },})
     const memoryPath = join(added.status.member.privateMemoryPath, 'memory.md')
     const scaffold = await readFile(memoryPath, 'utf8')
     // Structural labels, not English prose sentences: the writing rules live in

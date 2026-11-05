@@ -41,6 +41,18 @@ export { connectFreshWorkspaceZh } from './support.ts'
 export { getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot'
 export type { WebScaffold } from './scaffold.ts'
 
+/** Name a route in the create dialog: creation requires one and the picker lists routes only. */
+export async function chooseMemberModel(page: Page, dialog: Locator): Promise<void> {
+  await dialog.getByRole('button', { name: '模型' }).click()
+  const menu = page.locator('[role="menu"]').last()
+  await menu.waitFor()
+  const rows = menu.getByRole('menuitem')
+  await expect.poll(() => rows.count()).toBeGreaterThan(0)
+  expect(await rows.filter({ hasText: '跟随全局默认' }).count()).toBe(0)
+  await rows.first().click()
+  await expect.poll(() => page.locator('[role="menu"]').count()).toBe(0)
+}
+
 /**
  * Boot one scenario: stage the bundle, launch the scaffold, open a Chromium
  * page, connect a fresh Workspace and enter Team mode.

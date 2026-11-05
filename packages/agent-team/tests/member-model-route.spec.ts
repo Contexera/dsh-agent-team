@@ -33,7 +33,7 @@ describe('Agent Team model route rejection (issue #43 #6)', () => {
     })).rejects.toThrow(/provider 'no-such-provider' is not registered/)
   })
 
-  it('accepts a registered provider and leaves unpinned Members alone', async () => {
+  it('accepts a registered provider and refuses a Member created without a route', async () => {
     const { ctx, workspaceId } = await realHarness(new ScriptedAdapter())
     const pinned = await ctx.agentTeam.addMember({
       requestId: requestId('good-provider-add'), workspaceId, handle: 'builder',
@@ -41,11 +41,10 @@ describe('Agent Team model route rejection (issue #43 #6)', () => {
       model: { provider: 'mock', model: 'fine' },
     })
     expect(pinned.status.availability).toBe('active')
-    // No model at all: the Host default inheritance path, untouched.
-    const inherited = await ctx.agentTeam.addMember({
+    // No route at all is refused: such a Member would wake on whatever the Host default is at that moment.
+    await expect(ctx.agentTeam.addMember({
       requestId: requestId('no-model-add'), workspaceId, handle: 'painter',
       description: 'Paints the UI', presetId: 'team-member', projectRefs: [],
-    })
-    expect(inherited.status.availability).toBe('active')
+    })).rejects.toThrow(/requires an explicit model selection/)
   })
 })

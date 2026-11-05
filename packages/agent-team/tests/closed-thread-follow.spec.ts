@@ -35,9 +35,9 @@ async function seed(options?: { rulesVersion?: number }) {
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'delivery', description: '', memberIds: [] })).value.project.projectRef
   const memberId = 'member:reviewer' as AgentTeamMemberId
   const member: AgentTeamAgentMember = { memberId, sessionId: SessionId('session:reviewer'), workspaceId: alpha, handle: 'reviewer',
-    description: '', presetId: 'team-member', privateMemoryPath: '/tmp/reviewer', state: 'enabled' }
+    description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/reviewer', state: 'enabled' }
   await ledger.addMember({ requestId: requestId('add-reviewer'), actor: human, member, handle: 'reviewer', description: '', presetId: 'team-member',
-    workspaceId: alpha, projectRefs: [projectRef] })
+    workspaceId: alpha, projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
   return { pool, table, projectRef, reviewer: memberId, get ledger() { return ledger } }
 }
 

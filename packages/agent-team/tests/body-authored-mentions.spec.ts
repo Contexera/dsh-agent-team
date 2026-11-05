@@ -170,9 +170,9 @@ describe('body-authored mentions', () => {
     // down to Workspace, it did not disappear, so this Member is refused
     // everywhere in this Workspace.
     const foreignMember: AgentTeamAgentMember = { memberId: `member:foreign-${crypto.randomUUID()}` as never, sessionId: SessionId('session:foreign'),
-      workspaceId: beta, handle: 'foreign', description: 'Test Agent', presetId: 'team-member', privateMemoryPath: '/tmp/foreign', state: 'enabled' }
+      workspaceId: beta, handle: 'foreign', description: 'Test Agent', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/foreign', state: 'enabled' }
     await ledger.addMember({ requestId: requestId('add-foreign'), actor: agentTeamHumanActor(), member: foreignMember,
-      handle: foreignMember.handle, description: foreignMember.description, presetId: foreignMember.presetId, workspaceId: beta, projectRefs: [] })
+      handle: foreignMember.handle, description: foreignMember.description, presetId: foreignMember.presetId, workspaceId: beta, projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const foreign = { member: foreignMember, actor: { kind: 'member' as const, memberId: foreignMember.memberId, handle: 'foreign' } }
     await expect(ledger.reply({ requestId: requestId('foreign-reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
       body: 'Still here', baseRevision: sent.thread.revision, actor: foreign.actor })).rejects.toThrow(/not authorized|another Workspace/)

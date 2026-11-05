@@ -43,7 +43,7 @@ describe('subscription request retries', () => {
       name: 'retry', description: '', memberIds: [] })
     const projectRef = project.project.projectRef
     const added = await test.ctx.agentTeam.addMember({ requestId: requestId('retry-member'), workspaceId: test.workspaceId,
-      handle: 'builder', description: '', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: '', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const memberId = added.status.member.memberId
     const agent = test.ctx.agents.get(added.status.member.sessionId)!
     await test.ctx.agentTeam.addProjectOwner({ requestId: requestId('retry-owner'), workspaceId: test.workspaceId, projectRef, memberId })

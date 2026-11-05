@@ -78,7 +78,7 @@ export interface AgentTeamAddMemberRequest {
   /** Display purpose text; may be empty and filled in later through an edit. */
   readonly description: string
   readonly presetId: string
-  /** Absent inherits the Host default model selection. */
+  /** Required in practice: creation always names a route. The field stays optional because ledgers written before per-Member model selection omit it, and those records still replay. */
   readonly model?: AgentTeamModelSelection
   /** Durable capability intent; see AgentTeamMemberCapabilities. */
   readonly capabilities?: AgentTeamMemberCapabilities
@@ -131,14 +131,14 @@ export interface AgentTeamArchiveProjectResult {
   readonly releasedClaims: readonly AgentTeamClaim[]
 }
 
-/** Human intent to edit one Member's mutable facts, as a partial update: an absent optional field keeps the current value and an explicit `null` clears the override (Host default model / full standard capability surface). */
+/** Human intent to edit one Member's mutable facts, as a partial update: an absent optional field keeps the current value, and an explicit `null` clears the capability override. The model cannot be cleared: a Member always runs an explicit route. */
 export interface AgentTeamUpdateMemberRequest {
   readonly requestId: AgentTeamRequestId
   readonly memberId: AgentTeamMemberId
   readonly handle: string
   /** Display purpose text; may be empty, matching creation. */
   readonly description: string
-  /** Absent keeps the current selection; `null` clears it back to the Host default. */
+  /** Absent keeps the current selection; `null` is refused — replace the route instead of clearing it. */
   readonly model?: AgentTeamModelSelection | null
   /** Absent keeps the current override; `null` clears it back to the full surface. */
   readonly capabilities?: AgentTeamMemberCapabilities | null

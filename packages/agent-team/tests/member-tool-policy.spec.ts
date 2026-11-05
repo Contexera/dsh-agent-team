@@ -163,16 +163,16 @@ function useAdapter(adapter: LlmAdapter): void {
 interface MemberFacts {
   readonly memberId: AgentTeamMemberId
   readonly sessionId: SessionId
-  readonly privateMemoryPath: string
+  readonly model: { provider: 'mock', model: 'mock' }, privateMemoryPath: string
 }
 
 async function addMember(ctx: Context, workspaceId: WorkspaceId, handle: string, capabilities?: AgentTeamMemberCapabilities): Promise<MemberFacts> {
   const added = await ctx.agentTeam.addMember({
     requestId: requestId(`add-${handle}`), workspaceId, handle, description: 'Policy member',
     presetId: 'team-member', projectRefs: [], ...(capabilities === undefined ? {} : { capabilities }),
-  })
+   model: { provider: 'mock', model: 'mock' },})
   expect(added.status.availability).toBe('active')
-  return { memberId: added.status.member.memberId, sessionId: added.status.member.sessionId, privateMemoryPath: added.status.member.privateMemoryPath }
+  return { memberId: added.status.member.memberId, sessionId: added.status.member.sessionId, model: { provider: 'mock', model: 'mock' }, privateMemoryPath: added.status.member.privateMemoryPath }
 }
 
 function liveAgent(ctx: Context, facts: MemberFacts): Agent {
@@ -682,7 +682,7 @@ describe('Agent Team member tool policy', () => {
     }
   })
 
-  it('pins a model edit onto the live turn route and clears it back to the Host default', async () => {
+  it('pins a model edit onto the live turn route and replaces it without clearing', async () => {
     const adapter = new ScriptedAdapter()
     useAdapter(adapter)
     const { ctx, workspaceId } = shared
@@ -716,14 +716,19 @@ describe('Agent Team member tool policy', () => {
     expect(firstRequest?.model).toBe('pinned')
     expect(firstRequest?.sessionId).toBe(member.sessionId)
 
-    // Dropping the pin clears the stored override and returns the next turn
-    // to the Host default, still in the same Session.
-    const cleared = await ctx.agentTeam.updateMember({
+    // A Member always runs an explicit route: clearing is refused, and the stored pin stays in force.
+    await expect(ctx.agentTeam.updateMember({
       requestId: requestId('t13-unpin'), memberId: member.memberId, handle: 't13-model',
       description: 'Policy member', model: null,
+    })).rejects.toThrow(/cannot be cleared/)
+
+    // Replacing the route is the same live effect: the next turn in the same Session runs the new model.
+    const replaced = await ctx.agentTeam.updateMember({
+      requestId: requestId('t13-replace'), memberId: member.memberId, handle: 't13-model',
+      description: 'Policy member', model: { provider: 'mock', model: 'replaced' },
     })
-    expect(cleared.effect).toBe('applied')
-    expect(cleared.status.member.model).toBeUndefined()
+    expect(replaced.effect).toBe('applied')
+    expect(replaced.status.member.model).toEqual({ provider: 'mock', model: 'replaced' })
 
     adapter.enqueue([
       { type: 'block-start', index: 0, blockType: 'text' },
@@ -736,7 +741,7 @@ describe('Agent Team member tool policy', () => {
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'again' }], source: { kind: 'user' } }))
     await secondIdle
     expect(adapter.requests.at(-1)?.provider).toBe('mock')
-    expect(adapter.requests.at(-1)?.model).toBe('mock')
+    expect(adapter.requests.at(-1)?.model).toBe('replaced')
     expect(adapter.requests.at(-1)?.sessionId).toBe(member.sessionId)
   })
 

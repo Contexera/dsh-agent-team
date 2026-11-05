@@ -81,8 +81,8 @@ describe('replaying a rules version 1 ledger', () => {
   it('adopts the current rules version after the old records and keeps what each Member was following and saw', async () => {
     const { pool, v1, adopt } = await openBoth()
     const bystander: AgentTeamAgentMember = { memberId: 'member:bystander' as AgentTeamMemberId, sessionId: SessionId('session:bystander'), workspaceId: alpha,
-      handle: 'bystander', description: 'Test Agent', presetId: 'team-member', privateMemoryPath: '/tmp/bystander', state: 'enabled' }
-    await v1.addMember({ requestId: requestId('bystander'), actor: human, member: bystander, handle: 'bystander', description: 'Test Agent', presetId: 'team-member', workspaceId: alpha, projectRefs: [] })
+      handle: 'bystander', description: 'Test Agent', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/bystander', state: 'enabled' }
+    await v1.addMember({ requestId: requestId('bystander'), actor: human, member: bystander, handle: 'bystander', description: 'Test Agent', presetId: 'team-member', workspaceId: alpha, projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const before = Object.fromEntries(handles.map(handle => [handle, standing(v1, handle, threadRefs)]))
 
     const v2 = await adopt()

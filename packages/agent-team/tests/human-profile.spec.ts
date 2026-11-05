@@ -80,10 +80,10 @@ describe('ledger runtime human handle', () => {
       requestId: requestId('agent-collides'), workspaceId: alpha, handle: 'ada', description: '', presetId: 'preset',
       projectRefs: [], member: {
         memberId: memberId('m1'), sessionId: 'session:m1' as never, workspaceId: alpha,
-        handle: 'ada', description: '', presetId: 'preset', privateMemoryPath: '/tmp/m1', state: 'enabled',
+        handle: 'ada', description: '', presetId: 'preset', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/m1', state: 'enabled',
       },
       actor: agentTeamHumanActor(),
-    })).rejects.toThrow('collides with the human display name')
+     model: { provider: 'mock', model: 'mock' },})).rejects.toThrow('collides with the human display name')
   })
 })
 

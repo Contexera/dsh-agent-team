@@ -18,8 +18,8 @@ describe('Agent Team wake-slot swap delivery windows (ticket 05)', () => {
       const adapter = new ScriptedAdapter()
       const { ctx, workspaceId, pressureState } = await realHarness(adapter)
       const project = await ctx.agentTeam.createProject({ requestId: requestId('dm-wake-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const sender = await ctx.agentTeam.addMember({ requestId: requestId('dm-wake-sender'), workspaceId, handle: 'sender', description: 'Sends', presetId: 'team-member', projectRefs: [project.project.projectRef] })
-      const receiver = await ctx.agentTeam.addMember({ requestId: requestId('dm-wake-receiver'), workspaceId, handle: 'receiver', description: 'Receives', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+      const sender = await ctx.agentTeam.addMember({ requestId: requestId('dm-wake-sender'), workspaceId, handle: 'sender', description: 'Sends', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
+      const receiver = await ctx.agentTeam.addMember({ requestId: requestId('dm-wake-receiver'), workspaceId, handle: 'receiver', description: 'Receives', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
       const senderAgent = ctx.agents.get(sender.status.member.sessionId)!
       const receiverAgent = ctx.agents.get(receiver.status.member.sessionId)!
       adapter.enqueue(textResponse('First look done.'))

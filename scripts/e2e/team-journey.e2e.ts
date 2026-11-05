@@ -1,7 +1,7 @@
 import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
 import type { Browser } from 'playwright'
-import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, acknowledgeReloadConnectionLoss, actionBandGeometry, connectFreshWorkspaceZh, entryClusterEdges, entryUnreadCapsule, focusRing, inkContrast, installLocalBundle, launchWebScaffold, maxHorizontalScroll, openSidebar, readCountCapsule, resolveAliasColor, settleAnimations, settleLayout, taskEntryClusterLefts, taskEntryLineSelector, taskEntryRow, visibleSidebarWidth, watchConsole } from './__external-agent-team-support.ts'
+import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, acknowledgeReloadConnectionLoss, actionBandGeometry, connectFreshWorkspaceZh, entryClusterEdges, entryUnreadCapsule, focusRing, inkContrast, installLocalBundle, launchWebScaffold, maxHorizontalScroll, openSidebar, readCountCapsule, resolveAliasColor, settleAnimations, settleLayout, taskEntryClusterLefts, taskEntryLineSelector, taskEntryRow, visibleSidebarWidth, watchConsole, chooseMemberModel } from './__external-agent-team-support.ts'
 import type { Locator, WebScaffold } from './__external-agent-team-support.ts'
 
 let scaffold: WebScaffold | undefined
@@ -177,11 +177,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       await expect.poll(() => dialog.getByLabel('名称').inputValue()).toBe('builder')
       await page.screenshot({ path: join(UI03_SHOTS, 'agent-create-modal.png'), fullPage: true })
       await dialog.getByRole('button', { name: '模型' }).click()
-      await page.getByRole('menuitem', { name: '跟随全局默认' }).waitFor()
+      const createModelMenu = page.locator('[role="menu"]').last()
+      await createModelMenu.waitFor()
+      const createModelRows = createModelMenu.getByRole('menuitem')
+      await expect.poll(() => createModelRows.count()).toBeGreaterThan(0)
+      expect(await createModelRows.filter({ hasText: '跟随全局默认' }).count()).toBe(0)
       await page.screenshot({ path: join(UI03_SHOTS, 'agent-create-model-menu.png'), fullPage: true })
-      // Select the default row: Escape would bubble to the Modal and close the
-      // dialog.
-      await page.getByRole('menuitem', { name: '跟随全局默认' }).click()
+      // Escape would bubble to the Modal and close the dialog, so pick a row.
+      await createModelRows.first().click()
       // The Input atoms sit evenly inside the dialog card (no lopsided right
       // gutter).
       const inputBox = await dialog.getByLabel('名称').boundingBox()
@@ -192,6 +195,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       const rightGap = cardBox!.x + cardBox!.width - (inputBox!.x + inputBox!.width)
       expect(Math.abs(leftGap - rightGap)).toBeLessThanOrEqual(2)
     }
+    if (name !== 'builder') await chooseMemberModel(page, dialog)
     await dialog.getByRole('button', { name: '创建 Agent' }).click()
     await page.getByText(name, { exact: true }).waitFor({ timeout: 20_000 })
   }
@@ -426,18 +430,22 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // round-trip.
   const modelTrigger = agentEditor.getByRole('button', { name: '模型', exact: true })
   await modelTrigger.waitFor()
-  await expect.poll(() => modelTrigger.textContent()).toBe('跟随全局默认')
+  await expect.poll(() => modelTrigger.textContent()).not.toBe('选择模型')
   await modelTrigger.click()
-  const modelMenu = page.locator('[role="menu"]').filter({ hasText: '跟随全局默认' })
+  const modelMenu = page.locator('[role="menu"]').last()
   await modelMenu.waitFor()
-  expect(await modelMenu.getByRole('menuitem').count()).toBeGreaterThanOrEqual(2)
+  const modelRows = modelMenu.getByRole('menuitem')
+  expect(await modelRows.count()).toBeGreaterThanOrEqual(2)
+  expect(await modelRows.filter({ hasText: '跟随全局默认' }).count()).toBe(0)
   // The shared Menu's row radius, measured live; the mention popover below must
   // match it.
-  const shippedRowRadius = await modelMenu.getByRole('menuitem').first()
+  const shippedRowRadius = await modelRows.first()
     .evaluate(row => getComputedStyle(row).borderTopLeftRadius)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-model-menu.png'), fullPage: true })
-  await modelMenu.getByRole('menuitem', { name: '跟随全局默认' }).click()
+  const replacementLabel = (await modelRows.nth(1).textContent())?.trim() ?? ''
+  await modelRows.nth(1).click()
   await expect.poll(() => page.locator('[role="menu"]').count()).toBe(0)
+  await expect.poll(() => modelTrigger.textContent()).toBe(replacementLabel)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-edit-modal.png'), fullPage: true })
   // The Member's own reminders read under the form through the Human Remote. This
   // Agent has set none, so the block states that rather than rendering an empty list.

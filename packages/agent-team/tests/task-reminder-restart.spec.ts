@@ -84,8 +84,8 @@ async function taskAwaitingHumanReview(ctx: Context, projectRef: AgentTeamProjec
     requestId: requestId(`executor-${memberId}`), actor: agentTeamHumanActor(), workspaceId: alpha, handle,
     description: 'Executes the work', presetId: 'team-member', projectRefs: [projectRef],
     member: { memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle,
-      description: 'Executes the work', presetId: 'team-member', privateMemoryPath: `/tmp/${memberId}`, state: 'enabled' },
-  })
+      description: 'Executes the work', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: `/tmp/${memberId}`, state: 'enabled' },
+   model: { provider: 'mock', model: 'mock' },})
   const claimRead = await ledger.readThread({ requestId: requestId(`claim-read-${label}`), actor: executor, workspaceId: alpha, taskRef })
   const claimed = await ledger.changeClaim({ requestId: requestId(`claim-${label}`), actor: executor, workspaceId: alpha, taskRef,
     action: 'claim', direction: 'implement the change', baseRevision: claimRead.value.thread.revision })

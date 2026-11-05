@@ -12,7 +12,7 @@ async function discussion(kind: 'discussion' | 'task' = 'discussion') {
   const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: test.workspaceId,
     name: 'Install checks', description: 'Reproduce an installation failure' })
   const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: test.workspaceId,
-    handle: 'builder', description: 'Checks installation', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+    handle: 'builder', description: 'Checks installation', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
   const agent = test.ctx.agents.get(member.status.member.sessionId)!
   const started = await test.ctx.agentTeam.startThread({ kind, requestId: requestId('thread'),
     workspaceId: test.workspaceId, projectRef: project.project.projectRef,
@@ -120,7 +120,7 @@ describe('Thread read uses the current Session context', () => {
     const { ctx, workspaceId, adapter, agent, threadRef, taskRef, anchor, read } = await discussion('task')
     const projectRef = anchor.projectRef
     const peer = await ctx.agentTeam.addMember({ requestId: requestId('peer'), workspaceId,
-      handle: 'packager', description: 'Builds the signed package', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'packager', description: 'Builds the signed package', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const peerAgent = ctx.agents.get(peer.status.member.sessionId)!
     await ctx.agentTeam.changeAttentionForAgent(agent, { requestId: requestId('pause-follow'), workspaceId, threadRef, action: 'unfollow' })
     const peerRead = await ctx.agentTeam.readThreadForAgent(peerAgent, { requestId: requestId('peer-read'), workspaceId, threadRef })

@@ -355,6 +355,7 @@ async function memberActivationBatchSample(sample: number, commits: { team: stri
 
 async function addMember(ctx: Context, handle: string, projectRef?: AgentTeamProjectRef): Promise<{ memberId: AgentTeamMemberId; actor: AgentTeamMemberActor; agent: Agent }> {
   const result = await ctx.agentTeam.addMember({ requestId: requestId(`baseline:add:${handle}`), workspaceId, handle,
+    model: { provider: 'mock', model: 'mock' },
     description: 'Performance baseline member', presetId: 'team-member', projectRefs: projectRef === undefined ? [] : [projectRef] })
   const agent = ctx.agents.get(result.status.member.sessionId)
   if (agent === undefined) throw new Error(`Member ${handle} did not produce a live Agent`)

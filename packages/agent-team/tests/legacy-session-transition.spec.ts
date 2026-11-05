@@ -62,6 +62,7 @@ describe('AgentTeam legacy session-transition records', () => {
     // The recorded envelope moves exactly the binding; identity and memory stay.
     expect(replayed.getMember(member.memberId)).toMatchObject({
       memberId: member.memberId, handle: member.handle, state: 'enabled',
+      model: { provider: 'mock', model: 'mock' },
       privateMemoryPath: member.privateMemoryPath, sessionId: newSessionId,
     })
     expect(replayed.previousSessionForMember(member.memberId)).toBe(member.sessionId)

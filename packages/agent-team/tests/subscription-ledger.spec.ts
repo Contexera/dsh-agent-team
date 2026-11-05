@@ -65,8 +65,8 @@ interface Agent { readonly memberId: AgentTeamMemberId; readonly actor: AgentTea
 async function addAgent(ledger: AgentTeamLedger, handle: string, projectRefs: AgentTeamProjectRef[] = []): Promise<Agent> {
   const memberId = `member:${handle}` as AgentTeamMemberId
   const member: AgentTeamAgentMember = { memberId, sessionId: SessionId(`session:${handle}`), workspaceId: alpha, handle, description: '',
-    presetId: 'team-member', privateMemoryPath: `/tmp/${handle}`, state: 'enabled' }
-  await ledger.addMember({ requestId: requestId(`add-${handle}`), actor: human, member, handle, description: '', presetId: 'team-member', workspaceId: alpha, projectRefs })
+    presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: `/tmp/${handle}`, state: 'enabled' }
+  await ledger.addMember({ requestId: requestId(`add-${handle}`), actor: human, member, handle, description: '', presetId: 'team-member', workspaceId: alpha, projectRefs, model: { provider: 'mock', model: 'mock' }})
   return { memberId, actor: { kind: 'member', memberId, handle } }
 }
 

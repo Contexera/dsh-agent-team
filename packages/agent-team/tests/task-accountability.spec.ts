@@ -33,8 +33,8 @@ async function seed() {
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'delivery', description: '', memberIds: [] })).value.project.projectRef
   const add = async (name: string) => {
     const memberId = `member:${name}` as AgentTeamMemberId
-    const member = { memberId, sessionId: SessionId(`session:${name}`), workspaceId: alpha, handle: name, description: '', presetId: 'team-member', privateMemoryPath: `/tmp/${name}`, state: 'enabled' as const }
-    await ledger.addMember({ requestId: requestId(`add-${name}`), actor: human, member, handle: name, description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [projectRef] })
+    const member = { memberId, sessionId: SessionId(`session:${name}`), workspaceId: alpha, handle: name, description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: `/tmp/${name}`, state: 'enabled' as const }
+    await ledger.addMember({ requestId: requestId(`add-${name}`), actor: human, member, handle: name, description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     await ledger.addProjectOwner({ requestId: requestId(`own-${name}`), actor: human, workspaceId: alpha, projectRef, memberId })
     return { memberId, actor: { kind: 'member', memberId, handle: name } as AgentTeamMemberActor }
   }
@@ -148,8 +148,8 @@ describe('Task accountability in final rules version 2', () => {
     // A transfer target must be a current Project owner or the Human.
     await team.ledger.addMember({ requestId: requestId('add-outsider'), actor: human, workspaceId: alpha,
       member: { memberId: 'member:outsider' as AgentTeamMemberId, sessionId: SessionId('session:outsider'), workspaceId: alpha,
-        handle: 'outsider', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/outsider', state: 'enabled' },
-      handle: 'outsider', description: '', presetId: 'team-member', projectRefs: [team.projectRef] })
+        handle: 'outsider', description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/outsider', state: 'enabled' },
+      handle: 'outsider', description: '', presetId: 'team-member', projectRefs: [team.projectRef], model: { provider: 'mock', model: 'mock' }})
     const humanRead = await readTask(team, closed.value.kind === 'committed' ? closed.value.task : started.task, human)
     await expect(team.ledger.transferTask({ requestId: requestId('bad-target'), actor: human, workspaceId: alpha,
       taskRef: started.task.taskRef, target: 'member:outsider' as AgentTeamMemberId, baseRevision: humanRead.thread.revision })).rejects.toThrow(/accountable_target_invalid/)

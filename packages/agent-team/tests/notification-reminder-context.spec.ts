@@ -17,7 +17,7 @@ describe('bounded notices retain a route to live Task reminders', () => {
       name: 'Packaging', description: 'Release checks' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks packages', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks packages', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Check pending work.' }], source: { kind: 'user' } }))
     await adapter.started.promise

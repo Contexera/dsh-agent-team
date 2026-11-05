@@ -111,7 +111,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
   事实则完整保留在 ledger 中，供重放与未来恢复。这条边界就是 archival 与 remove 的分界。从 archived 状态 Remove 仍可作为数据清理路径。本轮刻意不提供 restore 入口，与 dsh 的 archived session 对齐。Project 归档之前写入的 ledger 省略 `project.state`。记录 schema 在 load 时把 `project.state` 归一化为 `active`。
 
 ## Member capabilities 与 skills
-- Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑语义与 `model` 一致，都是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。
+- Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。`model` 是例外，不可清除，见下面的模型契约。
 - Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留九个 Team tools 与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查和限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
 
   Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么返回 `deferred:no-live-handle`；两种顺序都让存储的意图在下次 activation 时仍然成立。
@@ -119,7 +119,10 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
   等待按类别记日志，带 Member、Session 与时长：等自己的回合是 `stage 'wait-turn'`，等外部执行（例如 Agent 释放自己的 Session 写路径）是 `stage 'wait-external'`。activation 期间的 restriction 失败只表现为这个 Member 的 activation failure。
 - live 应用失败不会放宽面：编辑保留其 ledger commit，旧 restriction 继续生效（新装失败时恢复原状），Remote 调用照常暴露失败。同 requestId 重试会重新应用已存储配置且不产生第二次业务提交。Host 比较的是存储意图与运行时实际已应用的效果，绝不与该次请求自身的历史比较。
 - 配置编辑把「效果」与「提交」分开回报：`updateMember` 返回 `effect`，取值 `applied`、`already-applied`、`deferred:no-live-handle` 或 `deferred:generation-changed`（先落账、下次激活生效）。失败不进取值——保持响亮拒绝，同时留一条可路由的 `capability-apply` diagnostic。`detail` 带 requestId、operationId、阶段与原因，Session 结构化放在 `sessionId`，日志用同一组关联 id。
+- Member 始终跑一条显式路由。创建必须给出一条，编辑只能替换、不能清除回 Host 默认；写入者只有两个：Human 的编辑（本节）与该 Member 自己的 Session（下条）。在此契约之前写入的账本记录没有 `model`，仍可读取，并按当时 Host 的默认选择唤醒。
 - 模型编辑的落账与回报和其他编辑一样，但新路由是否生效由上游决定：切换后新窗口在压缩之后仍装不下当前 Session 时会被拒绝并保留原路由，pending 选择就等到换回兼容模型为止，而记录在案意图两种情况下都在。
+- composer 是另一个入口，且不靠选择事件落账。真正证明切换越过了 Host 的压缩检查、进入一次真实请求的是 Member Session 的 `request/header`，所以 Host 以 `header.config` 的路由写一条 Human 的 `team/member-updated`。只写路由：推理档位是 Session 日志里的事实，activation 对同一条路由重新读取。
+- 有两种请求什么都不写。一种是请求的路由与 Member 当前正在跑的路由一致，包括 Team 自己在 activation 时写回的那条，于是写回不会经账本自循环。另一种是被 Host 拒绝的切换：它根本不会记下 header，因此也从不写入。
 - 名册每行恒带 `capabilityState`（`applied` | `pending`），由运行时实际已应用的效果派生；没有活面的状态字面报 `pending`。该字段与 `availability`/`presence` 正交：后两者回答 Member 会不会跑，它回答存储配置此刻生效没有。
 - Skills 是 Member 私有的。preset 不带共享 skill-filesystem row。Host 在每个 Member 的 agent exact scope layer 上注册一个 filesystem provider。它是 traceable-service 接缝，与 tool restriction 同构。这个 provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<memberId>/skills/`。
 

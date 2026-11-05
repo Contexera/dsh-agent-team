@@ -25,7 +25,7 @@ describe('Inbox notices present direct signals before ordinary work', () => {
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
 
     adapter.enqueue(textResponse('Noted the first direct Message.'))
@@ -59,7 +59,7 @@ describe('Inbox notices present direct signals before ordinary work', () => {
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
 
     // One Thread direct is delivered first, then ordinary updates accumulate
@@ -116,7 +116,7 @@ describe('Inbox notices present direct signals before ordinary work', () => {
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Work on the package.' }], source: { kind: 'user' } }))
     await adapter.started.promise
@@ -143,7 +143,7 @@ describe('Inbox notices present direct signals before ordinary work', () => {
     const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId,
       name: 'Packaging', description: 'Release verification' })
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Work on the package.' }], source: { kind: 'user' } }))
     await adapter.started.promise
@@ -170,7 +170,7 @@ describe('Inbox notices present direct signals before ordinary work', () => {
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Work on the package.' }], source: { kind: 'user' } }))
     await adapter.started.promise
@@ -208,7 +208,7 @@ describe('subscription lifecycle notices', () => {
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const memberId = added.status.member.memberId
     const agent = ctx.agents.get(added.status.member.sessionId)!
     const ledger = ctx.agentTeam['ledger']!
@@ -244,7 +244,7 @@ describe('ordinary unread digests', () => {
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const memberId = added.status.member.memberId
     const agent = ctx.agents.get(added.status.member.sessionId)!
     const ledger = ctx.agentTeam['ledger']!
@@ -274,7 +274,7 @@ describe('ordinary unread digests', () => {
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const memberId = added.status.member.memberId
     const agent = ctx.agents.get(added.status.member.sessionId)!
     const ledger = ctx.agentTeam['ledger']!
@@ -309,11 +309,11 @@ describe('ordinary unread digests', () => {
       name: 'Packaging', description: 'Release verification' })
     const projectRef = project.project.projectRef
     const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
-      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const memberId = added.status.member.memberId
     const agent = ctx.agents.get(added.status.member.sessionId)!
     const worker = await ctx.agentTeam.addMember({ requestId: requestId('worker'), workspaceId,
-      handle: 'worker', description: 'Claims work', presetId: 'team-member', projectRefs: [projectRef] })
+      handle: 'worker', description: 'Claims work', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const ledger = ctx.agentTeam['ledger']!
     const actor = { kind: 'member', memberId, handle: 'builder' } as const
     const started = await ledger.startThread({ requestId: requestId('task'), actor: agentTeamHumanActor(), workspaceId,

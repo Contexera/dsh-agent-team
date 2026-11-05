@@ -43,10 +43,10 @@ async function addLedgerMember(ledger: AgentTeamLedger, workspaceId: TeamWorkspa
   const memberId = `member:${crypto.randomUUID()}` as AgentTeamAgentMember['memberId']
   const member: AgentTeamAgentMember = {
     memberId, sessionId: `session:${memberId}` as AgentTeamAgentMember['sessionId'], workspaceId, handle,
-    description: 'Test Agent', presetId: 'team-member', privateMemoryPath: `/tmp/${memberId}`, state: 'enabled',
+    description: 'Test Agent', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: `/tmp/${memberId}`, state: 'enabled',
   }
   const added = (await ledger.addMember({ requestId: `add:${memberId}` as AgentTeamRequestId, actor: agentTeamHumanActor(), member,
-    handle, description: member.description, presetId: member.presetId, workspaceId, projectRefs: [] })).value
+    handle, description: member.description, presetId: member.presetId, workspaceId, projectRefs: [], model: { provider: 'mock', model: 'mock' }})).value
   return { actor: { kind: 'member', memberId: added.member.memberId, handle } }
 }
 

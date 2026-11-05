@@ -112,7 +112,7 @@ describe('Team Member private memory composition', () => {
     const agent = surfaceAgent(ctx)
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: 'tester' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: 'tester' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => [],
@@ -154,7 +154,7 @@ describe('Team Member private memory composition', () => {
     let owned: { projectRef: string; name: string; workspaceId: string }[] = []
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: 'tester' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: 'tester' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => owned,
@@ -188,7 +188,7 @@ describe('Team Member private memory composition', () => {
     const workspaces = [{ workspaceId: 'workspace:default', path: root, default: true }]
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
         : undefined,
       workspacesForAgent: () => workspaces,
       ownedProjectsForAgent: () => [],
@@ -225,7 +225,7 @@ describe('Team Member private memory composition', () => {
     const agent = surfaceAgent(ctx)
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: 'tester' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: 'tester' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => [],
@@ -269,7 +269,7 @@ describe('Team Member private memory composition', () => {
     const agent = surfaceAgent(ctx)
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => [],
@@ -307,7 +307,7 @@ describe('Team Member private memory composition', () => {
     let owned: { projectRef: string; name: string; workspaceId: string }[] = []
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: 'tester' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: 'tester' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => owned,
@@ -341,7 +341,7 @@ describe('Team Member private memory composition', () => {
     let description = 'tester'
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => [],
@@ -367,7 +367,7 @@ describe('Team Member private memory composition', () => {
     ]
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => owned,
@@ -394,7 +394,7 @@ describe('Team Member private memory composition', () => {
     const members = new Set<Agent>([agent])
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => members.has(subject)
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => [],
@@ -429,7 +429,7 @@ describe('Team Member private memory composition', () => {
     const agent = surfaceAgent(ctx)
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => [],
@@ -456,7 +456,7 @@ describe('Team Member private memory composition', () => {
     const agent = surfaceAgent(ctx)
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => [],
@@ -494,7 +494,7 @@ describe('Team Member private memory composition', () => {
     const agent = agentWithSession(ctx, session)
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => [],
@@ -527,7 +527,7 @@ describe('Team Member private memory composition', () => {
     const ctx = new Context()
     const agent = surfaceAgent(ctx)
     ctx.provide('agentTeam', {
-      memberForAgent: () => ({ memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }),
+      memberForAgent: () => ({ memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }),
       workspacesForAgent: () => [],
       ownedProjectsForAgent: () => [],
     } as never)
@@ -555,7 +555,7 @@ describe('Team Member private memory composition', () => {
     const ctx = new Context()
     const agent = surfaceAgent(ctx)
     ctx.provide('agentTeam', {
-      memberForAgent: () => ({ memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }),
+      memberForAgent: () => ({ memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }),
       workspacesForAgent: () => [],
       ownedProjectsForAgent: () => [],
     } as never)
@@ -587,7 +587,7 @@ describe('Team Member private memory composition', () => {
     let owned: { projectRef: string; name: string; workspaceId: string }[] | undefined
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
-        ? { memberId: 'member:a', privateMemoryPath: root, handle: 'A', description: '' }
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
         : undefined,
       workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
       ownedProjectsForAgent: () => owned,

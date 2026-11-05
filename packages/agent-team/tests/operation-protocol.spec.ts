@@ -108,6 +108,7 @@ const fixtureMember: AgentTeamAgentMember = {
   handle: memberHandle,
   description: 'Protocol fixture Agent',
   presetId: 'team-member',
+  model: { provider: 'mock', model: 'mock' },
   privateMemoryPath: '/tmp/protocol-member',
   state: 'enabled',
 }
@@ -898,7 +899,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
           presetId: memberAdded.data.member.presetId,
           projectRefs: memberAdded.data.projectRefs,
           member: memberAdded.data.member,
-        })
+         model: { provider: 'mock', model: 'mock' },})
         expect(out.value.member.memberId, 'the add mapper answers with the stored Member').toBe(memberId)
         return out
       },
@@ -911,7 +912,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
         presetId: memberAdded.data.member.presetId,
         projectRefs: memberAdded.data.projectRefs,
         member: memberAdded.data.member,
-      }),
+       model: { provider: 'mock', model: 'mock' },}),
     },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
@@ -1751,7 +1752,7 @@ async function seedLedger(): Promise<void> {
     presetId: fixtureMember.presetId,
     projectRefs: [],
     member: fixtureMember,
-  })
+   model: { provider: 'mock', model: 'mock' },})
   const created = committedValue(await ledger.createProject({
     requestId: requestId('seed:create-project'),
     actor: human,

@@ -13,7 +13,7 @@ async function waitingThread(body: string) {
   const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: test.workspaceId,
     name: 'engineering', description: 'Engineering work' })
   const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: test.workspaceId,
-    handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+    handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
   const agent = test.ctx.agents.get(member.status.member.sessionId)!
   const started = await test.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('thread'),
     workspaceId: test.workspaceId, projectRef: project.project.projectRef, body: 'Release plan' })

@@ -201,7 +201,8 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
     event.preventDefault()
     const normalizedHandle = handle.trim()
     const normalizedDescription = description.trim()
-    if (normalizedHandle.length === 0 || creating) return
+    // The Host requires an explicit route at creation, so the form refuses to submit without one.
+    if (normalizedHandle.length === 0 || model === undefined || creating) return
     const sameRequest = retryRequest !== undefined && retryRequest.workspaceId === workspaceId
       && retryRequest.handle === normalizedHandle && retryRequest.description === normalizedDescription
       && sameModel(retryRequest.model, model)
@@ -214,7 +215,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
       presetId: 'team-member',
       // No initial Projects: the Member joins later from the Project side, reachable through its DM view meanwhile.
       projectRefs: [],
-      ...(model === undefined ? {} : { model }),
+      model,
     })
   }
 
@@ -230,7 +231,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
         title={t('addAgent')}
         closeLabel={t('close')}
         contentClassName={createCss.dialogContent!}
-        footer={<><Button variant="outline" disabled={creating} onClick={closeForm}>{t('cancel')}</Button>{!importing && <Button type="submit" form="team-agent-create-form" variant="primary" disabled={creating || handle.trim().length === 0}>{creating ? t('creatingAgent') : t('createAgent')}</Button>}</>}
+        footer={<><Button variant="outline" disabled={creating} onClick={closeForm}>{t('cancel')}</Button>{!importing && <Button type="submit" form="team-agent-create-form" variant="primary" disabled={creating || handle.trim().length === 0 || model === undefined}>{creating ? t('creatingAgent') : t('createAgent')}</Button>}</>}
       >
         <Button className={createCss.modeSwitch!} variant="outline" disabled={creating} aria-expanded={importing} onClick={() => { setImporting(value => !value); setError(undefined) }}>{importing ? t('createAgent') : t('importAgentTitle')}</Button>
         {formOpen && importing ? <TeamAgentImport workspaceId={workspaceId} loadMembers={loadMembers} joinWorkspace={joinWorkspace} onPending={setCreating} onJoined={async () => { await refresh(); setFormOpen(false); queueMicrotask(() => { triggerRef.current?.focus() }) }} t={t} /> : <form id="team-agent-create-form" className={createCss.form} onSubmit={submit}>

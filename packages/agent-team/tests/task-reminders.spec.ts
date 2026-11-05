@@ -37,8 +37,8 @@ async function seed() {
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'delivery', description: '', memberIds: [] })).value.project.projectRef
   const add = async (name: string) => {
     const memberId = `member:${name}` as AgentTeamMemberId
-    const member: AgentTeamAgentMember = { memberId, sessionId: SessionId(`session:${name}`), workspaceId: alpha, handle: name, description: '', presetId: 'team-member', privateMemoryPath: `/tmp/${name}`, state: 'enabled' }
-    await ledger.addMember({ requestId: requestId(`add-${name}`), actor: human, member, handle: name, description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [projectRef] })
+    const member: AgentTeamAgentMember = { memberId, sessionId: SessionId(`session:${name}`), workspaceId: alpha, handle: name, description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: `/tmp/${name}`, state: 'enabled' }
+    await ledger.addMember({ requestId: requestId(`add-${name}`), actor: human, member, handle: name, description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     await ledger.addProjectOwner({ requestId: requestId(`own-${name}`), actor: human, workspaceId: alpha, projectRef, memberId })
     return { memberId, actor: { kind: 'member', memberId, handle: name } as AgentTeamMemberActor }
   }

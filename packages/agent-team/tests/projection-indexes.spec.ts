@@ -68,11 +68,11 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     const agentC = 'member:agent-c' as AgentTeamMemberId
     const agentMember = (memberId: string, handle: string, workspaceId: typeof alpha | typeof beta) => ({
       memberId: memberId as AgentTeamMemberId, sessionId: SessionId(`session:${memberId}`), workspaceId, handle,
-      description: `${handle} description`, presetId: 'team-member', privateMemoryPath: `/tmp/${handle}`, state: 'enabled' as const,
+      description: `${handle} description`, presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: `/tmp/${handle}`, state: 'enabled' as const,
     })
-    await ledger.addMember({ requestId: requestId('member-a'), workspaceId: alpha, handle: 'scout', description: 'Scout work', presetId: 'team-member', projectRefs: [projectA.projectRef], actor: human, member: agentMember(agentA, 'scout', alpha) })
-    await ledger.addMember({ requestId: requestId('member-b'), workspaceId: alpha, handle: 'planner', description: 'Planner work', presetId: 'team-member', projectRefs: [projectA.projectRef, projectB.projectRef], actor: human, member: agentMember(agentB, 'planner', alpha) })
-    await ledger.addMember({ requestId: requestId('member-c'), workspaceId: beta, handle: 'builder', description: 'Builder work', presetId: 'team-member', projectRefs: [projectC.projectRef], actor: human, member: agentMember(agentC, 'builder', beta) })
+    await ledger.addMember({ requestId: requestId('member-a'), workspaceId: alpha, handle: 'scout', description: 'Scout work', presetId: 'team-member', projectRefs: [projectA.projectRef], actor: human, member: agentMember(agentA, 'scout', alpha), model: { provider: 'mock', model: 'mock' }})
+    await ledger.addMember({ requestId: requestId('member-b'), workspaceId: alpha, handle: 'planner', description: 'Planner work', presetId: 'team-member', projectRefs: [projectA.projectRef, projectB.projectRef], actor: human, member: agentMember(agentB, 'planner', alpha), model: { provider: 'mock', model: 'mock' }})
+    await ledger.addMember({ requestId: requestId('member-c'), workspaceId: beta, handle: 'builder', description: 'Builder work', presetId: 'team-member', projectRefs: [projectC.projectRef], actor: human, member: agentMember(agentC, 'builder', beta), model: { provider: 'mock', model: 'mock' }})
 
     interface StartedThread {
       readonly label: string
@@ -320,8 +320,8 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     await ledger.addMember({
       requestId: requestId('lineage-member'), workspaceId: alpha, handle: 'lineage', description: 'Lineage member', presetId: 'team-member',
       projectRefs: [project.projectRef], actor: human,
-      member: { memberId, sessionId: session('0'), workspaceId: alpha, handle: 'lineage', description: 'Lineage member', presetId: 'team-member', privateMemoryPath: '/tmp/lineage', state: 'enabled' },
-    })
+      member: { memberId, sessionId: session('0'), workspaceId: alpha, handle: 'lineage', description: 'Lineage member', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/lineage', state: 'enabled' },
+     model: { provider: 'mock', model: 'mock' },})
     // A Member that never moved has left no Session behind.
     expect(ledger.previousSessionForMember(memberId)).toBeUndefined()
 
@@ -342,7 +342,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       previousOperationId: head[0],
       kind: 'team/member-session-renewed',
       data: {
-        member: { memberId, sessionId: session('2'), workspaceId: alpha, handle: 'lineage', description: 'Lineage member', presetId: 'team-member', privateMemoryPath: '/tmp/lineage', state: 'enabled' },
+        member: { memberId, sessionId: session('2'), workspaceId: alpha, handle: 'lineage', description: 'Lineage member', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/lineage', state: 'enabled' },
         previousSessionId: session('1'),
       },
     } as AgentTeamOperation)
@@ -370,8 +370,8 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       requestId: requestId('bucket-member'), workspaceId: alpha, handle: 'bucket-owner', description: 'Bucket owner', presetId: 'team-member',
       projectRefs: [project.projectRef], actor: human,
       member: { memberId, sessionId: SessionId('session:bucket-owner'), workspaceId: alpha, handle: 'bucket-owner', description: 'Bucket owner',
-        presetId: 'team-member', privateMemoryPath: '/tmp/bucket-owner', state: 'enabled' },
-    })
+        presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/bucket-owner', state: 'enabled' },
+     model: { provider: 'mock', model: 'mock' },})
 
     // 24 in-flight Tasks with two Claims each: enough shared Claim history
     // that a per-Task read walking every Claim would show cross-Task leakage.

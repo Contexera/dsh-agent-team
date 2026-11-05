@@ -23,7 +23,7 @@ describe('AgentTeam Human Task transfer Remote', () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('transfer-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const added = await test.ctx.agentTeam.addMember({ requestId: requestId('transfer-member'), workspaceId: alpha,
-      handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+      handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     await test.ctx.agentTeam.addProjectOwner({ requestId: requestId('transfer-owner'), workspaceId: alpha,
       projectRef: project.project.projectRef, memberId: added.status.member.memberId })
     const actor = { kind: 'member' as const, memberId: added.status.member.memberId, handle: added.status.member.handle }
@@ -63,7 +63,7 @@ describe('AgentTeam Human Task transfer Remote', () => {
   it('refuses a target that is not a current Project owner, and reports a stale revision as a business outcome', async () => {
     const { test, actor: seedOwner, started } = await seedTransfer()
     const outsider = await test.ctx.agentTeam.addMember({ requestId: requestId('outsider'), workspaceId: alpha,
-      handle: 'outsider', description: 'Not an owner', presetId: 'team-member', projectRefs: [] })
+      handle: 'outsider', description: 'Not an owner', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     await expect(test.ctx.agentTeam.transferTask({ requestId: requestId('bad-target'), workspaceId: alpha,
       taskRef: started.task.taskRef, target: outsider.status.member.memberId, baseRevision: started.thread.revision })).rejects.toThrow(/accountable_target_invalid/)
     // The stale case is the normal control flow the Client already models: it comes back as a result, not a Remote error. A legal target keeps the illegal one from masking it.
@@ -98,7 +98,7 @@ describe('AgentTeam Human Task transfer Remote', () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('finish-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const added = await test.ctx.agentTeam.addMember({ requestId: requestId('finish-member'), workspaceId: alpha,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     await test.ctx.agentTeam.addProjectOwner({ requestId: requestId('finish-owner'), workspaceId: alpha,
       projectRef: project.project.projectRef, memberId: added.status.member.memberId })
     // The Task is accountable to the second owner, who then finishes it: the grant that made them accountable ends afterwards.
