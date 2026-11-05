@@ -4,7 +4,7 @@ import { AGENT_TEAM_HUMAN_HANDLE } from '@contexera/dsh-agent-team/host'
 import { MENTION_BODY_FIXTURE } from '../../agent-team/tests/fixtures/mention-bodies.ts'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
-import { bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatInboxTime, formatMessageTime, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, plainGist, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
+import { bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatInboxTime, formatMessageTime, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, identityInitial, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, plainGist, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -27,6 +27,27 @@ function memberStatus(memberId: string, handle: string, extra: { readonly presen
     presence: extra.presence ?? 'available',
   } as unknown as AgentTeamClientMemberStatus
 }
+
+describe('identity initial', () => {
+  // Every avatar seat derives its letter here, so one astral handle covers all of them.
+  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+  it('takes one code point, so an astral character is never cut in half', () => {
+    expect(identityInitial('🎈builder')).toBe('🎈')
+    expect(LONE_SURROGATE.test(identityInitial('🎈builder'))).toBe(false)
+  })
+
+  it('strips the handle and member prefixes before reading the first letter', () => {
+    expect(identityInitial('@builder')).toBe('B')
+    expect(identityInitial('member:reviewer')).toBe('R')
+    expect(identityInitial('reviewer')).toBe('R')
+  })
+
+  it('answers nothing for text it cannot take a letter from, leaving the fallback to the caller', () => {
+    expect(identityInitial('')).toBe('')
+    expect(identityInitial('@')).toBe('')
+  })
+})
 
 describe('Team presentation formatters', () => {
   it('names every diagnostic class instead of showing the Host reason alone', () => {

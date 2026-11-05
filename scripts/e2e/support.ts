@@ -50,7 +50,12 @@ export type { WebScaffold } from './scaffold.ts'
  * module-level `scaffold`/`browser` pair each scenario declares is filled in
  * here so its `afterEach` can release them.
  */
-export async function openTeamPage(options: { readonly stayInOrdinaryMode?: boolean; readonly webhookOrigin?: string } = {}): Promise<{
+export async function openTeamPage(options: {
+  readonly stayInOrdinaryMode?: boolean
+  readonly webhookOrigin?: string
+  /** Device pixels per CSS pixel; a scenario reading a glyph needs more than one. */
+  readonly deviceScaleFactor?: number
+} = {}): Promise<{
   readonly page: Page
   readonly consoleWatch: { warnings: string[]; pageErrors: string[] }
 }> {
@@ -61,7 +66,8 @@ export async function openTeamPage(options: { readonly stayInOrdinaryMode?: bool
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] },
     ...(overlay === undefined ? {} : { extraOverlayPath: overlay }) })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN',
+    ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }) })
   const consoleWatch = watchConsole(page)
   await page.goto(scaffold.authenticatedUrl)
   await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')

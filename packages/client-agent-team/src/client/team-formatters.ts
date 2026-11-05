@@ -92,6 +92,16 @@ export function memberHue(memberId: string): number {
   return hash
 }
 
+/**
+ * The one place an avatar initial is derived. It counts code points, not UTF-16
+ * units: `slice(0, 1)` hands a handle that opens with an astral character half a
+ * surrogate pair, which renders as a replacement mark. A caller with its own
+ * empty fallback supplies it — this answers only what the text starts with.
+ */
+export function identityInitial(text: string): string {
+  return [...text.replace(/^@/, '').replace(/^member:/, '')][0]?.toUpperCase() ?? ''
+}
+
 export interface RefSegment {
   readonly text: string
   readonly ref?: string

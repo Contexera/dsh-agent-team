@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentTeamClientMemberStatus } from '@contexera/dsh-agent-team/types'
 import type { TeamSidebarProps } from './slots.ts'
-import { memberHue } from './team-formatters.ts'
+import { identityInitial, memberHue } from './team-formatters.ts'
 import { presenceDotState, presenceLabel } from './TeamPresenceDot.tsx'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import css from './sidebar.module.css'
@@ -21,7 +21,7 @@ export function TeamMemberAvatar({ status, t }: {
         role="img"
         aria-label={label}
       >
-        {status.member.handle.replace('@', '').slice(0, 1).toUpperCase()}
+        {identityInitial(status.member.handle)}
         <span className={css.agentAvatarBadge} aria-hidden="true">
           <TeamStateDot state={state} />
         </span>

@@ -8,6 +8,7 @@ import type { TeamEnvironmentSource } from './environment-check.ts'
 import { formLabels } from './locales.ts'
 import { useTeamConfig, type TeamConfigFace } from './team-config.ts'
 import { useAvatarImage } from './avatar-image.ts'
+import { identityInitial } from './team-formatters.ts'
 import css from './team-settings.module.css'
 
 /** The Team's settings page: identity, the Host row's compaction threshold, the local environment check, and the version footnote. It owns no durable fact and no copy of one — identity writes through the Team Remote, the threshold through the shared configuration form — and a failed write keeps the typed value and reports the Host's reason. */
@@ -40,8 +41,7 @@ async function failureOf(action: () => Promise<string | undefined>): Promise<str
 }
 
 function avatarInitial(name: string | undefined): string {
-  const trimmed = (name ?? '').replace(/^@/, '').trim()
-  return trimmed === '' ? 'H' : trimmed.slice(0, 1).toUpperCase()
+  return identityInitial((name ?? '').trim()) || 'H'
 }
 
 /** `follow` re-syncs the field when the profile changes underneath, without clobbering an in-progress edit. */

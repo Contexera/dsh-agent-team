@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 import type { AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { useAvatarImage } from './avatar-image.ts'
-import { memberHue } from './team-formatters.ts'
+import { identityInitial, memberHue } from './team-formatters.ts'
 import css from './avatar-stack.module.css'
 
 /** Distinct owners past this count collapse into one `+N` chip. */
@@ -47,10 +47,6 @@ function OwnerAvatar({ owner, human }: {
 }) {
   const image = useAvatarImage(human !== undefined && owner.memberId === human.memberId ? human.avatarUrl : undefined)
   const hue = { '--team-avatar-hue': memberHue(owner.memberId) } as CSSProperties
-  if (image.image.kind === 'initial') return <span className={css.avatar} style={hue}>{initial(owner.name)}</span>
+  if (image.image.kind === 'initial') return <span className={css.avatar} style={hue}>{identityInitial(owner.name)}</span>
   return <img className={css.avatarImage} style={hue} src={image.image.src} alt="" aria-hidden="true" onError={image.failed} />
-}
-
-function initial(name: string): string {
-  return name.replace(/^@/, '').replace(/^member:/, '').slice(0, 1).toUpperCase()
 }

@@ -58,6 +58,8 @@ Presence maps available/working/error/unavailable to the shared state-dot langua
 
 The `TeamAvatarStack` circles on a Thread entry reuse the same hue hash but carry no dot, because they answer who owns the work rather than who is online right now.
 
+Every seat takes its letter from one function, `identityInitial`, which counts code points rather than UTF-16 units: a handle opening with an astral character keeps it whole instead of being cut into half a surrogate pair. It answers only what the text starts with, so a seat with its own empty fallback supplies it — Settings names the Human `H`.
+
 No Agent seat ever draws an image — the hue and initial are the whole identity an Agent has — so the compact stack draws the Human's picture in the one chip that is the Human, and names that chip from the same profile projection.
 
 The Inbox row's leading cluster and the Project feed's Thread entry rows each take the Human's Member id from the Host (`AgentTeamInbox.humanMemberId`, the same initialization record `AgentTeamView` carries). Each then lets `namedAvatarOwners(owners, human)` replace that one owner with `humanName`/`humanAvatarUrl`, so a rename moves the chip's letter and the stack's label together instead of leaving an initial the profile no longer uses.

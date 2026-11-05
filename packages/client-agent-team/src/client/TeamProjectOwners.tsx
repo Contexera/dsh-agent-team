@@ -10,7 +10,7 @@ import type {
 } from '@contexera/dsh-agent-team/types'
 import type { TeamSidebarProps } from './slots.ts'
 import { TeamMemberRow } from './TeamMemberRow.tsx'
-import { HUMAN_MEMBER_ID, memberHue } from './team-formatters.ts'
+import { HUMAN_MEMBER_ID, identityInitial, memberHue } from './team-formatters.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import { mintRequestId } from './requests.ts'
 import { useHumanIdentity } from './human-identity.ts'
@@ -86,7 +86,7 @@ export function TeamProjectOwners({ project, members, ownerIds, addProjectOwner,
           <span className={sidebarCss.agentAvatar} style={{ '--team-avatar-hue': memberHue(HUMAN_MEMBER_ID), overflow: 'hidden' } as CSSProperties} aria-hidden="true">
             {humanImage.image.kind === 'image'
               ? <img src={humanImage.image.src} alt="" width={34} height={34} onError={humanImage.failed} />
-              : humanName.slice(0, 1).toUpperCase()}
+              : identityInitial(humanName)}
           </span>
           <span className={rowCss.copy}>
             <strong>{humanName}</strong>

@@ -8,7 +8,7 @@ import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
 import { cachedResolvedTaskRef, resolveUnknownTaskRefs, useResolvedTaskRefVersion, type ResolvedTaskRef } from './refs.ts'
 import { cachedResolvedThreadRef, resolveUnknownThreadRefs, useResolvedThreadRefVersion, type ResolvedThreadRef } from './refs.ts'
-import { bodyMentionsHuman, formatAbsoluteTime, formatClockTime, formatMessageTime, isSingleBrandedRef, memberHue, plainGist, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, unshownMentionNames, type MentionHandle, type PlannedMessageBody } from './team-formatters.ts'
+import { bodyMentionsHuman, formatAbsoluteTime, formatClockTime, formatMessageTime, identityInitial, isSingleBrandedRef, memberHue, plainGist, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, unshownMentionNames, type MentionHandle, type PlannedMessageBody } from './team-formatters.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import css from './conversation.module.css'
 
@@ -138,7 +138,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   return (
     <article className={css.messageRow} data-human={human || undefined} data-grouped={grouped || undefined} data-mentions-me={mentionedInBody || undefined} data-message-ref={messageRef} data-replying-to={replyTarget || undefined} data-reply-flash={replyFlash || undefined} data-card-open={cardOpen || undefined} onClick={onToggleCard === undefined ? undefined : toggleCard}>
       {identityImage.image.kind === 'initial'
-        ? <div className={css.messageIdentity} data-avatar="initial" style={avatarStyle} aria-hidden="true">{senderName.replace('@', '').slice(0, 1).toUpperCase()}</div>
+        ? <div className={css.messageIdentity} data-avatar="initial" style={avatarStyle} aria-hidden="true">{identityInitial(senderName)}</div>
         : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.image.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
       {/* A continuation row shows time of day only in the avatar seat (34px, no clip); the date lives on the run's identity line and the day separator. */}
       {grouped === true && showGroupedTime === true && occurredAt !== undefined && <span className={css.gutterTime} data-gutter-time="" aria-hidden="true" title={formatAbsoluteTime(occurredAt)}>{formatClockTime(occurredAt)}</span>}
