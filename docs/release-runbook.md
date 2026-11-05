@@ -97,7 +97,7 @@ Pushing master before the tag costs nothing and keeps the tag's evidence honest:
 
 Registry reads lag right after a publish: the version document can be served before the full packument, so `npm view <name>` may briefly report the previous version, or `E404` for a package that is live. Never re-publish to "fix" a lag — poll the packument, or prove the artifact by installing from the tarball URL.
 
-Staged publishing is the second reason a publish prints success and leaves the registry empty: the publish waits for approval, so the command reports the version while the version document still 404s. Re-publishing is refused (`E409 … previously staged version`), and `npm stage list` showing nothing does not clear it. A human approval on npmjs.com, or a re-publish with `--otp`, unblocks it — a step of the release, not a retry.
+Staged publishing is the second reason a publish prints success and leaves the registry empty: the publish waits for approval, so the command reports the version while the version document still 404s. Re-publishing is refused (`E409 … previously staged version`), and `npm stage list` showing nothing does not clear it. A human approval on npmjs.com, or a re-publish with `--otp`, unblocks it — a step of the release, not a retry. What separates the two: a lag heals while you poll, a staged publish does not.
 
 ## 7. Never
 
