@@ -26,3 +26,7 @@ packages/agent-team
 - `packages/client-agent-team` 分为 Node 部分（`src/index.ts`）和 browser 部分（`src/client/`）。browser 部分通过 typed Remote 读取 Host projections，并通过 public Client slots 渲染。
 
 接缝由第二个调用方、第二个 adapter 或独立持有的状态换来，绝不由行数换来。`index.ts` 与 `ledger.ts` 大，是因为它们承载 composition 与 authority，不是因为缺了一层；不要为了让单个文件变小而拆它们，也不要在真的出现第二份实现之前引入 `services/`、`utils/`、`adapters/` 目录。只做 re-export、只转发 props、只改名的模块不持有状态也不持有不变式：把调用内联，或删掉契约已经死掉的那一侧。
+
+一条被多个模块共同应用的规则——字符计数、截断边界、身份归一——只在一个模块实现，其余 import。再写一份内联副本，即使今天算得一模一样也是漂移：下一次改动就会分叉，而发现它的审查来得比漂移晚得多。
+
+字符计数与截断的实现在 `packages/agent-team/src/text.ts`：判定与切割必须同口径（码点），按 UTF-16 单元切割就是这条规则要防的缺陷。

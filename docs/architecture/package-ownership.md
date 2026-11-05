@@ -28,3 +28,7 @@ These three directories are the build and export seams of one published package,
 - `packages/client-agent-team` has a Node half (`src/index.ts`) and browser half (`src/client/`). The browser half reads Host projections through typed Remote and renders them through public Client slots.
 
 A seam is earned by a second caller, a second adapter, or independently owned state — never by line count. `index.ts` and `ledger.ts` are large because they hold composition and authority, not because a layer is missing; do not split either to make a file smaller, and do not introduce `services/`, `utils/`, or `adapters/` directories before a real second implementation exists. A module that only re-exports, only forwards props, or only renames a call carries no state and no invariant: keep that call inline or delete the dead side of the contract.
+
+A rule more than one module must apply — character counting, truncation bounds, identity normalization — lives in one module and is imported. A second inline copy is drift even when it computes the same thing today: the copies diverge at the next change, and the review that catches it arrives long after the divergence does.
+
+Character counting and truncation live in `packages/agent-team/src/text.ts`: judging and slicing must share that unit (code points), and a slice that counts UTF-16 units is the defect this rule exists to prevent.
