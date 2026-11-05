@@ -5,9 +5,11 @@ vi.setConfig({ testTimeout: 60_000 })
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage, LlmError } from '@deepseek-ai/dsh-llm'
 import { cleanups, realHarness, requestId, ScriptedAdapter, textResponse } from './helpers/member-harness.ts'
-import type { AgentTeamModelSelection } from '../src/types.ts'
+import { adoptionRequestId } from '../src/index.ts'
+import type { AgentTeamMemberId, AgentTeamModelSelection } from '../src/types.ts'
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
@@ -55,6 +57,52 @@ describe('Member model adoption from the request header', () => {
     await turn(agent, adapter, 'Carry on once more.')
     expect(ctx.agentTeam.status().operationCount).toBe(before + 1)
     expect(recorded()).toEqual({ provider: 'mock', model: 'next' })
+  })
+
+  it('keeps the route the Human replaced while the old one is still in flight', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const added = await add(ctx, workspaceId, 'builder', { provider: 'mock', model: 'start' })
+    const memberId = added.status.member.memberId
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const recorded = () => ctx.agentTeam.membersForClient({ workspaceId })
+      .find(status => status.member.memberId === memberId)?.member.model
+
+    // The step fixed its route before this hook ran, and the header is appended only after it returns: the window a
+    // settings-page edit lands in.
+    const held = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    ctx.on('agent/request', async ({ agent: subject }, next) => {
+      if (subject !== agent) return next()
+      held.resolve()
+      await release.promise
+      return next()
+    }, { prepend: true })
+
+    const before = ctx.agentTeam.status().operationCount
+    adapter.enqueue(textResponse('Noted.'))
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Carry on.' }], source: { kind: 'user' } }))
+    await held.promise
+    // The edit writes the ledger and reselects the live Session's route, which is exactly what the settings page does.
+    const edit = await ctx.agentTeam.updateMember({
+      requestId: requestId(`replace-${crypto.randomUUID()}`), memberId, handle: 'builder', description: '',
+      model: { provider: 'mock', model: 'chosen' },
+    })
+    expect(edit.effect).toBe('applied')
+    release.resolve()
+    await agent.whenIdle()
+
+    // The in-flight request still carried the old route; adopting it would write the Human's edit back over itself.
+    expect(recorded()).toEqual({ provider: 'mock', model: 'chosen' })
+    expect(ctx.agentTeam.status().operationCount).toBe(before + 1)
+  })
+
+  it('names the Session in an adoption request id', () => {
+    // A new Session restarts the event sequence, so an id without it collides with the previous generation's and the
+    // ledger's collision guard silently drops the adoption.
+    const member = 'member:agent-0' as AgentTeamMemberId
+    expect(adoptionRequestId(member, SessionId('session:a'), 7)).toBe(adoptionRequestId(member, SessionId('session:a'), 7))
+    expect(adoptionRequestId(member, SessionId('session:a'), 7)).not.toBe(adoptionRequestId(member, SessionId('session:b'), 7))
   })
 
   it('leaves the ledger untouched when the request is refused before its header is sent', async () => {

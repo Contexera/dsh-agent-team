@@ -195,6 +195,7 @@ export async function realHarness(
   persistenceBackend: PersistenceBackend = 'jsonl',
   reopen?: { readonly root: string },
   realCompaction = false,
+  seed?: (ctx: Context, workspaceId: WorkspaceId) => Promise<void>,
 ): Promise<{
   readonly ctx: Context
   readonly workspaceId: WorkspaceId
@@ -297,6 +298,8 @@ export async function realHarness(
       archived.push(sessionId)
     },
   })
+  // A spec that replays a ledger an older build wrote seeds the domain here, before Team boots over it.
+  if (seed !== undefined) await seed(ctx, workspaceId)
   const teamFiber = await ctx.plugin(AgentTeam)
   cleanups.push(async () => { await ctx.fiber.dispose(); await facility.closeAll(); await rm(root, { recursive: true, force: true }) })
   return { ctx, workspaceId, root, checkout, workspaces, teamFiber, archived, archiveFailures, presets: ctx.agentPresets as TestablePresets, pressureState, jobsState }

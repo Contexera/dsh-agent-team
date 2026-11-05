@@ -386,6 +386,15 @@ export function teamPresetScopeMismatchMessage(tsxDevMode: boolean): string {
   return 'selected preset is not team-enabled: this bundle and the harness resolved different physical copies of @deepseek-ai/dsh-scope; run pnpm install in the profile directory so node_modules matches the lockfile, then restart'
 }
 
+/**
+ * One adoption's ledger request id. The event sequence restarts with every Session, so a Member that changes generation
+ * would reuse the previous generation's id at the same sequence: the ledger's collision guard refuses that write and the
+ * adoption is dropped silently. The Session is part of the identity, and the route comparison keeps a replay idempotent.
+ */
+export function adoptionRequestId(memberId: AgentTeamMemberId, sessionId: SessionId, seq: number): AgentTeamRequestId {
+  return `${memberId}:${sessionId}:request-${seq}` as AgentTeamRequestId
+}
+
 export interface AgentTeamCommitted {
   readonly receipt: AgentTeamOperationReceipt
 }
@@ -720,7 +729,7 @@ export default class AgentTeam extends TypertRemoteService {
    * cannot feed itself through the ledger. Only the route is recorded: the reasoning effort stays a Session-log fact that
    * activation re-reads for that route, so adoption can neither drop an inherited tier nor pin it permanently.
    */
-  private adoptMemberRouteFromRequest(memberId: AgentTeamMemberId, agent: Agent, event: Extract<SessionEvent, { type: 'request/header' }>): void {
+  private adoptMemberRouteFromRequest(memberId: AgentTeamMemberId, agent: Agent, sessionId: SessionId, event: Extract<SessionEvent, { type: 'request/header' }>): void {
     if (this.retiringAgents.has(agent)) return
     let ledger: AgentTeamLedger
     try {
@@ -731,12 +740,16 @@ export default class AgentTeam extends TypertRemoteService {
     const member = ledger.getMember(memberId)
     if (member === undefined || member.state !== 'enabled') return
     const config = event.data.header.config
+    // The header's route was fixed at step preparation, so a pick made since then (settings page or composer) is newer than
+    // this request: adopting it here would write the replaced route back over the Human's choice.
+    const live = agent.model.current()
+    if (live === undefined || live.provider !== config.provider || live.model !== config.model) return
     const running = member.model ?? this.ctx.agentDefaultModel.currentSelection()
     if (running.provider === config.provider && running.model === config.model) return
     // The route alone: the effort belongs to the Session log, where activation re-reads it for the same route. Writing it
     // here would turn an inherited tier into a permanent one that later edits cannot lower.
     const model: AgentTeamModelSelection = Object.freeze({ provider: config.provider, model: config.model })
-    const requestId = `${memberId}:request-${event.seq}` as AgentTeamRequestId
+    const requestId = adoptionRequestId(member.memberId, sessionId, event.seq)
     void ledger.updateMember({
       requestId, memberId: member.memberId, handle: member.handle, description: member.description,
       model, actor: agentTeamHumanActor(),
@@ -2733,7 +2746,7 @@ export default class AgentTeam extends TypertRemoteService {
         installModelSelection(agentCtx)
         agentCtx.on('session/event', (session, event) => {
           if (session !== agent.session || event.type !== 'request/header') return
-          this.adoptMemberRouteFromRequest(member.memberId, agent, event)
+          this.adoptMemberRouteFromRequest(member.memberId, agent, session.id, event)
         })
         installMemberCompaction(
           agentCtx, agent, () => this.memberCompactionConfig(),
