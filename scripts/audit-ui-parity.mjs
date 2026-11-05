@@ -615,7 +615,8 @@ const bySeverity = { error: [], warn: [], info: [] }
 for (const finding of findings) bySeverity[finding.severity].push(finding)
 const print = (list) => list.forEach(f => console.log(`  [${f.severity}] ${f.where}: ${f.what}`))
 
-console.log('UI parity audit — Team Client vs DSH 0.1.7 design language')
+const harnessVersion = JSON.parse(readFileSync(join(harnessDir, 'package.json'), 'utf8')).version
+console.log(`UI parity audit — Team Client vs DSH ${harnessVersion} design language`)
 console.log(`harness checkout: ${harnessDir}`)
 console.log('')
 console.log(`errors (${bySeverity.error.length}):`)
