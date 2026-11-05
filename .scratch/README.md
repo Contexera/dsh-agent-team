@@ -21,6 +21,7 @@
 
 | 月 | 工作项 | 一句话结论 | 链接 |
 | --- | --- | --- | --- |
+| 2026-11 | agent-tools-context-rendering | 七工具的上下文呈现与拒绝恢复：01–06 交付并随 v0.2.6 发布，生产日志核对输出形状无回退；付费模型理解评测未获授权、按未运行归档。 | [README](archive/2026-11/agent-tools-context-rendering/README.md) |
 | 2026-11 | project-event-notifications | Member 提醒与 Project 定时/webhook 订阅 01–06 全部验收；真实 GitHub CI 事件已唤醒 Agent owner。 | [README](archive/2026-11/project-event-notifications/README.md) |
 | 2026-11 | test-ablation | 通过 30 种故障实验验证测试精简，减少 24 项测试并修正三类漏检。 | [README](archive/2026-11/test-ablation/README.md) |
 | 2026-08 | agent-team-quality-audit | 只读简化与可维护性审查；发现已实施或记为保留/延后，政策结论进架构与开发文档。 | [README](archive/2026-08/agent-team-quality-audit/README.md) |

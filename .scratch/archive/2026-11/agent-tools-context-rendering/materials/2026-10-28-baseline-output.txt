@@ -1,0 +1,88 @@
+# 基线原始输出（`harness/context-volume.mjs` 于 2026-10-28 23:4x 复跑）
+
+**读前必知两点：**
+
+1. **数字会漂，不是错。** 语料是 `~/.dsh/sessions` 的实时目录，成员每跑一轮就在长大。同一脚本相隔几十分钟重跑，调用数与总字符会有千分位级差异（例：`team_thread read` 2840 → 2844 次）。判断「能不能复现」要看量级与分位，不是末三位。
+2. **单位有两个，别混。** 脚本第一行 `files 827` 是**日志文件数**；语料实际是 **724 个 session 目录**，其中 101 个目录同时存有 v3/v4 两代日志。「每 session 几份」必须按目录口径算。
+
+下面为原始输出，未编辑。
+
+files 827
+
+== tool result chars (n, p50, p90, max, total) ==
+team_thread read                                 2844 1040 2806 17289 4387593
+team_thread history                              273 4746 14180 49930 1866214
+team_view -                                      270 6907 7769 13661 1606008
+team_thread read:main                            89 6887 10314 12295 605361
+team_message reply                               1946 269 373 738 553624
+team_task board                                  64 1929 3622 9919 146109
+team_claim claim                                 208 426 482 630 89927
+team_claim done                                  172 423 477 628 73726
+team_message reply unread_required               175 223 307 8196 72297
+team_message reply stale_revision                41 934 2862 5206 58452
+team_inbox -                                     619 34 34 480 41659
+team_thread unfollow                             124 253 254 257 30532
+team_claim list                                  133 137 300 695 23405
+team_task claim                                  30 475 579 612 14549
+team_message start                               41 376 376 483 13497
+team_task done                                   26 475 577 610 12647
+team_attention unfollow                          42 280 311 445 11979
+team_message reply thrown                        66 189 346 393 11330
+team_task_list -                                 4 2486 2503 2503 9892
+team_message post                                52 170 170 170 8840
+team_thread message                              4 2510 3668 3668 7829
+team_thread status                               32 244 246 247 7666
+team_thread read thrown                          59 106 216 408 7438
+team_message dm                                  54 100 100 100 5377
+team_task accept                                 13 357 401 401 4729
+team_claim release                               11 414 498 503 4707
+team_task_get -                                  5 831 944 944 4206
+team_dm -                                        40 99 100 100 3971
+team_thread read:main thrown                     18 166 398 398 3358
+team_attention status                            11 243 273 300 2789
+team_task_update claim                           3 831 944 944 2495
+team_task_update complete                        3 829 942 942 2489
+team_task_create -                               3 800 911 911 2408
+team_view - thrown                               13 154 192 192 2073
+team_claim claim unread_required                 9 230 230 230 2070
+team_claim done thrown                           15 147 184 184 2010
+team_attention follow                            6 294 301 301 1569
+team_message start thrown                        6 274 274 274 1391
+team_task list                                   7 195 200 200 1351
+team_claim list thrown                           17 61 61 154 1130
+team_thread history thrown                       7 134 355 355 1024
+team_thread message thrown                       8 163 166 166 956
+team_claim done unread_required                  4 230 230 230 920
+team_claim claim thrown                          6 184 184 184 794
+team_task done thrown                            8 86 147 147 749
+team_attention follow thrown                     3 299 309 309 695
+team_message post thrown                         3 226 226 226 678
+team_thread status thrown                        4 154 161 161 504
+team_message dm thrown                           3 154 173 173 481
+team_task claim thrown                           3 147 147 147 441
+team_task list thrown                            4 86 86 86 344
+team_thread - thrown                             3 60 60 60 180
+
+== injected team user messages (n, p50, p90, max, total) ==
+team notice Team Inbox has unread work.                      2926 611 2358 14548 3109325
+time-context                                                 2343 254 259 263 596528
+member-context block                                         2188 8537 11122 17599 18419452
+team notice Context pressure: prepare a ha                   273 746 907 1105 194621
+team snapshot                                                252 3300 6005 9574 830969
+team notice Recovery: continue your interr                   96 521 985 1697 47682
+team relay                                                   91 1172 1951 2529 108787
+team-context-handoff snapshot                                65 3579 5605 9441 243320
+team notice Task accepted: record what is                    28 348 489 489 11436
+team-context-continuation notice Context checkpoint recorded; w 15 100 100 100 1500
+team notice Team Workspace participation c                   10 310 348 348 3055
+
+== next call after a deferred write ==
+  183 unread_required: read
+   29 stale_revision: read
+   15 stale_revision: same-write retry (with offered token) -> ok
+    1 unread_required: team_thread history
+    1 unread_required: same-write retry (other token) -> unread_required
+    1 unread_required: same-write retry (other token) -> ok
+    1 stale_revision: same-write retry (with offered token) -> unread_required
+    1 unread_required: same-write retry (with offered token) -> ok
+    1 unread_required: same-write retry (with offered token) -> unread_required
