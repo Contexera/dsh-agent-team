@@ -43,7 +43,7 @@ All notable changes to this project are documented in this file. The format foll
 - Typing `@` straight after Chinese text opens the mention picker and reaches the Member: a call now starts at any `@` outside an ASCII word, so prose that spaces no words needs no space before a name, while an address like `mail@host.example` stays prose.
 - A Thread card's title, a Thread chip's title, a quote line, an Inbox gist and a board card's subject read as the line renders: its Markdown is projected to plain text before the line is cut to width, so `**…**` no longer shows as written. A Message body still renders its Markdown.
 - A Member's avatar initial is the first character of the handle rather than its first UTF-16 unit, so a handle that starts with an astral character draws that character instead of a replacement glyph; every avatar seat derives it through one helper.
-- Team text is counted and cut in code points: a Notice body, an Inbox gist, a compact line and a preview bound all measure what a reader sees, so cutting a long line no longer splits a surrogate pair into a broken character; one module owns the counting and truncation.
+- Team text is counted and cut in code points: a Notice body, an Inbox gist, a compact line and a preview bound all measure what a reader sees, so cutting a long line no longer splits a surrogate pair into a broken character; one module per package owns the counting and truncation.
 
 ## [0.2.6] - 2026-10-31
 
