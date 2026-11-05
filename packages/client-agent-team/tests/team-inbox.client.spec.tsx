@@ -16,7 +16,7 @@ function inboxRow(workspaceId: string, threadRef: string, overrides: Record<stri
     projectRef: 'project:engineering',
     projectName: 'engineering',
     taskNumber: 1,
-    task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef, status: 'in_progress', resolution: 'open' },
+    task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef, status: 'in_progress', resolution: 'open', accountable: 'member:human' },
     thread: { threadRef, taskRef: 'task:1', revision: 5 },
     unreadCount: 1,
     directCount: 1,
@@ -171,7 +171,7 @@ describe('Team Inbox surfaces', () => {
       projectName: status,
       previewText: `${status} row`,
       taskNumber: index + 1,
-      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${status}`, status, resolution: 'open' },
+      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${status}`, status, resolution: 'open', accountable: 'member:human' },
     }))
     const tasklessRow = (): ReturnType<typeof inboxRow> => inboxRow('w1', 'thread:taskless', { projectName: 'taskless', previewText: 'taskless row', task: undefined, taskNumber: undefined })
     await b.changeSubscriptionsReady()
@@ -370,14 +370,14 @@ describe('Team Inbox surfaces', () => {
     // One language for 「谁在这个 Task 上」 across both surfaces: the same stack, the
     // same rule, and the same words the Project feed's Thread entry row uses.
     const owned = await b.view.findByRole('button', { name: /owner stack row/ })
-    expect(owned.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('由 @reviewer, @builder 处理')
+    expect(owned.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('由 @reviewer, @builder 认领')
     expect(owned.querySelectorAll('[role="img"] > span')).toHaveLength(2)
     // A Thread nobody has claimed has no roster to lead with, so the row falls
     // back to the one person it can always name: whoever moved it last.
     const taskless = b.view.getByRole('button', { name: /taskless row/ })
     expect(taskless.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('最新来自 @iris')
     const tail = b.view.getByRole('button', { name: /read tail row/ })
-    expect(tail.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('由 @vera 处理')
+    expect(tail.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('由 @vera 认领')
     await b.runtime.dispose()
   })
 

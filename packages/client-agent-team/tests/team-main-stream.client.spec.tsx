@@ -23,7 +23,7 @@ const seedEntries: readonly MainStreamSeedEntry[] = [
   } },
   { kind: 'thread-card', sequence: 4, occurredAt: '2026-10-20T08:20:00.000Z', unread: true, card: {
     threadRef: 'thread:api', anchor: { messageRef: 'message:t4', sender: 'member:human', preview: '实现 API 网关', sequence: 4, occurredAt: '2026-10-20T08:20:00.000Z' },
-    task: { taskRef: 'task:12', taskNumber: 12, status: 'in_review', resolution: 'open', liveClaimOwners: [{ memberId: 'member:builder', name: 'builder' }] },
+    task: { taskRef: 'task:12', taskNumber: 12, status: 'in_review', resolution: 'open', accountable: 'member:human', liveClaimOwners: [{ memberId: 'member:builder', name: 'builder' }] },
     replyCount: 2, participants: [], newestSequence: 4, newestOccurredAt: '2026-10-20T08:20:00.000Z', newestActor: { memberId: 'member:builder', name: 'builder' },
   } },
 ]
@@ -59,7 +59,8 @@ describe('Team Main stream', () => {
     expect(await b.view.findByText('配色要不要跟设置页统一？')).toBeTruthy()
     expect(b.view.getByText('human 指定 @builder 为项目负责人')).toBeTruthy()
     const discussion = b.view.getByRole('button', { name: '打开讨论：登录页改版 · 6 条回复 · 2 人' })
-    const task = b.view.getByRole('button', { name: '打开 Task #12：实现 API 网关 · 待验收 · 由 @builder 处理 · 2 条回复 · 未读' })
+    // The card states who holds the Task between its status and its executors, and the accessible name says the same.
+    const task = b.view.getByRole('button', { name: '打开 Task #12：实现 API 网关 · 待验收 · 你负责 · 由 @builder 认领 · 2 条回复 · 未读' })
     expect(discussion.getAttribute('data-main-card')).toBe('discussion')
     expect(task.getAttribute('data-main-card')).toBe('task')
 

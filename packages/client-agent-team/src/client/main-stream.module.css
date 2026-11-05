@@ -55,6 +55,8 @@
   gap: 6px;
 }
 .cardStatus { color: var(--dsw-alias-label-secondary); }
+/* The executor group keeps its caption and faces on one line, so a wrapping card head never splits the word from them. */
+.cardExecutor { align-items: center; display: inline-flex; flex: none; gap: 4px; }
 .cardMeta {
   align-items: center;
   display: inline-flex;

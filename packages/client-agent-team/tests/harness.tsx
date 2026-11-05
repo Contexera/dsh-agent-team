@@ -351,7 +351,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     return { kind: 'thread-card', sequence: message.sequence, occurredAt: message.occurredAt, card: {
       threadRef: seedThreadRef,
       anchor: { messageRef: message.messageRef, sender: message.sender, preview: message.body, sequence: message.sequence, occurredAt: message.occurredAt },
-      ...(taskless ? {} : { task: { taskRef: seedTaskRef, taskNumber: 1, status: options?.seedTaskStatus ?? 'todo', resolution: 'open', liveClaimOwners: [] } }),
+      ...(taskless ? {} : { task: { taskRef: seedTaskRef, taskNumber: 1, status: options?.seedTaskStatus ?? 'todo', resolution: 'open', accountable: 'member:human', liveClaimOwners: [] } }),
       replyCount: 0, participants: [], newestSequence: message.sequence, newestOccurredAt: message.occurredAt,
       newestActor: { memberId: message.sender, name: message.sender === 'member:builder' ? 'builder' : 'human' },
     } }
@@ -402,10 +402,10 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     const asTask = request.kind === 'task'
     const attachments = (request.attachments ?? []).map(id => ({ attachmentId: id, name: `file-${id}.png`, byteSize: 8, mediaType: 'image/png' }))
     const message = { messageRef: `message:${1 + startedThreadCount}`, projectRef: request.projectRef, threadRef: 'thread:1', ...(asTask ? { taskRef: 'task:1' } : {}), sender: 'member:human', body: request.body, ...(attachments.length === 0 ? {} : { attachments }), topLevel: true, sequence, occurredAt: '2026-08-21T10:00:00.000Z' }
-    const task = asTask ? { taskRef: 'task:1', projectRef: request.projectRef, threadRef: 'thread:1', status: 'todo', resolution: 'open' } : undefined
+    const task = asTask ? { taskRef: 'task:1', projectRef: request.projectRef, threadRef: 'thread:1', status: 'todo', resolution: 'open', accountable: 'member:human' } : undefined
     const thread = { threadRef: 'thread:1', ...(asTask ? { taskRef: 'task:1' } : {}), revision: sequence }
     viewItems = [{ message, mentions: [], ...(task === undefined ? {} : { task, taskNumber: 1 }), thread, liveClaimOwners: [], messageCount: 1, lastActivityAt: message.occurredAt }]
-    const card = { threadRef: 'thread:1', anchor: { messageRef: message.messageRef, sender: 'member:human', preview: request.body, sequence, occurredAt: message.occurredAt }, ...(task === undefined ? {} : { task: { taskRef: 'task:1', taskNumber: 1, status: 'todo', resolution: 'open', liveClaimOwners: [] } }), replyCount: 0, participants: [], newestSequence: sequence, newestOccurredAt: message.occurredAt, newestActor: { memberId: 'member:human', name: 'human' } }
+    const card = { threadRef: 'thread:1', anchor: { messageRef: message.messageRef, sender: 'member:human', preview: request.body, sequence, occurredAt: message.occurredAt }, ...(task === undefined ? {} : { task: { taskRef: 'task:1', taskNumber: 1, status: 'todo', resolution: 'open', accountable: 'member:human', liveClaimOwners: [] } }), replyCount: 0, participants: [], newestSequence: sequence, newestOccurredAt: message.occurredAt, newestActor: { memberId: 'member:human', name: 'human' } }
     mainEntries = [...mainEntries, { kind: 'thread-card', sequence, occurredAt: message.occurredAt, card }]
     return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message, ...(task === undefined ? {} : { task }), thread, attention: [], directMarkers: [] } }
   })
@@ -469,13 +469,13 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const promoteThread = vi.fn(async (request: { requestId: string; workspaceId: string; threadRef: string; baseRevision: number }) => {
     const top = viewItems.find(item => (item.thread as { threadRef: string }).threadRef === request.threadRef) ?? viewItems[0]
     if (top === undefined) return { ok: false as const, error: { message: 'thread missing' } }
-    const task = { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: request.threadRef, status: 'todo', resolution: 'open' }
+    const task = { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: request.threadRef, status: 'todo', resolution: 'open', accountable: 'member:human' }
     const thread = { ...(top.thread as object), taskRef: task.taskRef, revision: request.baseRevision + 1 }
     const activity = { activityRef: 'activity:promoted', kind: 'promote' as const, taskRef: task.taskRef, threadRef: request.threadRef, actor: 'member:human', sequence: request.baseRevision + 1 }
     // A promoted Task is brand-new with no Claims, so the Host projects no owners.
     viewItems = viewItems.map(item => ({ ...item, task, thread, taskNumber: 1, liveClaimOwners: [] }))
     mainEntries = mainEntries.map(entry => entry.kind === 'thread-card' && (entry.card as { threadRef: string }).threadRef === request.threadRef
-      ? { ...entry, card: { ...(entry.card as object), task: { taskRef: task.taskRef, taskNumber: 1, status: 'todo', resolution: 'open', liveClaimOwners: [] } } }
+      ? { ...entry, card: { ...(entry.card as object), task: { taskRef: task.taskRef, taskNumber: 1, status: 'todo', resolution: 'open', accountable: task.accountable, liveClaimOwners: [] } } }
       : entry)
     wakeAll()
     return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, activity, task, thread } }
@@ -592,7 +592,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
       return taskRef === undefined ? [] : [[taskRef, item] as const]
     }))
     known.set('task:9c1b02aa-5d3e-4f0a-8b7c-1e2d3f4a5b6c', {
-      task: { taskRef: 'task:9c1b02aa-5d3e-4f0a-8b7c-1e2d3f4a5b6c', projectRef: 'project:engineering', threadRef: 'thread:9c1b02aa-5d3e-4f0a-8b7c-1e2d3f4a5b6d', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:9c1b02aa-5d3e-4f0a-8b7c-1e2d3f4a5b6c', projectRef: 'project:engineering', threadRef: 'thread:9c1b02aa-5d3e-4f0a-8b7c-1e2d3f4a5b6d', status: 'todo', resolution: 'open', accountable: 'member:human' },
     })
     const resolved = request.taskRefs.flatMap(taskRef => {
       const item = known.get(taskRef) ?? [...known.values()].find(candidate => {

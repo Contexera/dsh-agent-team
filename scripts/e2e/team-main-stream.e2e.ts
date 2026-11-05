@@ -55,6 +55,12 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await mainTab.click()
   const taskCard = page.getByRole('button', { name: /^打开 Task #1：实现 API 网关/ })
   await taskCard.waitFor()
+  // A Task card names who holds it, face and words together, and its accessible name states the same responsibility.
+  expect(await taskCard.locator('[data-team-owner]').textContent()).toBe('H你负责')
+  expect(await taskCard.getAttribute('aria-label')).toContain('你负责')
+  // The owner's face is the stack's own circle, and it wears no ring: the loop that paints one around a group is pinned
+  // where a real group stands, in the Inbox row below.
+  expect(await taskCard.locator('[data-team-owner] > *').first().evaluate(node => getComputedStyle(node).boxShadow)).toBe('none')
   expect(await discussionCard.getAttribute('data-main-card')).toBe('discussion')
   // The feed's large target answers on its own surface, not on one edge: the border alone used to lighten under the
   // pointer, which left the fill untouched and made the only reacting edge fainter.

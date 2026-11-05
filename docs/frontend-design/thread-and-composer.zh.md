@@ -54,7 +54,7 @@ Thread 里的一条 Message，可以通过「选中它所回答的那条 Message
 - 方位（本条的硬约束）：入口的任何状态都**不放在身份行上**。一个 run 里的后续消息没有自己的身份行内容，状态簇停在那里只会孤零零地悬在行尾；而任何靠右的落点都要读者为真正想看的价值横穿整列。状态改为**领起入口行**：与上方正文同一个左缘，且整条 feed 的所有入口共用一个 x。shipped DSH 的行也是这么做的（`SkillRow` 折叠态的首位槽、`JobListAction` 触发钮「点在前、计数在后」）。
 - 状态簇（`.stateCluster`）：**未走完的** taskful 入口依次是三样东西。第一，Task 在办 Claim 的所有者头像叠放。第二，`taskStatusDot(status)` 对应的 8px `TeamStateDot`。第三，本地化状态词。`in_progress`→ongoing、`in_review`→warning、`done`→done 走共享 `StateDot`。`todo` 是空心圆环、`closed` 是 tertiary 安静点。五个状态共用同一套形态语言。Claim 是 Host 事实而非装饰。只有 `in_progress`/`in_review` 的 Task 才有所有者。`released` 的 Claim 已不是工作，所有者按 Claim 顺序去重。taskless 入口不虚构状态点。
 - **已了结（done / closed）的 Task 整个簇退位，只领一个未读胶囊**：扫描已了结工作交给看板；在完工的行上画所有者叠放，回答的是没人问的问题。
-- `TeamAvatarStack` 是 18px 交叠圆圈，用共享成员色相，最多 3 枚 + `+N` 一枚。相邻两面靠 2px 环分开，环把自己从叠放所在的表面上切出来。取值与两层画法见下文「收件箱」入口段。Inbox 页行与 Project feed 入口行都落在页面底色上。圆圈本身是装饰，所以整个叠放是一个 `role="img"`，标签写出完整名单（`claimers`）。
+- `TeamAvatarStack` 是 18px 圆圈，用共享成员色相，每枚压住前一枚 4px，最多 3 枚 + `+N` 一枚。分隔就是重叠本身——圆自己相交——因为描边必须取所在那一层的颜色，而悬停、焦点、当前选中各换一次底色，每次都把它重画成一圈白边；4px 足够浅，压不坏邻居的首字母。圆圈本身是装饰，所以整个叠放是一个 `role="img"`，标签写出完整名单（`claimers`）。
 - 入口行的其余部分：12px/18px tertiary、`fit-content`、自身无底色无边框。hover 与 `:focus-visible` 只做两件事：文字提亮到 primary，chevron 前推 2px（120ms，reduced-motion 下关闭）。焦点环 2px 主题色。 状态之后接「这条入口是什么」。taskful 是 `Task #N`。taskless 在有后续动态时是本地化 Thread label，入口消息仍是最新事实时是 `replyAction`（回复）。 未走完的入口追加 `· 最近活动 <HH:mm>`，与 Inbox 行共用同一个近度标签。今天就是裸时刻。「不是今天的第一天」才带日子词（`昨天 HH:mm`）。判据是 Host 的 `lastActivityAt` 不同于入口消息自己的 `occurredAt`，即「这条消息之后事情又动过」。精确本地时刻挂控件的 `title`。
 - `done` / `closed` 的 Task 换成脚注形式：`Task #N · <状态词> · <MM-DD>`，落款日是它了结的那天，取 Inbox 老行同样的日期形态，跨年时印完整日期。近度在这里只会在每一行重复一次「什么时候了结的」；精确时刻仍留在控件的 `title` 上，一次悬停即可看到。
 

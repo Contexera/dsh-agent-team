@@ -71,7 +71,7 @@ The dot is 8px of `--dsw-alias-state-business-primary` — the solid ink the que
 
 That fill is translucent, so the ring paints two layers — the fill over that surface's own opaque fill — because the wash alone would darken an already-darkened surface a second time and read as a halo instead of a ring.
 
-The avatar stack keeps the same rule (`avatar-stack.module.css`), and each side names its own surface: the sidebar dot cuts out of `--dsw-specific-sidebar-fill`, the fill the Agent badge cuts itself out of, while the chips on Inbox page rows and Project feed entry rows sit on the page fill `--dsw-alias-bg-base`. Handing over no fill leaves both layers the same colour, which draws nothing extra, so the mark reads as laid over the icon's strokes instead of blending into them — on a filled card as much as on a plain one.
+The rule stays with the dot: the avatar stack stands its faces 4px apart instead of ringing them (see [thread-and-composer.md](thread-and-composer.md)), because a face has no fill to name. Each surface that carries the dot names its own fill: the sidebar dot cuts out of `--dsw-specific-sidebar-fill`, the fill the Agent badge cuts itself out of. Handing over no fill leaves both layers the same colour, so the mark reads as laid over the icon's strokes rather than blended into them.
 
 It hangs off the icon's own wrapper (`.inboxMark`: `position: relative`, `flex: 0 0 16px`) at `-2px` on both axes, which is what puts the same dot on the same corner of the same glyph whether that icon sits in the 34px card or in the 36px rail button. On the narrow rail the mark thus stays inside the control box that the rail region clips its overflow to.
 
@@ -117,7 +117,7 @@ A leading cluster hangs there on every row — counted or not, which is the poin
 
 It centres on the identity line it leads rather than sharing that line's baseline, because the chip that is the Human's picture has none to share. A browser reads a replaced box as resting on its bottom edge, so baseline alignment dropped the identity line 4px and made that row 4px taller while an initial-led row stayed put (the shipped two-line row centres its own marker on its heading line the same way, `.searchResultHeading`).
 
-Everything the row says opens on the column after it, so the identity line, the gist under it, and the section heading above it share one left edge (34px from the row's edge) on every row that draws a single face — which is what the section heading is inset to. A stack widens its own row by 12px per extra face instead of every other row reserving the width of the widest stack. The row thus has three left edges where it had two: the count and the gist at 8px, the provenance at 34px, and the section heading a third.
+Everything the row says opens on the column after it, so the identity line, the gist under it, and the section heading above it share one left edge (34px from the row's edge) on every row that draws a single face — which is what the section heading is inset to. A stack widens its own row by 14px per extra face (an 18px circle overlapping the one before by 4px), not the widest stack's width. The row thus has three left edges where it had two: the count and the gist at 8px, the provenance at 34px, and the section heading a third.
 
 ### Information order
 

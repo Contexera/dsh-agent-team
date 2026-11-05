@@ -193,9 +193,9 @@
 }
 
 .boardCardFoot time { margin-left: auto; }
-.boardCardOwner { flex: none; color: var(--dsw-alias-label-caption); }
-/* The executor group keeps its caption and faces on one line; only the row wraps, never mid-group, so a narrow column
-   moves the whole "executors" reading to a second line instead of splitting a caption from its avatars. */
+.boardCardAwaiting { flex: none; color: var(--dsw-alias-label-caption); }
+/* The claim group keeps its faces and their one word on one line; only the row wraps, never mid-group, so a narrow column
+   moves the whole "who claimed it" reading to a second line instead of splitting the word from its faces. */
 .boardCardExecutor { align-items: center; display: inline-flex; flex: none; gap: 4px; }
 .boardCardRole { color: var(--dsw-alias-label-caption); }
 .boardAcceptBadge {

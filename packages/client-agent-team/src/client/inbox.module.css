@@ -49,8 +49,6 @@
 }
 .row:hover,
 .row:focus-visible {
-  /* The row is no longer the page background here, so its marks must cut themselves out of the surface they are on. */
-  --team-mark-ring: var(--dsw-alias-interactive-bg-hover);
   background: var(--dsw-alias-interactive-bg-hover);
 }
 .row:focus-visible {

@@ -936,6 +936,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await panel.waitFor()
   const derivedCard = panel.getByRole('button', { name: new RegExp(`^打开 Task #${derivedNumber}：`) })
   await derivedCard.waitFor()
+  // A Task card names who holds it: the Human started this one, so card and accessible name both say so in the second
+  // person, and the face beside the words is the owner's own.
+  expect(await derivedCard.textContent()).toContain('你负责')
+  expect(await derivedCard.getAttribute('aria-label')).toContain('你负责')
+  expect(await derivedCard.locator('[data-team-owner]').count()).toBe(1)
   await derivedCard.click()
   await page.getByRole('heading', { name: `Task #${derivedNumber}` }).waitFor()
   await expect.poll(async () => await page.locator('[data-team-panel]').count()).toBe(0)
@@ -2347,6 +2352,17 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     await page.getByRole('tab', { name: '看板' }).click()
     await expect.poll(async () => await page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true')
   }
+  // The board names the accountable on the same card: still the Human's Task here, so the foot reads in the second person.
+  expect(await taskEntryRow(page, 1).textContent()).toContain('你负责')
+  // The claimed slot of that same foot: one face and one word, no ring around it, and the whole roster still in the label.
+  const claimedFoot = taskEntryRow(page, 1)
+  const claimMarks = await claimedFoot.locator('[class*="boardCardExecutor"] [role="img"]').evaluate(cluster => ({
+    shadows: Array.from(cluster.children, child => getComputedStyle(child).boxShadow),
+    label: cluster.getAttribute('aria-label'),
+  }))
+  expect(claimMarks.label).toBe('由 @builder 认领')
+  expect(claimMarks.shadows).toEqual(claimMarks.shadows.map(() => 'none'))
+  await page.screenshot({ path: join(UI05_SHOTS, 'board-card-claimed.png'), fullPage: true })
   await taskEntryRow(page, 1).click()
   await page.getByRole('heading', { name: /Task #1/ }).waitFor()
   const transferTrigger = page.getByRole('button', { name: '转交负责人' })
@@ -2366,6 +2382,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await transferTrigger.click()
   const transferDialog = page.getByRole('dialog', { name: '转交负责人' })
   await transferDialog.waitFor()
+  // What taking it on means is stated where the choice is made: responsibility is independent acceptance, so a reader
+  // handing work away knows what they are handing over.
+  expect(await transferDialog.textContent()).toContain('由他作为独立的一方验收这条 Task')
   // The follower set is the whole offer: builder and reviewer both follow this Thread, and the Human
   // is its current accountable, which a transfer never offers back to itself. An owners-based menu
   // would have listed neither builder nor this pair.
@@ -2401,6 +2420,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // records it in the feed. Counted together so a duplicate of either fails.
   await expect.poll(() => page.getByText('已转交给 @reviewer', { exact: true }).count()).toBe(1)
   await expect.poll(() => page.getByText(/把负责人从/).count()).toBe(1)
+  // The band names who holds the Task now, so the receipt can retire without taking the answer with it.
+  const threadOwner = page.locator('[data-team-thread] [data-team-owner]')
+  await expect.poll(() => threadOwner.textContent()).toBe('R负责')
   // The Human is no longer the accountable, so the Task's accept authority moved
   // with it: the transfer is the one path the Human keeps for an owned Task.
   await page.getByRole('button', { name: '关闭任务' }).click()
@@ -2438,6 +2460,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () =>
     JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef)))
     .toContain(`"accountable":"${humanMemberId}"`)
+  await expect.poll(() => threadOwner.textContent()).toContain('你负责')
   // Reopening is the Human's own path again, and the unread gate still fences it: the mend delivered one
   // responsibility notice, which the durable read below consumes. On a closed Thread the reopen lives only in
   // the composer-slot notice, which is the one this beat means.
@@ -2918,20 +2941,20 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     }
   }))
   expect(column.length).toBeGreaterThan(0)
-  // The leading cluster is the Host's roster: one 18px face per owner,
-  // overlapping by 6px (the same again for a `+N` chip), under the Project feed's
-  // own words. A Thread with no live owner falls back to its newest fact's
-  // author, as the taskless rows above do.
+  // The leading cluster is the Host's roster: one 18px face per owner, each
+  // overlapping the one before it by 4px (the same again for a `+N` chip), under
+  // the Project feed's own words. A Thread with no live owner falls back to its
+  // newest fact's author, as the taskless rows above do.
   const inboxNow = scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id })
   const hostRows = [...inboxNow.items, ...inboxNow.recent]
-  const clusterWidth = (owners: number): number => owners === 0 ? 18 : 18 + 12 * (Math.min(owners, 3) - 1) + (owners > 3 ? 12 : 0)
+  const clusterWidth = (owners: number): number => owners === 0 ? 18 : 18 + 14 * (Math.min(owners, 3) - 1) + (owners > 3 ? 14 : 0)
   for (const section of column) {
     for (const row of section.rows) {
       const item = hostRows.find(candidate => (candidate.previewText ?? '') === row.text)
       expect(item).toBeDefined()
       expect(row.actorLabel).toBe(item!.liveClaimOwners.length === 0
         ? `最新来自 @${item!.newestActor.name}`
-        : `由 ${item!.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
+        : `由 ${item!.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 认领`)
       expect(row.actorWidth).toBe(clusterWidth(item!.liveClaimOwners.length))
       // The text column follows the cluster actually drawn: one face's width per
       // face, never a reserved widest stack.
@@ -3067,9 +3090,18 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(stackItem.liveClaimOwners.map(owner => owner.name).sort()).toEqual(
     claimants.map((entry: { member: { handle: string } }) => entry.member.handle).sort())
   expect(stackBox.circles).toBe(Math.min(stackItem.liveClaimOwners.length, 3) + (stackItem.liveClaimOwners.length > 3 ? 1 : 0))
-  expect(stackBox.label).toBe(`由 ${stackItem.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
+  expect(stackBox.label).toBe(`由 ${stackItem.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 认领`)
   expect(stackBox.width).toBe(clusterWidth(stackItem.liveClaimOwners.length))
   expect(stackBox.inset).toBe(stackBox.width + 8)
+  // No shadow on any face, and every chip after the first slides its 4px overlap (a stack of one cannot show that half).
+  await stackRow.hover()
+  const stackMarks = await stackRow.locator('[class*="rowActor"] [role="img"]').evaluate(cluster => ({
+    overlaps: Array.from(cluster.children, child => getComputedStyle(child).marginLeft),
+    shadows: Array.from(cluster.children, child => getComputedStyle(child).boxShadow),
+  }))
+  expect(stackMarks.overlaps.slice(1)).toEqual(stackMarks.overlaps.slice(1).map(() => '-4px'))
+  expect(stackMarks.shadows).toEqual(stackMarks.shadows.map(() => 'none'))
+  await page.mouse.move(0, 0)
   // The row also states the Task's standing (dot plus status word, as on every
   // Task surface). It arrives on a wake after the page opened, in the busiest row
   // shape.

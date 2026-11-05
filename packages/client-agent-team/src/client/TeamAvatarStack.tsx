@@ -35,13 +35,16 @@ export function TeamAvatarStack({ owners, label, human }: {
   const shown = owners.slice(0, MAX_VISIBLE)
   const overflow = owners.length - shown.length
   return <span className={css.stack} role="img" aria-label={label}>
-    {shown.map(owner => <OwnerAvatar key={owner.memberId} owner={owner} human={human} />)}
+    {shown.map(owner => <TeamAvatarFace key={owner.memberId} owner={owner} human={human} />)}
     {overflow > 0 && <span className={css.overflow}>{`+${overflow}`}</span>}
   </span>
 }
 
-/** Only an owner the seat identifies as the Human consults an image; undecodable bytes keep the initial. */
-function OwnerAvatar({ owner, human }: {
+/**
+ * One face at the size a row draws people, so a stack's circles and a seat's person are the same mark. Only the Human
+ * consults an image; undecodable bytes keep the initial.
+ */
+export function TeamAvatarFace({ owner, human }: {
   readonly owner: TeamAvatarOwner
   readonly human: TeamAvatarHuman | undefined
 }) {

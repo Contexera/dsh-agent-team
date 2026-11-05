@@ -853,7 +853,7 @@ describe('Team conversation surfaces', () => {
       messageRef: ref, projectRef: 'project:1', threadRef: 'thread:1', taskRef: 'task:1',
       sender: 'member:builder', body, topLevel: false, sequence, occurredAt } })
     const historyWith = (facts: unknown[]) => b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open', accountable: 'member:human' },
       thread: { threadRef: 'thread:1', revision: 2 }, anchor, claims: [], facts, cursor: 0, hasMore: false,
     } } as never))
     const row = (ref: string) => document.querySelector(`[data-message-ref="${ref}"]`)
@@ -902,7 +902,7 @@ describe('Team conversation surfaces', () => {
     const anchor = { messageRef: 'message:anchor', projectRef: 'project:1', threadRef: 'thread:1', taskRef: 'task:1',
       sender: 'member:human', body: 'first task', topLevel: true, sequence: 2, occurredAt: '' }
     const historyWith = (facts: unknown[]) => b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open', accountable: 'member:human' },
       thread: { threadRef: 'thread:1', revision: 2 }, anchor, claims: [], facts, cursor: 0, hasMore: false,
     } } as never))
     const backfillFact = { kind: 'message', sequence: 1, message: { messageRef: 'message:old-1', projectRef: 'project:1', threadRef: 'thread:1',
@@ -963,7 +963,7 @@ describe('Team conversation surfaces', () => {
     const nextFact = { kind: 'message', sequence: 10, message: { messageRef: 'message:new-10', projectRef: 'project:1', threadRef: 'thread:1',
       taskRef: 'task:1', sender: 'member:builder', body: 'fresh arrival two', topLevel: false, sequence: 10, occurredAt: '' }, mentions: [] }
     const historyWith = (facts: unknown[]) => b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open', accountable: 'member:human' },
       thread: { threadRef: 'thread:1', revision: 3 }, anchor, claims: [], facts, cursor: 0, hasMore: false,
     } } as never))
 
@@ -1022,7 +1022,7 @@ describe('Team conversation surfaces', () => {
     const watchedFact = { kind: 'message', sequence: 9, message: { messageRef: 'message:new-9', projectRef: 'project:1', threadRef: 'thread:1',
       taskRef: 'task:1', sender: 'member:builder', body: 'watched live', topLevel: false, sequence: 9, occurredAt: '' }, mentions: [] }
     b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open', accountable: 'member:human' },
       thread: { threadRef: 'thread:1', revision: 3 }, anchor, claims: [], facts: [watchedFact], cursor: 0, hasMore: false,
     } } as never))
 
@@ -1084,7 +1084,7 @@ describe('Team conversation surfaces', () => {
     const failedFact = { kind: 'message', sequence: 9, message: { messageRef: 'message:new-9', projectRef: 'project:1', threadRef: 'thread:1',
       taskRef: 'task:1', sender: 'member:builder', body: 'unacknowledged', topLevel: false, sequence: 9, occurredAt: '' }, mentions: [] }
     b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open', accountable: 'member:human' },
       thread: { threadRef: 'thread:1', revision: 3 }, anchor, claims: [], facts: [failedFact], cursor: 0, hasMore: false,
     } } as never))
 

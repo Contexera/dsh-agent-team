@@ -125,11 +125,19 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // the retry replay and the held-batch attribution, each with the reason the
 // code cannot show. 4189 was the new audited count; 4315 restores the ~3%
 // slack the rule above asks for, after the previous row was left at zero slack.
+// 2026-11-05: the Task accountable seat added what the code cannot show — one component every
+// face that names responsibility draws from, the single wording function its accessible names
+// share, and the two resolutions behind them (the roster on the Client's faces, the board's own
+// projection where no roster is held). 1216 was the audited count; 1250 restores the ~3%.
+// 2026-11-05: the same round gave the browser lane its first witness for a Task's claimed slot —
+// the face-and-word group on a card whose Task was claimed, its accessible roster, and the circles
+// that paint nothing — which until then only the component suite rendered. The scope had been left
+// at zero slack; 1660 restores the ~3% the rule asks for over that audited count.
 const COMMENT_BUDGETS = {
   'packages/agent-team/src': 4315,
-  'packages/client-agent-team/src': 1215,
+  'packages/client-agent-team/src': 1250,
   'packages/tool-agent-team/src': 242,
-  'scripts': 1622,
+  'scripts': 1660,
 }
 
 const EXCLUDED_DIRECTORY = 'vendor'

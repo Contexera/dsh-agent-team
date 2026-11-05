@@ -78,7 +78,7 @@ Claims are Host facts rather than decoration: only an `in_progress` or `in_revie
 
 A resolved Task drops the whole cluster and leads with the unread capsule alone — the board owns scanning resolved work, and an owner stack on finished work answers a question nobody is asking.
 
-`TeamAvatarStack` draws overlapping 18px circles in the shared Member hue, capped at three plus a `+N` chip. A 2px ring separates neighbours by cutting the faces out of the surface the stack is laid on (values and layering: the Inbox entry note below, where both kinds of row sit on the page fill). The circles are presentational, so the stack is one `role="img"` whose label names the whole roster (`claimers`).
+`TeamAvatarStack` draws 18px circles in the shared Member hue, each overlapping the one before by 4px, capped at three plus a `+N` chip. The overlap is the separator — the circles themselves cross — because a ring would have to take the colour of whatever surface the row sits on, and hover, focus and current fills each repainted it into a white halo; 4px is shallow enough that a neighbour's initial stays whole. The circles are presentational, so the stack is one `role="img"` whose label names the whole roster (`claimers`).
 
 What the entry is follows the state on the same line: 12px/18px tertiary and `fit-content`, with no box of its own. Hover and `:focus-visible` only brighten it to primary and nudge the chevron 2px (120ms, off under reduced motion), under a 2px business-colored focus ring. That text is `Task #N` for a taskful entry, and for a taskless one the localized Thread label once the Thread has follow-up activity, or `replyAction` while the entry Message is still the newest fact.
 

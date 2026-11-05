@@ -20,6 +20,7 @@ import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
 import { firstSentence, formatActivity, formatRiskClass, formatTaskStatus, plainGist, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
+import { TeamOwnerSeat } from './TeamOwnerSeat.tsx'
 import { TeamThreadCard } from './TeamThreadCard.tsx'
 import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { daySeparatorLabel, localDateKey } from './team-separators.ts'
@@ -29,7 +30,7 @@ import { cachedResolvedMessageRef, useResolvedMessageRefVersion } from './refs.t
 import { factKey, firstUnreadMention, mergeFacts, messageFact, stableMentionNames, type ThreadFactKey } from './thread-facts.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread, resolvedThreadDestination } from './refs.ts'
-import { rosterProjectName, rosterMember } from './refs.ts'
+import { rosterAccountableOwner, rosterProjectName, rosterMember } from './refs.ts'
 import css from './conversation.module.css'
 import threadCss from './thread.module.css'
 
@@ -354,6 +355,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       card={entry.card}
       unread={false}
       human={humanIdentity}
+      humanMemberId={projectView?.humanMemberId}
+      accountableOwner={rosterAccountableOwner(members, projectView?.humanMemberId, humanName, task.accountable)}
       t={t}
       onOpen={() => selectThread(entry.card.threadRef, projectRef, task.taskRef, task.taskNumber)}
     />
@@ -512,6 +515,12 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           <div className={threadCss.titleLine}>
             <h1>{task === undefined ? t('threadLabel') : t('taskLabel', { number: resolvedTaskNumber ?? '…' })}</h1>
             {task !== undefined && <Pill><TeamStateDot size={8} state={taskStatusDot(task.status)} />{formatTaskStatus(task.status, t)}</Pill>}
+            {/* Identity beside status, so a transfer's receipt can retire without taking the answer with it. */}
+            {task !== undefined && <TeamOwnerSeat
+              owner={rosterAccountableOwner(members, projectView?.humanMemberId, humanName, task.accountable)}
+              human={humanIdentity}
+              humanMemberId={projectView?.humanMemberId}
+              t={t} />}
           </div>
           {taskTitle !== undefined && taskTitle !== '' && <p className={threadCss.taskTitle} title={taskTitle}>{taskTitle}</p>}
         </div>

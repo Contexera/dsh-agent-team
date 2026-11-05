@@ -1,4 +1,4 @@
-import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamMemberDiagnosticClass, AgentTeamMemberId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamInboxActor, AgentTeamMemberDiagnosticClass, AgentTeamMemberId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import { resolveBodyMentions, scanBodyHandles } from '@contexera/dsh-agent-team/mentions'
 import { extractMarkdownPlainText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamKey } from './locales.ts'
@@ -294,8 +294,54 @@ export function mentionNamesOf(
     .filter((name): name is MentionHandle => name !== undefined)
 }
 
+/** One Member written the way every surface addresses them: `@handle`, with one prefix however the name was spelled. */
+export function memberTag(name: string): string {
+  return `@${name.replace(/^@/, '')}`
+}
+
 export function claimersLabel(owners: ReadonlyArray<{ readonly name: string }>, t: TeamConversationProps['t']): string {
-  return t('claimers', { names: owners.map(owner => `@${owner.name}`).join(', ') })
+  return t('claimers', { names: owners.map(owner => memberTag(owner.name)).join(', ') })
+}
+
+/**
+ * The faces an executor group lists: the live Claim owners other than the accountable, whose face the seat beside the
+ * group has already drawn. One person was otherwise drawn twice in one line — once as the owner, once as an executor —
+ * which read as two roles disagreeing about who holds the Task rather than as one person doing both.
+ */
+export function claimersBeyond<T extends { readonly memberId: AgentTeamMemberId }>(
+  owners: readonly T[],
+  accountable: AgentTeamMemberId | undefined,
+): readonly T[] {
+  return accountable === undefined ? owners : owners.filter(owner => owner.memberId !== accountable)
+}
+
+/**
+ * How a Task's responsibility is stated: the reader in the second person, a suspended owner as a standing, any other
+ * Member by handle. The card, the board and the Thread page therefore cannot describe one Task three ways.
+ */
+export function accountableLabel(
+  owner: Pick<AgentTeamInboxActor, 'memberId' | 'name' | 'state'>,
+  humanMemberId: AgentTeamMemberId | undefined,
+  t: TeamConversationProps['t'],
+): string {
+  if (owner.state === 'suspended') return t('taskOwnerSuspended')
+  if (owner.memberId === humanMemberId) return t('taskOwnerYou')
+  return t('taskOwner', { name: memberTag(owner.name) })
+}
+
+/**
+ * The standing as the seat writes it: the face beside it already names the person, so the words carry only the role —
+ * `负责`, the reader as `你负责`, a suspended owner as `负责 · 已暂停`. `accountableLabel` keeps the full sentence the
+ * card's accessible name and the seat's own label speak, so the concise line never becomes the only description.
+ */
+export function accountableWord(
+  owner: Pick<AgentTeamInboxActor, 'memberId' | 'state'>,
+  humanMemberId: AgentTeamMemberId | undefined,
+  t: TeamConversationProps['t'],
+): string {
+  if (owner.state === 'suspended') return t('taskOwnerRolePaused')
+  if (owner.memberId === humanMemberId) return t('taskOwnerYou')
+  return t('taskOwnerRole')
 }
 
 /**

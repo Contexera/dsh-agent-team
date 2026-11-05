@@ -140,7 +140,15 @@ Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task
 
 The finished column offers `展开全部已完成` under its head only while the Host reports it cut the column — the board value's `finishedTruncated` — and the control retires once the column shows everything, and at the deepest page the Host accepts, rather than standing there with nothing to do. A full column is not a cut one, so the control never appears on a page that merely happens to be full. An empty column states its own `0` in the head and draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
 
-A card splits the two people roles by their count. The accountable owner stays text — the reader as `你负责`, resolved from the board value's `humanMemberId` — because one named person has to be read. Executors are the avatar stack under a `执行者` caption, since they are 0–N read at a glance; an open Task nobody has claimed says `待认领`, and a resolved card drops the executor slot rather than claiming nobody is on it.
+A card splits the two people roles by their count. The accountable is one person, so `TeamOwnerSeat` draws them as one: the 18px face every card already draws, then the role word alone — `负责`, the reader as `你负责` (from `humanMemberId`), a suspended owner as `负责 · 已暂停`. The face has already named the person, so a handle there only added a third size of text to a 12px line. The seat is one `role="img"` whose label, and hover `title`, is the full `负责人 @handle`; a card's accessible name says the same sentence from the same function.
+
+Claimants are the avatar stack followed by `认领`, the same word `待认领` uses, so the two states of one slot share one vocabulary; the word after the faces is what keeps a group from reading as more owners. The group lists the claimants the seat does not already stand for, so one person is drawn once in a line: a Task its owner claimed alone shows the seat and nothing beside it, since the status already says work has started. An open Task nobody has claimed says `待认领`, and a resolved card drops the slot rather than claiming nobody is on it.
+
+Faces overlap by 4px and wear no ring: a ring has to be the colour of the surface under it, and every wash a card or row takes on — hover, focus, current — turned that guess into a white halo around the circles. The overlap is shallow so a neighbour's initial stays whole; the group reads as one cluster because the circles themselves cross, not because a border cuts them out.
+
+The seat is one component on every face that names a Task's responsibility — a board card, a Main stream card, a Thread page's band — so responsibility cannot be three pictures of the same person. Its wording is one pair of functions: `accountableWord` for the short line, `accountableLabel` for the full sentence the label and hover carry, so the two cannot describe the Task differently.
+
+The cards and the band resolve the person from the roster (`rosterAccountableOwner`, the resolution every other person ref on those surfaces uses), and an id the roster cannot answer for stays the id rather than being invented. The board reads the Host's own `accountableOwner`, because the cross-Workspace board holds no roster.
 
 A `待你验收` badge rides the cards the reader may accept.
 
@@ -154,7 +162,7 @@ A Thread card is the feed's one large target: the page ground at rest behind a h
 
 The Main stream holds five entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), owner-added/owner-removed activity rows, subscription lifecycle lines, Thread cards, and published subscription events.
 
-A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status and, until it resolves, its live Claim owners or `待认领`. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page.
+A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status, who holds it, and — until it resolves — its live Claim owners followed by `认领`, or `待认领`. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page. Responsibility is the one fact a card cannot leave out: the reader transfers a Task from the card's Thread, so the card is also where they check who has it now.
 
 Every one of those names is compact text: the body's first non-empty line with its Markdown projected to plain text, then bounded — projection first, so a marker pair like `**…**` is never cut into an opener that pairs with nothing. The same rule serves a Thread chip's title, a quote line, an Inbox gist and a board card's subject, while a Message body still renders its Markdown wherever it is a Message.
 
@@ -264,13 +272,19 @@ That band's feedback line is a third failure shape beside `errorState` and `erro
 
 A committed transfer states its result in the same slot at the same grade, in the secondary ink: the Host's activity row records it in the feed, but a long Thread scrolls that row away from the control just used. The receipt is derived from the projection, so a later move retires it rather than leaving a line claiming the Task is somewhere it no longer is.
 
-The transfer control opens a dialog rather than a menu, because the offer is a list of people and "nobody to offer" is a real answer where an empty menu would be a dead end. The candidates are this Thread's enabled followers and nothing else: a handover is a move inside a conversation, so the readers already in it are the people it can land on, while the Host's wider permission of any enabled Project member is an authority rather than an offer.
+The transfer control opens a dialog rather than a menu, because the offer is a list of people and "nobody to offer" is a real answer where an empty menu would be a dead end.
+
+Before it offers anyone, the dialog states what taking the Task on means: a transfer moves responsibility only, and responsibility includes accepting the Task as a party that did not do the work. A reader handing work away decides who will verify it, so that meaning belongs in the dialog rather than in the hover hint — the hint states the consequence of the verb, the dialog the consequence of the choice.
+
+The candidates are this Thread's enabled followers and nothing else: a handover is a move inside a conversation, so the readers already in it are the people it can land on, while the Host's wider permission of any enabled Project member is an authority rather than an offer.
 
 The Human joins that list only by following this Thread, because the follower set is every Member's Attention. The current accountable is never offered to itself, a departed or disabled member is filtered out, and with no candidate left the body states that in place of the list instead of drawing buttons that would fail. Focus enters the dialog, Tab walks the candidates, Escape closes it, and at 390×844 the list scrolls inside the card rather than pushing the footer out of reach.
 
 A candidate is the ghost row the mention picker already draws for the same job: one borderless row per person, at the call radius, with the interactive fill under the pointer. Drawn as outlined buttons the list stood level with the dialog's own Cancel and read as five controls instead of one list.
 
 A failure is stated where the reader pressed: a Remote error lands inside the dialog beside the candidates, while a fence closes the dialog and re-reads through the page's recovery path, so one message is never drawn twice. The write stays non-optimistic — every candidate is disabled until the Host answers, the Task's current accountable stays on screen untouched, and the dialog closes on the committed result rather than on the click.
+
+The band names the Task, its status and its accountable — identity, in the same title line, so the reader can see who holds it without opening the dialog that moves it. Responsibility stands there permanently rather than only in the transfer receipt: the receipt says what the last click did, the seat says where the Task is, and the second answer outlives the first.
 
 The band names the Task and states what is wrong with it; it does not carry the Task's work queue. A Claim reaches the reader as the fact that recorded it — the activity line in the timeline — and as the owners drawn on a feed entry row, and the early-accept dialog still lists the open Claims it will complete, because that list is what the acceptance is decided on. No surface lists Claims on demand, so the band stays identity plus a real problem.
 

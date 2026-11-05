@@ -24,7 +24,7 @@ import { formatActivity } from './team-formatters.ts'
 import { factKey, firstUnreadMention, mergeFacts, messageFact, stableMentionNames } from './thread-facts.ts'
 import { chunkTimeline, placeCards, type TimelineNode } from './team-separators.ts'
 import { cachedResolvedMessageRef, useResolvedMessageRefVersion } from './refs.ts'
-import { hostTaskRefLookup, hostThreadRefLookup, jumpToTaskThread, jumpToThread, resolvedThreadDestination, type ResolvedMemberRef } from './refs.ts'
+import { hostTaskRefLookup, hostThreadRefLookup, jumpToTaskThread, jumpToThread, resolvedThreadDestination, rosterAccountableOwner, type ResolvedMemberRef } from './refs.ts'
 import { useThreadFollow } from './thread-actions.ts'
 import { useTeamThreadController } from './thread-controller.ts'
 import projectCss from './project.module.css'
@@ -221,6 +221,8 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
       card={entry.card}
       unread={false}
       human={humanIdentity}
+      humanMemberId={humanMemberId}
+      accountableOwner={rosterAccountableOwner(members, humanMemberId, humanName, task.accountable)}
       t={t}
       onOpen={() => { selectThread(entry.card.threadRef, projectRef, task.taskRef, task.taskNumber) }}
     />

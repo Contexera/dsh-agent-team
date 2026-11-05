@@ -1,0 +1,9 @@
+/* The 6px step a caption takes to the faces it introduces: one group, never broken mid-seat when a card head wraps. */
+.seat {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+}
+
+.standing { color: var(--dsw-alias-label-secondary); }

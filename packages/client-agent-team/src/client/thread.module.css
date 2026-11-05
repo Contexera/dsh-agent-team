@@ -5,6 +5,12 @@
   gap: 10px;
 }
 .titleLine h1 { margin: 0; }
+/* The seat's words take the band's own chrome scale — the status pill's 12px/18 — because a seat at the body size beside
+   an 11–12px pill put two type sizes on one line, and the reader read the seat as a foreign element. */
+.titleLine [data-team-owner] {
+  font-size: 12px;
+  line-height: 18px;
+}
 
 .riskSection {
   margin: 14px auto 0;

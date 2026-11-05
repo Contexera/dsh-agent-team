@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
-  AgentTeamProject, AgentTeamProjectRef, AgentTeamClientMemberStatus, AgentTeamMemberId,
+  AgentTeamInboxActor, AgentTeamProject, AgentTeamProjectRef, AgentTeamClientMemberStatus, AgentTeamMemberId,
   AgentTeamMessageRef,
   AgentTeamResolveMessageRefsRequest, AgentTeamResolveMessageRefsResult,
   AgentTeamResolveTaskRefsRequest, AgentTeamResolveTaskRefsResult, AgentTeamResolveThreadRefsRequest, AgentTeamResolveThreadRefsResult,
@@ -297,5 +297,24 @@ export const rosterMember = (
     handle: hit.member.handle.replace(/^@/, ''),
     ...(openable ? { sessionId: hit.member.sessionId } : {}),
     openable,
+  }
+}
+
+/**
+ * A Task's accountable as this roster draws them: the Human by their own name, a Member by handle, and — like the Host's
+ * own resolution — an unresolvable id left as the id. The state rides along so a suspended owner reads as a standing.
+ */
+export const rosterAccountableOwner = (
+  members: readonly AgentTeamClientMemberStatus[],
+  humanMemberId: AgentTeamMemberId | undefined,
+  humanHandle: string,
+  accountable: AgentTeamMemberId,
+): AgentTeamInboxActor => {
+  const resolved = rosterMember(members, humanMemberId, humanHandle, accountable)
+  const state = members.find(status => status.member.memberId === resolved?.memberId)?.member.state
+  return {
+    memberId: resolved?.memberId ?? accountable,
+    name: resolved?.handle ?? accountable,
+    ...(state === undefined ? {} : { state }),
   }
 }

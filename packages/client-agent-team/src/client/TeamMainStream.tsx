@@ -16,6 +16,7 @@ import { TeamMessage } from './TeamMessage.tsx'
 import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
 import { TeamThreadCard } from './TeamThreadCard.tsx'
+import { rosterAccountableOwner } from './refs.ts'
 import { formatAbsoluteTime, formatInboxTime, mentionNamesOf, plainGist } from './team-formatters.ts'
 import { chunkRunsWithDays, isRunGap, localDateKey } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
@@ -256,6 +257,8 @@ export function TeamMainStream({
           card={entry.card}
           unread={entry.unread}
           human={human}
+          humanMemberId={humanMemberId}
+          accountableOwner={entry.card.task === undefined ? undefined : rosterAccountableOwner(members, humanMemberId, humanName, entry.card.task.accountable)}
           t={t}
           onOpen={() => {
             if (entry.card.task === undefined) onOpenDiscussion(entry.card.threadRef)

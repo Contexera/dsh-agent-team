@@ -1,19 +1,19 @@
+/* Faces overlap: one circle's edge crosses the next, which is what makes them read as one cluster — no separator ring,
+   because a ring has to be the colour of the surface beneath it, and every wash a card or row takes on (hover, focus,
+   current) repainted it into a white halo. The overlap is 4px rather than a deeper cut so a neighbour's initial survives. */
 .stack {
   align-items: center;
   display: inline-flex;
   flex: none;
 }
+.stack > :not(:first-child) { margin-left: -4px; }
 
-/* One overlapping circle; the 2px ring separates neighbours. The ring paints the surface the stack sits on (the row's
-   translucent wash over the page fill, as two shadow layers), so a hovered row shows no halo of empty space around the faces. */
+/* One 18px circle, the size a row draws people. */
 .avatar,
 .avatarImage,
 .overflow {
   align-items: center;
   border-radius: 50%;
-  box-shadow:
-    0 0 0 2px var(--team-mark-ring, var(--dsw-alias-bg-base)),
-    0 0 0 2px var(--dsw-alias-bg-base);
   corner-shape: round;
   display: inline-flex;
   font-size: 9px;
@@ -38,6 +38,3 @@
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-secondary);
 }
-
-/* Every chip after the first overlaps its neighbour, pictures included. */
-.stack > :not(:first-child) { margin-left: -6px; }

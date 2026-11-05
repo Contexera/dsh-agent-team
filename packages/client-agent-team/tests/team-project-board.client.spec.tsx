@@ -94,7 +94,9 @@ describe('Team Project board', () => {
     }], finished: [], finishedTruncated: false } }))
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     fireEvent.click(await b.view.findByRole('tab', { name: '看板' }))
-    await waitFor(() => expect(b.view.getByText('负责人已暂停')).toBeTruthy())
+    // The word marks the standing on the line; the sentence the seat speaks says who is paused and why it matters.
+    await waitFor(() => expect(b.view.getByText('负责 · 已暂停')).toBeTruthy())
+    expect(b.view.container.querySelector('[data-team-owner]')?.getAttribute('aria-label')).toBe('负责人已暂停')
     await b.runtime.dispose()
   })
 
@@ -174,15 +176,15 @@ describe('Team Project board', () => {
         // `task:2` sits in no loaded Message: only the Host board can surface it,
         // which is what pins the board's coverage to the Project rather than the feed.
         tasks: [
-          { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' },
-          { taskRef: 'task:2', projectRef: 'project:engineering', threadRef: 'thread:2', status: 'todo', resolution: 'open' },
+          { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open', accountable: 'member:human' },
+          { taskRef: 'task:2', projectRef: 'project:engineering', threadRef: 'thread:2', status: 'todo', resolution: 'open', accountable: 'member:human' },
         ],
         threads: [{ threadRef: 'thread:1', taskRef: 'task:1', revision: 2 }, { threadRef: 'thread:2', taskRef: 'task:2', revision: 1 }],
         taskNumbers: [{ taskRef: 'task:1', taskNumber: 1 }, { taskRef: 'task:2', taskNumber: 2 }],
         items: [{
           message: { messageRef: 'message:seed-0', projectRef: 'project:engineering', threadRef: 'thread:1', taskRef: 'task:1', sender: 'member:human', body: '实现 API 网关', topLevel: true, sequence: 1, occurredAt: '2026-10-14T09:00:00.000Z' },
           mentions: [],
-          task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' },
+          task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open', accountable: 'member:human' },
           taskNumber: 1,
           thread: { threadRef: 'thread:1', taskRef: 'task:1', revision: 2 },
           liveClaimOwners: [],
@@ -201,11 +203,11 @@ describe('Team Project board', () => {
         humanMemberId: 'member:human',
         open: [
           { workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: 'thread:2',
-            task: { taskRef: 'task:2', projectRef: 'project:engineering', threadRef: 'thread:2', status: 'todo', resolution: 'open' },
+            task: { taskRef: 'task:2', projectRef: 'project:engineering', threadRef: 'thread:2', status: 'todo', resolution: 'open', accountable: 'member:human' },
             taskNumber: 2, subject: '接入计费', liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
             lastActivitySequence: 2, lastActivityAt: '2026-10-14T10:00:00.000Z', relation: 'project-owner', needsAcceptance: false },
           { workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: 'thread:1',
-            task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' },
+            task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open', accountable: 'member:human' },
             taskNumber: 1, subject: '实现 API 网关', liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
             lastActivitySequence: 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false },
         ],
@@ -237,7 +239,7 @@ describe('Team Project board', () => {
     // Seven resolved Tasks: more than the Host's default page of five.
     const finished = Array.from({ length: 7 }, (_unused, index) => ({
       workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: `thread:${index + 1}`,
-      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${index + 1}`, status: 'done', resolution: 'open' },
+      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${index + 1}`, status: 'done', resolution: 'open', accountable: 'member:human' },
       taskNumber: index + 1, subject: `已完成 ${index + 1}`, liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
       lastActivitySequence: index + 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false,
     }))
@@ -277,7 +279,7 @@ describe('Team Project board', () => {
     // Exactly the Host's default page: a full column with no older work behind it.
     const finished = Array.from({ length: 5 }, (_unused, index) => ({
       workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: `thread:${index + 1}`,
-      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${index + 1}`, status: 'done', resolution: 'open' },
+      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${index + 1}`, status: 'done', resolution: 'open', accountable: 'member:human' },
       taskNumber: index + 1, subject: `已完成 ${index + 1}`, liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
       lastActivitySequence: index + 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false,
     }))
@@ -300,7 +302,7 @@ describe('Team Project board', () => {
     // own maximum, and a control that could only repeat the same request retires.
     const finished = Array.from({ length: 101 }, (_unused, index) => ({
       workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: `thread:${index + 1}`,
-      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${index + 1}`, status: 'done', resolution: 'open' },
+      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${index + 1}`, status: 'done', resolution: 'open', accountable: 'member:human' },
       taskNumber: index + 1, subject: `已完成 ${index + 1}`, liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
       lastActivitySequence: index + 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false,
     }))
