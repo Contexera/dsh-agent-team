@@ -417,3 +417,15 @@ Tag `b830ec950f`（2026-10-29）相对 `dsh-v0.2.1-rc.2` 改动 667 个文件。
 Typert 产物无变化。§3.6 未因格式变化重新触发：`packages/session` 下改动的文件全是 manifest 的版本行，没有已发布产物被拒。
 
 认证树上的证据：`npm run typecheck`（517 个 Harness 映射）、`npm test`（1554 通过、1 跳过）、`npm run lint`（99 warning、0 error）、`npm run build`、`npm pack --dry-run`（358 文件）、`check:artifact`（65 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（10 条旅程）。
+
+### DSH 0.2.2-rc.1
+
+DSH `0.2.2-rc.1` 在移动后的 peer 线 `>=0.2.2-rc.1 <0.2.3` 上认证通过，随 Agent Team `0.2.7` 发布。候选版本落在 `>=0.2.1-rc.2 <0.2.2` 之外，因此按 §4 移动 peer 而不是就地记录基线。
+
+认证时 npm `next` 指向候选，`latest` 仍指向 `0.2.1-rc.5`，所以声明线继续接纳默认安装真正会解析到的那个宿主。
+
+Tag `66491b05e3`（2026-11-04）相对 `dsh-v0.2.1-rc.2` 改动 8,278 个文件。推动本轮的是四处上游契约变化：设置导航图标有了官方 `settings.section.icon` 槽位、窄屏侧栏变成 drawer、outline 按钮变体把描边改成读 `--dsh-button-outline-color` 的 inset shadow、侧栏 paint inset 从 12px 收到 8px。
+
+§3.6 以零新增拒绝收尾：767 个已存会话被重新打开，755 通过、12 拒绝，而等价对照线拒绝 47 条；多接受的每一条都是 `subagent/descriptor version 2` 工件。§3.5 的扁平安装解析到 322 个 `0.2.2-rc.1` 包、零个更早版本。
+
+认证树上的证据：`npm run typecheck`、`npm test`（2022 通过、1 跳过）、`npm run lint`（102 warning、0 error）、`npm run build`、`npm pack --dry-run`（409 文件）、`check:artifact`（108 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（13 条旅程）。

@@ -354,3 +354,15 @@ Tag `b830ec950f` (2026-10-29) carries 667 changed files against `dsh-v0.2.1-rc.2
 Typert output is unchanged. Section 3.6 is not re-triggered: every changed file under `packages/session` is a manifest version line, and no released artifact content is refused.
 
 Evidence on the certified tree: `npm run typecheck` (517 Harness mappings), `npm test` (1554 passed, 1 skipped), `npm run lint` (99 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (358 files), `check:artifact` (65 runtime relative imports resolved), `git diff --check`, and `npm run test:browser` (10 journeys).
+
+### DSH 0.2.2-rc.1
+
+DSH `0.2.2-rc.1` is certified on a moved peer line, `>=0.2.2-rc.1 <0.2.3`, shipped as Agent Team `0.2.7`. The candidate falls outside `>=0.2.1-rc.2 <0.2.2`, so section 4 moves the peers rather than recording a baseline in place.
+
+At certification time npm `next` pointed at the candidate while `latest` still pointed at `0.2.1-rc.5`, so the declared line keeps admitting the host a default install resolves.
+
+Tag `66491b05e3` (2026-11-04) carries 8,278 changed files against `dsh-v0.2.1-rc.2`. Four upstream contract changes drove the round: the settings nav icon gained an official `settings.section.icon` slot, the narrow sidebar became a drawer, the outline button variant moved its stroke to an inset shadow reading `--dsh-button-outline-color`, and the sidebar paint inset shrank from 12px to 8px.
+
+Section 3.6 closes with no new refusal: 767 stored sessions were reopened, 755 pass and 12 are refused, while the equivalent control line refuses 47; every extra acceptance is a `subagent/descriptor version 2` artifact. Section 3.5 resolves a flat install to 322 `0.2.2-rc.1` packages and zero older ones.
+
+Evidence on the certified tree: `npm run typecheck`, `npm test` (2022 passed, 1 skipped), `npm run lint` (102 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (409 files), `check:artifact` (108 runtime relative imports resolved), `git diff --check`, and `npm run test:browser` (13 journeys).

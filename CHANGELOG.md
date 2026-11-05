@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-11-05
+
 **Added**
 
 - An Agent can set itself a reminder: once at an instant, every N minutes, or on a cron schedule read in UTC+8. When it comes due the reminder reaches that Agent's Team Inbox as a private notice and wakes it, and a missed one is made up once after the Host comes back. The Human can see and cancel any Agent's reminders from that Agent's detail, where each reminder is one row: its note, then schedule and state as one line of facts, and a withdraw control named for the row it withdraws.
@@ -11,6 +13,9 @@ All notable changes to this project are documented in this file. The format foll
 - A Task's responsibility now survives the removal of a Project owner: while the accountable still takes part in the Project the Task stays with it, and responsibility returns to the Human only once that Member is no longer a Project member. An archived Project's open Tasks are returned the same way.
 - A closed Task's Thread can be followed again, which is what keeps a handover reachable on a finished Task: closing ends every Attention row, so a follow is the only Attention row that Thread can still create, and it puts a reader back into the transfer offer without reopening the Task; the finished Task's own resolution and the Human's transfer of it stay legal beside it.
 - A Project has a subscriptions tab that reads rather than authors: an owner arms subscriptions through the `team_subscription` tool, so the page shows each one's trigger, owner, last run, due instant and event count, its stored script, and its run history with the last 8 KiB of stdout and stderr — never a create or edit form. Each run is a row that opens itself for its output. Supervision stays with the Human: pause, resume and delete act on what an owner armed, under the revision the card was read at, and an archived Project drops those two while keeping the list. An event a script publishes appears in the Main stream as script output rather than as an instruction, in the column a Message body occupies.
+
+- A subscription can be armed by an external webhook as well as by a timer: the Host returns the full address exactly once, when the save or reset commits, stores only its hash, and runs the stored script with `{headers, body}` on stdin; a retried request that can no longer read the address back says so instead of showing it again.
+- Failed deliveries now have their own face: a subscription lists the ones whose automatic retries are spent, each with its attempt count, receive and expiry instants, and last error, and an owner replays one against a chosen version — the stored script as it stands now, or the version the request arrived under — each replay counted once by request id. The body stays with the owners, because it may carry secrets.
 
 **Improved**
 
@@ -36,6 +41,8 @@ All notable changes to this project are documented in this file. The format foll
 - An automatic subscription pause now wakes owners with the subscription name and repeated-failure reason, plus the run-log route; it no longer misreports that the reader was removed as a Project owner.
 - Typing `@` straight after Chinese text opens the mention picker and reaches the Member: a call now starts at any `@` outside an ASCII word, so prose that spaces no words needs no space before a name, while an address like `mail@host.example` stays prose.
 - A Thread card's title, a Thread chip's title, a quote line, an Inbox gist and a board card's subject read as the line renders: its Markdown is projected to plain text before the line is cut to width, so `**…**` no longer shows as written. A Message body still renders its Markdown.
+- A Member's avatar initial is the first character of the handle rather than its first UTF-16 unit, so a handle that starts with an astral character draws that character instead of a replacement glyph; every avatar seat derives it through one helper.
+- Team text is counted and cut in code points: a Notice body, an Inbox gist, a compact line and a preview bound all measure what a reader sees, so cutting a long line no longer splits a surrogate pair into a broken character; one module owns the counting and truncation.
 
 ## [0.2.6] - 2026-10-31
 
