@@ -7,6 +7,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { characterLength } from './text.ts'
 
 /** A script snapshot is what runs; the repository file it came from is never read again. */
 export const SUBSCRIPTION_SCRIPT_MAX_BYTES = 16 * 1024
@@ -74,11 +75,6 @@ export type SubscriptionOutput =
   | { readonly ok: false; readonly reason: string }
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
-
-/** Code-point length, which is what the contract's character ceilings count. */
-export function characterLength(value: string): number {
-  return [...value].length
-}
 
 /** The identity of one script snapshot: its exact bytes, so an update is visible in the ledger. */
 export function scriptHash(content: string): string {

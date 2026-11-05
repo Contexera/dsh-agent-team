@@ -3,6 +3,7 @@ import { basename, extname, isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { stableRequestUuid } from './request-scoped-id.ts'
 import { recoveryFor } from './recovery-hints.ts'
+import { truncateToCharacters } from './text.ts'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { AgentTeamAttachmentId } from './types.ts'
 
@@ -42,11 +43,10 @@ export function pathAttachmentId(requestId: string, index: number): AgentTeamAtt
 /** Strip path separators, control characters, Windows-illegal characters, reserved device names, and leading dots from one client-supplied name. */
 export function sanitizeFileName(raw: string): string {
   // oxlint-disable no-control-regex -- strip ASCII control characters, separators, and Windows-reserved characters from client filenames.
-  const cleaned = raw
+  const cleaned = truncateToCharacters(raw
     .replaceAll(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '')
     .replaceAll(/^\.+/g, '')
-    .trim()
-    .slice(0, 180)
+    .trim(), 180)
     .replace(/[\s.]+$/g, '')
   // oxlint-enable no-control-regex
   if (cleaned === '') return 'attachment'

@@ -11,6 +11,7 @@ import {
   type RenderedTeamMessage,
   type TeamMessageSurface,
 } from './surface-visibility.ts'
+import { characterLength, truncateToCharacters } from './text.ts'
 import { formatTeamTimestamp } from './time-format.ts'
 import type {
   AgentTeamActivity,
@@ -161,7 +162,7 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
               ...(repliesTo === undefined ? [] : [repliesTo]),
               `Message: ${boundedNotificationBody(fact.message.body)}`].join('\n')
           },
-          ...(onSurface || fact.message.body.length > NOTIFICATION_BODY_MAX_CHARACTERS ? {} : { message: {
+          ...(onSurface || characterLength(fact.message.body) > NOTIFICATION_BODY_MAX_CHARACTERS ? {} : { message: {
             threadRef: item.thread.threadRef, messageRef: fact.message.messageRef, body: fact.message.body } }) })
       } else if (direct && fact.kind === 'activity') {
         const activity = activityFact(fact.activity)
@@ -198,7 +199,7 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
         const onSurface = isMainEntryOnSurface(surface, entry, project.projectRef)
         candidates.push({ scope, priority: onSurface ? 1 : 0, order: order++, sequence: entry.sequence, detail: true, direct: true,
           text: () => mainNotificationDetail(entry, project, lookup, onSurface),
-          ...(onSurface || entry.message.body.length > NOTIFICATION_BODY_MAX_CHARACTERS ? {} : { message: {
+          ...(onSurface || characterLength(entry.message.body) > NOTIFICATION_BODY_MAX_CHARACTERS ? {} : { message: {
             projectRef: project.projectRef, messageRef: entry.message.messageRef, body: entry.message.body } }) })
       } else if (entry.kind === 'activity' && entry.direct) {
         const onSurface = isMainEntryOnSurface(surface, entry, project.projectRef)
@@ -316,7 +317,8 @@ function ordinaryDigestSection<T>(header: string, entries: readonly T[], text: (
 function notificationDigestText(text: string): string {
   const flattened = text.trim().replace(/\s+/gu, ' ')
   if (flattened === '') return '(empty text)'
-  return flattened.length <= ORDINARY_DIGEST_TEXT_MAX ? flattened : `${flattened.slice(0, ORDINARY_DIGEST_TEXT_MAX)}…`
+  return characterLength(flattened) <= ORDINARY_DIGEST_TEXT_MAX
+    ? flattened : `${truncateToCharacters(flattened, ORDINARY_DIGEST_TEXT_MAX)}…`
 }
 
 function mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: AgentTeamProject,
@@ -397,7 +399,7 @@ function memberReminderDetail(entry: AgentTeamUnreadMemberReminder): string {
 
 function boundedNotificationBody(body: string): string {
   const limit = NOTIFICATION_BODY_MAX_CHARACTERS
-  return body.length <= limit ? body : `${body.slice(0, limit)}\n${NOTIFICATION_TRUNCATION_MARKER}`
+  return characterLength(body) <= limit ? body : `${truncateToCharacters(body, limit)}\n${NOTIFICATION_TRUNCATION_MARKER}`
 }
 
 /**

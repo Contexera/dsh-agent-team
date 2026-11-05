@@ -1,3 +1,4 @@
+import { characterLength } from './text.ts'
 import type { AgentTeamMemberReminderState, AgentTeamReminderRef, AgentTeamReminderSchedule } from './types/entities.ts'
 
 /**
@@ -283,7 +284,7 @@ export function parseReminderNote(input: unknown): ReminderNoteParse {
   if (typeof input !== 'string') return { ok: false, reason: 'Reminder note must be a string.' }
   const note = input.trim()
   if (note === '') return { ok: false, reason: 'Reminder note must say what this reminder is for.' }
-  if ([...note].length > MAX_REMINDER_NOTE_CHARACTERS) {
+  if (characterLength(note) > MAX_REMINDER_NOTE_CHARACTERS) {
     return { ok: false, reason: `Reminder note must be at most ${MAX_REMINDER_NOTE_CHARACTERS} characters.` }
   }
   return { ok: true, note }

@@ -207,8 +207,8 @@ import { formatTeamTimestamp } from './time-format.ts'
 import { resolveBodyMentions } from './mentions.ts'
 import { recoveryFor } from './recovery-hints.ts'
 import { planTaskReminders } from './task-reminders.ts'
+import { characterLength, truncateToCharacters } from './text.ts'
 import {
-  characterLength,
   isScriptHash,
   SUBSCRIPTION_EVENT_DETAIL_MAX_CHARACTERS,
   SUBSCRIPTION_EVENT_ID_MAX_CHARACTERS,
@@ -786,7 +786,7 @@ function assertUnhandledKind(operation: never): never {
  */
 function boundedOpeningLine(body: string, max: number): string {
   const firstLine = body.split('\n').map(line => line.trim()).find(line => line !== '') ?? ''
-  return firstLine.length > max ? `${firstLine.slice(0, max - 1)}…` : firstLine
+  return characterLength(firstLine) > max ? `${truncateToCharacters(firstLine, max - 1)}…` : firstLine
 }
 
 /**
@@ -3073,7 +3073,8 @@ export class AgentTeamLedger {
       const sentByReader = operation.data.senderMemberId === recipientMemberId && operation.data.recipientMemberId === sender.memberId
       if (!sentByOther && !sentByReader) continue
       const direction = sentByOther ? 'them → you' : 'you → them'
-      const truncated = operation.data.body.length > 160 ? `${operation.data.body.slice(0, 160)}…` : operation.data.body
+      const truncated = characterLength(operation.data.body) > 160
+        ? `${truncateToCharacters(operation.data.body, 160)}…` : operation.data.body
       return `(${direction}, at ${formatTeamTimestamp(operation.occurredAt)}) ${truncated}`
     }
     return undefined
@@ -4806,7 +4807,7 @@ export class AgentTeamLedger {
         || reminder.state !== 'active' || !reminderScheduleIsSound(reminder.schedule)
         || !reminderRefIsStorable(reminder.reminderRef)
         || !Number.isFinite(Date.parse(reminder.createdAt))
-        || [...reminder.note].length > MAX_REMINDER_NOTE_CHARACTERS || reminder.note.trim() === ''
+        || characterLength(reminder.note) > MAX_REMINDER_NOTE_CHARACTERS || reminder.note.trim() === ''
         || reminder.reminderRef === '' || this.activeMemberReminderCountFrom(projection, member.memberId) > MAX_ACTIVE_REMINDERS_PER_MEMBER) {
         throw new Error('invalid Member reminder creation')
       }

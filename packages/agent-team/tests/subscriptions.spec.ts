@@ -5,7 +5,6 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  characterLength,
   credentialsProblem,
   nameProblem,
   parseSubscriptionOutput,
@@ -89,8 +88,8 @@ describe('the output contract', () => {
     expect(parseSubscriptionOutput(bytes(JSON.stringify({ id: long, title: 'A' })))).toEqual({
       ok: false, reason: 'line 1: the id is longer than 200 characters',
     })
-    // Code points, not UTF-16 units: 200 four-byte characters are 200 characters, 400 units.
-    expect(characterLength('🎈'.repeat(200))).toBe(200)
+    // Code points, not UTF-16 units: 200 astral characters are 200 characters, 400 units, so the id passes.
+    expect(parseSubscriptionOutput(bytes(JSON.stringify({ id: '🎈'.repeat(200), title: 'A' })))).toMatchObject({ ok: true })
   })
 
   it('bounds detail and requires an http(s) url', () => {

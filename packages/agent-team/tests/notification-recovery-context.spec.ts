@@ -39,6 +39,35 @@ describe('recovery notifications retain unread work within the whole-output budg
       .toMatchObject({ unreadCount: 2, directCount: 2 })
   })
 
+  it('bounds a long body without halving an astral character', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId,
+      name: 'Packaging', description: 'Release verification' })
+    const projectRef = project.project.projectRef
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    // 8300 astral characters are 8300 characters but 16600 UTF-16 units, so a body bounded by units cuts
+    // between the halves of one and leaves a lone surrogate where the reader sees a broken glyph.
+    adapter.enqueue(textResponse('Noted the release check.'))
+    const posted = await ctx.agentTeam.postMainMessage({ requestId: requestId('long'), workspaceId, projectRef,
+      body: `@builder ${'🎈'.repeat(8300)}` })
+    if (posted.kind !== 'committed') throw new Error('setup post failed')
+    await agent.whenIdle()
+    const notice = agent.session.deriveMessages().filter(message => message.role === 'user'
+      && message.source.kind === '@contexera/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
+      .content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
+    expect(notice).toContain('Message body truncated')
+    expect(notice).toContain('🎈')
+    expect(notice).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
+    // The delivered detail is the first 8192 characters by code point, not the first 8192 units: the
+    // mention line stays whole and every glyph it keeps is complete.
+    expect(notice).toContain(`@builder ${'🎈'.repeat(8183)}`)
+    expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing)
+      .toMatchObject({ unreadCount: 1, directCount: 1 })
+  })
+
   it.each([70, 491, 570])('restores direct facts after compaction within the whole budget (%i body repeats)', async repeats => {
     const adapter = new GatedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
