@@ -226,24 +226,24 @@ export function TeamMainStream({
     if (entry.kind === 'subscription-event') {
       // What a script printed is data. It is rendered as text, never parsed for
       // mentions or Markdown, and the marker states that boundary on screen.
-      // The block is content, not a system notice: its ledger mark hangs in the
-      // gutter and the head, title, link and detail share one text column, so
-      // nothing here reads as a line centred over left-aligned prose.
+      // The block is content, not a system notice: its mark seats where a Message's identity seats and the head,
+      // title and detail share the feed's text column. The head states the three facts that never change — which
+      // subscription, when, and how much to trust it — so the warning is a clause there instead of a sentence
+      // repeated under every event, and the title is the one place a reader aims at, so a link is the title.
       const { event } = entry.event
       return <div className={streamCss.entry} data-main-entry="subscription-event" data-unread={unread} key={mainEntryKey(entry)}>
         <div className={streamCss.subscriptionEvent}>
           <span className={streamCss.subscriptionEventMark} aria-hidden="true" />
           <p className={streamCss.subscriptionEventHead}>
-            <span className={streamCss.subscriptionEventLabel}>{t('mainSubscriptionEvent', { name: entry.event.subscriptionName })}</span>
+            <span className={streamCss.subscriptionEventLabel}>{entry.event.subscriptionName}</span>
             <time className={streamCss.subscriptionEventTime} dateTime={entry.occurredAt} title={formatAbsoluteTime(entry.occurredAt)}>{formatInboxTime(entry.occurredAt, t)}</time>
+            <span className={streamCss.subscriptionEventWarning}>{t('mainSubscriptionEventUntrusted')}</span>
           </p>
           <div className={streamCss.subscriptionEventBody}>
-            <p className={streamCss.subscriptionEventTitle}>{event.title}</p>
-            {event.url === undefined ? null : <p className={streamCss.subscriptionEventUrl}>
-              <a href={event.url} target="_blank" rel="noreferrer noopener">{event.url}</a>
-            </p>}
+            <p className={streamCss.subscriptionEventTitle}>
+              {event.url === undefined ? event.title : <a href={event.url} target="_blank" rel="noreferrer noopener">{event.title}</a>}
+            </p>
             {event.detail === undefined ? null : <p className={streamCss.subscriptionEventDetail}>{event.detail}</p>}
-            <p className={streamCss.subscriptionEventNotice}>{t('mainSubscriptionEventUntrusted')}</p>
           </div>
         </div>
       </div>

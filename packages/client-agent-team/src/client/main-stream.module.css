@@ -93,10 +93,10 @@
 
 /* A published subscription event has a Message's shape — a head line, then the
    body — so it seats like one: the mark takes the identity seat and the head,
-   title, link and detail share the feed's text axis. Prose indented off the axis
-   every Message uses, or a line centred over it, would each say this block is
-   not part of the feed. Its text also rides the content axis, so script output
-   is exactly as large as a Message body at any font-size setting. */
+   title and detail share the feed's text axis. Prose indented off the axis every
+   Message uses, or a line centred over it, would each say this block is not part
+   of the feed. One fact per line, never a line per fact: an event lands in a feed
+   that already carries Messages, so it costs three lines, not five. */
 .subscriptionEvent {
   column-gap: 10px;
   display: grid;
@@ -115,9 +115,11 @@
   width: 5px;
 }
 
-/* The clock rides the head sentence instead of being pushed to the column's far
-   edge by a space-between. A script's URL is data, so it is a real link with no
-   referrer back to the app. */
+/* The three facts that never change — which subscription, when, and how much to
+   trust it — ride one line, with the clock beside the name rather than pushed to
+   the column's far edge. The warning is a clause of that line because it holds
+   for every event the subscription ever publishes; drawn as its own sentence it
+   repeated under each one and read as content. */
 .subscriptionEventHead {
   align-items: baseline;
   color: var(--dsw-alias-label-tertiary);
@@ -141,6 +143,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.subscriptionEventWarning {
+  flex: none;
+}
+
+/* The title is what a reader aims at, so it is the one thing at a Message body's
+   size — and when the event carries a validated link, the title is the anchor.
+   A printed URL under it only said the same destination twice. */
 .subscriptionEventBody {
   display: grid;
   font-size: var(--dsh-content-font-size, 14px);
@@ -157,37 +166,27 @@
   overflow-wrap: anywhere;
 }
 
-.subscriptionEventUrl {
-  font-size: 12px;
-  line-height: 18px;
-  margin: 0;
-  opacity: 0.8;
-  overflow-wrap: anywhere;
+.subscriptionEventTitle a {
+  border-radius: var(--dsw-radius-xs, 4px);
+  color: var(--dsw-alias-state-business-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.subscriptionEventTitle a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.subscriptionEventTitle a:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
 }
 
 .subscriptionEventDetail {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
   margin: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-
-.subscriptionEventNotice {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-  margin: 0;
-}
-
-.subscriptionEventUrl a {
-  color: var(--dsw-alias-state-business-primary);
-  text-decoration: none;
-}
-
-.subscriptionEventUrl a:hover {
-  text-decoration: underline;
-}
-
-.subscriptionEventUrl a:focus-visible {
-  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: 2px;
 }

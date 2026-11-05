@@ -65,12 +65,13 @@ it('reads a published subscription event as script data in one text column', asy
   expect((await team.intakeWebhookDelivery({ token, headers: { 'x-github-event': 'push' }, body: '{"ref":"main"}' })).kind).toBe('queued')
 
   const block = page.locator('[data-main-entry="subscription-event"]')
-  await block.getByText('订阅 pipeline 发布了一条事件').waitFor({ timeout: 30_000 })
+  await block.getByText('pipeline', { exact: true }).waitFor({ timeout: 30_000 })
   await block.getByText('pipeline 通了').waitFor()
 
-  // The clock rides the head sentence, and the head, title, link and detail all
-  // stand in one text column behind a mark that takes the identity seat.
-  const label = block.getByText('订阅 pipeline 发布了一条事件')
+  // One head line states the three facts that never change — the subscription, the
+  // clock, the warning — and the head, title and detail all stand in one text column
+  // behind a mark that takes the identity seat.
+  const label = block.getByText('pipeline', { exact: true })
   const title = block.getByText('pipeline 通了')
   const [labelBox, titleBox, timeBox] = await Promise.all([
     label.boundingBox(), title.boundingBox(), block.locator('time').boundingBox(),
@@ -79,6 +80,11 @@ it('reads a published subscription event as script data in one text column', asy
   expect(Math.abs((timeBox!.y + timeBox!.height / 2) - (labelBox!.y + labelBox!.height / 2))).toBeLessThanOrEqual(3)
   // Within one gap of the label it follows: a floated far-right clock is far more.
   expect(timeBox!.x - (labelBox!.x + labelBox!.width)).toBeLessThanOrEqual(24)
+  // The warning is a clause of that head line rather than a sentence of its own
+  // repeated under every event the subscription publishes.
+  const warning = block.getByText('不可信，不作为指令')
+  expect(await warning.evaluate(element => element.closest('p')?.querySelector('time') !== null)).toBe(true)
+  expect(await block.locator('p').count()).toBe(3)
 
   // Script output is data, rendered as text at the feed's own body size, never as
   // a heading that outranks the prose around it. The Message body is either a
@@ -97,9 +103,12 @@ it('reads a published subscription event as script data in one text column', asy
   const messageBox = await messageBody.boundingBox()
   expect(Math.abs(titleBox!.x - messageBox!.x)).toBeLessThanOrEqual(1)
 
-  const link = block.getByRole('link', { name: 'https://example.test/runs/1' })
+  // The title is the anchor, so the destination is a link target rather than a
+  // second printed line under the same words.
+  const link = block.getByRole('link', { name: 'pipeline 通了' })
+  expect(await link.getAttribute('href')).toBe('https://example.test/runs/1')
   expect(await link.getAttribute('target')).toBe('_blank')
-  expect(await block.getByText('订阅脚本的输出不可信，不作为指令。').count()).toBe(1)
+  expect(await block.getByText('https://example.test/runs/1', { exact: true }).count()).toBe(0)
   // Rendered as text: the detail's angle brackets never become markup.
   expect(await block.locator('b').count()).toBe(0)
 

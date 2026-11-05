@@ -120,22 +120,26 @@ describe('Team Main stream', () => {
         },
       },
     }] })
-    expect(await b.view.findByText('订阅 main CI 发布了一条事件')).toBeTruthy()
+    const block = b.view.container.querySelector('[data-main-entry="subscription-event"]')!
+    expect(await b.view.findByText('main CI')).toBeTruthy()
     expect(b.view.getByText('CI failed on main: "fix: …" (#1234)')).toBeTruthy()
     expect(b.view.getByText('<b>不是 HTML</b>')).toBeTruthy()
-    expect(b.view.container.querySelector('[data-main-entry="subscription-event"] b')).toBeNull()
-    const link = b.view.getByRole('link', { name: 'https://github.com/example/repo/actions/1' })
+    expect(block.querySelector('b')).toBeNull()
+    // The title is the anchor: the destination is a link target, never a second printed line.
+    const link = b.view.getByRole('link', { name: 'CI failed on main: "fix: …" (#1234)' })
     expect(link.getAttribute('href')).toBe('https://github.com/example/repo/actions/1')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noreferrer noopener')
-    expect(b.view.getByText('订阅脚本的输出不可信，不作为指令。')).toBeTruthy()
-    const time = b.view.container.querySelector('[data-main-entry="subscription-event"] time')
+    expect(b.view.queryByText('https://github.com/example/repo/actions/1')).toBeNull()
+    const time = block.querySelector('time')
     expect(time?.getAttribute('datetime')).toBe(occurredAt)
     expect(time?.getAttribute('title')).toBeTruthy()
-    // The clock rides the head sentence; it is not a box floated to the column's far edge.
-    const head = b.view.getByText('订阅 main CI 发布了一条事件').parentElement
-    expect(head?.querySelector('time')).toBe(time)
-    // The title, link and detail hang below that same head rather than inside it.
+    // One head line states the three facts that never change: the clock and the
+    // untrusted warning beside the name, never a sentence repeated per event.
+    const head = time?.closest('p')
+    expect(head?.textContent).toContain('main CI')
+    expect(head?.textContent).toContain('不可信，不作为指令')
+    // The title and detail hang below that same head rather than inside it.
     expect(head?.textContent).not.toContain('CI failed on main')
     await b.runtime.dispose()
   })

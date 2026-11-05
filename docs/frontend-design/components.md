@@ -213,9 +213,13 @@ Deletion is confirmed in a dialog that states what goes with it, and every durab
 
 The Host still owns the trial gate and the webhook address: a save re-runs the trial, so a cached pass is never trusted, and the arming write answers with the complete address exactly once — to the owner that armed it. Nothing on this page shows that address.
 
-A published event is data, never a Message: the block names the subscription, the clock rides that head sentence instead of floating at the column's far edge, and the title, link and detail are plain text in one column behind a mark seated where a Message's identity sits — the head is content, never a centred system notice over left-aligned prose.
+A published event is data, never a Message, and it costs three lines rather than five: the block seats a mark where a Message's identity sits and puts everything behind it on that Message's text axis, because prose indented off that axis, or a line centred over it, reads as a notice standing beside the feed instead of part of it.
 
-Its text starts on the axis a Message body starts on and rides the content axis, so script output is exactly as large as that body at any font-size setting, with the title one weight up (`600`) rather than a heading size. Only the validated link is a real anchor that opens outside the app. A standing marker states that the script's output is untrusted and never an instruction.
+The head line carries only the facts that never change — which subscription, what time, and how far to trust it — so the untrusted warning is a clause of that line (`不可信，不作为指令`) rather than a sentence repeated under every event the subscription publishes; a warning printed once per event stops being read as a warning.
+
+The title is what a reader aims at, so it is both the one line at a Message body's size (one weight up, `600`) and the anchor when the event carries a validated link: the destination is a link target, not a second printed line saying the same thing.
+
+That anchor opens outside the app with no referrer back to it, which is how the feed treats every link a script supplied. The detail sits under the title at `13px/20px` in the secondary ink — the level the rest of the feed uses for context rather than content.
 
 ## Whole-surface loading state
 Every surface that has nothing to show yet — the Inbox, the global Task board, both Thread seats, the Project feed and the Project board tab — renders the same box: `.emptySurface` holding a `.loadingState` line whose pulse mark (`.loadingMark`, `aria-hidden`) precedes the words.
