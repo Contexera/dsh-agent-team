@@ -464,4 +464,22 @@ describe('Team presentation formatters', () => {
     expect(plainGist('x'.repeat(130))).toBe(`${'x'.repeat(119)}…`)
     expect(plainGist('甲\t乙  丙')).toBe('甲 乙 丙')
   })
+
+  it('bounds a compact line by code points, never splitting an astral character', () => {
+    const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+    // 120 astral characters are exactly the default bound: no ellipsis, and
+    // no half of a surrogate pair left where a UTF-16 slice used to cut.
+    const balloons = '🎈'.repeat(120)
+    expect(plainGist(balloons)).toBe(balloons)
+    expect(LONE_SURROGATE.test(plainGist(balloons))).toBe(false)
+    // One over the bound keeps 119 whole characters plus the ellipsis.
+    expect(plainGist('🎈'.repeat(121))).toBe(`${'🎈'.repeat(119)}…`)
+    // A custom bound counts the same unit when BMP and astral characters mix.
+    expect(plainGist(`a${'🎈'.repeat(10)}`, 5)).toBe('a🎈🎈🎈…')
+    // The source bound cuts on the same unit. A large max exposes that edge:
+    // 2047 BMP characters leave the 2048th UTF-16 unit mid-surrogate.
+    const long = plainGist(`${'x'.repeat(2047)}${'🎈'.repeat(4)}`, 2050)
+    expect(LONE_SURROGATE.test(long)).toBe(false)
+    expect(long).toBe(`${'x'.repeat(2047)}🎈`)
+  })
 })

@@ -73,17 +73,37 @@ const GIST_SOURCE_MAX_CHARACTERS = 2048
 const GIST_MAX_CHARACTERS = 120
 
 /**
+ * At most `limit` code points from the front of one line. `slice` counts UTF-16
+ * units, so it can end between the halves of an astral character and leave a
+ * lone surrogate for the reader; counting characters here instead keeps the
+ * bound and the cut on the same unit. The walk stops at the limit, so a
+ * pathological line is not spread into an array in full.
+ */
+function takeCodePoints(value: string, limit: number): string {
+  let end = 0
+  let count = 0
+  for (const character of value) {
+    if (count === limit) break
+    end += character.length
+    count += 1
+  }
+  return end === value.length ? value : value.slice(0, end)
+}
+
+/**
  * One body line as compact plain text: the first non-empty line with its
  * Markdown presentation projected away, whitespace compacted, then bounded.
  * Projection runs before the bound, so a marker pair like `**…**` is never cut
  * into an opener that never closes. A Message body keeps its Markdown wherever
  * it renders as a Message; every label, card title, chip and quote line reads
- * the body through here.
+ * the body through here. Both bounds and the ellipsis decision count code
+ * points, so an astral character never leaves half of itself behind.
  */
 export function plainGist(text: string, max = GIST_MAX_CHARACTERS): string {
   const firstLine = text.split('\n').map(line => line.trim()).find(line => line !== '') ?? ''
-  const projected = extractMarkdownPlainText(firstLine.slice(0, GIST_SOURCE_MAX_CHARACTERS), { mode: 'first-line' }).replace(/\s+/g, ' ').trim()
-  return projected.length > max ? `${projected.slice(0, max - 1)}…` : projected
+  const projected = extractMarkdownPlainText(takeCodePoints(firstLine, GIST_SOURCE_MAX_CHARACTERS), { mode: 'first-line' }).replace(/\s+/g, ' ').trim()
+  const characters = [...projected]
+  return characters.length > max ? `${characters.slice(0, max - 1).join('')}…` : projected
 }
 
 export function memberHue(memberId: string): number {
