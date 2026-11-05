@@ -8,10 +8,7 @@
  * decides nothing, and a missing date is reported rather than skipped, because
  * that absence is the drift the date exists to catch.
  *
- * `--days N` sets the threshold (default 30). `--json` prints one JSON object
- * per stale item and nothing else, so a subscription can publish it directly:
- * an unreadable line would reject the whole run, and staying silent when
- * nothing is stale is what keeps the subscription from becoming noise.
+ * `--days N` sets the threshold (default 30).
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
@@ -21,7 +18,6 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const activeDirectory = join(root, '.scratch', 'active')
 
 const args = process.argv.slice(2)
-const json = args.includes('--json')
 const daysIndex = args.indexOf('--days')
 const threshold = daysIndex === -1 ? 30 : Number(args[daysIndex + 1])
 if (!Number.isInteger(threshold) || threshold <= 0) {
@@ -68,24 +64,6 @@ for (const work of works) {
   }
   const age = Math.floor((Date.now() - parsed) / DAY)
   if (age > threshold) stale.push({ work, date: match[1], age })
-}
-
-if (json) {
-  for (const item of stale.sort((a, b) => b.age - a.age)) {
-    console.log(JSON.stringify({
-      id: `scratch-stale:${item.work}:${item.date}`,
-      title: `${item.work} 已 ${item.age} 天没核对`,
-      detail: `最后核对 ${item.date}；是继续推还是归档，看一眼。`,
-    }))
-  }
-  for (const item of undated) {
-    console.log(JSON.stringify({
-      id: `scratch-stale:${item.work}:no-date`,
-      title: `${item.work} 缺最后核对日期`,
-      detail: `README 的「最后核对日期」读不出来（${item.reason}）；补上或结案。`,
-    }))
-  }
-  process.exit(0)
 }
 
 for (const item of stale.sort((a, b) => b.age - a.age)) {
