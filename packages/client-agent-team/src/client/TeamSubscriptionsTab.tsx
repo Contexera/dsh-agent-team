@@ -412,4 +412,3 @@ function pausedText(entry: AgentTeamSubscriptionListEntry, t: TeamConversationPr
   return failure === undefined ? t('subscriptionPausedFailures')
     : t('subscriptionPausedFailuresWithCategory', { category: runCategoryText(failure.category, t) })
 }
-
