@@ -289,6 +289,23 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await settleLayout(page)
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'task-board-page-narrow.png'), fullPage: true })
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
+
+  // Pointer capability is the one thing this sheet used to state unconditionally: every hover style
+  // now sits inside a hover-capable media query, so the bundled rules — not just the source the audit
+  // reads — keep them out of reach of a touch tap that never lifts. A second context with `hasTouch`
+  // cannot stand in here: the Team navigation a scenario builds is not in storage state, and the lane
+  // would have to rebuild it at 390 to find this page again.
+  const pointerRules = await page.evaluate(() => {
+    const rules = [...document.styleSheets].flatMap(sheet => {
+      try { return [...sheet.cssRules] } catch { return [] }
+    })
+    return {
+      hoverMedia: rules.filter(rule => rule instanceof CSSMediaRule && /hover:\s*hover/.test(rule.conditionText)).length,
+      bareHover: rules.filter(rule => rule instanceof CSSStyleRule && /:hover/.test(rule.selectorText)).length,
+    }
+  })
+  expect(pointerRules.hoverMedia).toBeGreaterThan(0)
+  expect(pointerRules.bareHover).toBe(0)
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)
 import { join } from 'node:path'

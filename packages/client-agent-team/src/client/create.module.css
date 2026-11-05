@@ -29,22 +29,28 @@
   max-height: min(320px, 56vh);
 }
 
+/* This control is a field, not a button: it takes the shipped `Input` frame it stands beside —
+   32px box, 8px side padding, the md radius, and the l4 neutral its frame is stroked with — so the
+   model picker in a dialog lines up with the name and description fields above it instead of
+   reading as a thicker, boxier third row. The stroke stays 1px for the reason stated in
+   principles-and-language.md: Chromium rounds a 0.5px border up, so 1px is the pixel shipped paints. */
 .selectTrigger {
   align-items: center;
   background: var(--dsw-alias-bg-layer-1);
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-sm, 8px);
+  border: 1px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md, 12px);
   box-sizing: border-box;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   display: flex;
   font-size: 14px;
   gap: 8px;
+  height: 32px;
   justify-content: space-between;
   line-height: 22px;
-  min-height: 32px;
-  padding: 4px 10px;
+  padding: 0 8px;
   text-align: left;
+  width: 100%;
 }
 
 .selectTrigger:disabled {
@@ -58,6 +64,7 @@
 }
 
 .selectValue {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -102,8 +109,10 @@
   padding: 3px 6px;
 }
 
-.memberOption:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+@media (hover: hover) {
+  .memberOption:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 .memberOption input {
@@ -246,7 +255,11 @@
   padding: 0;
   width: 18px;
 }
-.sectionHint:hover { color: var(--dsw-alias-label-secondary); }
+@media (hover: hover) {
+  .sectionHint:hover {
+    color: var(--dsw-alias-label-secondary);
+  }
+}
 .sectionHint:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 1px;

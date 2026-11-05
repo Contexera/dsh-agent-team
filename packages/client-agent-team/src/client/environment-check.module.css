@@ -47,8 +47,10 @@
   text-decoration: none;
 }
 
-.link:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .link:hover {
+    text-decoration: underline;
+  }
 }
 
 .link:focus-visible {

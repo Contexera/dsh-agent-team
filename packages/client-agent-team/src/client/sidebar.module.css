@@ -30,11 +30,17 @@
   justify-content: center;
   padding: 0;
 }
-.railButton:hover,
 .railButton:focus-visible {
   --team-mark-ring: var(--dsw-alias-interactive-bg-hover);
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
+}
+@media (hover: hover) {
+  .railButton:hover {
+    --team-mark-ring: var(--dsw-alias-interactive-bg-hover);
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
 }
 .railButton:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -63,9 +69,13 @@
   width: 100%;
 }
 /* The field sits on its own layer, so the shared hover fill is what marks its overview as the page on screen. */
-.workspaceTrigger:hover,
 .workspaceTrigger[aria-current='page'] {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+@media (hover: hover) {
+  .workspaceTrigger:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 .workspaceTrigger:focus-visible {
   border-color: var(--dsw-alias-brand-primary);
@@ -131,17 +141,21 @@
   height: 38px;
   justify-content: center;
   line-height: 22px;
-  /* The shipped bar's own inset: 0.2.2 sets it to its paint inset plus the hairline
-     (`calc(3px + 1px)`), where the certified line used a flat 2px. No width: the margins
-     are what size the slab inside this column, and a width would add them on top. The
-     journey measures this card against the shipped bar's box, so a host change shows up
-     there rather than as a silent 2px drift. */
-  margin: 0 4px 12px;
+  /* The shipped bar's own inset, read from the host rather than copied: the sidebar publishes its
+     paint inset for this line and adds one hairline on top (`calc(paint-inset + 1px)`), which is 4px
+     on 0.2.2 where the certified line used a flat 2px. No width: the margins are what size the slab
+     inside this column, and a width would add them on top. The journey measures this card against the
+     shipped bar's box, so a host change shows up there rather than as a silent drift. */
+  margin: 0 calc(var(--dsh-sidebar-paint-inset, 3px) + 1px) 12px;
   padding: 8px 12px;
 }
-.leaveCard:hover,
 .leaveCard:focus-visible {
   background: var(--dsw-alias-button-floating-hover);
+}
+@media (hover: hover) {
+  .leaveCard:hover {
+    background: var(--dsw-alias-button-floating-hover);
+  }
 }
 .leaveCard:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -151,16 +165,24 @@
 :global([data-platform='darwin']) .leaveCard {
   background: rgb(255 255 255 / 0.55);
 }
-:global([data-platform='darwin']) .leaveCard:hover,
 :global([data-platform='darwin']) .leaveCard:focus-visible {
   background: rgb(255 255 255 / 0.3);
+}
+@media (hover: hover) {
+  :global([data-platform='darwin']) .leaveCard:hover {
+    background: rgb(255 255 255 / 0.3);
+  }
 }
 :global([data-platform='darwin']) :global([data-ds-dark-theme]) .leaveCard {
   background: rgb(255 255 255 / 0.15);
 }
-:global([data-platform='darwin']) :global([data-ds-dark-theme]) .leaveCard:hover,
 :global([data-platform='darwin']) :global([data-ds-dark-theme]) .leaveCard:focus-visible {
   background: rgb(255 255 255 / 0.2);
+}
+@media (hover: hover) {
+  :global([data-platform='darwin']) :global([data-ds-dark-theme]) .leaveCard:hover {
+    background: rgb(255 255 255 / 0.2);
+  }
 }
 /* Shrink-wraps the label so the chevron anchors to its leading edge; `min-width: 0` keeps the label's ellipsis working. */
 .leaveCardGroup {
@@ -206,11 +228,16 @@
   text-align: left;
   width: 100%;
 }
-.inboxCard:hover,
 .inboxCard:focus-visible,
 .inboxCard[aria-current='page'] {
   --team-mark-ring: var(--dsw-alias-interactive-bg-hover);
   background: var(--dsw-alias-interactive-bg-hover);
+}
+@media (hover: hover) {
+  .inboxCard:hover {
+    --team-mark-ring: var(--dsw-alias-interactive-bg-hover);
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 .inboxCard:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -244,9 +271,13 @@
   text-align: left;
   width: 100%;
 }
-.taskBoardCard:hover,
 .taskBoardCard:focus-visible,
 .taskBoardCard[aria-current='page'] { background: var(--dsw-alias-interactive-bg-hover); }
+@media (hover: hover) {
+  .taskBoardCard:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
 .taskBoardCard:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: -2px; }
 /* The board's own checklist glyph sits where the Inbox mark sits and reads at the same tertiary ink, so the two
    cross-Workspace rows above the selector stay one control family. */
@@ -383,9 +414,13 @@
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 1px;
 }
-.sectionToggle:hover .sectionChevron,
 .sectionToggle:focus-visible .sectionChevron {
   color: var(--dsw-alias-label-primary);
+}
+@media (hover: hover) {
+  .sectionToggle:hover .sectionChevron {
+    color: var(--dsw-alias-label-primary);
+  }
 }
 .sectionChevron {
   color: var(--dsw-alias-label-tertiary);
@@ -413,7 +448,11 @@
   padding: 0;
   width: 20px;
 }
-.sectionHint:hover { color: var(--dsw-alias-label-secondary); }
+@media (hover: hover) {
+  .sectionHint:hover {
+    color: var(--dsw-alias-label-secondary);
+  }
+}
 .sectionHint:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 1px;
@@ -445,10 +484,15 @@
   padding: 0;
   width: 28px;
 }
-.iconButton:hover,
 .iconButton:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
+}
+@media (hover: hover) {
+  .iconButton:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
 }
 /* Team's header does not clip, so the ring would otherwise add 2px to a line the row grid already measures. */
 .iconButton:focus-visible {
@@ -468,9 +512,13 @@
   padding: 0;
 }
 /* Colour only: the button has no padding, so a hover fill would hug the glyphs. */
-.textButton:hover,
 .textButton:focus-visible {
   color: var(--dsw-alias-label-primary);
+}
+@media (hover: hover) {
+  .textButton:hover {
+    color: var(--dsw-alias-label-primary);
+  }
 }
 .textButton:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -607,10 +655,14 @@
   border-radius: var(--dsw-radius-md, 12px);
 }
 /* Suppressed while a row-level state paints the full-row fill, so the two never stack into a visible seam. */
-.agentRow:hover .agentSelect[aria-current='page'],
 .agentRow:focus-within .agentSelect[aria-current='page'],
 .agentRow[data-menu-open] .agentSelect[aria-current='page'] {
   background: transparent;
+}
+@media (hover: hover) {
+  .agentRow:hover .agentSelect[aria-current='page'] {
+    background: transparent;
+  }
 }
 .agentAvatar {
   align-items: center;
@@ -686,22 +738,30 @@
   flex: none;
   padding-right: 4px;
 }
-.projectRow:hover .rowMenu,
 .projectRow:focus-within .rowMenu,
 .projectRow[data-menu-open] .rowMenu,
-.agentRow:hover .rowMenu,
 .agentRow:focus-within .rowMenu,
 .agentRow[data-menu-open] .rowMenu {
   display: inline-flex;
 }
+@media (hover: hover) {
+  .projectRow:hover .rowMenu,
+  .agentRow:hover .rowMenu {
+    display: inline-flex;
+  }
+}
 .projectRow[data-menu-open],
 .agentRow[data-menu-open],
-.projectRow:hover,
-.agentRow:hover,
 .projectRow:focus-within,
 .agentRow:focus-within,
 .projectRow[aria-current='page'] {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+@media (hover: hover) {
+  .projectRow:hover,
+  .agentRow:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 .rowMenuButton {
@@ -717,9 +777,13 @@
   padding: 0;
   width: 20px;
 }
-.rowMenuButton:hover,
 .rowMenuButton:focus-visible {
   color: var(--dsw-alias-label-primary);
+}
+@media (hover: hover) {
+  .rowMenuButton:hover {
+    color: var(--dsw-alias-label-primary);
+  }
 }
 .rowMenuButton:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));

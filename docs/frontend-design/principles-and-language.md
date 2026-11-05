@@ -38,6 +38,8 @@ Re-verified once more on **0.2.1-rc.2** at source level: every rule this sheet m
 
 What differs from 0.2.0-rc.2 belongs to states and surfaces this contract does not mirror: the Windows-titlebar collapsed new-session control traded its 50% circle for `--dsw-radius-sm`, sidebar trailing hover actions widened 10px→15px, a selected command chip takes a `state-business-tertiary` tint with the caret suppressed, and the composer's child-prompt file intake narrowed to images.
 
+Re-verified on **0.2.2-rc.1**, where the pointer contract hardened rather than changed: the shipped client now wraps every hover style in `@media (hover: hover)` (+300 blocks, −343 bare `:hover` rules), because a touch tap never lifts the pointer and a bare `:hover` leaves its wash, underline, or revealed action painted after the finger is gone. Team's sheets follow that rule and the audit reports a `:hover` outside the query. The shipped outline variant also moved its stroke out of the layout border into an inset shadow reading `--dsh-button-outline-color`, so a pressed state restyles that variable — a border recolour there paints nothing.
+
 | Dimension | Rule | Shipped reference |
 | --- | --- | --- |
 | Icon-only control | 28×28 circle, `border-radius: 999px`, `corner-shape: round`, transparent fill, hover `--dsw-alias-interactive-bg-hover-solid` (composer) / `--dsw-alias-interactive-bg-hover` (sidebar) | `InputBar.module.css .add`, `SidebarRoot.module.css .iconButton` |

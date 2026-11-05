@@ -100,8 +100,10 @@
   background: var(--dsw-alias-button-ghost-active-fill);
   --dsh-button-outline-color: var(--dsw-alias-button-ghost-active-border);
 }
-.toggleOn[aria-pressed='true']:hover:not(:disabled) {
-  background: var(--dsw-alias-button-ghost-active-hover);
+@media (hover: hover) {
+  .toggleOn[aria-pressed='true']:hover:not(:disabled) {
+    background: var(--dsw-alias-button-ghost-active-hover);
+  }
 }
 
 /* A band's failure is one line per refusing control, under the band and inside its own padding: the
@@ -356,9 +358,11 @@
   padding: 0 8px;
   white-space: nowrap;
 }
-.cardAction:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
+@media (hover: hover) {
+  .cardAction:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
 }
 .cardAction:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -463,8 +467,17 @@
   white-space: nowrap;
 }
 /* The line is a control: the rule brightens and the words step up one grade, nothing moves. */
-.quoteLine:hover .quoteLineBar { background: var(--dsw-alias-label-secondary); opacity: .8; }
-.quoteLine:hover .quoteLineText { color: var(--dsw-alias-label-secondary); }
+@media (hover: hover) {
+  .quoteLine:hover .quoteLineBar {
+    background: var(--dsw-alias-label-secondary);
+    opacity: .8;
+  }
+}
+@media (hover: hover) {
+  .quoteLine:hover .quoteLineText {
+    color: var(--dsw-alias-label-secondary);
+  }
+}
 .quoteLine:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 2px;
@@ -511,12 +524,19 @@
   padding: 0;
   width: fit-content;
 }
-.messageExpand:hover,
 .messageExpand:focus-visible {
   color: var(--dsw-alias-label-primary);
   outline: none;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+@media (hover: hover) {
+  .messageExpand:hover {
+    color: var(--dsw-alias-label-primary);
+    outline: none;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 }
 /* Compact timeline typography over the shared Markdown primitive; the root font shorthand is reset so Agent and Human bodies
    share one text grid. Heading sizes are chat-tuned so the page h1 stays loudest. Sizes ride the Settings content-font axis:
@@ -770,8 +790,10 @@
   cursor: pointer;
 }
 
-.transferCandidate:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
+@media (hover: hover) {
+  .transferCandidate:hover:not(:disabled) {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 .transferCandidate:focus-visible {
@@ -797,8 +819,10 @@
   text-underline-offset: 3px;
 }
 
-.refLink:hover {
-  text-decoration-thickness: 2px;
+@media (hover: hover) {
+  .refLink:hover {
+    text-decoration-thickness: 2px;
+  }
 }
 
 .refLink:focus-visible {

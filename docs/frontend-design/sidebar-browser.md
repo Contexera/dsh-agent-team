@@ -22,7 +22,7 @@ The embedded Member Session is the one overlay that can stand over a Team face t
 
 Row ellipsis menus use public `Menu`, are visible on hover/focus/menu-open, and pin the row background while open.
 
-Project and Agent editors use public Remote mutations and Host projections rather than optimistic inline edits. Agent model selection uses the public menu and Host model directory and offers no "follow the global default" row: creating an Agent requires naming a route, so the trigger reads "Choose a model" and the create button stays disabled until one is picked.
+Project and Agent editors use public Remote mutations and Host projections rather than optimistic inline edits. Agent model selection uses the public menu and Host model directory and offers no "follow the global default" row: creating an Agent requires naming a route, so the trigger reads "Choose a model" and the create button stays disabled until one is picked. The trigger is that Input frame itself (32px, md radius, l4 stroke written 1px), so it stands in the column with the name and description fields instead of reading as a third shape.
 
 An edit replaces the route without clearing it back to the Host default. Changing an active model preserves Member and Session identity. Selecting an Agent opens its embedded Session without leaving Team mode; explicit Team navigation closes that overlay.
 

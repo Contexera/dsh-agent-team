@@ -21,6 +21,8 @@ Team Client 渲染在 shipped DSH 外壳内部，必须讲基础 UI 的设计语
 
 与 0.2.0-rc.2 的差异都落在本契约**不**镜像的状态与面上：Windows 标题栏折叠态的新建会话控件把 50% 圆换成 `--dsw-radius-sm`；侧栏 hover 尾部操作间距 10px→15px；被选中的命令胶囊取 `state-business-tertiary` 底色并隐藏光标；composer 的子会话文件 intake 收窄到仅图片。
 
+在 **0.2.2-rc.1** 上复核：指针契约只是更严，没有改向——shipped client 现在把每一条 hover 样式都收进 `@media (hover: hover)`（+300 处、删掉 343 条裸 `:hover`），因为手指点完不会"离开"，裸 `:hover` 的底色、下划线、揭示出来的动作会一直留在屏幕上。Team 的样式表按同一条规则写，`:hover` 落在这个查询之外会被审计报出。shipped 的 outline 变体也把描边从布局边框移进读取 `--dsh-button-outline-color` 的 inset 阴影，按下态该改变量——再去改边框颜色什么也画不出来。
+
 | 维度 | 规则 | shipped 参考 |
 | --- | --- | --- |
 | 纯图标控件 | 28×28 圆形，`border-radius: 999px`，`corner-shape: round`，透明底色，hover 用 `--dsw-alias-interactive-bg-hover-solid`（composer）/ `--dsw-alias-interactive-bg-hover`（侧栏） | `InputBar.module.css .add`、`SidebarRoot.module.css .iconButton` |

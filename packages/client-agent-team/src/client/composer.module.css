@@ -133,9 +133,13 @@
   text-align: left;
 }
 
-.mentionOption:hover,
 .mentionOption[aria-selected='true'] {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+@media (hover: hover) {
+  .mentionOption:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 .mentionName {
@@ -187,8 +191,10 @@
   line-height: 20px;
   padding: 0 10px 0 8px;
 }
-.asTaskPill:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
+@media (hover: hover) {
+  .asTaskPill:hover:not(:disabled) {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 .asTaskPill:focus-visible {
   box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -197,10 +203,15 @@
   color: var(--dsw-alias-label-dimmed);
   cursor: default;
 }
-.asTaskPillOn,
-.asTaskPillOn:hover:not(:disabled) {
+.asTaskPillOn {
   background: var(--dsw-alias-button-primary-fill);
   color: var(--dsw-alias-label-primary-foreground);
+}
+@media (hover: hover) {
+  .asTaskPillOn:hover:not(:disabled) {
+    background: var(--dsw-alias-button-primary-fill);
+    color: var(--dsw-alias-label-primary-foreground);
+  }
 }
 .asTaskLabel {
   white-space: nowrap;
@@ -228,8 +239,10 @@
   place-items: center;
   width: 28px;
 }
-.attachButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
+@media (hover: hover) {
+  .attachButton:hover:not(:disabled) {
+    background: var(--dsw-alias-interactive-bg-hover-solid);
+  }
 }
 .attachButton:disabled {
   cursor: default;
@@ -304,9 +317,13 @@
   padding: 0;
   width: 16px;
 }
-.fileChipRemove:hover,
 .fileChipRemove:focus-visible {
   color: var(--dsw-alias-label-primary);
+}
+@media (hover: hover) {
+  .fileChipRemove:hover {
+    color: var(--dsw-alias-label-primary);
+  }
 }
 .fileChipRemove:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -332,8 +349,10 @@
   width: 34px;
 }
 
-.sendButton:hover:not(:disabled) {
-  background: var(--dsw-alias-button-info-hover, var(--dsw-alias-button-primary-hover));
+@media (hover: hover) {
+  .sendButton:hover:not(:disabled) {
+    background: var(--dsw-alias-button-info-hover, var(--dsw-alias-button-primary-hover));
+  }
 }
 
 .sendButton:focus-visible {
@@ -448,9 +467,11 @@
   padding: 0;
   width: 20px;
 }
-.replyBannerCancel:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
+@media (hover: hover) {
+  .replyBannerCancel:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
 }
 .replyBannerCancel:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));

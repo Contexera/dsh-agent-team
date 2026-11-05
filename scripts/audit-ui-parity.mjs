@@ -301,7 +301,8 @@ const GEOMETRY = [
   ['sidebar.module.css', '.workspaceTrigger', [['border-radius', 'var(--dsw-radius-md, 12px)'], ['min-height', '34px'], ['border', '1px solid var(--dsw-alias-border-l2)'], ['margin', '2px 0 0']], 'the Workspace selector keeps the sidebar row geometry: the md tier, 34px line, and its neutral separator written as 1px because that is what shipped\'s 0.5px declaration actually renders as. Its only margin is the stack\'s own 2px top step, so the two cross-Workspace cards and the selector read as one unit'],
   ['sidebar.module.css', '.inboxCard', [['border-radius', 'var(--dsw-radius-md, 12px)'], ['height', '34px'], ['margin', '4px 0 0']], 'the Inbox entry is a sidebar row: the md tier, 34px height. Its 4px top is the unit\'s own step off the exit slab above it; every later gap in the stack is another control\'s 2px top, never this row\'s bottom'],
   ['sidebar.module.css', '.taskBoardCard', [['border-radius', 'var(--dsw-radius-md, 12px)'], ['height', '34px'], ['margin', '2px 0 0']], 'the Task board entry is the Inbox entry\'s sibling cross-Workspace row: the same md tier, 34px height, and 2px top step'],
-  ['sidebar.module.css', '.leaveCard', [['height', '38px'], ['border-radius', 'var(--dsw-radius-md, 12px)'], ['box-sizing', 'border-box'], ['background', 'var(--dsw-alias-button-elevated-fill)'], ['border', '1px solid var(--dsw-alias-border-l3)'], ['padding', '8px 12px'], ['margin', '0 2px 12px']], 'the mode\'s exit takes over the shipped New Session bar: the same 38px elevated slab, the same 8px/12px inset and a centred label in the same vertical slot, its l3 separator written as 1px because that is what shipped\'s 0.5px declaration actually renders as. It also stands on the shipped bar\'s own box — 14px to 266px in the 280px sidebar, measured equal in one render by the e2e parity block. The 2px horizontal margin is the shipped bar\'s own, and it must stay stated: shipped declares no width, so the slab is a stretched flex item that the margin pulls in, while a `width: 100%` here would add to the margin and push the slab 4px past the column. The browsing region keeps its own 12px trailing inset so this row and the rows below it share one right edge'],
+  ['create.module.css', '.selectTrigger', [['height', '32px'], ['width', '100%'], ['border', '1px solid var(--dsw-alias-border-l4)'], ['border-radius', 'var(--dsw-radius-md, 12px)'], ['padding', '0 8px']], 'the model picker is a field, not a button: it takes the shipped Input frame it stands beside (32px box, md radius, the l4 neutral written 1px because Chromium rounds 0.5px up) and fills the column, so it reads as the third row of one form instead of a narrower, boxier control beside two inputs'],
+  ['sidebar.module.css', '.leaveCard', [['height', '38px'], ['border-radius', 'var(--dsw-radius-md, 12px)'], ['box-sizing', 'border-box'], ['background', 'var(--dsw-alias-button-elevated-fill)'], ['border', '1px solid var(--dsw-alias-border-l3)'], ['padding', '8px 12px'], ['margin', '0 calc(var(--dsh-sidebar-paint-inset, 3px) + 1px) 12px']], 'the mode\'s exit takes over the shipped New Session bar: the same 38px elevated slab, the same 8px/12px inset and a centred label in the same vertical slot, its l3 separator written as 1px because that is what shipped\'s 0.5px declaration actually renders as. It also stands on the shipped bar\'s own box — 14px to 266px in the 280px sidebar, measured equal in one render by the e2e parity block. The horizontal margin is the shipped bar\'s own inset, read from `--dsh-sidebar-paint-inset` rather than copied so it follows the host: shipped declares no width, so the slab is a stretched flex item that the margin pulls in, while a `width: 100%` here would add to the margin and push the slab past the column. The browsing region keeps its own 12px trailing inset so this row and the rows below it share one right edge'],
   ['sidebar.module.css', '.leaveCardGlyph', [['position', 'absolute'], ['right', 'calc(100% + 6px)']], 'the exit centres its label, not the group: the chevron hangs off the label\'s leading edge out of flow, because centring the group depends on the air inside each glyph\'s box, which differs between CJK and Latin glyphs and across platform font stacks — a compensation measured on one stack walks the ink off the middle on another'],
   ['sidebar.module.css', '.iconButton', [['height', '28px'], ['width', '28px'], ['border-radius', 'var(--dsw-radius-sm, 8px)'], ['flex', 'none']], 'the section header\'s action is the shipped header action: a 28px square on the small tier, not the round 24px control it used to be, and `flex: none` keeps a long section label from squeezing it. Its focus ring is inset (`outline-offset: -2px` on the focus-visible rule) because this header does not clip its own overflow the way the shipped one does, so an outset ring would add 2px to a line the row grid already measures'],
   ['sidebar.module.css', '.sectionHeader', [['height', '28px'], ['margin', '2px 0 0'], ['padding', '0 0 0 4px'], ['gap', '4px']], 'the header is its tallest control and nothing more — a 28px action beside a 14/20 label — not the shipped 36px toolbar, which is sized for a search field and an action cluster. Its only vertical margin is the 2px step above it, the shipped list\'s own within-group step, so a header sits nearer the rows it names than the block before it; the list below carries the other step. It takes no negative right margin: inside the scroll container that overhang would be clipped and would cut the action button, and the container\'s reserved bar gutter already lands this header\'s right edge on the rows\' edge'],
@@ -392,6 +393,42 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
         note('error', `${file} ${selector}`, `border width '${fraction[0]}' does not render: Chromium rounds border-width up to 1px, so declare 1px — or use the elevation box-shadow hairline for a real half pixel`)
       }
     }
+  }
+}
+
+// Hover styling belongs in a hover-capable media query. Shipped 0.2.2 swept its whole client that
+// way (+300 `@media (hover: hover)` blocks, −343 bare `:hover` rules), because a touch tap never
+// lifts the pointer: a bare `:hover` leaves its wash, underline, or revealed action behind after the
+// finger is gone. Reading this needs the real nesting, so the flat scanners above (which strip
+// at-rule blocks whole) cannot answer it.
+const HOVER_CAPABLE = /@media[^{]*(?:hover:\s*hover|any-hover:\s*hover)/
+
+for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.css'))) {
+  const css = readFileSync(join(clientDir, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const stack = []
+  let header = ''
+  for (const char of css) {
+    if (char === '{') {
+      const head = header.trim()
+      header = ''
+      if (!head.startsWith('@') && /:hover/.test(head) && !stack.some(entry => HOVER_CAPABLE.test(entry))) {
+        for (const selector of head.split(',').map(part => part.trim()).filter(part => part.includes(':hover'))) {
+          note('error', `${file} ${selector}`, 'hover style outside `@media (hover: hover)`: a touch tap keeps it applied after the finger lifts — wrap the rule in that media query (shipped 0.2.2 does)')
+        }
+      }
+      stack.push(head)
+      continue
+    }
+    if (char === '}') {
+      stack.pop()
+      header = ''
+      continue
+    }
+    if (char === ';' && stack.length === 0) {
+      header = ''
+      continue
+    }
+    header += char
   }
 }
 

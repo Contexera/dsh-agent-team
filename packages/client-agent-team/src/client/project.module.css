@@ -65,7 +65,11 @@
   right: 0;
 }
 
-.tab:hover { color: var(--dsw-alias-label-secondary); }
+@media (hover: hover) {
+  .tab:hover {
+    color: var(--dsw-alias-label-secondary);
+  }
+}
 
 .tab[aria-selected="true"] { color: var(--dsw-alias-state-business-primary); }
 
@@ -150,7 +154,11 @@
 /* The card is a target, so the pointer answers on the surface: the interactive fill the Inbox row and the Thread card take.
    Lightening the border was the wrong answer twice over — it left the card's fill untouched, and it made the one edge that
    does react grow fainter under the pointer. The column behind it is the module ground, so the fill has to move, not the edge. */
-.boardCard:hover { background: var(--dsw-alias-interactive-bg-hover); }
+@media (hover: hover) {
+  .boardCard:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
 
 .boardCard:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -266,9 +274,13 @@
   width: 2px;
 }
 
-.panelHandle:hover::after,
 .panelHandle:focus-visible::after,
 .panelHandle[data-dragging]::after { opacity: 1; }
+@media (hover: hover) {
+  .panelHandle:hover::after {
+    opacity: 1;
+  }
+}
 
 .panelHandle:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));

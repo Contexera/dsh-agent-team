@@ -47,9 +47,13 @@
   text-align: left;
   width: 100%;
 }
-.row:hover,
 .row:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+@media (hover: hover) {
+  .row:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 .row:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
