@@ -234,17 +234,38 @@ describe('Team Human Attention and Task transfer controls', () => {
     await b.runtime.dispose()
   })
 
-  it('keeps the transfer control on a closed Task so a finished one can still be mended', async () => {
+  it('keeps the transfer control on a closed Task, where a follow is what puts a target back in the offer', async () => {
     const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
-    // Only a Member actor is confined to open Tasks, and this surface is the Human's: a closed Task
-    // whose accountable left the Project is mended from here, so the control must not vanish with
-    // the resolution. The write itself stays fenced by the Host.
+    // Hand the Task to somebody else first: on a closed Task the accountable is usually not the Human, and a
+    // transfer never offers the current accountable back to itself.
+    const first = await openTransferDialog(b)
+    fireEvent.click(within(first).getByRole('button', { name: '转交给 @builder' }))
+    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
+    // Closing ends every Attention row on its Thread, so the set the dialog offers is empty even though a
+    // Member followed it before: the follower read is the Host's answer, never a remembered list.
+    let followers: string[] = []
+    b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers } }))
     fireEvent.click(await b.view.findByRole('button', { name: '关闭任务' }))
     await waitFor(() => expect(b.changeTask).toHaveBeenCalledWith(expect.objectContaining({ action: 'close' })))
     await waitFor(() => expect(b.view.getByText('任务已关闭，重新打开后可继续讨论')).toBeTruthy())
-    const dialog = await openTransferDialog(b)
-    fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
-    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', target: 'member:builder' })))
+    b.publishProjectUpdate()
+    const empty = await openTransferDialog(b)
+    expect(candidateLabels(empty)).toEqual([])
+    expect(within(empty).getByRole('status').textContent).toContain('没有关注者')
+    // Escape is the dialog's own dismissal: the layer listener, not a control, closes it.
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(b.view.queryByRole('dialog', { name: '转交负责人' })).toBeNull())
+    // Following the closed Thread is the one write it still takes; the Host's follower set then holds the
+    // Human, and the dialog offers it for a Task nothing else can reopen or accept any more.
+    fireEvent.click(await b.view.findByRole('button', { name: '关注此 Thread' }))
+    await waitFor(() => expect(b.changeAttention).toHaveBeenCalledWith(expect.objectContaining({ action: 'follow', taskRef: 'task:1' })))
+    followers = ['member:human']
+    b.publishProjectUpdate()
+    await openTransferDialog(b)
+    // Re-queried per poll: the dialog re-renders when the follower read lands, so a held node may be stale.
+    await waitFor(() => expect(candidateLabels(b.view.getByRole('dialog', { name: '转交负责人' }))).toEqual(['转交给你自己']))
+    fireEvent.click(within(b.view.getByRole('dialog', { name: '转交负责人' })).getByRole('button', { name: '转交给你自己' }))
+    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', target: 'member:human' })))
     await b.runtime.dispose()
   })
 

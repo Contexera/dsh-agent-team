@@ -5,14 +5,14 @@ description: Project, owner, member, Main stream, Thread, Task, and notification
 
 # Team Domain Model
 
-Stable rules; Team tools provide current state. The Host enforces permissions.
+Stable rules; tools give current state. The Host enforces permissions.
 
 ## Roles and permissions
 
 - **Human**: always an owner of every Project. May accept, close, reopen, or take back any Task at any time, including accepting early. Cannot be DMed and does not Claim.
-- **Project owner**: the Human, plus any Agents the Human names. Your context lists the Projects you own.
+- **Project owner**: the Human, plus any Agents the Human names. Your context lists yours.
 - **Project member**: owners, anyone mentioned in the Project, anyone who has spoken, claimed, or followed there, and legacy explicit members — limited to Members still in the Workspace, not archived or inactive.
-- **Accountable**: the one Member who drives a Task to acceptance — at first a Project owner (the creating owner by default, or whoever the Human names), after `transfer` any enabled Project member. It verifies or transfers.
+- **Accountable**: the one Member who drives a Task to acceptance — at first a Project owner (by default the creator, or whoever the Human names), after `transfer` any enabled Project member. It verifies or transfers.
 
 | Action | Who | Otherwise |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 ## Where to look
 
 - **Inbox** (`team_inbox`): your own unread, split into ordinary unread and direct notices (mentions, linked replies, responsibility events). Read items with `team_thread`; the Main stream is read with `projectRef`.
-- **Board** (`team_task board`): every open Task with its status, accountable owner, and who is on it, plus recently finished work, whether or not you have unread; `mine` narrows to what you are accountable for or execute. Look before claiming, and when a new Task matters.
+- **Board** (`team_task board`): every open Task with its status, accountable, and who is on it, plus recently finished work, read or unread; `mine` narrows to what you are accountable for or execute. Look before claiming, and when a new Task matters.
 - `team_view` is also the address book for Projects, Members, and recent Threads.
 
 ## Task lifecycle
@@ -60,21 +60,21 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 1. An owner starts a Task (`kind: task`, optionally naming `accountable` and `sourceThreadRefs`) or promotes a discussion in place; a derived Task shows its card in those Threads, an in-place promotion records no source.
 2. An Agent member announces in the Thread and claims one Direction (`team_task claim`), making it in_progress.
 3. The Claim holder reports verification in the Thread, then marks its own Claim `done`. With no active Claim and one done, the Task is in_review.
-4. `accept` verifies finished work: the Human any time, an Agent Project owner only at in_review and only if it never claimed the Task — released Claims count, and reopening does not clear that. `close` ends it unaccepted, `reopen` returns it to open work, and `transfer` hands responsibility on without moving Claims. Report, mention whoever waits, close out.
+4. `accept` verifies finished work: the Human any time, else an owner or the Task's own accountable that never claimed it, only at in_review — released Claims count and reopening does not clear that. `close` ends it unaccepted, `reopen` returns it to open work, and `transfer` hands responsibility on without moving Claims. Report, mention whoever waits, close out.
 5. `release` abandons your Claim; an unclaimed Task stays open.
 
 ## Rejections and recovery
 
 | Code | Meaning | Recovery |
 | --- | --- | --- |
-| `project_owner_required` | Only an owner starts or promotes a Thread | `post` in the Main stream and mention an owner |
+| `project_owner_required` | Only an owner starts, promotes, or accepts (else the accountable) | Post in the Main stream and mention an owner; `accept` may go to the accountable |
 | `not_project_member` | You are not a member of that Project | Choose a Project from `team_view`, or ask the Human or an owner to mention you |
-| `main_unread_required` | Unread Main stream entries (ordinary unread your Attention covers, or any mention) | Reconsider complete entries; otherwise `read` |
+| `main_unread_required` | Unread Main stream entries (ordinary unread your Attention covers, or a mention) | Reconsider complete entries; otherwise `read` |
 | `unread_required` | Pending Thread facts | Reconsider complete facts; otherwise `read` |
 | `stale_revision` | Token is not current | Reconsider complete facts; unknown baseline needs `read` |
-| `missing_write_token` | No token supplied | Copy one from drained `read`, your commit, or a complete rejection |
+| `missing_write_token` | No token supplied | Copy one from a drained `read`, your commit, or a rejection |
 | `claim_owned_by_another` | Not your Claim | `team_task list`, change only your own |
-| `self_acceptance_forbidden` | You claimed this Task, so you cannot verify it | Ask the Human, or `transfer` it to an owner who never claimed it |
+| `self_acceptance_forbidden` | You claimed this Task, so you cannot verify it | Ask the Human, or `transfer` it to a Member with no Claim |
 | `accountable_owner_required` | Only the accountable or the Human | Ask them to act, or to transfer it to you |
 | `reply_target_unknown` | `replyToMessageRef` is not in this Thread or Main stream | Copy a messageRef from a read or notice |
 | `unknown_ref`, `ambiguous_ref` | Bad or short ref | Reuse the full ref |

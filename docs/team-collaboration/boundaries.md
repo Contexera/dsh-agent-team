@@ -15,7 +15,7 @@ This context check changes no durable state and keeps no second read database. O
 
 Partial or omitted facts and an unknown or unrecognized revision baseline supply no retry token and route to `team_thread read`. An unrecognized token does not establish that the Thread changed concurrently. A Main stream refusal follows the same rule without a revision token: complete pending Messages and Activities may be reconsidered directly, while any partial or missing fact routes to `read` with `projectRef`. These are normal collaboration outcomes, not infrastructure failures; there is no force-send.
 
-Closed Tasks reject replies, Claims, and new Attention. Taskless Threads have no Claim or Task-resolution mutation.
+Closed Tasks reject replies and Claims; a follow is the only Attention row their Thread can still create, while the Human's transfer of a finished Task and the Task's own resolution stay legal. Taskless Threads have no Claim or Task-resolution mutation.
 
 Close releases active Claims and ends Attention. Reopen restores an open Task, not previous Attention periods; a new reopen restores the accountable's current Thread follow unless the accountable is the actor or already follows. Older reopen records keep their marker-only replay semantics.
 
@@ -37,11 +37,11 @@ A transfer target is any enabled Project member or the Human — following the T
 ## Human Remote boundary
 The Human Client uses `readThread`, `threadHistory`, `threadObservations`, and `changes`, and it consumes the Host's Human Inbox slice as the 「收件箱 / Inbox」 queue. Attention has two entry points, neither of them model-facing: the Agent tool `team_attention` goes through `changeAttentionForAgent`, while `@Remote('changeAttention')` is the Human Remote — which both Thread faces wire to one shared follow control, so a Human subscribes to a Thread's ordinary updates from the Web surface.
 
-Task responsibility moves through the Human `transferTask` Remote. The Host accepts any enabled Project member or the Human, and re-implements none of it on the Client: the dialog offers this Thread's enabled followers, which is the narrower set a handover inside one conversation can land on, and the Human appears there only by following the Thread. 
+Task responsibility moves through the Human `transferTask` Remote. The Host accepts any enabled Project member or the Human, and re-implements none of it on the Client: the dialog offers this Thread's enabled followers, which is the narrower set a handover inside one conversation can land on, and the Human appears there only by following the Thread.
 
 The Client re-implements neither the transfer rules nor the accept/close/reopen authority, which stay on the Host.
 
-The control also stands on a finished Task, because only a Member actor is confined to open Tasks. An accepted Task keeps its Thread's followers, so a Task whose accountable left the Project is mended there; a closed Task's Thread has no follower left at all — closing ends every Attention row, and a closed Thread refuses a new follow — so its dialog says that nobody can take it instead of naming a target of its own.
+The control also stands on a finished Task, because only a Member actor is confined to open Tasks. An accepted Task keeps its Thread's followers, so a Task whose accountable left the Project is mended there. Closing ends every Attention row, so a closed Task's Thread has no follower left; a follow is the only Attention row it can still create, and it puts a reader back in the offer — and until somebody follows it, the dialog says that nobody can take the Task instead of naming a target of its own.
 
 A committed transfer is also stated where the control stands: the band prints the new accountable from the Host's own committed result, and retires that line once the projection stops agreeing with it. The Host's transfer activity row still records the move in the feed — the band's line is the same fact at the control, not a second authority over it.
 

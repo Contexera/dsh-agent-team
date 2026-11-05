@@ -89,7 +89,7 @@ async function handOver(team: Seeded, task: AgentTeamTask, actor: AgentTeamMembe
 describe('Task responsibility under rules version 3', () => {
   it('hands a Task to a plain Project member, follows it there, and replays the move from cold', async () => {
     const team = await seed()
-    expect(team.ledger.status().rulesVersion).toBe(3)
+    expect(team.ledger.status().rulesVersion).toBe(AGENT_TEAM_RULES_VERSION)
     const reviewer = await team.add('reviewer')
     const executor = await team.add('executor')
     const started = await startTask(team, human)
@@ -183,6 +183,25 @@ describe('Task responsibility under rules version 3', () => {
     expect(() => new AgentTeamLedger(team.table).validate()).not.toThrow()
   })
 
+  it('keeps a former owner its Task while the removal leaves it in the Project, and returns it once participation ends', async () => {
+    const team = await seed()
+    // The Member joins the Workspace only, so the owner grant is its one tie to the Project until the Task
+    // names it. Version 2 answered this removal with a sweep over owner grants and put the Task back on the
+    // Human; version 3 asks what participation the Member has left instead.
+    const member = await team.add('member', { owner: true, projectRefs: [] })
+    const kept = await startTask(team, human, member.memberId)
+    await team.ledger.removeProjectOwner({ requestId: requestId('drop-grant'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: member.memberId })
+    // The removal itself records the Member as named in the Project — version 2's membership rule — so the
+    // Task stays, and the Member keeps driving it.
+    expect(team.ledger.getTask(kept.task.taskRef)?.accountable).toBe(member.memberId)
+    expect(team.ledger.taskBoard(member.actor, { workspaceId: alpha }).open[0]).toMatchObject({ relation: 'accountable' })
+    // Participation is what the retention hangs on: taking the Member out of the Workspace leaves no Project
+    // tie at all, and only then does responsibility go back to the Human.
+    await team.ledger.removeMember({ requestId: requestId('leave'), actor: human, memberId: member.memberId })
+    expect(team.ledger.getTask(kept.task.taskRef)?.accountable).toBe(AGENT_TEAM_HUMAN_MEMBER_ID)
+    expect(() => new AgentTeamLedger(team.table).validate()).not.toThrow()
+  })
+
   it('returns every Task in the scope when the Project archives, including one handed to a plain member', async () => {
     const team = await seed()
     const reviewer = await team.add('reviewer')
@@ -235,7 +254,7 @@ describe('Task responsibility under rules version 3', () => {
 
     // A version-3 build opens the same ledger, adopts version 3, and keeps the older segment as written.
     await team.reopen()
-    expect(team.ledger.status().rulesVersion).toBe(3)
+    expect(team.ledger.status().rulesVersion).toBe(AGENT_TEAM_RULES_VERSION)
     const reviewer = await team.add('reviewer')
     const second = await startTask(team, human)
     const moved = await handOver(team, second.task, human, reviewer.memberId)

@@ -73,7 +73,7 @@ UI work 的边界如下：
 - 有对应能力时复用 public Harness primitives 和 `--dsw-*` theme tokens。
 - CSS 保持在 CSS Modules 中；不要 import private Harness CSS。
 - Runtime presence 必须与 Claim 和 Task state 分离。
-- Task resolution controls 会修改 Task 和 Claim。Closed Task 对 replies 和 new Attention 是 terminal。reopen 会恢复 open Task，但不会恢复此前的 Attention。
+- Task resolution controls 会修改 Task 和 Claim。Closed Task 拒绝 replies 和 Claim；follow 是它唯一还能新建的 Attention 行；Task 自身的 resolution 与 Human 对已结束 Task 的转交仍然合法。reopen 会恢复 open Task，但不会恢复此前的 Attention。
 - Message、Activity、Claim 和 Task 的 presentation 要保持区分且用户可读。不要暴露 opaque refs 或 internal enums。
 - Durable mutations 不做 optimistic update。失败时保留 input，并渲染下一份 Host projection。
 - 保持 Team mode enter/leave、refresh recovery、slot restoration 和 narrow layout behavior。

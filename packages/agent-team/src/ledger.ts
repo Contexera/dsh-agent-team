@@ -259,9 +259,10 @@ export const TASK_BOARD_FINISHED_PER_PROJECT = 5
  * Highest validation-rules version this build implements; a ledger segment without a marker is version 1.
  * Version 3 widens Task responsibility without rewriting history: a transfer target may be any enabled Project
  * member, a Task's own accountable may verify it, and losing an owner grant returns responsibility only when
- * that grant was the Member's last Project participation.
+ * that grant was the Member's last Project participation. Version 4 lets a closed Task's Thread be followed:
+ * closing ends every Attention row, so refusing the follow left a finished Task with no follower to hand it to.
  */
-export const AGENT_TEAM_RULES_VERSION = 3
+export const AGENT_TEAM_RULES_VERSION = 4
 
 function freezeActor(actor: AgentTeamActor): AgentTeamActor {
   if (actor.kind === 'host') return Object.freeze({ kind: 'host', handle: actor.handle })
@@ -2944,7 +2945,9 @@ export class AgentTeamLedger {
       const { task, thread } = this.threadContextForActor(actor, request.workspaceId, request)
       const current = this.attentionFor(actor.memberId, thread.threadRef)
       if (request.action === 'follow') {
-        if (task?.resolution === 'closed') throw new Error(`Task '${task.taskRef}' is closed; reopen it before following`)
+        // A closed Thread takes one write besides its resolution: the follow that returns somebody to it. Closing
+        // ended every Attention row, so without this the follower set could never offer a target again.
+        if (task?.resolution === 'closed' && this.state.rulesVersion < 4) throw new Error(`Task '${task.taskRef}' is closed; reopen it before following`)
         if (current !== undefined) throw new Error(`Member is already following Thread '${thread.threadRef}'`)
         const attention = this.followAttention(actor.memberId, thread.threadRef, 'self')
         const operation: AgentTeamThreadAttentionChangedOperation = Object.freeze({
@@ -4447,7 +4450,7 @@ export class AgentTeamLedger {
         || (task === undefined ? currentTask !== undefined : currentTask === undefined || !this.sameTask(currentTask, task) || thread.taskRef !== task.taskRef)
         || (actor !== undefined && !this.participatesInProjectWorkspaceFrom(projection, projectRef, actor.memberId))) throw new Error('invalid Attention operation')
       const current = this.attentionForFrom(projection, operation.data.memberId, thread.threadRef)
-      if ((operation.data.action === 'follow' && (task?.resolution === 'closed' || current !== undefined))
+      if ((operation.data.action === 'follow' && ((projection.rulesVersion < 4 && task?.resolution === 'closed') || current !== undefined))
         || (operation.data.action === 'unfollow' && (current === undefined || (task !== undefined && this.hasActiveClaimFrom(projection, operation.data.memberId, task.taskRef))))) {
         throw new Error('invalid Attention transition')
       }
@@ -6722,10 +6725,20 @@ export class AgentTeamLedger {
       && this.canVerifyTaskFrom(projection, task, task.accountable) ? task.accountable : AGENT_TEAM_HUMAN_MEMBER_ID
   }
 
+  /**
+   * Who a Task change's responsibility marker reaches. Version 2 named the accountable, or the Human when that
+   * accountable had ever held a Claim — a suspended accountable was still the member the change concerned.
+   * Version 3 asks who can verify, which also moves a marker off an accountable that can no longer act. Each
+   * version answers for the records it wrote, so a captured version 2 segment still replays onto its own member.
+   */
   private responsibilityActivityRecipientsFrom(projection: Projection, task: AgentTeamTask, actor: AgentTeamMemberId): readonly AgentTeamMemberId[] {
     const recipients = new Set<AgentTeamMemberId>()
-    if (task.status === 'in_review') recipients.add(this.verifierOfFrom(projection, task))
-    else if (task.status === 'todo') recipients.add(task.accountable)
+    if (task.status === 'in_review') {
+      if (projection.rulesVersion < 3) {
+        const accountableHeld = this.heldTaskClaimFrom(projection, task.taskRef, task.accountable)
+        recipients.add(task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID || !accountableHeld ? task.accountable : AGENT_TEAM_HUMAN_MEMBER_ID)
+      } else recipients.add(this.verifierOfFrom(projection, task))
+    } else if (task.status === 'todo') recipients.add(task.accountable)
     recipients.delete(actor)
     return [...recipients]
   }

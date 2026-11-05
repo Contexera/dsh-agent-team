@@ -2409,8 +2409,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread.png'), fullPage: true })
 
   // The control stands on a closed Task, because the Human may transfer a finished one, but closing ended
-  // every Attention row on this Thread and a closed Thread refuses a new follow: the follower set is
-  // empty, and the dialog states that instead of inventing a target of its own.
+  // every Attention row on this Thread: the follower set is empty, and the dialog states that instead of
+  // inventing a target of its own.
   const mendTrigger = page.getByRole('button', { name: '转交负责人' })
   await mendTrigger.waitFor()
   await mendTrigger.click()
@@ -2423,36 +2423,29 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.keyboard.press('Escape')
   await expect.poll(() => closedDialog.count()).toBe(0)
 
-  // Reopening restores its accountable's Attention and opens the Thread to a follow; only then is the
-  // Human in the offer, and mending back to the Human is the same move as any other handover. The unread
-  // gate still fences the reopen behind a durable read, and the read is what the composer slot wants.
-  await scaffold.ctx.agentTeam.readThread({ requestId: 'm2-06-mend-human-read' as never, workspaceId: workspace.id, taskRef: task.taskRef })
-  await page.getByRole('button', { name: '重新打开' }).first().click()
-  await page.getByRole('button', { name: '关闭任务' }).waitFor()
-  await scaffold.ctx.agentTeam.changeAttention({ requestId: 'm2-06-mend-human-follow' as never, workspaceId: workspace.id,
-    taskRef: task.taskRef, action: 'follow' })
-  // Re-enter the Thread so the page's own observation read carries that follower: the board is the only
-  // face that carries a Task's door, and a follower written while the page stands would need a Host wake.
-  await page.getByRole('button', { name: '返回项目' }).click()
-  await page.getByRole('heading', { name: '# delivery' }).waitFor()
-  if (await page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected') !== 'true') {
-    await page.getByRole('tab', { name: '看板' }).click()
-    await expect.poll(async () => await page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true')
-  }
-  await taskEntryRow(page, 1).click()
-  await page.getByRole('heading', { name: /Task #1/ }).waitFor()
-  await page.getByRole('button', { name: '转交负责人' }).click()
+  // Following the closed Thread is the one write it still takes, and it is what puts the Human back in the
+  // offer: the reviewer is the accountable now, so it is never offered to itself and the Human is the one
+  // follower left. Mending back to the Human is the same move as any other handover.
+  await page.getByRole('button', { name: '关注此 Thread' }).click()
+  await page.getByRole('button', { name: '取消关注此 Thread' }).waitFor()
+  await mendTrigger.click()
   const mendDialog = page.getByRole('dialog', { name: '转交负责人' })
   await mendDialog.waitFor()
-  // The reviewer is the accountable now, so it is never offered to itself; the Human is the one follower
-  // left that may take it.
-  expect(await mendDialog.locator('li button').allTextContents()).toEqual(['转交给你自己'])
+  await expect.poll(async () => await mendDialog.locator('li button').allTextContents()).toEqual(['转交给你自己'])
   await settleAnimations(page)
   await page.screenshot({ path: join(UI03_SHOTS, 'mended-dialog.png') })
   await mendDialog.getByRole('button', { name: '转交给你自己' }).click()
   await expect.poll(async () =>
     JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef)))
     .toContain(`"accountable":"${humanMemberId}"`)
+  // Reopening is the Human's own path again, and the unread gate still fences it: the mend delivered one
+  // responsibility notice, which the durable read below consumes. On a closed Thread the reopen lives only in
+  // the composer-slot notice, which is the one this beat means.
+  await scaffold.ctx.agentTeam.readThread({ requestId: 'm2-06-mend-human-read' as never, workspaceId: workspace.id, taskRef: task.taskRef })
+  await page.getByRole('button', { name: '重新打开' }).first().click()
+  await expect.poll(async () =>
+    JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef)))
+    .toContain('"resolution":"open"')
   await page.screenshot({ path: join(UI05_SHOTS, 'mended-task.png'), fullPage: true })
 
   // The mend left the Task open, which is its point: it is actionable again. Closing it here restores

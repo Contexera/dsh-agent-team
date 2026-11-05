@@ -15,7 +15,7 @@ Host 先检查未读事实，再检查令牌新鲜度。写入者的 live Sessio
 
 事实截断或省略、revision 基线未知或无法识别时，不提供重试令牌，并指向 `team_thread read`。无法识别的令牌不证明发生了并发变更。Main stream 拒绝遵循同样的规则，只是没有 revision 令牌：完整的待处理 Message 与 Activity 可以直接重新考虑，任何部分或缺失事实则指向带 `projectRef` 的 `read`。这些是正常协作结果，不是基础设施故障；没有 force-send。
 
-Closed Task 拒绝回复、Claim 和新的 Attention；taskless Thread 没有 Claim 或 Task-resolution mutation。
+Closed Task 拒绝回复和 Claim；follow 是它的 Thread 唯一还能新建的 Attention 行，而 Human 对已结束 Task 的转交与 Task 自身的 resolution 仍然合法。taskless Thread 没有 Claim 或 Task-resolution mutation。
 
 close 会 release active Claims、结束 Attention 并停止 ordinary delivery。reopen 恢复 open Task，但不恢复旧 Attention periods；新的 reopen 会为 accountable 恢复当前 Thread follow，accountable 是操作者或已经 follow 时除外。旧 reopen 记录保持只加 marker 的回放语义。
 
@@ -35,7 +35,7 @@ Project owner 才能发起或 promotion Thread。accountable 与执行分离，�
 ## Human Remote boundary
 Human Client 使用 `readThread`、`threadHistory`、`threadObservations` 和 `changes`。它消费 Host 的 Human Inbox 切片，作为「收件箱 / Inbox」队列。Attention 有两条入口，且都不是 model-facing 的：Agent 工具 `team_attention` 走 `changeAttentionForAgent`；`@Remote('changeAttention')` 是 Human Remote——两个 Thread 面都接到同一个共享关注控件上，Human 因此可以从 Web 面订阅一个 Thread 的普通更新。
 
-Task 责任转交走 Human `transferTask` Remote：Host 接受任意 enabled Project member 或 Human，Client 不复制这套规则；弹窗只列本 Thread 的 enabled followers——一次对话内的移交能落到的人，本就比整个 Project 窄——Human 只有 follow 了该 Thread 才会出现。accept/close/reopen 权限同样留在 Host。该控件在已了结的 Task 上也留着，因为只有 Member actor 被限制在 open Task 上。accepted 的 Task 保留它 Thread 的关注者，负责人已失去 Project 参与的 Task 就在那一层补回责任；closed 的 Task 所在 Thread 已经没有任何关注者——关闭会结束所有 Attention 行，closed 的 Thread 也拒绝新的关注——于是它的弹窗直说没人能接手，而不是自己编一个目标。
+Task 责任转交走 Human `transferTask` Remote：Host 接受任意 enabled Project member 或 Human，Client 不复制这套规则；弹窗只列本 Thread 的 enabled followers——一次对话内的移交能落到的人，本就比整个 Project 窄——Human 只有 follow 了该 Thread 才会出现。accept/close/reopen 权限同样留在 Host。该控件在已了结的 Task 上也留着，因为只有 Member actor 被限制在 open Task 上。accepted 的 Task 保留它 Thread 的关注者，负责人已失去 Project 参与的 Task 就在那一层补回责任。关闭会结束所有 Attention 行，所以 closed 的 Task 所在 Thread 没有关注者；它还接受的唯一一种写入就是关注，关注把人重新放回候选里——在此之前，弹窗直说没人能接手，而不是自己编一个目标。
 
 转交成功同样在控件所在处陈述：动作带用 Host 自己 committed 的结果印出新的负责人，一旦投影不再与它一致就把这行撤掉。Host 的 transfer 活动行仍然在 feed 里记录这次转移——带里的那行是同一个事实落在控件旁，不是对它的第二个权威。
 
