@@ -97,6 +97,8 @@ npm publish --tag <dist-tag> --access public
 
 刚发布后 registry 的读取会滞后：版本文档可能先于完整 packument 可用，于是 `npm view <name>` 可能短暂报旧版本，或对一个已经上线的包报 `E404`。绝不要为了「修」滞后而重新发布——轮询 packument，或用 tarball URL 安装来证明产物。
 
+第二种「打印成功、注册表却空」是暂存发布：发布在等批准，命令已报版本，版本端点仍 404。重发同版本会被拒（`E409`），`npm stage list` 说空并不作数。到 npmjs.com 批准一次，或带 `--otp` 重发——这是流程里的一步，不是盲目重试。
+
 ## 7. 绝不
 
 - 绝不重新发布、撤销发布，或移动已被某个发布引用的 tag。`npm deprecate` 是唯一被认可的清理手段。
