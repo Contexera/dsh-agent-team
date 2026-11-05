@@ -35,9 +35,13 @@ const pruneMemberContext: SessionMessageProjection<'test/prune-member-context'> 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
+/** A live route the fake Agents never resolve; context composition reads none of it. */
+const STUB_MODEL = { current: () => undefined, select: () => {} }
+
 function fakeAgent(ctx: Context): Agent {
   return {
     id: SessionId('session:memory-test'), ctx, status: 'idle', options: { provider: 'mock', model: 'mock' },
+    model: STUB_MODEL,
     session: { surface: { nodes: [] }, events: [] } as never,
     inbox: {} as never,
     cancel() {}, whenIdle: async () => {}, runMaintenance: async task => task(new AbortController().signal),
@@ -48,6 +52,7 @@ function fakeAgent(ctx: Context): Agent {
 async function preStep(ctx: Context, agent: Agent): Promise<PreStepDecision> {
   return agentEvents(ctx, agent).waterfall('agent/pre-step', {
     messages: [], turn: 1, step: 1, signal: new AbortController().signal,
+    modelSelection: { provider: 'mock', model: 'mock' },
   }, async () => ({ kind: 'enter', messages: [] }))
 }
 
@@ -59,6 +64,7 @@ function surfaceAgent(ctx: Context): Agent {
 function agentWithSession(ctx: Context, session: Session): Agent {
   return {
     id: session.id, ctx, status: 'idle', options: { provider: 'mock', model: 'mock' },
+    model: STUB_MODEL,
     session,
     inbox: {} as never,
     cancel() {}, whenIdle: async () => {}, runMaintenance: async task => task(new AbortController().signal),

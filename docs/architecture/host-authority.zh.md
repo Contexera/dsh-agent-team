@@ -24,6 +24,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 - Agent lifecycle、replay、authorization、idempotency 和 revision checks 留在 Host。durable unread 变化可通过 public safe-boundary API 产生一条有界、合并的通知：direct mention 携带 Message 和 source；direct Task/Claim Activity 携带完整事件；ordinary unread 携带 Thread-first route、有界摘要和溢出数量，存在 Task 时带 overlay。Promotion 通过 Activity markers 到达 followers。通知不是第二权威，也不保证恰好处理一次。
 - 通知先排缺失的 direct 信号，再排 reminder 与普通摘要；其排序、上限和字符预算见 [attention-and-messaging.zh.md](../team-collaboration/attention-and-messaging.zh.md)。
 - 已提交的 Session transition（`team/member-session-renewed`、`team/member-session-rolled-over`、`team/member-session-recycled`）记录的是 desired binding，而不是已完成的切换。retire 旧代与 activate 目标都是 ledger 写入之外的 Host 效果。startup 与 Member 的显式 recovery 动作都会补完被中断的 transition，依据记录的 previous Session。每个效果各自推导自己是否已完成。live handle 不能证明 archive 那一半跑过。重复请求只返回已记录的 receipt 与诚实状态，不再提交一次绑定。
+- 这条 transition 记录就是一次换代的全部 lineage。后继 Session 的 header 不写 `parentSession`——那个字段专指 subagent 的创建者——所以想找退役 Session 的读者去读 ledger，而不是读 header。
 - 每个 durable Member state 只有一组期望的外部 effect，即 [Member Lifecycle](../domain-model.zh.md#member-lifecycle) 表。每一次 lifecycle operation 在 commit 之后重跑这组 effect。startup 对每个非 enabled Member 也重跑同一组。archive、suspension、remove 因此走同一条推导重跑收敛，不做第二次 durable 写入。即使 Workspace/Session/filesystem 调用被 crash 或失败打断，也一样收敛。
 - startup 绝不把非 enabled Member 激活为 enabled。启动阶段失败的 effect 只记日志，下一次 boot 重试，不让 boot 失败。同一 Member 的 lifecycle operation 按提交序串行；不同 Member 从不排在彼此的等待之后。
 - Task 提醒由 Host 在 Team 事件后评估并写入 `team/reminder-raised`，不使用 timer。其可选 `reminderMarkers` Inbox delta 仅属于一个接收者；marker 被读取消费后，replay 仍保留完整 episode 用于去重。
@@ -76,7 +77,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - Claim 按 Task 分桶，由重放派生的索引支撑，所以按 Task 的读取（Claim 列表、Thread 画面、Inbox 行、Task board）绝不走账本的全部 Claim。这里每个索引都由重放重建，绝不是第二份 durable 权威。
 
 ## Session 持久化与重放
-- Bundle 目标为 DSH `0.2.1-rc.2`。Bundle 的 Session persistence 使用当前 DSH schema。随附的 JSONL backend 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4），旧格式 Session 数据无需手动处置。这个 DSH Session-schema 策略不会抹掉 Team operation history。Team 有意保留针对旧版、Message-level `occurredAt` 之前 records 的窄 replay normalization。
+- Bundle 目标为 DSH `0.2.2-rc.1`。Bundle 的 Session persistence 使用当前 DSH schema。随附的 JSONL backend 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4），旧格式 Session 数据无需手动处置。这个 DSH Session-schema 策略不会抹掉 Team operation history。Team 有意保留针对旧版、Message-level `occurredAt` 之前 records 的窄 replay normalization。
 - 普通存储的 Message operations 在加载时使用包裹 operation 的 instant。旧 `team/thread-read` snapshot anchors 与 Message facts 从来源 Message operation 解析 instant。只在必要时回退到 read operation。而 snapshot 正是唯一仍会走到这条 normalization 的记录形态。snapshot 把 Message anchors 与 Thread facts 连同消费掉的 Inbox delta 一起冻结在记录里。
 
   当前每次读写入的 receipt 只存进度与 Inbox delta，是唯一不存任何 instant 的 Thread-read 形态。旧记录就地 normalize 并校验，绝不改写。不要增加 Team 自有的 Session migration、宽泛 compatibility reads 或 fallback storage paths。可选的 `member.model` inheritance 与可选 Message attachments 都是当前语义，不是 legacy fields。
@@ -118,6 +119,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
   等待按类别记日志，带 Member、Session 与时长：等自己的回合是 `stage 'wait-turn'`，等外部执行（例如 Agent 释放自己的 Session 写路径）是 `stage 'wait-external'`。activation 期间的 restriction 失败只表现为这个 Member 的 activation failure。
 - live 应用失败不会放宽面：编辑保留其 ledger commit，旧 restriction 继续生效（新装失败时恢复原状），Remote 调用照常暴露失败。同 requestId 重试会重新应用已存储配置且不产生第二次业务提交。Host 比较的是存储意图与运行时实际已应用的效果，绝不与该次请求自身的历史比较。
 - 配置编辑把「效果」与「提交」分开回报：`updateMember` 返回 `effect`，取值 `applied`、`already-applied`、`deferred:no-live-handle` 或 `deferred:generation-changed`（先落账、下次激活生效）。失败不进取值——保持响亮拒绝，同时留一条可路由的 `capability-apply` diagnostic。`detail` 带 requestId、operationId、阶段与原因，Session 结构化放在 `sessionId`，日志用同一组关联 id。
+- 模型编辑的落账与回报和其他编辑一样，但新路由是否生效由上游决定：切换后新窗口在压缩之后仍装不下当前 Session 时会被拒绝并保留原路由，pending 选择就等到换回兼容模型为止，而记录在案意图两种情况下都在。
 - 名册每行恒带 `capabilityState`（`applied` | `pending`），由运行时实际已应用的效果派生；没有活面的状态字面报 `pending`。该字段与 `availability`/`presence` 正交：后两者回答 Member 会不会跑，它回答存储配置此刻生效没有。
 - Skills 是 Member 私有的。preset 不带共享 skill-filesystem row。Host 在每个 Member 的 agent exact scope layer 上注册一个 filesystem provider。它是 traceable-service 接缝，与 tool restriction 同构。这个 provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<memberId>/skills/`。
 

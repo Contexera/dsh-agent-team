@@ -142,8 +142,14 @@
               name: '@deepseek-ai/dsh-tool-pwsh'
               disabled: !!js process.platform !== 'win32'
 
+            # `apply_patch` stays off even though the Host default is already
+            # false: stating it here keeps a Member's file-editing surface from
+            # widening if a future Host default turns the tool on, and the
+            # shipped preset test asserts the value rather than trusting it.
             - id: tool-fs
               name: '@deepseek-ai/dsh-tool-fs'
+              config:
+                applyPatch: false
 
             - id: tool-fs-search
               name: '@deepseek-ai/dsh-tool-fs-search'

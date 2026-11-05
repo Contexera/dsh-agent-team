@@ -25,6 +25,29 @@ import { advanceSessionEventCursor, initSessionEventCursor, type SessionEventFol
 import { mountTeamMemberHost, provideQuietTokenMeter } from '../../packages/agent-team/tests/helpers/team-host-fixture.ts'
 import { addLedgerMember, alpha, harness, ledgerAtBoot, makeOwner, sqliteHarness } from '../../packages/agent-team/tests/helpers/host-harness.ts'
 import type { AgentTeamMemberActor, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamRequestId } from '../../packages/agent-team/src/types.ts'
+import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+
+/**
+ * Run one model-shaped Team tool call and take its settled result.
+ *
+ * 0.2.2 executes tools in batches: the single-call entry this bench used
+ * before became the batch contract, whose calls carry the model's JSON
+ * arguments string and whose results are keyed by callId. Every bench site is
+ * one call, so it goes through the same executor the agent loop selects.
+ */
+async function runTeamTool(
+  ctx: Context,
+  call: { readonly callId: ToolCallId; readonly name: string; readonly arguments: unknown; readonly agent?: Agent; readonly signal?: AbortSignal },
+): Promise<ToolExecutionResult> {
+  const batch = await ctx.tools.execute({
+    calls: [{ type: 'tool-call', id: call.callId, name: call.name, arguments: JSON.stringify(call.arguments) }],
+    signal: call.signal ?? new AbortController().signal,
+    ...call.agent === undefined ? {} : { agent: call.agent },
+  })
+  const outcome = batch.results[0]
+  if (outcome === undefined) throw new Error(`${call.name} baseline produced no settled result`)
+  return outcome.result
+}
 
 if (process.env.DSH_BENCH_TEAM !== '1') {
   console.error('Set DSH_BENCH_TEAM=1 to run the Team performance baseline.')
@@ -249,8 +272,7 @@ async function coldBootChild(): Promise<void> {
   try {
     for (let index = 0; index < 2; index += 1) {
       const member = await addMember(host.ctx, `boot-restore-${index}`)
-      const result = await host.ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`boot-session-${index}`),
-        name: 'team_view', arguments: {}, agent: member.agent })
+      const result = await runTeamTool(host.ctx, { callId: ToolCallId(`boot-session-${index}`), name: 'team_view', arguments: {}, agent: member.agent })
       if (result.isError) throw new Error('Cold boot fixture could not initialize its Member')
     }
     await host.teamFiber.dispose()
@@ -379,8 +401,7 @@ async function toolSample(sample: number, commits: { team: string; harness: stri
       try { return originalView(...args) } finally { hostViewMs = elapsed(begin) }
     }
     const begin = now()
-    const result = await host.ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`baseline-view-${sample}`),
-      name: 'team_view', arguments: {}, agent: member.agent })
+    const result = await runTeamTool(host.ctx, { callId: ToolCallId(`baseline-view-${sample}`), name: 'team_view', arguments: {}, agent: member.agent })
     const total = elapsed(begin)
     if (result.isError) throw new Error(`team_view baseline failed: ${JSON.stringify(result)}`)
     return {
@@ -420,7 +441,7 @@ async function toolReadSweepSample(sample: number, commits: { team: string; harn
     for (const [index, call] of calls.entries()) {
       const callBegin = now()
       const agent = call.name === 'team_inbox' || call.name === 'team_task' || call.name === 'team_view' ? member.agent : projectMember.agent
-      const result = await host.ctx.tools.execute({ signal: new AbortController().signal,
+      const result = await runTeamTool(host.ctx, {
         callId: ToolCallId(`baseline-sweep-${sample}-${index}`), name: call.name, arguments: call.arguments, agent })
       stages[`${call.name}Ms`] = elapsed(callBegin)
       if (result.isError) throw new Error(`${call.name} baseline failed: ${JSON.stringify(result)}`)
@@ -451,13 +472,11 @@ async function threadReadReplySample(sample: number, commits: { team: string; ha
       projectRef: project.project.projectRef, body: 'Performance benchmark read and reply' })
     if (started.kind !== 'committed') throw new Error(`thread-read-reply Thread did not commit: ${started.kind}`)
     const readBegin = now()
-    const read = await host.ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`baseline-thread-read-${sample}`),
-      name: 'team_thread', arguments: { action: 'read', threadRef: started.thread.threadRef }, agent: member.agent })
+    const read = await runTeamTool(host.ctx, { callId: ToolCallId(`baseline-thread-read-${sample}`), name: 'team_thread', arguments: { action: 'read', threadRef: started.thread.threadRef }, agent: member.agent })
     const threadReadMs = elapsed(readBegin)
     if (read.isError) throw new Error(`team_thread read baseline failed: ${JSON.stringify(read)}`)
     const replyBegin = now()
-    const reply = await host.ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`baseline-thread-reply-${sample}`),
-      name: 'team_message', arguments: { action: 'reply', threadRef: started.thread.threadRef, baseRevision: started.thread.revision,
+    const reply = await runTeamTool(host.ctx, { callId: ToolCallId(`baseline-thread-reply-${sample}`), name: 'team_message', arguments: { action: 'reply', threadRef: started.thread.threadRef, baseRevision: started.thread.revision,
         body: 'Performance benchmark reply' }, agent: member.agent })
     const threadReplyMs = elapsed(replyBegin)
     if (reply.isError) throw new Error(`team_message reply baseline failed: ${JSON.stringify(reply)}`)
@@ -550,18 +569,15 @@ async function toolWriteSample(sample: number, commits: { team: string; harness:
       try { return await originalPost(...args) } finally { hostPostMs = elapsed(begin) }
     }
     const begin = now()
-    const result = await host.ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`baseline-write-${sample}`),
-      name: 'team_message', arguments: { action: 'post', projectRef: project.project.projectRef, body: 'Performance benchmark post' }, agent: member.agent })
+    const result = await runTeamTool(host.ctx, { callId: ToolCallId(`baseline-write-${sample}`), name: 'team_message', arguments: { action: 'post', projectRef: project.project.projectRef, body: 'Performance benchmark post' }, agent: member.agent })
     const total = elapsed(begin)
     if (result.isError) throw new Error(`team_message post baseline failed: ${JSON.stringify(result)}`)
     const dmBegin = now()
-    const dmResult = await host.ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`baseline-dm-${sample}`),
-      name: 'team_dm', arguments: { memberRef: recipient.memberId, body: 'Performance benchmark DM' }, agent: member.agent })
+    const dmResult = await runTeamTool(host.ctx, { callId: ToolCallId(`baseline-dm-${sample}`), name: 'team_dm', arguments: { memberRef: recipient.memberId, body: 'Performance benchmark DM' }, agent: member.agent })
     const dmTotal = elapsed(dmBegin)
     if (dmResult.isError) throw new Error(`team_dm baseline failed: ${JSON.stringify(dmResult)}`)
     const taskBegin = now()
-    const taskResult = await host.ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`baseline-task-${sample}`),
-      name: 'team_message', arguments: { action: 'start', kind: 'task', projectRef: project.project.projectRef, body: 'Performance benchmark task' }, agent: member.agent })
+    const taskResult = await runTeamTool(host.ctx, { callId: ToolCallId(`baseline-task-${sample}`), name: 'team_message', arguments: { action: 'start', kind: 'task', projectRef: project.project.projectRef, body: 'Performance benchmark task' }, agent: member.agent })
     const taskTotal = elapsed(taskBegin)
     if (taskResult.isError) throw new Error(`team_message task start baseline failed: ${JSON.stringify(taskResult)}`)
     return {
@@ -652,8 +668,7 @@ async function collaborationAgentTurnSample(sample: number, commits: { team: str
       adapter.step = 0
       let baseRevision: number | undefined
       if (current === 'warm') {
-        const read = await host.ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`baseline-sender-read-${sample}`),
-          name: 'team_thread', arguments: { action: 'read', threadRef }, agent: sender.agent })
+        const read = await runTeamTool(host.ctx, { callId: ToolCallId(`baseline-sender-read-${sample}`), name: 'team_thread', arguments: { action: 'read', threadRef }, agent: sender.agent })
         const text = read.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
         const revision = text.match(/baseRevision: (\d+)/)?.[1]
         if (read.isError || revision === undefined) throw new Error('Sender could not read the current Thread revision')

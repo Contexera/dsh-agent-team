@@ -44,6 +44,7 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { AgentTeamLedger } from '../../src/ledger.ts'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, teamPresetScopeMismatchMessage } from '../../src/index.ts'
 import { AGENT_TEAM_PLUGIN_ID } from '../../src/context-source.ts'
@@ -252,6 +253,8 @@ export async function realHarness(
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  // 0.2.2 moved tool execution behind a selected executor plugin, so a composition that runs tools must name one.
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })

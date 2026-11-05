@@ -2,9 +2,8 @@
  * Vendored fork of `@deepseek-ai/dsh-storage-sqlite` (`schema.ts`).
  *
  * Source: deepseek-ai/deepseek-harness
- * `packages/storage/storage-sqlite/src/schema.ts` at version 0.1.5-rc.2
- * (MIT per that version's package metadata and the repo root LICENSE;
- * the stale npm `latest` tag 0.0.1-rc.1 carries BSD-3-Clause metadata).
+ * `packages/storage/storage-sqlite/src/schema.ts` at version 0.2.2-rc.1
+ * (MIT per that version's package metadata and the repo root LICENSE).
  * Kept identical except the `@module` tag below.
  *
  * Why vendored instead of depended on: DSH Desktop generation installers

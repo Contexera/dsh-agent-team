@@ -14,7 +14,7 @@ import { isAbsolute, join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
-import { installModelSelection, type Agent, type AgentHandle, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import { installModelSelection, type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
@@ -24,6 +24,7 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
 import { Session, SessionId, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-token-meter'
@@ -48,11 +49,12 @@ import { AGENT_TEAM_PLUGIN_ID, isAgentTeamContextSource, isAgentTeamSource } fro
 import { surfaceVisibilityProbe, teamMessageSurface, visibleTeamSurface, isFactOnSurface, isMainEntryOnSurface } from './surface-visibility.ts'
 export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './surface-visibility.ts'
 export { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
-import { CONTEXT_CONTINUITY_PROJECTION_KEY, carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from './context-projection.ts'
+import { carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY, type TeamContextProjectionState } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
+import { coldInboxOf } from './cold-inbox.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
 import { INITIAL_CHECKPOINT, SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
@@ -454,8 +456,8 @@ export default class AgentTeam extends TypertRemoteService {
   /** The probed shell family, cached for the composition's lifetime; a probe that found nothing is retried. */
   private subscriptionShellProbe: Promise<SubscriptionShell | undefined> | undefined
   private readonly handles = new Map<AgentTeamMemberId, AgentHandle>()
-  /** Live selection refs let model edits take effect without disposing the Session. */
-  private readonly modelSelections = new Map<AgentTeamMemberId, ModelSelectionRef>()
+  /** Reader of the awaited context-projection registration; unloading Team releases it. */
+  private contextProjection: ProjectionHandle<TeamContextProjectionState> | undefined
   /** Agent ids with a turn in flight; restarts must wait for the boundary. */
   private readonly runningAgents = new Set<SessionId>()
   private readonly memberRuntime = new MemberRuntime({
@@ -527,7 +529,7 @@ export default class AgentTeam extends TypertRemoteService {
     projectionForMember: (memberId, sessionId) => {
       const handle = this.handles.get(memberId)
       if (handle === undefined || handle.agent.session.id !== sessionId) return undefined
-      return this.ctx.sessionProjections.stateOf(handle.agent.session, CONTEXT_CONTINUITY_PROJECTION_KEY)
+      return this.contextProjection?.stateOf(handle.agent.session)
     },
     executeTransition: (memberId, plan) => this.executeMemberTransition(memberId, plan),
     messages: {
@@ -686,13 +688,26 @@ export default class AgentTeam extends TypertRemoteService {
   private measureStoredContext(sessionId: SessionId, inspection: StoredSessionInspection): number | null {
     try {
       const session = Session.create(sessionId, inspection.events, inspection.header, inspection.inheritedEventCount)
-      const inbox = this.ctx.sessionProjections.stateOf(session, 'inbox')
+      // The driver owns the inbox projection and publishes no reader, so this prices the Session's own durable splices; an invalid history keeps the generation.
+      const inbox = coldInboxOf(inspection.events)
       if (inbox === undefined || [...inbox['next-turn'], ...inbox['next-step']].some(message => this.isOrdinaryInput(message))) return null
       return this.ctx.tokenMeter.measure(session).totalTokens
     } catch (error) {
       this.ctx.logger.warn(`agent-team: could not price Session '${sessionId}' for the wake swap: ${failureDetail(error)}; the generation is kept`)
       return null
     }
+  }
+
+  /**
+   * Record the configured route on a resumed Agent. A route the ledger names without an effort keeps the effort its own log recorded for that same route, so a Session-level model edit that never entered the ledger survives the next activation.
+   */
+  private applyConfiguredRoute(agent: Agent, selection: AgentTeamModelSelection): void {
+    const previous = agent.model.current()
+    const inherited = previous !== undefined && previous.provider === selection.provider && previous.model === selection.model
+      ? previous.reasoningEffort
+      : undefined
+    const effort = selection.reasoningEffort ?? inherited
+    agent.model.select({ provider: selection.provider, model: selection.model, ...effort === undefined ? {} : { reasoningEffort: effort } })
   }
 
   private async recycleColdGeneration(member: AgentTeamAgentMember, agent: Agent): Promise<Error | undefined> {
@@ -891,10 +906,8 @@ export default class AgentTeam extends TypertRemoteService {
 
   protected async [Service.init](): Promise<void> {
     // Registered once per Host: the framework keeps one unit per projection key and drives it for every Session, so the fold is session-agnostic.
-    // The registration rides this plugin's fiber, so unloading Team removes the key and its cached cells.
-    this.ctx.effect(() => this.ctx.root.sessionProjections.register(
-      createTeamContextProjectionDefinition(),
-    ), 'agentTeam.contextProjection')
+    // The registration rides this plugin's fiber, so unloading Team releases the key and its cached cells; one owner, never a second disposer.
+    this.contextProjection = await this.ctx.sessionProjections.register(createTeamContextProjectionDefinition())
     this.ctx.on('agent/error', ({ agent, error }) => {
       const member = this.memberForAgent(agent)
       if (member === undefined) return
@@ -992,7 +1005,6 @@ export default class AgentTeam extends TypertRemoteService {
       await this.reminderEvaluationTail
       await Promise.all([...this.handles.values()].map(handle => this.disposeWithWakeGuard(handle)))
       this.handles.clear()
-      this.modelSelections.clear()
       this.memberRuntime.disposeAll()
       this.runningAgents.clear()
       await domain.close()
@@ -1417,7 +1429,6 @@ export default class AgentTeam extends TypertRemoteService {
       'for the retired Agent to release its Session write path',
       () => this.disposeWithWakeGuard(active))
     this.handles.delete(memberId)
-    this.modelSelections.delete(memberId)
     this.memberRuntime.forgetMember(memberId)
     this.clearMemberFailure(memberId, 'activation')
     this.dropInboxCoverage(memberId)
@@ -1594,7 +1605,7 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Human edit of one Member's mutable facts. A live model selection is updated in place: disposing an Agent emits session/disposed,
+   * Human edit of one Member's mutable facts. A live model edit records the new route in the Session log through the public model-selection seam, so no Agent is disposed: disposing an Agent emits session/disposed,
    * which makes the Web Client permanently mark the same Session id unavailable even if Team recreates it.
    */
   @Remote('updateMember')
@@ -1613,9 +1624,8 @@ export default class AgentTeam extends TypertRemoteService {
       if (active !== undefined) {
         effect = 'already-applied'
         if (!isDeepStrictEqual(previous?.model ?? undefined, current.model ?? undefined)) {
-          const selection = this.modelSelections.get(request.memberId)
-          if (selection === undefined) throw new Error(`Agent Member '${current.handle}' has no live model selection`)
-          selection.current = current.model ?? this.ctx.agentDefaultModel.currentSelection()
+          // The public model-selection seam records the new route in the Session log: the current turn keeps its fixed route and the next step picks this one up, so no Agent disposal is needed.
+          active.agent.model.select(current.model ?? this.ctx.agentDefaultModel.currentSelection())
           effect = 'applied'
         }
         if (!this.memberRuntime.appliedCapabilitiesMatch(current.memberId, current.capabilities)) {
@@ -2667,12 +2677,9 @@ export default class AgentTeam extends TypertRemoteService {
           return
         }
       }
-      // AgentOptions declares only provider/model. Install the full selection
-      // through the public Agent model-selection seam so reasoning effort is
-      // applied to the next request and not lost during activation.
+      // AgentOptions carries the whole configured route, so a fresh Session records its effort on the first request instead of through a synthetic selection event.
       const selection = member.model ?? this.ctx.agentDefaultModel.currentSelection()
-      const agentOptions = { provider: selection.provider, model: selection.model }
-      const selected: ModelSelectionRef = { current: selection, assembled: undefined }
+      const agentOptions = { ...selection }
       const setup = async (agentCtx: Context, agent: Agent) => {
         try {
           await this.ctx.agentPresets.mount(agentCtx, member.presetId)
@@ -2684,7 +2691,9 @@ export default class AgentTeam extends TypertRemoteService {
           // failures by type, not by matching message text.
           throw new PresetCompositionError(error instanceof Error ? error.message : String(error), { cause: error })
         }
-        installModelSelection(agentCtx, selected)
+        // Only a resumed Session records the configured route, and it inherits the effort its own log recorded for that route; a fresh Session's route rides AgentOptions, exactly as the driver's own resume does.
+        if (persisted) this.applyConfiguredRoute(agent, selection)
+        installModelSelection(agentCtx)
         installMemberCompaction(
           agentCtx, agent, () => this.memberCompactionConfig(),
           () => this.compactionEngineFor(agent), () => this.retiringAgents.has(agent),
@@ -2703,8 +2712,10 @@ export default class AgentTeam extends TypertRemoteService {
           },
         }
       }
-      // A renewal's create path parents at the ledger-recorded previous Session even when the caller passes none:
+      // The Session this generation replaces, read from the ledger's transition record when the caller names none:
       // a crash between the durable swap commit and this activation recreates the Session from the ledger binding alone.
+      // The Host session header does NOT carry it: a rollover's lineage is the ledger's own transition, and `parentSession`
+      // now names a subagent's creator, so writing it here would misreport the relation to every reader of the header.
       const lineageParent = forkedFrom ?? (!persisted ? this.requireLedger().previousSessionForMember(member.memberId) : undefined)
       let recoveryCarried = 0
       created = persisted
@@ -2714,7 +2725,6 @@ export default class AgentTeam extends TypertRemoteService {
             meta: {
               cwd: workspacePath,
               agentPreset: member.presetId,
-              ...(lineageParent === undefined ? {} : { parentSession: lineageParent }),
             },
             agentOptions,
             setup,
@@ -2725,7 +2735,6 @@ export default class AgentTeam extends TypertRemoteService {
       await workspace.attachSession(member.sessionId)
       this.handles.set(member.memberId, created)
       this.memberIdle.status(member.memberId, created.agent.status, Date.now())
-      this.modelSelections.set(member.memberId, selected)
       this.clearMemberFailure(member.memberId, 'activation')
       this.clearMemberFailure(member.memberId, 'preTurnCancellation')
       this.clearMemberFailure(member.memberId, 'capabilityApply')
@@ -2762,7 +2771,6 @@ export default class AgentTeam extends TypertRemoteService {
         await this.disposeWithWakeGuard(created)
         if (this.handles.get(member.memberId) === created) this.handles.delete(member.memberId)
       }
-      this.modelSelections.delete(member.memberId)
       this.memberRuntime.forgetMember(member.memberId)
       const message = error instanceof Error ? error.message : String(error)
       this.ctx.logger.warn(`agent-team: activation failed for member '${this.memberLabel(member.memberId)}': ${message}`)
@@ -2784,7 +2792,6 @@ export default class AgentTeam extends TypertRemoteService {
       const stale = this.handles.get(memberId)
       if (stale !== undefined) {
         this.handles.delete(memberId)
-        this.modelSelections.delete(memberId)
         this.memberRuntime.forgetMember(memberId)
         // The composition-loss diagnostic this heal answers is stale once the
         // rebuild starts; a later activation must not resurface it.
@@ -5098,7 +5105,6 @@ export default class AgentTeam extends TypertRemoteService {
         () => this.disposeWithWakeGuard(handle))
       this.handles.delete(memberId)
     }
-    this.modelSelections.delete(memberId)
     this.memberRuntime.forgetMember(memberId)
     this.memberIdle.forget(memberId)
     this.clearMemberFailure(memberId, 'activation')

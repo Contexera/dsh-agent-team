@@ -102,7 +102,11 @@ async function bootHost(options: BootOptions = {}): Promise<{ readonly mutations
       if (options.apply !== true || fiber === undefined) return
       const candidate = resolveConfig(fiber.runtime!, structuredClone(stored))
       const changed: string[][] = []
-      for (const { path, ref } of volatileEntries(fiber.config)) {
+      // The running references hang off the plugin instance's resolved config.
+      // 0.2.2 keeps the raw config on `fiber.config` and the validated one on
+      // the service, so the fiber's own config no longer carries them; the
+      // loader commits into the same effective config.
+      for (const { path, ref } of volatileEntries(ctx.agentTeam.config)) {
         const source = path.reduce<unknown>((value, key) => Reflect.get(value as object, key), candidate)
         if (source === undefined) continue
         updateVolatile(ref, source as Volatile<unknown>)

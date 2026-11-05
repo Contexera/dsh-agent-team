@@ -14,4 +14,6 @@ autoInstallPeers: false
 # pnpm admits a version younger than its minimum release age only when it is
 # listed here, and maintains the list itself while installing.
 minimumReleaseAgeExclude:
-  - '@deepseek-ai/dsh-storage-sqlite@0.1.5-rc.1'
+  - '@deepseek-ai/cosmokit@1.9.0'
+  - '@deepseek-ai/dsh-storage-sqlite@0.2.2-rc.1'
+  - '@deepseek-ai/schemastery@3.19.0'

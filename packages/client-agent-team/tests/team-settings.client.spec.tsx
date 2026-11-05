@@ -7,6 +7,8 @@ import { TeamHumanIdentity, type TeamHumanIdentityLoader } from '../src/client/h
 import { TeamEnvironmentCheck, type TeamEnvironmentLoader } from '../src/client/environment-check.ts'
 import { zh } from '../src/client/locales.ts'
 import { TeamSettingsSection } from '../src/client/TeamSettingsSection.tsx'
+import { TeamSettingsNavIcon } from '../src/client/TeamSettingsNavIcon.tsx'
+import { TEAM_MARK_DOT, TEAM_MARK_RING } from '../src/client/team-mark.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -207,5 +209,25 @@ describe('Team settings page: identity', () => {
     const footnote = screen.getByText('版本 0.1.13')
     expect(screen.getByText(zh.environmentOutOfRangeTitle).compareDocumentPosition(footnote))
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+})
+
+describe('Team settings nav mark', () => {
+  it('draws the bundle mark at the shell-supplied size', () => {
+    // The shell renders this content in the nav row's icon seat and hands it the
+    // row's requested edge; the mark is one svg in the row's own ink.
+    // The shell supplies the row's edge plus its standard hooks; the seat's own props
+    // are all this component reads, so the rest are stubbed away here.
+    const props = { size: 16, active: false } as unknown as Parameters<typeof TeamSettingsNavIcon>[0]
+    render(<TeamSettingsNavIcon {...props} />)
+    const svg = document.querySelector('svg')
+    expect(svg).not.toBeNull()
+    expect(svg!.getAttribute('width')).toBe('16')
+    expect(svg!.getAttribute('height')).toBe('16')
+    expect(svg!.querySelector('path')!.getAttribute('d')).toBe(TEAM_MARK_RING)
+    expect(svg!.querySelector('circle')!.getAttribute('cx')).toBe(String(TEAM_MARK_DOT.cx))
+    // The row's ink, not a fixed colour: the seat inherits the shell's selected and
+    // resting ink, so the mark follows the row without a second registration.
+    expect(svg!.querySelector('path')!.getAttribute('stroke')).toBe('currentColor')
   })
 })

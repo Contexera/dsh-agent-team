@@ -130,6 +130,19 @@ class MemoryKvUnit implements KvUnit {
     this.medium.tables.get(table)?.delete(key)
   }
 
+  async deleteRecords(table: string, keys: readonly string[]): Promise<void> {
+    this.assertOpen()
+    const distinct = [...new Set(keys)]
+    if (distinct.length === 0) return
+    // One batch: every key is intercepted before the first deletion lands, so a rejected batch leaves the medium untouched instead of half-deleted.
+    for (const key of distinct) {
+      this.pool.consumeInjectedFailure()
+      await this.intercept(table, key, 'delete')
+    }
+    const records = this.medium.tables.get(table)
+    for (const key of distinct) records?.delete(key)
+  }
+
   async setGlobal(value: unknown): Promise<void> {
     this.assertOpen()
     this.pool.consumeInjectedFailure()

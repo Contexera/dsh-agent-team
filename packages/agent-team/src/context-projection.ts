@@ -91,12 +91,6 @@ export interface TeamContextProjectionState {
   }[]
 }
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
-  interface SessionProjectionStateMap {
-    contextContinuity: TeamContextProjectionState
-  }
-}
-
 const relatedFileSchema = z.object({ path: z.string().min(1), reason: z.string() }).strict()
 const openCallSchema = z.object({ callId: z.string().min(1), name: z.string(), arguments: z.string() }).strict()
 const checkpointEntrySchema = z.object({

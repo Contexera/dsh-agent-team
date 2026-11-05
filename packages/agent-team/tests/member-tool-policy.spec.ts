@@ -8,7 +8,7 @@ import { ToolCallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import { defineContentToolFixture, executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { TeamService as OfficialTeamService } from '@deepseek-ai/dsh-experimental-agent-team'
 import * as OfficialTeamTools from '@deepseek-ai/dsh-experimental-tool-agent-team'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
@@ -199,7 +199,7 @@ describe('Agent Team member tool policy', () => {
     expect(ctx.tools.schemas().map(tool => tool.name)).toContain('foreign_global')
   })
 
-  it('hides late own-scope tools from model requests and rejects direct and nested calls', async () => {
+  it('declares a late own-scope registration to the model but still denies its direct and nested calls', async () => {
     const adapter = new ScriptedAdapter()
     useAdapter(adapter)
     const { ctx, workspaceId } = shared
@@ -214,10 +214,10 @@ describe('Agent Team member tool policy', () => {
     const member = await addMember(ctx, workspaceId, 't17-late')
     const agent = liveAgent(ctx, member)
     const call = { signal: new AbortController().signal, agent, name: 'foreign_late', arguments: {} }
-    expect((await ctx.tools.execute({ ...call, callId: ToolCallId('t17-direct') })).isError).toBe(true)
+    expect((await executeToolFixture(ctx, { ...call, callId: ToolCallId('t17-direct') })).isError).toBe(true)
     const nested = ctx.on('tools/pre-execute', async (execution, next) => {
       if (execution.agent === agent && execution.name === 'ordinary_tool') {
-        const result = await ctx.tools.execute({ ...call, callId: ToolCallId('t17-nested'), parent: execution.token })
+        const result = await executeToolFixture(ctx, { ...call, callId: ToolCallId('t17-nested'), parent: execution.token })
         expect(result.isError).toBe(true)
       }
       return next()
@@ -229,15 +229,17 @@ describe('Agent Team member tool policy', () => {
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'run' }], source: { kind: 'user' } }))
     await idle
     expect(adapter.requests).toHaveLength(2)
+    // A restriction has always filtered global tools only and left scoped registrations alone; what changed is that the Team no longer has an assembly-time hook that hid a Member's own late row from the declarations. It is declared now, and the guard below is what refuses to run it.
+    const declaredTools = [...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool', 'foreign_late'].sort()
     for (const request of adapter.requests) {
-      expect(request.tools?.map(tool => tool.name).sort()).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+      expect(request.tools?.map(tool => tool.name).sort()).toEqual(declaredTools)
     }
     expect(agent.session.requestHeader()?.tools?.map(tool => tool.name).sort())
       .toEqual(adapter.requests.at(-1)?.tools?.map(tool => tool.name).sort())
     expect(body).not.toHaveBeenCalled()
     const ordinary = await ctx.agents.create({ sessionId: SessionId('t17-ordinary') })
     testCleanups.push(async () => { await ordinary.dispose() })
-    expect((await ctx.tools.execute({ ...call, agent: ordinary.agent, callId: ToolCallId('t17-other') })).isError).not.toBe(true)
+    expect((await executeToolFixture(ctx, { ...call, agent: ordinary.agent, callId: ToolCallId('t17-other') })).isError).not.toBe(true)
     expect(body).toHaveBeenCalledTimes(1)
   })
 
@@ -254,11 +256,12 @@ describe('Agent Team member tool policy', () => {
       requestId: requestId('t18-edit'), memberId: member.memberId, handle: 't18-shadow', description: 'Policy member',
       capabilities: { tools: { allow: ['ordinary_tool'] } },
     })
-    await expect(ctx.systemPrompt.assemble({ scope: agent })).rejects.toThrow(/replaced.*ordinary_tool/)
-    const result = await ctx.tools.execute({
+    // Without the assembly-time filter the Team used to run, a same-name replacement reaches the request's declarations and surfaces where the Member's guard runs it — at the call, not while the prompt is assembled.
+    const result = await executeToolFixture(ctx, {
       signal: new AbortController().signal, agent, name: 'ordinary_tool', arguments: {}, callId: ToolCallId('t18-call'),
     })
     expect(result.isError).toBe(true)
+    expect(JSON.stringify(result)).toMatch(/replaced.*ordinary_tool/)
     expect(body).not.toHaveBeenCalled()
   })
 
@@ -284,7 +287,7 @@ describe('Agent Team member tool policy', () => {
       await ctx.plugin(OfficialTeamService)
       await ctx.plugin(OfficialTeamTools)
     }
-    const denied = await ctx.tools.execute({
+    const denied = await executeToolFixture(ctx, {
       signal: new AbortController().signal, agent, name: 'list_agents', arguments: {}, callId: ToolCallId('t20-foreign'),
     })
     expect(denied.isError).toBe(true)
@@ -297,7 +300,10 @@ describe('Agent Team member tool policy', () => {
     expect(agent.session.ownEvents().filter(event => event.type === 'turn/end').at(-1)?.data.reason.kind).toBe('completed')
     expect(adapter.requests).toHaveLength(2)
     for (const request of adapter.requests) {
-      expect(request.tools?.map(tool => tool.name).sort()).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+      // A restriction filters global tools only and leaves scoped registrations alone, and the official Team tools register in the Agent's exact scope — so, with no assembly-time hook left to hide them, they are declared alongside the Member's own set. The guard, not the declaration, is what refuses them: the direct `list_agents` call above is already denied.
+      const declared = new Set(request.tools?.map(tool => tool.name))
+      expect([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].every(name => declared.has(name))).toBe(true)
+      expect(declared.has('list_agents')).toBe(true)
     }
     const ordinary = await ctx.agents.create({ sessionId: SessionId('t20-ordinary') })
     testCleanups.push(async () => { await ordinary.dispose() })
@@ -314,7 +320,10 @@ describe('Agent Team member tool policy', () => {
     await resumedIdle
     expect(resumedAgent.session.ownEvents().filter(event => event.type === 'turn/end').at(-1)?.data.reason.kind).toBe('completed')
     expect(adapter.requests).toHaveLength(3)
-    expect(adapter.requests.at(-1)?.tools?.map(tool => tool.name).sort()).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    // The resumed Member keeps its own tool set; the official Team rows stay declared too, because a restriction leaves scoped registrations alone, and the guard still refuses them.
+    const resumedDeclared = new Set(adapter.requests.at(-1)?.tools?.map(tool => tool.name))
+    expect([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].every(name => resumedDeclared.has(name))).toBe(true)
+    expect(resumedDeclared.has('list_agents')).toBe(true)
   })
 
   it('restricts each Member to its own allow-list without affecting siblings', async () => {
@@ -346,7 +355,7 @@ describe('Agent Team member tool policy', () => {
     // An allow-list narrows capability, never the Member's ability to be in the
     // directory it was invited to work in.
     expect(toolNames(ctx, agent)).toContain('working_directory')
-    const entered = await ctx.tools.execute({
+    const entered = await executeToolFixture(ctx, {
       signal: new AbortController().signal, callId: ToolCallId('t15-cd'), name: 'working_directory',
       arguments: { cd: otherWorkspace }, agent,
     })

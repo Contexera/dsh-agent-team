@@ -8,7 +8,7 @@ import type { AgentTeamAddMemberRequest, AgentTeamCreateProjectRequest, AgentTea
 import { COMMON_NS, LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { en as commonEn, zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/index.ts'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import { SlotTestRuntime, stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
+import { SlotTestRuntime, contextMenuHook, stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import type { PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { apply as applySidebar, inject as injectSidebar } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { apply as applyConversation, inject as injectConversation } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -60,7 +60,8 @@ function Frame({ renderSlot, usePanelInfo }: FrameProps) {
   const panelId = usePanelInfo(info => info.activePanelId)
   return <>
     <button type="button" data-test-control onClick={() => { setCollapsed(value => !value) }}>Toggle fixture sidebar</button>
-    {renderSlot('sidebar', { collapsed, width: collapsed ? 56 : 280 })}
+    {/* The bench never opens drawer mode: no Team surface reads that owner share. */}
+    {renderSlot('sidebar', { collapsed, width: collapsed ? 56 : 280, drawer: false })}
     {renderSlot('main', {}, { entryKey: panelId ?? 'conversation' })}
   </>
 }
@@ -895,6 +896,11 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     runtime.panelInfo.set({ activePanelId: options.mainPanelId as never })
   }
   await runtime.mount({ inject: [...injectSidebar], apply: applySidebar })
+  // rc.1's shipped Session header reads the context-menu hook from the root
+  // props share; production gets it from the ui-context-menu plugin, and the
+  // bench supplies the same production bindings the Harness suites stub with,
+  // because no Team surface opens a menu of its own here.
+  const disposeContextMenu = runtime.slots.provideRoot({ props: { useContextMenu: contextMenuHook() } })
   // The shipped ConversationRoot occupies the conversation seat — the same
   // surface production mounts — so member-session specs assert the
   // session-maybe seat's adoption semantics (remount on no-session) through

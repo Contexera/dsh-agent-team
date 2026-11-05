@@ -143,23 +143,9 @@ export class MemberRuntime {
       }
       return undefined
     })
-    agentCtx.on('system-prompt/assemble', async (_assembly, context, next) => {
-      if (context.scope !== scope) return next()
-      const assembly = await next()
-      const allow = new Set(this.enforcedToolAllow.get(memberId))
-      for (const name of allow) {
-        if (tools.get(name, scope) !== bindings.get(name)) throw new Error(`Team Member tool replaced: ${name}`)
-      }
-      const schemas = new Map(tools.schemas(scope).map(schema => [schema.name, schema]))
-      return {
-        ...assembly,
-        tools: assembly.tools.filter(schema => allow.has(schema.name)).map(schema => {
-          const declared = schemas.get(schema.name)
-          if (declared === undefined) throw new Error(`Team Member tool unavailable: ${schema.name}`)
-          return declared
-        }),
-      }
-    })
+    // `restrict` above is what shapes this Member's declared tools: 0.2.2 builds
+    // a request's declarations from the step's admitted set, which reads the
+    // scope's restricted view, so an assembly-time filter no longer exists.
     return bindings
   }
 

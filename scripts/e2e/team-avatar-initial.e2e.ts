@@ -1,6 +1,6 @@
 import { afterEach, it, expect } from 'vitest'
 import { join } from 'node:path'
-import { BROWSER_ARTIFACTS, closeScenario, openTeamPage, settleLayout } from './__external-agent-team-support.ts'
+import { BROWSER_ARTIFACTS, closeScenario, openSidebar, openTeamPage, settleLayout } from './__external-agent-team-support.ts'
 
 /** The avatar lane's own shots: the initial is a glyph-sized fact, so it gets its own directory. */
 const AVATAR_SHOTS = join(BROWSER_ARTIFACTS, 'avatar-initial')
@@ -36,7 +36,7 @@ it('keeps an astral initial whole in the sidebar avatar', async () => {
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
-  await page.getByRole('button', { name: '打开侧边栏' }).click()
+  await openSidebar(page)
   await settleLayout(page)
   const narrowRow = page.locator('[class*="agentRow"]').filter({ hasText: 'builder' }).first()
   await narrowRow.waitFor()

@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import { installModelSelection, type Agent, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import { installModelSelection, type Agent } from '@deepseek-ai/dsh-agent'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { CONTEXT_WINDOW_EXCEEDED_CODE, createUserMessage, LlmAdapter, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -40,7 +40,7 @@ const contexts: Context[] = []
 afterEach(async () => { await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose())) })
 
 async function fixture(model = 'large', settings: MemberCompactionConfig = { ...DEFAULT_MEMBER_COMPACTION }, maxTokens?: number): Promise<{
-  ctx: Context; agent: Agent; adapter: BudgetAdapter; engine: MemberCompactionEngine; selection: ModelSelectionRef;
+  ctx: Context; agent: Agent; adapter: BudgetAdapter; engine: MemberCompactionEngine;
 }> {
   const ctx = new Context()
   contexts.push(ctx)
@@ -55,10 +55,9 @@ async function fixture(model = 'large', settings: MemberCompactionConfig = { ...
   const agent = await harness.create(SessionId(`budget-${model}`), {
     provider: 'budget-test', model, ...maxTokens === undefined ? {} : { maxTokens },
   })
-  const selection: ModelSelectionRef = { current: { provider: 'budget-test', model }, assembled: undefined }
-  installModelSelection(agent.ctx, selection)
+  installModelSelection(agent.ctx)
   installMemberCompaction(agent.ctx, agent, () => settings, () => engine, () => false)
-  return { ctx, agent, adapter, engine, selection }
+  return { ctx, agent, adapter, engine }
 }
 
 async function send(agent: Agent, tokens: number): Promise<void> {
@@ -130,14 +129,25 @@ describe('Member compaction through real requests', () => {
     expect(adapter.requests.map(request => request.maxTokens)).toEqual([8_192, 8_192])
   })
 
-  it('applies a model switch before deciding the input and output budgets', async () => {
-    const { agent, adapter, selection } = await fixture()
-    await send(agent, 180_000)
-    selection.current = { provider: 'budget-test', model: 'small' }
-    await send(agent, 45_000)
-    expect(adapter.summaries).toHaveLength(1)
+  it('applies a model switch the new window can hold, then budgets from that window', async () => {
+    const { agent, adapter } = await fixture()
+    await send(agent, 20_000)
+    agent.model.select({ provider: 'budget-test', model: 'small' })
+    await send(agent, 20_000)
     expect(adapter.requests[1]!.model).toBe('small')
     expect(adapter.requests[1]!.maxTokens).toBe(128_000)
+  })
+
+  it('refuses a model switch the new window cannot hold, preserving the previous route', async () => {
+    const { agent, adapter } = await fixture()
+    await send(agent, 180_000)
+    agent.model.select({ provider: 'budget-test', model: 'small' })
+    await send(agent, 45_000)
+    // 0.2.2 compacts on the committed route before honoring a switch and refuses one it cannot make safe. One uncompactable user message leaves no range, so the request never reaches the adapter and the previous route stays committed.
+    expect(adapter.requests).toHaveLength(1)
+    expect(adapter.summaries).toHaveLength(0)
+    expect(agent.session.requestHeader()?.config.model).toBe('large')
+    expect(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')?.data.reason.kind).toBe('error')
   })
 
   it('honors a smaller configured budget with no retained-tail floor', async () => {
@@ -220,7 +230,7 @@ describe('Member compaction through real requests', () => {
   })
 
   it('leaves middleware-served virtual routes usable without a model directory entry', async () => {
-    const { ctx, agent, selection } = await fixture()
+    const { ctx, agent } = await fixture()
     let served = 0
     ctx.on('llm/stream', (options, next) => {
       if (options.provider !== 'virtual') return next()
@@ -229,7 +239,7 @@ describe('Member compaction through real requests', () => {
         yield { type: 'finish', reason: { kind: 'stop' } }
       })()
     })
-    selection.current = { provider: 'virtual', model: 'virtual' }
+    agent.model.select({ provider: 'virtual', model: 'virtual' })
     await send(agent, 10)
     expect(served).toBe(1)
     expect(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')?.data.reason.kind).toBe('completed')

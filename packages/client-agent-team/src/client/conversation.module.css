@@ -91,12 +91,14 @@
    two standings used to differ by a stroke alone; this takes the shipped selected vocabulary (Pill and
    ClockPicker: the ghost-active fill under a same-family stroke) rather than a second solid fill,
    because acceptance is the one primary this band carries. The attribute is part of the selector so the
-   state rests on the button's own semantics. Specificity is why both declarations below name it: the
-   variant's `.outline` (0,1,0) sets the neutral stroke, its hover rule (0,3,0) sets the hover wash, and
-   the derived class alone would be overrun by that hover rule rather than merely tied with it. */
+   state rests on the button's own semantics.
+   The outline variant keeps a transparent layout border and paints its stroke as an inset shadow whose
+   colour reads `--dsh-button-outline-color`, so the pressed state restyles that variable and leaves the
+   border and the shadow declaration alone — the shipped contract for a feature class. Restyling the
+   border instead would paint a second stroke over the shadow and leave the pressed state indistinguishable. */
 .toggleOn[aria-pressed='true'] {
   background: var(--dsw-alias-button-ghost-active-fill);
-  border-color: var(--dsw-alias-button-ghost-active-border);
+  --dsh-button-outline-color: var(--dsw-alias-button-ghost-active-border);
 }
 .toggleOn[aria-pressed='true']:hover:not(:disabled) {
   background: var(--dsw-alias-button-ghost-active-hover);
@@ -393,13 +395,17 @@
    the row opens the card. Keyboard focus reveals it on both, which is why the
    buttons stay mounted and focusable instead of leaving the tree. The row lives
    under [data-team-thread] on Thread pages and under [data-team-project] in the
-   Main stream, so both containers carry the reveal. */
+   Main stream, so both containers carry the reveal.
+   A hidden card also stops taking pointer events, on both branches: the card
+   carries `z-index` so it floats over its own row's words, and an invisible box
+   that still hit-tests steals the click of whatever surface covers this one —
+   the discussion panel at a narrow width is exactly that surface. */
 @media (hover: hover) {
-  .messageCard { opacity: 0; transition: opacity 160ms ease-out; }
+  .messageCard { opacity: 0; pointer-events: none; transition: opacity 160ms ease-out; }
   [data-team-thread] .messageRow:hover .messageCard,
   [data-team-project] .messageRow:hover .messageCard,
   [data-team-thread] .messageRow:has(:focus-visible) .messageCard,
-  [data-team-project] .messageRow:has(:focus-visible) .messageCard { opacity: 1; }
+  [data-team-project] .messageRow:has(:focus-visible) .messageCard { opacity: 1; pointer-events: auto; }
 }
 @media (hover: none) {
   .messageCard { opacity: 0; pointer-events: none; transition: opacity 160ms ease-out; }

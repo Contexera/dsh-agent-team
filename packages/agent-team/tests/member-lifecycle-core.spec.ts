@@ -21,6 +21,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 vi.setConfig({ testTimeout: 60_000 })
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import AgentTeam from '../src/index.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -69,7 +70,7 @@ describe('Agent Team Member lifecycle', () => {
       ['team_dm', { memberRef: 'member:missing', body: 'Do not route implicitly' }],
       ['team_task', { action: 'list', taskRef: 'task:missing' }],
     ] as const) {
-      const omitted = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`global-missing-${name}`),
+      const omitted = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`global-missing-${name}`),
         name, arguments: args, agent })
       expect(omitted.isError).toBe(true)
       if (!omitted.isError) throw new Error('Expected an explicit Workspace requirement')
@@ -80,11 +81,11 @@ describe('Agent Team Member lifecycle', () => {
     const project = await ctx.agentTeam.createProject({ requestId: requestId('global-project'), workspaceId: otherId,
       name: 'work', description: '', memberIds: [memberId] })
     await ctx.agentTeam.addProjectOwner({ requestId: requestId('global-owner'), workspaceId: otherId, projectRef: project.project.projectRef, memberId })
-    const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('global-start'),
+    const result = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId('global-start'),
       name: 'team_message', arguments: { action: 'start', workspace: otherId, projectRef: project.project.projectRef, body: 'Working in joined checkout' }, agent })
     expect(result.isError, result.isError ? result.error.message : '').toBe(false)
     expect(ctx.agentTeam.view({ workspaceId: otherId }).items[0]?.message.body).toBe('Working in joined checkout')
-    const legacyRef = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('global-start-channel-ref'),
+    const legacyRef = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId('global-start-channel-ref'),
       name: 'team_message', arguments: { action: 'start', workspace: otherId, projectRef: project.project.projectRef.replace('project:', 'channel:'), body: 'Cited by its Channel ref' }, agent })
     expect(legacyRef.isError, legacyRef.isError ? legacyRef.error.message : 'Agents still cite the channel: refs older history shows').toBe(false)
     expect(agent.session.header.cwd).toBe(checkout)
@@ -106,7 +107,7 @@ describe('Agent Team Member lifecycle', () => {
     const added = await ctx.agentTeam.addMember({ requestId: requestId('main-add'), workspaceId, handle: 'builder', description: '', presetId: 'team-member', projectRefs: [projectRef] })
     const agent = ctx.agents.get(added.status.member.sessionId)!
     const run = async (name: string, args: Record<string, unknown>) => {
-      const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`main-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
+      const result = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`main-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
       return result.isError ? { error: result.error.message } : { text: JSON.stringify(result) }
     }
 
@@ -137,7 +138,7 @@ describe('Agent Team Member lifecycle', () => {
       handle: 'builder', description: '', presetId: 'team-member', projectRefs: [] })
     const agent = ctx.agents.get(added.status.member.sessionId)!
     await ctx.agentTeam.joinWorkspace({ requestId: requestId('abbrev-join'), workspaceId: otherId, memberId: added.status.member.memberId })
-    const call = (name: string, args: unknown) => ctx.tools.execute({ signal: new AbortController().signal,
+    const call = (name: string, args: unknown) => executeToolFixture(ctx, { signal: new AbortController().signal,
       callId: ToolCallId(`abbrev-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
 
     const abbreviated = await call('team_view', { workspace: 'workspace:1a2b3c4d-0000-4000-8000-000000000001' })
@@ -226,7 +227,7 @@ describe('Agent Team Member lifecycle', () => {
     const threadRef = started.thread!.threadRef
     const taskRef = started.task!.taskRef
     const rejected = async (name: string, args: unknown): Promise<string> => {
-      const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`shape-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
+      const result = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`shape-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
       expect(result.isError, `${name} ${JSON.stringify(args)} unexpectedly succeeded`).toBe(true)
       if (!result.isError) throw new Error('expected a rejection')
       return result.error.message
@@ -238,7 +239,7 @@ describe('Agent Team Member lifecycle', () => {
     const historyArgs = await rejected('team_thread', { action: 'message', threadRef, messageRef: 'message:23011', beforeSequence: 1, limit: 5 })
     expect(historyArgs).toContain('action: history')
     expect(historyArgs).toMatch(/cannot page/i)
-    const paged = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('shape-read-page'), name: 'team_thread',
+    const paged = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId('shape-read-page'), name: 'team_thread',
       arguments: { action: 'read', threadRef, beforeSequence: 1, limit: 5 }, agent })
     expect(paged.isError, `read with a page size was refused: ${paged.isError ? paged.error.message : ''}`).toBe(false)
     for (const action of ['read', 'history'] as const) {
@@ -266,7 +267,7 @@ describe('Agent Team Member lifecycle', () => {
     const peerClaim = await ctx.agentTeam.changeClaimForAgent(peerAgent, { requestId: requestId('shape-peer-claim'), workspaceId, taskRef, action: 'claim', baseRevision: peerRead.thread.revision, direction: 'Peer claim on this Task' })
     if (peerClaim.kind !== 'committed') throw new Error(`expected committed peer claim, received ${peerClaim.kind}`)
     const builderRead = await ctx.agentTeam.readThreadForAgent(agent, { requestId: requestId('shape-builder-read'), workspaceId, threadRef })
-    const ownAttempt = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('shape-own-claim'), name: 'team_task', arguments: { action: 'done', taskRef, baseRevision: builderRead.thread.revision, claimRef: peerClaim.claim.claimRef }, agent })
+    const ownAttempt = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId('shape-own-claim'), name: 'team_task', arguments: { action: 'done', taskRef, baseRevision: builderRead.thread.revision, claimRef: peerClaim.claim.claimRef }, agent })
     expect(ownAttempt.isError).toBe(true)
     if (!ownAttempt.isError) throw new Error('expected an ownership rejection')
     expect(ownAttempt.error.message).toContain('own Claim')
@@ -764,7 +765,7 @@ describe('Agent Team Member lifecycle', () => {
     const agent = ctx.agents.get(builder.status.member.sessionId)!
     let callNumber = 0
     const call = async (name: string, args: unknown) => {
-      const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-protocol-${++callNumber}`), name, arguments: args, agent })
+      const result = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`team-protocol-${++callNumber}`), name, arguments: args, agent })
       expect(result.isError, `${name} ${JSON.stringify(args)}: ${result.isError ? result.error.message : 'ok'}`).toBe(false)
       expect(result.concludesTurn).toBeUndefined()
       if (result.isError) throw new Error(result.error.message)
@@ -807,7 +808,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(JSON.stringify(threadDirectory.threads)).not.toContain('One follow-up reply')
     // A second Member who joined after both Threads started sees them too.
     const lateJoinerAgent = ctx.agents.get(reviewer.status.member.sessionId)!
-    const lateJoinerView = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-protocol-${++callNumber}`), name: 'team_view', arguments: {}, agent: lateJoinerAgent }).then(result => {
+    const lateJoinerView = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`team-protocol-${++callNumber}`), name: 'team_view', arguments: {}, agent: lateJoinerAgent }).then(result => {
       expect(result.isError).toBe(false)
       return result.value as Record<string, any>
     })
@@ -834,7 +835,7 @@ describe('Agent Team Member lifecycle', () => {
     const shotFact = shotHistory.facts.find(fact => fact.kind === 'message' && fact.message.attachments !== undefined)
     expect(shotFact).toBeDefined()
     expect(shotHistory.facts.some(fact => fact.kind === 'message' && new RegExp(`\\[attachment\\] .*attachments${sep === '/' ? '\\/' : '\\\\'}v1${sep === '/' ? '\\/' : '\\\\'}`).test(fact.message?.body ?? ''))).toBe(true)
-    const rejected = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-protocol-bad-${++callNumber}`), name: 'team_message', arguments: { action: 'start', projectRef: project.project.projectRef, body: 'Never committed', attachments: ['relative/shot.png'] }, agent })
+    const rejected = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`team-protocol-bad-${++callNumber}`), name: 'team_message', arguments: { action: 'start', projectRef: project.project.projectRef, body: 'Never committed', attachments: ['relative/shot.png'] }, agent })
     expect(rejected.isError).toBe(true)
     expect(rejected.error?.message ?? rejected.value).toMatch(/must be absolute/)
     expect(ctx.agentTeam.threadHistory({ workspaceId, threadRef: shotThreadRef as never }).facts.some(fact => fact.kind === 'message' && fact.message?.body === 'Never committed')).toBe(false)
@@ -947,7 +948,7 @@ describe('Agent Team Member lifecycle', () => {
     const recipient = ctx.agents.get(reviewer.status.member.sessionId)!
     let callNumber = 0
     const call = async (name: string, args: unknown) => {
-      const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-${++callNumber}`), name, arguments: args, agent: sender })
+      const result = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`team-dm-${++callNumber}`), name, arguments: args, agent: sender })
       expect(result.isError).toBe(false)
       if (result.isError) throw new Error(result.error.message)
       return result.value as Record<string, any>
@@ -999,7 +1000,7 @@ describe('Agent Team Member lifecycle', () => {
     // latest prior exchange from the reader's own side is the builder's own
     // 'still green?', so the reader (builder) reads (you → them).
     adapter.enqueue(textResponse('Thanks.'))
-    const replyFromReviewer = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-mirror-${++callNumber}`), name: 'team_dm', arguments: { memberRef: builder.status.member.memberId, body: 'yes, all green' }, agent: recipient })
+    const replyFromReviewer = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`team-dm-mirror-${++callNumber}`), name: 'team_dm', arguments: { memberRef: builder.status.member.memberId, body: 'yes, all green' }, agent: recipient })
     expect(replyFromReviewer.isError).toBe(false)
     adapter.enqueue(textResponse('Noted.'))
     await waitForIdle(ctx, sender)
@@ -1010,22 +1011,22 @@ describe('Agent Team Member lifecycle', () => {
     expect(mirrorText).toMatch(/\(you → them, at [^)]+\+08:00\) still green\?/)
 
     // Parameter matrix: human recipients, unknown Members, and stray fields.
-    const bad = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-bad-${++callNumber}`), name: 'team_dm', arguments: { memberRef: AGENT_TEAM_HUMAN_MEMBER_ID, body: 'hi' }, agent: sender })
+    const bad = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`team-dm-bad-${++callNumber}`), name: 'team_dm', arguments: { memberRef: AGENT_TEAM_HUMAN_MEMBER_ID, body: 'hi' }, agent: sender })
     expect(bad.isError).toBe(true)
     expect(bad.error?.message ?? '').toMatch(/Agent Member/)
     expect(bad.error?.message ?? '').toMatch(/Agent Member/)
-    const unknown = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-unknown-${++callNumber}`), name: 'team_dm', arguments: { memberRef: 'member:nobody', body: 'hi' }, agent: sender })
+    const unknown = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`team-dm-unknown-${++callNumber}`), name: 'team_dm', arguments: { memberRef: 'member:nobody', body: 'hi' }, agent: sender })
     expect(unknown.isError).toBe(true)
     // A Thread write's parameters are not merely ignored here: the schema does
     // not carry them, so a model reaching for one is refused before the Host.
-    const stray = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-stray-${++callNumber}`), name: 'team_dm', arguments: { memberRef: reviewer.status.member.memberId, body: 'hi', projectRef: project.project.projectRef }, agent: sender })
+    const stray = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`team-dm-stray-${++callNumber}`), name: 'team_dm', arguments: { memberRef: reviewer.status.member.memberId, body: 'hi', projectRef: project.project.projectRef }, agent: sender })
     expect(stray.isError).toBe(true)
     expect(stray.error?.message ?? '').toMatch(/does not accept|unexpected/i)
 
     // A suspended peer is not a sendable target: the ledger rejects the send
     // outright (nothing is recorded), which is the pre-delivery guard.
     await ctx.agentTeam.suspendMember({ requestId: requestId('dm-suspend'), memberId: reviewer.status.member.memberId })
-    const suspended = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-suspended-${++callNumber}`), name: 'team_dm', arguments: { memberRef: reviewer.status.member.memberId, body: 'are you back?' }, agent: sender })
+    const suspended = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`team-dm-suspended-${++callNumber}`), name: 'team_dm', arguments: { memberRef: reviewer.status.member.memberId, body: 'are you back?' }, agent: sender })
     expect(suspended.isError).toBe(true)
     expect(suspended.error?.message ?? '').toMatch(/suspended/)
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
@@ -1201,7 +1202,7 @@ describe('Agent Team Member lifecycle', () => {
     const peerAgent = ctx.agents.get(peer.status.member.sessionId)!
     let callNumber = 0
     const call = async (name: string, args: unknown) => {
-      const result = await ctx.tools.execute({ signal: new AbortController().signal,
+      const result = await executeToolFixture(ctx, { signal: new AbortController().signal,
         callId: ToolCallId(`peer-mention-${++callNumber}`), name, arguments: args, agent: starterAgent })
       if (result.isError) throw new Error(result.error.message)
       return result.value as Record<string, any>

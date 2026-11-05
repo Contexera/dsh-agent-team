@@ -1,7 +1,7 @@
 import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
 import type { Browser } from 'playwright'
-import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, acknowledgeReloadConnectionLoss, actionBandGeometry, connectFreshWorkspaceZh, entryClusterEdges, entryUnreadCapsule, focusRing, inkContrast, installLocalBundle, launchWebScaffold, maxHorizontalScroll, readCountCapsule, resolveAliasColor, settleAnimations, settleLayout, taskEntryClusterLefts, taskEntryLineSelector, taskEntryRow, watchConsole } from './__external-agent-team-support.ts'
+import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, acknowledgeReloadConnectionLoss, actionBandGeometry, connectFreshWorkspaceZh, entryClusterEdges, entryUnreadCapsule, focusRing, inkContrast, installLocalBundle, launchWebScaffold, maxHorizontalScroll, openSidebar, readCountCapsule, resolveAliasColor, settleAnimations, settleLayout, taskEntryClusterLefts, taskEntryLineSelector, taskEntryRow, visibleSidebarWidth, watchConsole } from './__external-agent-team-support.ts'
 import type { Locator, WebScaffold } from './__external-agent-team-support.ts'
 
 let scaffold: WebScaffold | undefined
@@ -210,7 +210,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // the dialog from the narrow-expanded sidebar after the collapse settles.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
-  await page.getByRole('button', { name: '打开侧边栏' }).click()
+  await openSidebar(page)
   await page.getByRole('button', { name: '添加 Agent' }).click()
   const narrowDialog = page.getByRole('dialog', { name: '添加 Agent' })
   await narrowDialog.getByLabel('名称').waitFor()
@@ -257,7 +257,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Reopen from the narrow-expanded sidebar after the collapse settles.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
-  await page.getByRole('button', { name: '打开侧边栏' }).click()
+  await openSidebar(page)
   await page.getByRole('button', { name: '新建项目' }).click()
   const narrowProjectDialog = page.getByRole('dialog', { name: '新建项目' })
   await narrowProjectDialog.getByLabel('名称').waitFor()
@@ -888,7 +888,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.setViewportSize({ width: 390, height: 844 })
   const narrowProjectFrame = page.locator('[data-sidebar-collapsed="true"]')
   await narrowProjectFrame.waitFor()
-  await expect.poll(async () => (await narrowProjectFrame.locator(':scope > div').first().boundingBox())?.width ?? 999).toBeLessThanOrEqual(56)
+  await expect.poll(async () => await visibleSidebarWidth(page)).toBeLessThanOrEqual(56)
   await expect.poll(async () => (await page.locator('[data-team-project]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(330)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await page.screenshot({ path: join(UI04_SHOTS, 'narrow-project.png'), fullPage: true })
@@ -902,7 +902,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.setViewportSize({ width: 390, height: 844 })
   const tasklessProjectFrame = page.locator('[data-sidebar-collapsed="true"]')
   await tasklessProjectFrame.waitFor()
-  await expect.poll(async () => (await tasklessProjectFrame.locator(':scope > div').first().boundingBox())?.width ?? 999).toBeLessThanOrEqual(56)
+  await expect.poll(async () => await visibleSidebarWidth(page)).toBeLessThanOrEqual(56)
   await expect.poll(async () => (await page.locator('[data-team-project]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(330)
   await tasklessCard.click()
   // A taskless discussion opens beside its feed; the Project page, timeline, and
@@ -2482,7 +2482,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.setViewportSize({ width: 390, height: 844 })
   const collapsedFrame = page.locator('[data-sidebar-collapsed="true"]')
   await collapsedFrame.waitFor()
-  await expect.poll(async () => (await collapsedFrame.locator(':scope > div').first().boundingBox())?.width ?? 999).toBeLessThanOrEqual(56)
+  await expect.poll(async () => await visibleSidebarWidth(page)).toBeLessThanOrEqual(56)
   await page.screenshot({ path: join(UI01_SHOTS, 'narrow-thread.png'), fullPage: true })
   await page.screenshot({ path: join(UI02_SHOTS, 'narrow-team-rail.png'), fullPage: true })
   await page.screenshot({ path: join(UI05_SHOTS, 'narrow-closed-thread.png'), fullPage: true })
@@ -2728,30 +2728,57 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id }).totalUnreadCount).toBe(baseUnread + 3)
   await expectSidebarUnread(String(baseUnread + 3))
 
-  // Narrow rail: 对话 → 收件箱 → 任务看板 → Projects → Agents. The Inbox icon marks unread and is
-  // a destination that opens the Inbox and expands the sidebar. The exit leads
-  // the rail as it leads the wide column, and the Task board is the Inbox's
-  // sibling cross-Workspace destination right after it.
-  await page.setViewportSize({ width: 390, height: 844 })
+  // The rail is the desktop collapse: 对话 → 收件箱 → 任务看板 → Projects → Agents as icons. The
+  // Inbox icon marks unread and opens the Inbox, expanding the sidebar; the exit leads the rail as
+  // it leads the wide column, and the Task board is the Inbox's sibling cross-Workspace destination.
+  // The narrow lane gets the drawer instead, measured below.
+  await inboxCard.click()
+  await page.locator('[data-team-inbox]').waitFor()
+  // The card's current-page fill is read while it is on screen, because the icon that replaces it
+  // in the rail must wear exactly that.
+  const currentCardFill = await inboxCard.evaluate(card => ({
+    label: card.getAttribute('aria-current'),
+    background: getComputedStyle(card).backgroundColor,
+  }))
+  expect(currentCardFill.label).toBe('page')
+  await page.getByRole('button', { name: '收起侧边栏' }).click()
+  await page.locator('[data-sidebar-collapsed="true"]').waitFor()
+  await settleLayout(page)
   const inboxRail = page.locator('nav[class*="railWorkspace"]')
   await inboxRail.waitFor()
   const railLabels = await inboxRail.locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))
   expect(railLabels).toEqual(['对话', `收件箱，${baseUnread + 3} 条未读`, '任务看板', '项目', 'Agents'])
   await expectSidebarUnread(String(baseUnread + 3))
-  // The dot replaced the number, so the rail's hover hint is where the quantity
-  // shows (the same name the control carries); the assertion above reads it
-  // unhovered.
+  // The dot replaced the number, so the rail's hover hint is where the quantity shows (the same
+  // name the control carries); the assertion above reads it unhovered.
   await railInboxButton.hover()
   const railHint = page.locator('[role="tooltip"]')
   await expect.poll(async () => await railHint.count()).toBe(1)
   expect(await railHint.textContent()).toBe(`收件箱，${baseUnread + 3} 条未读`)
   await page.mouse.move(300, 600)
   await expect.poll(async () => await railHint.count()).toBe(0)
+  // The rail has no label, so the current page is the fill on the icon: the same
+  // `aria-current="page"` fill the wide card wears.
+  const railCurrent = await railInboxButton.evaluate(button => ({
+    label: button.getAttribute('aria-current'),
+    background: getComputedStyle(button).backgroundColor,
+  }))
+  expect(railCurrent.label).toBe('page')
+  expect(railCurrent.background).toBe(currentCardFill.background)
+  expect(railCurrent.background).not.toBe('rgba(0, 0, 0, 0)')
   // Screenshot the settled rail after the collapse crossfade.
   await settleAnimations(page)
-  await page.screenshot({ path: join(UI07_SHOTS, 'inbox-narrow-rail.png'), fullPage: true })
+  await page.screenshot({ path: join(UI07_SHOTS, 'inbox-rail.png'), fullPage: true })
   await railInboxButton.click()
-  await page.locator('[data-team-inbox]').waitFor()
+  await page.locator('[data-sidebar-collapsed]').waitFor({ state: 'detached' })
+  await settleLayout(page)
+  // The narrow lane is a drawer: the header's opener brings the wide entries, same Inbox mark.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('[data-sidebar-collapsed="true"]').waitFor()
+  await openSidebar(page)
+  await expectSidebarUnread(String(baseUnread + 3))
+  await settleAnimations(page)
+  await page.screenshot({ path: join(UI07_SHOTS, 'inbox-narrow-drawer.png'), fullPage: true })
   await expect.poll(() => page.locator('button[class*="inboxCard"]').count()).toBe(1)
   await expect.poll(async () => await inboxRow.count()).toBe(1)
   await expect.poll(async () => await inboxRow.textContent()).toContain('#delivery')
@@ -2826,14 +2853,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(narrowFit.rowHeight).toBeLessThanOrEqual(60)
   await settleAnimations(page)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-page-narrow.png'), fullPage: true })
-  // On a phone the reading state is the collapsed rail, so the queue gets that
-  // face too, with the compact row shape. The card's current-page fill is read
-  // while it is on screen because the replacing icon must wear exactly that.
-  const currentCardFill = await inboxCard.evaluate(card => ({
-    label: card.getAttribute('aria-current'),
-    background: getComputedStyle(card).backgroundColor,
-  }))
-  expect(currentCardFill.label).toBe('page')
+  // On a phone the reading state is the closed drawer, so the queue keeps the compact row shape.
   await page.getByRole('button', { name: '收起侧边栏' }).click()
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
   await settleLayout(page)
@@ -2844,17 +2864,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(collapsedRow.height).toBeLessThanOrEqual(62)
   expect(collapsedRow.sameLine).toBe(true)
-  // The rail has no label, so the current page is the fill on the icon: the same
-  // `aria-current="page"` fill the wide card wears.
-  const railCurrent = await railInboxButton.evaluate(button => ({
-    label: button.getAttribute('aria-current'),
-    background: getComputedStyle(button).backgroundColor,
-  }))
-  expect(railCurrent.label).toBe('page')
-  expect(railCurrent.background).toBe(currentCardFill.background)
-  expect(railCurrent.background).not.toBe('rgba(0, 0, 0, 0)')
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-page-narrow-collapsed.png'), fullPage: true })
-  await railInboxButton.click()
+  await openSidebar(page)
   await page.locator('[data-sidebar-collapsed]').waitFor({ state: 'detached' })
   await settleLayout(page)
   await page.setViewportSize({ width: 1440, height: 960 })

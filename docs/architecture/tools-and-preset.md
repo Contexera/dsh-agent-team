@@ -4,9 +4,11 @@ English | [中文](tools-and-preset.zh.md)
 
 The explicit `team-member` preset is the only Team Member composition. It adds coding capability rows (shell, filesystem/search, web search and fetch, background jobs, the skill loader tool, compaction), collaboration guidance/tools, Harness Workspace instruction discovery, and bounded private-memory context. Skill discovery itself is not a preset row: each Member's provider is Host-registered on its agent scope (see Host authority). Ordinary Sessions remain outside this roster and receive no Team prompt sections, tools, or Member memory.
 
+The filesystem row states `applyPatch: false` rather than inheriting the Host default: `edit` is the one file-modification tool a Member is granted, and a preset that left the flag unstated would widen every Member's surface the day a Host default flips. The shipped preset test asserts the value, so the decision is checked rather than assumed.
+
 Every Member starts restricted to the tool definitions contributed by its selected preset, plus the explicitly shared `working_directory` tool. Host-global tools are excluded. `capabilities.tools.allow` can only narrow this baseline; it cannot authorize a Host or later plugin tool. The nine Team tools and `working_directory` remain available.
 
-The Host captures those definitions before Agent publication, filters request schemas during prompt assembly, and guards direct and nested execution. Later own-scope tools are hidden from requests and denied execution; replacing an allowed definition rejects request assembly and execution. Capability edits retain the original bindings. These checks apply to the exact Member, not ordinary Agents or delegated child scopes.
+The Host captures those definitions before Agent publication and guards direct and nested execution. Later own-scope tools are no longer hidden from requests: a restriction filters Host-global tools only, so without an assembly-time filter a scoped registration stays declared while its execution is still denied. Replacing an allowed definition is refused at execution rather than at assembly. Capability edits retain the original bindings. These checks apply to the exact Member, not ordinary Agents or delegated child scopes.
 
 Team mode does not filter prompts injected by other official or custom plugins. Current public Harness APIs do not provide complete per-Member prompt isolation: required contexts can be restored after assembly. In particular, experimental Team's `team:policy` and required `team:identity` remain visible; they do not block activation or conversation.
 
@@ -24,7 +26,7 @@ The generation swap is owned by `team-context-management.ts`, Team's own coordin
 2. recheck the owned-jobs guard and the ordinary-input queue at the commit seam — a queued ordinary message defers the swap;
 3. inside `agent.runMaintenance`, commit the idempotent `team/member-session-recycled` operation as the Host actor, recording `inputFromSeq` (the retired log's offset) when a live generation exists;
 4. retire the old generation: its pre-step gate rejects the step without a model request, then dispose and archive (never delete); the original inbox insertions remain in the log even if already claimed;
-5. activate the fresh Session, parented at the one it replaces;
+5. activate the fresh Session, whose lineage the ledger transition already records (its header carries no `parentSession`, which names a subagent's creator);
 6. fold the retired log from `inputFromSeq`, drop every message the successor already holds by id, deliver the rest by followup, then rederive the Inbox from the ledger.
 
 Maintenance is what makes the commit safe against input arriving mid-swap: the loop is parked there, so a new message waits in the durable inbox instead of reaching the generation being retired. A failed commit releases maintenance and the old generation continues; a committed one retires it, and startup or recovery finishes a swap interrupted before the replay.

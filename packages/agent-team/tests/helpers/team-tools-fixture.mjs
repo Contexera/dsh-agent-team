@@ -1,5 +1,5 @@
 import { apply as applyAgentTeamTools } from '@contexera/dsh-agent-team/tools'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 
 export const name = 'test-team-tools'
 export const inject = ['tools']

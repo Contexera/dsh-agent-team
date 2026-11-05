@@ -232,6 +232,10 @@ describe('Agent Team shipping contract', () => {
       '@deepseek-ai/dsh-tool-fs-search', '@deepseek-ai/dsh-tool-jobs', '@deepseek-ai/dsh-tool-skill',
       '@deepseek-ai/dsh-tool-web',
     ]) expect(preset).toContain(`name: '${capability}'`)
+    // The file-editing surface is stated, not inherited: `apply_patch` is off in the
+    // Host default today, and a preset that left it unstated would silently widen
+    // every Member's tools the day that default flips.
+    expect(preset).toMatch(/- id: tool-fs\n\s+name: '@deepseek-ai\/dsh-tool-fs'\n\s+config:\n\s+applyPatch: false\n/)
     // Skills are per-Member (Host-mounted private-directory provider), so the
     // shared filesystem row is deliberately absent from the preset.
     expect(preset).not.toContain('@deepseek-ai/dsh-skill-filesystem')
@@ -249,16 +253,16 @@ describe('Agent Team shipping contract', () => {
     // A plugin's own `engines.dsh` decides DSH compatibility alone (peers are
     // then ignored), so it states the same certified line the peers do: one
     // line, one answer whichever field an installer reads.
-    expect(bundleManifest.engines.dsh).toBe('>=0.2.1-rc.2 <0.2.2')
-    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-tool-web']).toBe('>=0.2.1-rc.2 <0.2.2')
-    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-command-compact']).toBe('>=0.2.1-rc.2 <0.2.2')
-    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-preset']).toBe('>=0.2.1-rc.2 <0.2.2')
-    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-preset-registry']).toBe('>=0.2.1-rc.2 <0.2.2')
+    expect(bundleManifest.engines.dsh).toBe('>=0.2.2-rc.1 <0.2.3')
+    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-tool-web']).toBe('>=0.2.2-rc.1 <0.2.3')
+    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-command-compact']).toBe('>=0.2.2-rc.1 <0.2.3')
+    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-preset']).toBe('>=0.2.2-rc.1 <0.2.3')
+    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-preset-registry']).toBe('>=0.2.2-rc.1 <0.2.3')
     expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-presets']).toBeUndefined()
     // The certified baseline moves as one cut: every DSH peer carries the same
     // range, or an install resolves two DSH generations at once. No host-scope
     // package may sit in `dependencies` (see the host-scope gate below).
-    expect([...dshPeerRanges(bundleManifest)]).toEqual(['>=0.2.1-rc.2 <0.2.2'])
+    expect([...dshPeerRanges(bundleManifest)]).toEqual(['>=0.2.2-rc.1 <0.2.3'])
     expect(preset).toContain('compaction: true')
     expect(preset).toContain('toolResultPruner: true')
     expect(preset).toContain('team_inbox, team_thread, team_attention, team_message, team_dm, team_task, team_view, team_subscription, and team_reminder')

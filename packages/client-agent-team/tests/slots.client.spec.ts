@@ -79,7 +79,12 @@ async function bench(persisted: string | null = null) {
     'sidebar.panellist': { kind: 'list', scope: 'root' },
   } } as never, root)
   slots.register({ name: 'sidebar.workspaces', priority: 0 }, root)
-  slots.register({ name: 'sidebar.settings', priority: 0 }, root)
+  // The shipped settings shell declares the panel's seats off its sidebar entry, so a
+  // Team section and its nav icon have somewhere to register.
+  slots.register({ name: 'sidebar.settings', priority: 0, children: {
+    'settings.section': { kind: 'list', scope: 'root' },
+    'settings.section.icon': { kind: 'list', scope: 'root', inline: true },
+  } } as never, root)
   // The shipped Conversation occupies the keyed main panel under the reserved
   // 'conversation' key and declares the composer seats below it, mirroring
   // the 0.1.5 ui-layout + ui-conversation tree.
@@ -124,6 +129,24 @@ describe('Team Client slot takeover', () => {
     await fiber.dispose()
     expect(slots.entries('sidebar.panellist')).toHaveLength(0)
     expect(slots.spec('sidebar.workspaces.directoryFlow')).toBeUndefined()
+  })
+
+  it('registers the settings nav mark on the shell icon seat under the Team section id', async () => {
+    const { ctx, slots } = await bench()
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+
+    // The mark rides the shell's own icon seat, addressed by the Team section id, so
+    // the nav row draws the bundle's mark instead of the generic gear — and the two
+    // ids stay tied, because an icon registered under any other id never renders.
+    const section = slots.entries('settings.section')
+    expect(section).toHaveLength(1)
+    const icons = slots.entries('settings.section.icon')
+    expect(icons).toHaveLength(1)
+    expect(icons[0]!.options.id).toBe(section[0]!.options.id)
+
+    await fiber.dispose()
+    expect(slots.entries('settings.section.icon')).toHaveLength(0)
   })
 
   it('fails loudly when another takeover claims a Team primary seat at the same priority', async () => {

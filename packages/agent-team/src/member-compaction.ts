@@ -1,9 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createSystemMessage, LlmError, type LlmCallConfig, type LlmResolvedModelInfo, type Message, type UserMessage } from '@deepseek-ai/dsh-llm'
+import { createSystemMessage, LlmError, type LlmCallConfig, type LlmResolvedModelInfo, type Message, type ToolSchema, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 import type ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
-import { renderPrompt, type PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
+import { renderPrompt, type PromptPresentation } from '@deepseek-ai/dsh-system-prompt'
 
 export interface MemberCompactionConfig {
   readonly enabled: boolean
@@ -36,21 +36,23 @@ export function memberOutputTokens(inputTokens: number, contextWindow: number, r
   return Math.min(requestedTokens ?? available, available)
 }
 
-export function measureMemberInput(ctx: Context, agent: Agent, config: LlmCallConfig, pending: readonly Message[], assembly?: PromptAssembly): number {
+export function measureMemberInput(ctx: Context, agent: Agent, config: LlmCallConfig, pending: readonly Message[], assembly?: PromptPresentation, stepTools?: readonly ToolSchema[]): number {
   const meter = ctx.get('tokenMeter')
   if (meter === undefined) throw new Error('agent-team: token meter unavailable')
   const header = agent.session.requestHeader()
   const measurement = meter.measure(agent.session, {
     ...header,
     config,
-    ...assembly === undefined ? {} : { tools: [...assembly.tools] },
+    // The header names the previous request's tools; a captured step replaces them with the set the next request will actually declare.
+    ...(assembly !== undefined && stepTools !== undefined ? { tools: [...stepTools] } : {}),
   })
   let inputTokens = measurement.totalTokens + pending.reduce((sum, message) => sum + meter.estimateMessage(message), 0)
   if (assembly !== undefined) {
     const head = agent.session.surface.nodes[0]
     const event = head === undefined ? undefined : agent.session.eventAt(head)
     const previous = event?.type === 'system/message' ? meter.estimateMessage(event.data.message) : 0
-    inputTokens += Math.max(0, meter.estimateMessage(createSystemMessage(renderPrompt(assembly))) - previous)
+    // renderPrompt reads sections and variables only; tool declarations left the waterfall, so the presentation carries none.
+    inputTokens += Math.max(0, meter.estimateMessage(createSystemMessage(renderPrompt({ ...assembly, tools: [] }))) - previous)
   }
   return inputTokens
 }
@@ -64,7 +66,8 @@ export function installMemberCompaction(
 ): void {
   let pending: readonly Message[] = []
   let claimed: readonly UserMessage[] = []
-  let assembly: PromptAssembly | undefined
+  let assembly: PromptPresentation | undefined
+  let stepTools: readonly ToolSchema[] | undefined
   type OutputClamp = { readonly provider: string; readonly model: string; readonly applied: number; readonly requested: number | undefined }
   let loggedClamp: OutputClamp | undefined
   let preparedClamp: OutputClamp | undefined
@@ -78,8 +81,10 @@ export function installMemberCompaction(
       && actual.model === preparedClamp.model && actual.maxTokens !== undefined
       ? { ...preparedClamp, applied: actual.maxTokens } : undefined
   })
-  ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+  ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     assembly = await next()
+    // 0.2.2 moved tool declarations out of the waterfall: the step's admitted set arrives on the context, and `schemas` projects it the way the request's own provider does.
+    stepTools = context.toolSet === undefined ? undefined : ctx.tools.schemas(context.scope, context.toolSet)
     return assembly
   }, { prepend: true })
   ctx.on('agent/pre-step', async (payload, next) => {
@@ -114,7 +119,7 @@ export function installMemberCompaction(
     // A window that cannot hold the fixed reserve leaves this policy no room to
     // act; the Agent's own upstream limits still apply to the request.
     if (threshold === undefined) return request
-    const measure = (): number => measureMemberInput(ctx, agent, request, offered, assembly)
+    const measure = (): number => measureMemberInput(ctx, agent, request, offered, assembly, stepTools)
     let inputTokens = measure()
     if (inputTokens >= threshold) {
       const engine = engineFor()

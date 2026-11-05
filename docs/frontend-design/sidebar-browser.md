@@ -54,7 +54,10 @@ That is the closest a Team control can legally stand to the brand row. The row i
 
 The exit row is the one row in this column that leaves rather than navigates, so it never carries `aria-current`. It takes over the shipped New Session bar instead of restating a row of its own: the mode hides that bar, so one bar stands in that position in either mode and only its label changes — the same 38px elevated slab and the same l3 hairline, with the label reading 对话 and the glyph pointing back.
 
-Taking over the slot means taking over the box, not only the position. The row stands where the shipped bar stands and measures what it measures: 14px to 266px in the 280px sidebar. The 2px horizontal inset is the shipped bar's own, since shipped declares no width and lets that margin pull a stretched flex item in. The browser test measures both in one render and requires them equal, so the two modes put one bar on one box and a change to either is caught rather than eyeballed.
+Taking over the slot means taking over the box, not only the position. The row stands where the shipped bar stands and measures what it measures: 12px to 268px in the 280px sidebar.
+
+The 4px horizontal inset is the shipped bar's own — 0.2.2 sets it to its paint inset plus the hairline, where the certified line used a flat 2px — since shipped declares no width and lets that margin pull a stretched flex item in.
+The browser test measures both in one render and requires them equal, so the two modes put one bar on one box and a change to either is caught rather than eyeballed.
 
 The browsing column below keeps the shipped browser's own trailing 12px inset. That is what puts this column's section headers and rows on the shipped rows' left edge.
 

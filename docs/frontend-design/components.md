@@ -76,9 +76,9 @@ Membership law follows the Host: joining needs `availability === 'active'` (the 
 ## Team settings page
 Settings carries the Team's one surface: the `settings.section` entry `team-settings` (「团队」), offered in ordinary mode only, because Team mode's sidebar takeover puts the settings panel out of reach. The shell draws the nav rail and the content column, so the section draws its own 18px/600 heading and then rows in the shipped settings language — 16px/0 padding over a hairline separator, a 14px/22px title above a 12px/18px tertiary description, 12px between controls. It reuses the shipped `Button` and `Input` rather than restating them.
 
-The nav glyph is shell-owned too: `navIcon(id)` draws a fixed mark per section id and falls back to the generic gear for an unknown one, and `settings.section` carries no icon option.
+The nav glyph is the shell's own seat: `settings.section.icon` takes one registration per section id, and the shell keeps its generic gear only for an id nobody claimed.
 
-So the Team row takes the bundle's mark through a contained DOM workaround: the row is tagged inside the shell's portalled dialog and the mark is painted over the shell glyph with a mask. It is not a supported extension point, so one observer watches only the dialog's open/close and releases every tag and style on dispose — drop it once the Harness exposes an icon on `settings.section`.
+So the Team row registers the bundle's mark under its own section id and the shell renders it — the mark is the row's only glyph, sized by the shell's own 16px and painted in the row's ink, and it leaves with the registration rather than needing an observer to unwind it.
 
 The page writes two things. Identity — the display name and the avatar — goes through the Team Remote, which owns the profile entry the Client would otherwise have to name. The compaction threshold is the Team Host row's own settings group, read and written through the shared configuration form (`configForms.get(<row id>)`), so the page names one `memberCompaction.tokens` child path rather than restating the whole group.
 

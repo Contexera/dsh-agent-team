@@ -110,7 +110,7 @@
 
 /* The mode's exit, first in the browsing region under the shell's brand row (a New Session button or a macOS window-drag
    surface). It leaves rather than navigates, so it never carries `aria-current`. It takes the shipped New Session bar's slot
-   and slab (38px elevated fill, 2px inset, so its box matches the shipped bar: 252px wide, 14px from the sidebar edge); the
+   and slab (38px elevated fill, 4px inset, so its box matches the shipped bar: 256px wide, 12px from the sidebar edge); the
    separator is 1px because shipped's 0.5px declaration renders as 1px.
 
    The label is what centres, not the label+chevron group: glyph air differs between CJK and Latin and across font stacks,
@@ -131,8 +131,12 @@
   height: 38px;
   justify-content: center;
   line-height: 22px;
-  /* The shipped bar's own inset. No width: the 2px margins make it 252px inside the 256px column, and a width would add them on top. */
-  margin: 0 2px 12px;
+  /* The shipped bar's own inset: 0.2.2 sets it to its paint inset plus the hairline
+     (`calc(3px + 1px)`), where the certified line used a flat 2px. No width: the margins
+     are what size the slab inside this column, and a width would add them on top. The
+     journey measures this card against the shipped bar's box, so a host change shows up
+     there rather than as a silent 2px drift. */
+  margin: 0 4px 12px;
   padding: 8px 12px;
 }
 .leaveCard:hover,

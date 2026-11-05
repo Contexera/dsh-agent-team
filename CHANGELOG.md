@@ -20,6 +20,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Upgrade note**
 
+- This build is certified against DSH `0.2.2-rc.1` and declares `>=0.2.2-rc.1 <0.2.3`, so a DSH `0.2.1-rc.x` install now resolves to `@contexera/dsh-agent-team` `0.2.6` instead of this one. Stored Sessions and the Team ledger open unchanged, and a profile already running the previous line needs no migration — only the bundle version that matches the host it runs on.
 - Team's durable identifiers now carry the `contexera` name: the six loader row ids in `cordis.patch.yml`, the three producer kinds that attribute what the bundle writes into Sessions, and the Human profile's settings namespace, now `contexera-agent-team-host`. Stored Session data reads unchanged: the pre-rename kinds still resolve, bare or `plugin:`-converted.
 - An existing profile keeps the Team Host row's whole Config across that rename: at boot the Host carries the old row's values — the display name, `wakeRecycle`, `memberCompaction`, and the avatar reference while its bytes still exist — into `contexera-agent-team-host`, filling only the fields that namespace's user layer stores nothing for, so a value edited after upgrading wins. A field holding a `!!js` expression keeps its default instead of being written back as source text.
 - Only the Host row is migrated: a profile patch that addresses one of the other five renamed rows — `wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}` — by its old id is skipped after the rename, because no loader entry answers to that id, so Team falls back to that row's shipped values. A hand edit to the Team preset or to the preset registry's `default` has to be re-applied.
@@ -27,6 +28,9 @@ All notable changes to this project are documented in this file. The format foll
 
 **Fixed**
 
+- The Team settings row draws one glyph on DSH `0.2.2`: the bundle's mark is registered on the shell's own settings icon seat, where a DOM workaround had painted it over the shell's glyph — which the shell's new nav wrapper drew beside it, leaving the generic gear and the mark stacked in one row.
+- A followed Thread reads as pressed again on DSH `0.2.2`: the shipped outline variant moved its stroke from the layout border into an inset shadow that reads `--dsh-button-outline-color`, so the pressed state restyles that variable rather than a border that no longer paints.
+- A Message's hover action card no longer eats a click meant for the surface covering it: the hidden card stops taking pointer events, so at a narrow width the discussion panel's close control is reachable again.
 - An automatic subscription pause now wakes owners with the subscription name and repeated-failure reason, plus the run-log route; it no longer misreports that the reader was removed as a Project owner.
 - Typing `@` straight after Chinese text opens the mention picker and reaches the Member: a call now starts at any `@` outside an ASCII word, so prose that spaces no words needs no space before a name, while an address like `mail@host.example` stays prose.
 - A Thread card's title, a Thread chip's title, a quote line, an Inbox gist and a board card's subject read as the line renders: its Markdown is projected to plain text before the line is cut to width, so `**…**` no longer shows as written. A Message body still renders its Markdown.

@@ -4,9 +4,11 @@
 
 显式的 `team-member` preset 是唯一的 Team Member composition。它含一整套 coding capability rows：shell、filesystem/search、web search 与 fetch。还有 background jobs、skill 加载工具、compaction。skill 发现本身不是 preset row。每个 Member 的 provider 由 Host 注册在自己的 agent scope 上（见 Host authority）。另有 Team collaboration guidance/tools、Harness Workspace instruction discovery，和有界的 private-memory reference context。普通 Sessions 留在这个 isolated roster 之外。它们拿不到 Team prompt sections、tools 或 Member memory。
 
+filesystem row 显式写 `applyPatch: false`，而不是沿用 Host 默认值：Member 只被授予 `edit` 这一种文件修改工具，preset 若留空，将来 Host 默认值一翻就会悄悄扩大每个 Member 的工具面。发布包的 preset 测试断言这个值，所以这是一项被检查的决定，不是一个假设。
+
 每个 Member 默认只获准使用所选 preset 注册的工具定义，以及显式共享的 `working_directory`。Host 全局工具不在此范围内。`capabilities.tools.allow` 只能进一步缩减，不能授权 Host 工具或后来插件添加的工具。九个 Team 工具和 `working_directory` 始终保留。
 
-Host 在 Agent 发布前保存这些工具定义，在提示组装时过滤请求中的工具列表，并在直接调用和嵌套调用执行前检查。后来注册到 Member 自身 scope 的工具不会进入请求，调用也会被拒绝；允许的工具定义被替换时，请求组装和执行都会被拒绝。能力编辑沿用原始定义。检查只作用于该 Member，不影响普通 Agent 或委派子 scope。
+Host 在 Agent 发布前保存这些工具定义，并在直接调用和嵌套调用执行前检查。后来注册到 Member 自身 scope 的工具不再被挡在请求之外：restriction 只过滤 Host 全局工具，没有组装期过滤时，scoped 注册仍会出现在请求的工具列表里，但调用依然会被拒绝。允许的工具定义被替换时，拒绝发生在执行期而不是组装期。能力编辑沿用原始定义。检查只作用于该 Member，不影响普通 Agent 或委派子 scope。
 
 Team mode 不过滤其他官方或自定义插件注入的提示。当前 Harness 公开接口不支持完整的 Member 提示隔离：必需上下文会在组装后被恢复。例如 experimental Team 的 `team:policy` 与必需的 `team:identity` 仍会进入上下文，但不会因此阻止激活或对话。
 
@@ -24,7 +26,7 @@ Member 没有 context 工具。preset 的 `compaction-basic` 行挂载 Team 的�
 2. 在 commit seam 复查 owned-jobs guard 与普通输入队列——排队中的普通消息会让这次换代延后；
 3. 在 `agent.runMaintenance` 内以 Host actor 提交幂等的 `team/member-session-recycled` operation，并在存在 live 代时记下 `inputFromSeq`（退役日志的偏移）；
 4. retire 旧代：它的 pre-step gate reject 该 step，不发旧代模型请求；随后 dispose + 归档，绝不删除；即使输入已经被 claim，最初的 inbox 插入记录仍在日志中；
-5. 激活新 Session，lineage parent 指向被替换的那一代；
+5. 激活新 Session，lineage 由 ledger 的 transition 记录承载（它的 header 不写 `parentSession`，那个字段专指 subagent 的创建者）；
 6. 从 `inputFromSeq` 起折叠退役日志，按 message id 剔掉新代已经持有的消息，其余用 followup 投递，再从 ledger 重导出 Inbox。
 
 maintenance 是这次 commit 能安全面对换窗中途新输入的原因：loop 停在那里，新消息留在 durable inbox，不会落到正在被退役的那一代。commit 失败则 maintenance 放行，旧代继续运行；commit 成功就退役它，崩溃则留给启动或恢复补完尚未重放的换代。

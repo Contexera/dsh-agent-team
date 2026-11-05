@@ -1,5 +1,5 @@
 import { afterEach, it, expect } from 'vitest'
-import { UI04_SHOTS, closeScenario, openTeamPage, scaffold, settleLayout } from './__external-agent-team-support.ts'
+import { UI04_SHOTS, closeScenario, openSidebar, openTeamPage, scaffold, settleLayout } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -47,7 +47,7 @@ it('edits Project owners from the Project dialog under rules version 2 in real W
   // The 390 breakpoint unmounts sidebar panels, so reopen the dialog from the narrow-expanded sidebar.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
-  await page.getByRole('button', { name: '打开侧边栏' }).click()
+  await openSidebar(page)
   const narrowEditor = await openEditor()
   const narrowOwners = narrowEditor.getByRole('group', { name: '负责人' })
   await narrowOwners.getByRole('button', { name: '移除负责人 @steward' }).waitFor()

@@ -8,9 +8,13 @@ import * as memberTimeContext from '../src/member-time-context.ts'
 
 const PLUGIN = memberTimeContext.name
 
+/** A live route the fake Agent never resolves; the clock composition reads none of it. */
+const STUB_MODEL = { current: () => undefined, select: () => {} }
+
 function fakeAgent(ctx: Context, events: unknown[] = []): Agent {
   return {
     id: SessionId('session:clock-test'), ctx, status: 'idle', options: { provider: 'mock', model: 'mock' },
+    model: STUB_MODEL,
     session: { surface: { nodes: [] }, events, ownEvents: () => events, inheritedEventCount: 0 } as never,
     inbox: {} as never,
     cancel() {}, whenIdle: async () => {}, runMaintenance: async task => task(new AbortController().signal),
@@ -21,6 +25,7 @@ function fakeAgent(ctx: Context, events: unknown[] = []): Agent {
 async function preStep(ctx: Context, agent: Agent, turn = 1, step = 1): Promise<PreStepDecision> {
   return agentEvents(ctx, agent).waterfall('agent/pre-step', {
     messages: [], turn, step, signal: new AbortController().signal,
+    modelSelection: { provider: 'mock', model: 'mock' },
   }, async () => ({ kind: 'enter', messages: [] }))
 }
 
@@ -128,6 +133,7 @@ describe('Team Member clock composition', () => {
     const loopMessage = createUserMessage({ content: [{ type: 'text', text: 'loop message' }], source: { kind: 'user' } })
     const decision = await agentEvents(ctx, agent).waterfall('agent/pre-step', {
       messages: [loopMessage], turn: 2, step: 1, signal: new AbortController().signal,
+      modelSelection: { provider: 'mock', model: 'mock' },
     }, async () => ({ kind: 'enter', messages: [loopMessage] }))
     expect(decision.kind).toBe('enter')
     if (decision.kind !== 'enter') return

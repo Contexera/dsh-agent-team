@@ -19,6 +19,8 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import * as PtcToolExecutor from '@deepseek-ai/dsh-tool-executor-ptc'
 import * as ToolWorkingDirectory from '@deepseek-ai/dsh-tool-working-directory'
 import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
@@ -65,6 +67,8 @@ export interface TeamMemberHostOptions {
   /** Sibling checkouts to create beside the checkout, for a Member invited into a second directory. */
   readonly otherCheckouts?: number
   readonly workingDirectory?: WorkingDirectorySeat
+  /** Which tool executor the composition selects; the native one is the shipped default. */
+  readonly toolExecutor?: 'native' | 'ptc'
 }
 
 /**
@@ -99,6 +103,9 @@ export async function mountTeamMemberHost(options: TeamMemberHostOptions): Promi
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  // 0.2.2 moved tool execution behind a selected executor plugin, so a composition that runs tools must name one.
+  if (options.toolExecutor === 'ptc') await ctx.plugin(PtcToolExecutor)
+  else await ctx.plugin(NativeToolExecutor)
   // The Harness mounts `working_directory` globally in every shipped profile,
   // outside any preset; this boot composes no bundle, so it mounts the tool
   // itself where a test needs the allow-list union to have something real.

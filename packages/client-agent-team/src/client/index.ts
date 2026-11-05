@@ -70,8 +70,8 @@ import { TeamDraftStore } from './drafts.ts'
 import { TeamPanelIcon } from './TeamPanelIcon.tsx'
 import { TeamConversation } from './TeamConversation.tsx'
 import { TeamWorkspaceBrowser } from './TeamWorkspaceBrowser.tsx'
+import { TeamSettingsNavIcon } from './TeamSettingsNavIcon.tsx'
 import { en, zh, type TeamKey } from './locales.ts'
-import { installSettingsNavIcon } from './settings-nav-icon.ts'
 
 export type { TeamMode, TeamNavigationActions, TeamNavigationSnapshot } from './navigation.ts'
 export type { TeamKey } from './locales.ts'
@@ -340,9 +340,6 @@ function registerModeShadow<T extends object>(
 
 function applyUi(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'agent-team: dictionaries')
-  if (typeof document !== 'undefined') {
-    ctx.effect(() => installSettingsNavIcon(document, () => ctx.locale.bind(NS)('teamSettingsNav')), 'agent-team: settings nav mark')
-  }
 
   const navigation = new TeamNavigation()
   const disposeNavigation = ctx.reflect.provide('teamNavigation', navigation)
@@ -498,6 +495,15 @@ function applyUi(ctx: ClientContext): void {
       },
     }),
   }, TeamSettingsSection as never))
+
+  // The nav mark rides the shell's own icon seat, addressed by the section id above, so
+  // the row draws the bundle's mark instead of the generic gear. Registered beside the
+  // section rather than observed in the DOM: the shell renders the icon it is given and
+  // drops it with the registration, so nothing is left to clean up on unload.
+  ctx.slots.inject('settings.section.icon', () => ctx.slots.register({
+    name: 'settings.section.icon',
+    id: 'team-settings',
+  }, TeamSettingsNavIcon as never))
 }
 
 export async function apply(ctx: ClientContext): Promise<void> {

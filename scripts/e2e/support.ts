@@ -145,6 +145,27 @@ export async function openSettings(page: Page): Promise<void> {
 }
 
 /**
+ * Expand the collapsed sidebar: the header opener, since a closed drawer keeps the
+ * rail's own toggle unclickable and both controls share one accessible name.
+ */
+export async function openSidebar(page: Page): Promise<void> {
+  await page.locator('[data-sidebar-opener]').click()
+}
+
+/**
+ * Width the collapsed sidebar still covers: a closed drawer slides the column out
+ * instead of shrinking it to a rail.
+ */
+export async function visibleSidebarWidth(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const column = document.querySelector('[class*="sidebarCol"]')
+    if (column === null) return Number.NaN
+    const box = column.getBoundingClientRect()
+    return Math.max(0, Math.min(box.right, window.innerWidth) - Math.max(box.left, 0))
+  })
+}
+
+/**
  * The focus ring a control renders, plus whether the browser counts the focus
  * as keyboard-visible (`:focus-visible`).
  */
@@ -224,15 +245,15 @@ export async function actionBandGeometry(page: Page): Promise<{
       radii: [...new Set(buttons.map(button => styleOf(button).borderTopLeftRadius))],
       // The inline inset of the label: 10px on every shipped `sm` control.
       insets: [...new Set(buttons.map(button => styleOf(button).paddingLeft))],
-      // Only the outlined controls carry a stroke: the primary is fill-only on purpose. Width is one
-      // value across them; colour is held separately because a followed control paints its own
-      // on-state stroke, which is a state difference rather than an inconsistency.
+      // Only the outlined controls carry a stroke: the primary is fill-only on purpose. Colour is held
+      // separately because a followed control paints its own on-state stroke, a state difference rather
+      // than an inconsistency; the shipped variant paints it as an inset shadow, so it is read there.
       outlineWidths: [...new Set(buttons
         .filter(button => styleOf(button).borderTopWidth !== '0px')
         .map(button => styleOf(button).borderTopWidth))],
       outlineColors: [...new Set(buttons
         .filter(button => styleOf(button).borderTopWidth !== '0px')
-        .map(button => styleOf(button).borderTopColor))],
+        .map(button => /rgba?\([^)]*\)/.exec(styleOf(button).boxShadow)?.[0] ?? styleOf(button).borderTopColor))],
       steps: [...new Set(groups.map(group => styleOf(group).gap))],
       bandRight: Math.round(band.getBoundingClientRect().right),
       // A wrapped band may use more than one line; no control may leave the band's box.
