@@ -101,8 +101,8 @@ export function installMemberCompaction(
     return assembly
   }, { prepend: true })
   ctx.on('agent/pre-step', async (payload, next) => {
-    // The step's route is frozen before this waterfall; a request hook may only
-    // adjust controls, so the same route must reach every summary.
+    // The step's route is frozen before this waterfall; a hook may only adjust
+    // controls, so the same route must reach every summary.
     bindStepRoute({ step: payload.step, provider: payload.modelSelection.provider, model: payload.modelSelection.model })
     let decision
     try {
@@ -152,8 +152,7 @@ export function installMemberCompaction(
       const engine = engineFor()
       if (engine === undefined) throw new Error('agent-team: Member reached its context budget without a compaction engine')
       const member = memberEngine()
-      // The request continues without a checkpoint; the clamp below still refuses
-      // a window that cannot hold it.
+      // No checkpoint this request; the clamp below still refuses an unholdable window.
       let passedThrough = member !== undefined && member.degraded(agent, request)
       if (passedThrough) {
         ctx.logger.warn(`agent-team: ${request.provider}/${request.model} summarized nothing after a bounded attempt; passing this request through without a checkpoint (${inputTokens} tokens) until its route or summary configuration changes`)

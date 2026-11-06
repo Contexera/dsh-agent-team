@@ -3,6 +3,7 @@ import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compa
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import type { Message, ToolSchema } from '@deepseek-ai/dsh-llm'
+import { estimateToolsTokens } from '@deepseek-ai/dsh-token-meter/estimate'
 import type {} from './index.ts'
 
 /** One provider/model route a summarization call can go to. */
@@ -21,6 +22,10 @@ type SummaryInput = {
   readonly tools?: readonly ToolSchema[]
 }
 
+type SummaryDecision =
+  | { readonly kind: 'committed' }
+  | { readonly kind: 'route'; readonly route: MemberSummaryRoute }
+
 export default class MemberCompactionEngine extends BasicCompactionEngine {
   private stepRoute: MemberStepRoute | undefined
   private alternativeSpent = false
@@ -35,19 +40,19 @@ export default class MemberCompactionEngine extends BasicCompactionEngine {
     return super.compactIfNeeded(agent, trigger, signal)
   }
 
-  /** Bind the step's fixed route, or clear it when that step ends. */
+  /** Bind the step's fixed route, or clear it at that step's end. */
   useStepRoute(route: MemberStepRoute | undefined): void {
     this.stepRoute = route
     if (route !== undefined) this.alternativeSpent = false
   }
 
-  /** Whether a bounded failure opened the circuit for this route; another route starts clean. */
+  /** Whether a bounded failure opened the circuit for this route. */
   degraded(agent: Agent, route: MemberSummaryRoute): boolean {
     const recorded = this.degradedRoutes.get(agent)
     return recorded !== undefined && recorded.provider === route.provider && recorded.model === route.model
   }
 
-  /** Whether the last summary attempt failed for a reason other than cancellation; consumed on read. */
+  /** Whether the last automatic attempt failed for a reason other than cancellation. */
   takeSummaryFailure(agent: Agent): boolean {
     const failed = this.summaryFailures.has(agent)
     if (failed) this.summaryFailures.delete(agent)
@@ -72,54 +77,75 @@ export default class MemberCompactionEngine extends BasicCompactionEngine {
     agent: Agent,
     signal?: AbortSignal,
   ) {
-    const target = await this.summaryTarget(agent, signal)
-    const route = target ?? agent.session.requestHeader()?.config
-    // An automatic path that already cost this route its summaries does not
-    // call the model again; the explicit /compact below is the way out.
+    const decision = await this.summaryDecision(agent, input, signal)
+    const route = decision.kind === 'route' ? decision.route : agent.session.requestHeader()?.config
+    // A route that already cost its summaries is not called again; /compact is the way out.
     if (!this.manualAgents.has(agent) && route !== undefined && this.degraded(agent, route)) {
       throw new Error(`agent-team: summarization is paused for ${route.provider}/${route.model} after a bounded failure`)
     }
     try {
-      if (target === undefined) return await super.summarize(input, agent, signal)
-      try {
-        return await super.summarize(input, this.routedView(agent, target), signal)
-      } catch (error) {
-        // One known-good route, once per step: no model rotation.
-        if (signal?.aborted === true || this.alternativeSpent) throw error
-        this.alternativeSpent = true
-      }
-      return await super.summarize(input, agent, signal)
+      return await this.attemptSummary(input, agent, decision, signal)
     } catch (error) {
-      if (signal?.aborted !== true && route !== undefined) {
-        // The failure is recorded here, where every entry point passes through,
-        // so a model switch that keeps failing stops paying for it too.
-        this.summaryFailures.add(agent)
-        this.degradedRoutes.set(agent, { provider: route.provider, model: route.model })
+      // Cancellation opens nothing.
+      if (signal?.aborted === true) throw error
+      if (decision.kind !== 'route' || this.alternativeSpent) {
+        this.recordFailure(agent, route)
+        throw error
       }
-      throw error
+      // One further route, once per step: no rotation, no second alternative.
+      this.alternativeSpent = true
+      if (route !== undefined) this.degradedRoutes.delete(agent)
+      try {
+        return await super.summarize(input, agent, signal)
+      } catch (alternativeError) {
+        this.recordFailure(agent, route)
+        throw alternativeError
+      }
     }
   }
 
-  /** The step's route when it differs, nothing explicit outranks it, and its window can hold this summary. */
-  private async summaryTarget(agent: Agent, signal?: AbortSignal): Promise<MemberSummaryRoute | undefined> {
-    const step = this.stepRoute
+  private attemptSummary(input: SummaryInput, agent: Agent, decision: SummaryDecision, signal?: AbortSignal) {
+    return decision.kind === 'route'
+      ? super.summarize(input, this.routedView(agent, decision.route), signal)
+      : super.summarize(input, agent, signal)
+  }
+
+  private recordFailure(agent: Agent, route: MemberSummaryRoute | undefined): void {
+    if (route === undefined) return
+    this.summaryFailures.add(agent)
+    this.degradedRoutes.set(agent, { provider: route.provider, model: route.model })
+  }
+
+  private async summaryDecision(agent: Agent, input: SummaryInput, signal?: AbortSignal): Promise<SummaryDecision> {
     const committed = agent.session.requestHeader()?.config
-    if (step === undefined || committed === undefined) return undefined
-    if (step.provider === committed.provider && step.model === committed.model) return undefined
-    if (this.explicitSummaryTarget(step)) return undefined
+    const step = this.stepRoute
+    if (committed === undefined || step === undefined) return { kind: 'committed' }
+    const stepRoute = { provider: step.provider, model: step.model }
+    // The shipped resolution for the committed route already reaches a global
+    // target and one configured for that route, so only a target configured for
+    // the step's own route needs the routed view.
+    if (this.config.summarizationProvider !== '' || this.explicitSummaryTarget(committed)) return { kind: 'committed' }
+    if (stepRoute.provider === committed.provider && stepRoute.model === committed.model) return { kind: 'committed' }
+    // A target on the step's policy needs no branch: the routed view resolves it, and
+    // precedence here would be dead — the shipped switch check runs first.
+    if (!await this.canHoldSummary(agent, input, stepRoute, signal)) return { kind: 'committed' }
+    return { kind: 'route', route: stepRoute }
+  }
+
+  /** Whether `route` can hold this call's input plus its cap; equality refuses, and the call's own input is priced rather than the surface. */
+  async canHoldSummary(agent: Agent, input: { readonly messages: readonly Message[] }, route: MemberSummaryRoute, signal?: AbortSignal): Promise<boolean> {
     const llm = this.ctx.get('llm')
     const meter = this.ctx.get('tokenMeter')
-    if (llm === undefined || meter === undefined) return undefined
+    if (llm === undefined || meter === undefined) return false
     let window: number | undefined
     try {
-      window = (await llm.resolveModelInfo(step.provider, step.model, signal)).context?.contextWindow
+      window = (await llm.resolveModelInfo(route.provider, route.model, signal)).context?.contextWindow
     } catch {
-      return undefined
+      return false
     }
-    // Equality leaves no room for the reply; the cap is this route's, never a constant.
-    if (window === undefined
-      || meter.measure(agent.session).totalTokens + this.summaryCap(step) >= window) return undefined
-    return { provider: step.provider, model: step.model }
+    if (window === undefined) return false
+    const transcript = input.messages.reduce((sum, message) => sum + meter.estimateMessage(message), 0)
+    return transcript + estimateToolsTokens(agent.session.requestHeader()) + this.summaryCap(route) < window
   }
 
   /** A configured summary target outranks the step's route. */

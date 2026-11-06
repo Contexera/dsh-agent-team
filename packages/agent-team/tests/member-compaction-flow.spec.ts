@@ -4,6 +4,7 @@ import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deep
 import { CONTEXT_WINDOW_EXCEEDED_CODE, createUserMessage, LlmAdapter, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
+import { estimateToolsTokens } from '@deepseek-ai/dsh-token-meter/estimate'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import { afterEach, describe, expect, it } from 'vitest'
 import MemberCompactionEngine from '../src/member-compaction-engine.ts'
@@ -287,19 +288,16 @@ describe('Member summary target and bounded fallback', () => {
   })
 
   it('refuses a proposed window the summary input would exactly fill', async () => {
-    const exact = await fixture()
-    await history(exact.agent)
-    exact.adapter.windows.set('edge', exact.ctx.tokenMeter.measure(exact.agent.session).totalTokens + MEMBER_SUMMARY_TOKENS)
-    exact.agent.model.select({ provider: 'budget-test', model: 'edge' })
-    await send(exact.agent, 40_000)
-    expect(exact.adapter.summaries[0]!.model).toBe('large')
-
-    const roomy = await fixture()
-    await history(roomy.agent)
-    roomy.adapter.windows.set('edge', roomy.ctx.tokenMeter.measure(roomy.agent.session).totalTokens + MEMBER_SUMMARY_TOKENS + 1)
-    roomy.agent.model.select({ provider: 'budget-test', model: 'edge' })
-    await send(roomy.agent, 40_000)
-    expect(roomy.adapter.summaries[0]!.model).toBe('edge')
+    const { agent, adapter, engine, ctx } = await fixture()
+    await history(agent)
+    const input = { messages: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'e'.repeat(160_000) }] })] }
+    const need = input.messages.reduce((sum, message) => sum + ctx.tokenMeter.estimateMessage(message), 0)
+    const tools = estimateToolsTokens(agent.session.requestHeader())
+    const route = { provider: 'budget-test', model: 'edge' }
+    adapter.windows.set('edge', need + tools + MEMBER_SUMMARY_TOKENS)
+    expect(await engine.canHoldSummary(agent, input, route)).toBe(false)
+    adapter.windows.set('edge', need + tools + MEMBER_SUMMARY_TOKENS + 1)
+    expect(await engine.canHoldSummary(agent, input, route)).toBe(true)
   })
 
   it('prices the capability gate from the route summary cap a model policy resolves', async () => {
@@ -391,6 +389,46 @@ describe('Member summary target and bounded fallback', () => {
     expect(adapter.summaries).toHaveLength(0)
     await engine.compactNow(agent, new AbortController().signal)
     expect(adapter.summaries.map(options => options.model)).toEqual(['large'])
+  })
+
+  it('honours a summary target configured for the step route only', async () => {
+    const { agent, adapter } = await fixture('large', { ...DEFAULT_MEMBER_COMPACTION }, undefined,
+      { maxTokens: MEMBER_SUMMARY_TOKENS, modelPolicies: [{ provider: 'budget-test', model: 'far', summarizationProvider: 'budget-test', summarizationModel: 'summarizer-far' }] })
+    await history(agent)
+    adapter.windows.set('far', 1_000_000)
+    agent.model.select({ provider: 'budget-test', model: 'far' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['summarizer-far'])
+  })
+
+  it('keeps a summary target configured for the committed route', async () => {
+    const { agent, adapter } = await fixture('large', { ...DEFAULT_MEMBER_COMPACTION }, undefined,
+      { maxTokens: MEMBER_SUMMARY_TOKENS, modelPolicies: [{ provider: 'budget-test', model: 'large', summarizationProvider: 'budget-test', summarizationModel: 'summarizer-large' }] })
+    await history(agent)
+    adapter.windows.set('far', 1_000_000)
+    agent.model.select({ provider: 'budget-test', model: 'far' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['summarizer-large'])
+  })
+
+  it('falls back to the committed route when a configured summary target fails', async () => {
+    const { agent, adapter } = await fixture('large', { ...DEFAULT_MEMBER_COMPACTION }, undefined,
+      { maxTokens: MEMBER_SUMMARY_TOKENS, modelPolicies: [{ provider: 'budget-test', model: 'far', summarizationProvider: 'budget-test', summarizationModel: 'summarizer-far' }] })
+    await history(agent)
+    adapter.windows.set('far', 1_000_000)
+    adapter.silentRoutes.add('summarizer-far')
+    agent.model.select({ provider: 'budget-test', model: 'far' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['summarizer-far', 'large'])
+  })
+
+  it('prices the call region, not the whole session, when a route has a smaller window', async () => {
+    const { agent, adapter } = await fixture('large', { enabled: true, tokens: 2_000_000 })
+    await history(agent)
+    adapter.windows.set('sw', 270_000)
+    agent.model.select({ provider: 'budget-test', model: 'sw' })
+    await send(agent, 1_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['sw', 'sw'])
   })
 
   it('lets an explicit summary configuration outrank the step route', async () => {
