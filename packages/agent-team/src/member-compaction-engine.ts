@@ -4,6 +4,7 @@ import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import type { Message, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { estimateToolsTokens } from '@deepseek-ai/dsh-token-meter/estimate'
+import { MEMBER_SUMMARY_INSTRUCTION_TOKENS } from './member-compaction.ts'
 import type {} from './index.ts'
 
 /** One provider/model route a summarization call can go to. */
@@ -78,7 +79,7 @@ export default class MemberCompactionEngine extends BasicCompactionEngine {
     signal?: AbortSignal,
   ) {
     const decision = await this.summaryDecision(agent, input, signal)
-    const route = decision.kind === 'route' ? decision.route : agent.session.requestHeader()?.config
+    const route = this.circuitRoute(agent)
     // A route that already cost its summaries is not called again; /compact is the way out.
     if (!this.manualAgents.has(agent) && route !== undefined && this.degraded(agent, route)) {
       throw new Error(`agent-team: summarization is paused for ${route.provider}/${route.model} after a bounded failure`)
@@ -104,6 +105,12 @@ export default class MemberCompactionEngine extends BasicCompactionEngine {
     }
   }
 
+  private circuitRoute(agent: Agent): MemberSummaryRoute | undefined {
+    const step = this.stepRoute
+    if (step !== undefined) return { provider: step.provider, model: step.model }
+    return agent.session.requestHeader()?.config
+  }
+
   private attemptSummary(input: SummaryInput, agent: Agent, decision: SummaryDecision, signal?: AbortSignal) {
     return decision.kind === 'route'
       ? super.summarize(input, this.routedView(agent, decision.route), signal)
@@ -126,13 +133,14 @@ export default class MemberCompactionEngine extends BasicCompactionEngine {
     // the step's own route needs the routed view.
     if (this.config.summarizationProvider !== '' || this.explicitSummaryTarget(committed)) return { kind: 'committed' }
     if (stepRoute.provider === committed.provider && stepRoute.model === committed.model) return { kind: 'committed' }
-    // A target on the step's policy needs no branch: the routed view resolves it, and
-    // precedence here would be dead — the shipped switch check runs first.
+    // A target on the step's policy outranks that route's window: the route is only
+    // its key, and the shipped switch path reaches this branch first.
+    if (this.explicitSummaryTarget(stepRoute)) return { kind: 'route', route: stepRoute }
     if (!await this.canHoldSummary(agent, input, stepRoute, signal)) return { kind: 'committed' }
     return { kind: 'route', route: stepRoute }
   }
 
-  /** Whether `route` can hold this call's input plus its cap; equality refuses, and the call's own input is priced rather than the surface. */
+  /** Whether `route` can hold this call's own input, instruction and cap inside its window; equality refuses. */
   async canHoldSummary(agent: Agent, input: { readonly messages: readonly Message[] }, route: MemberSummaryRoute, signal?: AbortSignal): Promise<boolean> {
     const llm = this.ctx.get('llm')
     const meter = this.ctx.get('tokenMeter')
@@ -145,7 +153,8 @@ export default class MemberCompactionEngine extends BasicCompactionEngine {
     }
     if (window === undefined) return false
     const transcript = input.messages.reduce((sum, message) => sum + meter.estimateMessage(message), 0)
-    return transcript + estimateToolsTokens(agent.session.requestHeader()) + this.summaryCap(route) < window
+    return transcript + MEMBER_SUMMARY_INSTRUCTION_TOKENS + estimateToolsTokens(agent.session.requestHeader())
+      + this.summaryCap(route) < window
   }
 
   /** A configured summary target outranks the step's route. */

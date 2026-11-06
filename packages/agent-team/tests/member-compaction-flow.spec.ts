@@ -8,7 +8,7 @@ import { estimateToolsTokens } from '@deepseek-ai/dsh-token-meter/estimate'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import { afterEach, describe, expect, it } from 'vitest'
 import MemberCompactionEngine from '../src/member-compaction-engine.ts'
-import { DEFAULT_MEMBER_COMPACTION, installMemberCompaction, MEMBER_SUMMARY_TOKENS, type MemberCompactionConfig } from '../src/member-compaction.ts'
+import { DEFAULT_MEMBER_COMPACTION, installMemberCompaction, MEMBER_SUMMARY_INSTRUCTION_TOKENS, MEMBER_SUMMARY_TOKENS, type MemberCompactionConfig } from '../src/member-compaction.ts'
 
 class BudgetAdapter extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
@@ -294,9 +294,10 @@ describe('Member summary target and bounded fallback', () => {
     const need = input.messages.reduce((sum, message) => sum + ctx.tokenMeter.estimateMessage(message), 0)
     const tools = estimateToolsTokens(agent.session.requestHeader())
     const route = { provider: 'budget-test', model: 'edge' }
-    adapter.windows.set('edge', need + tools + MEMBER_SUMMARY_TOKENS)
+    const priced = need + tools + MEMBER_SUMMARY_INSTRUCTION_TOKENS + MEMBER_SUMMARY_TOKENS
+    adapter.windows.set('edge', priced)
     expect(await engine.canHoldSummary(agent, input, route)).toBe(false)
-    adapter.windows.set('edge', need + tools + MEMBER_SUMMARY_TOKENS + 1)
+    adapter.windows.set('edge', priced + 1)
     expect(await engine.canHoldSummary(agent, input, route)).toBe(true)
   })
 
@@ -409,6 +410,29 @@ describe('Member summary target and bounded fallback', () => {
     agent.model.select({ provider: 'budget-test', model: 'far' })
     await send(agent, 40_000)
     expect(adapter.summaries.map(options => options.model)).toEqual(['summarizer-large'])
+  })
+
+  it('keeps an operator pin on the summary target without rotating to the conversation model', async () => {
+    const { agent, adapter } = await fixture('large', { ...DEFAULT_MEMBER_COMPACTION }, undefined,
+      { maxTokens: MEMBER_SUMMARY_TOKENS, summarizationProvider: 'budget-test', summarizationModel: 'summarizer' })
+    await history(agent)
+    adapter.windows.set('far', 1_000_000)
+    adapter.silentRoutes.add('summarizer')
+    agent.model.select({ provider: 'budget-test', model: 'far' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['summarizer'])
+    await send(agent, 1_000)
+    expect(adapter.summaries).toHaveLength(1)
+  })
+
+  it('uses a summary target configured on a small-window step route ahead of that window', async () => {
+    const { agent, adapter } = await fixture('large', { ...DEFAULT_MEMBER_COMPACTION }, 8_192,
+      { maxTokens: MEMBER_SUMMARY_TOKENS, modelPolicies: [{ provider: 'budget-test', model: 'far', summarizationProvider: 'budget-test', summarizationModel: 'summarizer-far' }] })
+    await history(agent)
+    adapter.windows.set('far', 200_000)
+    agent.model.select({ provider: 'budget-test', model: 'far' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['summarizer-far'])
   })
 
   it('falls back to the committed route when a configured summary target fails', async () => {

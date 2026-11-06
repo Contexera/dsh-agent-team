@@ -16,6 +16,8 @@ const MEMBER_WINDOW_RATIO = 0.8
 const MEMBER_CONTEXT_RESERVE = 16_384
 const MEMBER_OUTPUT_RESERVE = 4_096
 export const MEMBER_SUMMARY_TOKENS = 32_768
+/** Conservative price of the instruction the shipped summarizer appends after the replayed region. */
+export const MEMBER_SUMMARY_INSTRUCTION_TOKENS = 2_048
 
 export const DEFAULT_MEMBER_COMPACTION: MemberCompactionConfig = Object.freeze({
   enabled: true,
