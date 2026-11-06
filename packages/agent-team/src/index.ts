@@ -167,6 +167,7 @@ import type {
   AgentTeamSubscriptionDraftTrialResult,
   AgentTeamSubscriptionListRequest,
   AgentTeamSubscriptionListResult,
+  AgentTeamSubscriptionMetadata,
   AgentTeamSubscriptionLogEntry,
   AgentTeamSubscriptionLogsRequest,
   AgentTeamSubscriptionLogsResult,
@@ -2447,7 +2448,7 @@ export default class AgentTeam extends TypertRemoteService {
     const member = this.memberForAgent(agent)
     if (member === undefined) throw new Error('Agent is not an active Team Member')
     if (!this.requireLedger().participatesIn(member.memberId, request.workspaceId)) throw new Error('Member cannot view another Workspace')
-    const view = this.requireLedger().view(request, member.memberId)
+    const view = this.requireLedger().view({ ...request, includeWorkspaceDirectory: true }, member.memberId)
     return Object.freeze({ ...view, workspaces: Object.freeze(view.workspaces.map(participation => {
       const title = this.ctx.workspaceRegistry.get(participation.workspaceId)?.title
       return title === undefined ? participation : Object.freeze({ ...participation, title })
@@ -3478,20 +3479,16 @@ export default class AgentTeam extends TypertRemoteService {
     if (result.committed) this.emitCommitted(result.value.receipt)
   }
 
-  private listSubscriptions(actor: AgentTeamActor, request: AgentTeamSubscriptionListRequest): AgentTeamSubscriptionListResult {
+  private subscriptionListEntries<T>(request: AgentTeamSubscriptionListRequest,
+    select: (subscription: AgentTeamSubscription) => T): AgentTeamSubscriptionListResult<T> {
     const ledger = this.requireLedger()
-    // Listing carries the scripts themselves, so it is gated like the reads it
-    // answers: a Workspace share is not a Project membership.
-    ledger.assertSubscriptionReadAuthority(actor, request.projectRef, request.workspaceId)
-    const entries = ledger.subscriptionsOfProject(request.projectRef).map(subscription => {
-      const subscriptionRef = subscription.subscriptionRef
-      // The page scans one row per subscription: what the ledger accepted, and
-      // the newest run and due instant the private checkpoints already hold.
+    const entries = ledger.subscriptionsOfProject(request.projectRef).map(stored => {
+      const subscriptionRef = stored.subscriptionRef
       const accepted = ledger.subscriptionEvents(subscriptionRef)
       const lastRun = this.runRecordsOf(subscriptionRef)[0]
       const dueAt = this.checkpointFor(subscriptionRef).dueAt
       return Object.freeze({
-        subscription,
+        subscription: select(stored),
         unpublished: ledger.pendingSubscriptionEvents(subscriptionRef).length,
         eventCount: accepted.length,
         ...(accepted.length === 0 ? {} : { lastEventAt: accepted.at(-1)!.acceptedAt }),
@@ -3502,9 +3499,19 @@ export default class AgentTeam extends TypertRemoteService {
     return Object.freeze({ entries: Object.freeze(entries) })
   }
 
-  /** An Agent Member lists one Project's subscriptions; any Member of the Project may look. */
-  subscriptionsForAgent(agent: Agent, request: AgentTeamSubscriptionListRequest): AgentTeamSubscriptionListResult {
-    return this.listSubscriptions(this.memberCall(agent, request.workspaceId), request)
+  private listSubscriptions(actor: AgentTeamActor, request: AgentTeamSubscriptionListRequest): AgentTeamSubscriptionListResult {
+    this.requireLedger().assertSubscriptionReadAuthority(actor, request.projectRef, request.workspaceId)
+    return this.subscriptionListEntries(request, subscription => subscription)
+  }
+
+  /** Agent discovery returns no script, credential reference or webhook arm, even to a Project member. */
+  subscriptionsForAgent(agent: Agent, request: AgentTeamSubscriptionListRequest): AgentTeamSubscriptionListResult<AgentTeamSubscriptionMetadata> {
+    const actor = this.memberCall(agent, request.workspaceId)
+    this.requireLedger().assertSubscriptionMetadataAuthority(actor, request.projectRef, request.workspaceId)
+    return this.subscriptionListEntries(request, subscription => {
+      const { script: _script, credentials: _credentials, webhook: _webhook, ...metadata } = subscription
+      return metadata
+    })
   }
 
   @Remote('subscriptions')

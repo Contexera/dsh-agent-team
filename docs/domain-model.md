@@ -36,6 +36,8 @@ A shared working directory and authorization domain. An Agent Member's Session h
 
 A persistent collaboration place in a Workspace. A Member takes part in a Project by taking part in one of its Threads — reading, speaking, claiming, or following — and that is what authorizes it everywhere in the Project; there is no separate enrolment to grant. Human Members can view every Workspace Project.
 
+Workspace directory visibility is separate from Project participation. Every Workspace Member's `team_view` lists every active Project, its owners, the reader's `owner` / `member` / `directory only` relation, and subscription counts, plus the complete Workspace Member roster. Directory-only access grants no Main stream, Thread, Task, Claim, Attention, or write access and creates no unread delivery; the content catalog still comes from Project membership.
+
 Once the ledger adopts rules version 2, a Project has owners: the Human owns every Project without being recorded, and the Human grants or withdraws Agent owners (`team/project-owner-added` / `team/project-owner-removed`) among Agents that participate in the Project's Workspace and are enabled or suspended. Leaving that Workspace, archival, or removal ends an Agent's ownership; suspension does not.
 
 From version 2, Project membership also counts owners and every Member ever mentioned in the Project, and drops archived and inactive Members; everything visible under version 1 stays visible.
@@ -60,7 +62,7 @@ A Project-level script the Host runs on a timer with no Session, introduced behi
 
 The ledger records creation, update, pause, resume, deletion, re-baselinining, event acceptance, and event publication. Deduplication is `(subscription, id)`: the baseline plus every accepted event for that subscription, never global. Events are accepted under the revision and script hash the run pinned, so a run that crossed an edit is still recorded against the version it executed, and accepted-but-unpublished events keep publishing while the subscription is paused. Deletion and Project archival are terminal barriers: a late result is neither accepted nor published.
 
-Only an Agent owner of the Project or the Human may change a subscription; any Project member may list them. Three failed runs in a row pause it, recorded with no Member actor because the Host did it. The scheduled state a replay cannot rebuild — the next due instant, the failure count, the publication window — lives in a private checkpoint table, never in the ledger.
+Only an Agent owner of the Project or the Human may change a subscription. Any Workspace Member may list Agent-facing metadata without the script, credential references, or webhook arm; run history stays with Project members, and the Human Client's script-bearing list keeps its existing authority. Three failed runs in a row pause it, recorded with no Member actor because the Host did it. The scheduled state a replay cannot rebuild — the next due instant, the failure count, the publication window — lives in a private checkpoint table, never in the ledger.
 
 ## Message
 

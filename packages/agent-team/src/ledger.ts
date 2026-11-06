@@ -3666,8 +3666,9 @@ export class AgentTeamLedger {
     const projectRefFilter = request.projectRef === undefined
       ? undefined
       : this.requireActiveProject(request.workspaceId, request.projectRef).projectRef
+    const directoryRequested = memberId !== undefined && request.includeWorkspaceDirectory === true
     if (projectRefFilter !== undefined) {
-      if (memberId !== undefined && !this.isProjectMember(projectRefFilter, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${request.projectRef}'`)
+      if (memberId !== undefined && !directoryRequested && !this.isProjectMember(projectRefFilter, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${request.projectRef}'`)
     }
     let threadRefFilter: AgentTeamThreadRef | undefined
     if (request.threadRef !== undefined) {
@@ -3781,11 +3782,30 @@ export class AgentTeamLedger {
     })
     const initialization = this.initialization()
     const nextCursor = selected.length === 0 ? cursor : direction === 'before' ? selected[0]!.sequence : selected.at(-1)!.sequence
+    const directory = !directoryRequested ? undefined : Object.freeze({
+      projects: Object.freeze([...this.state.projects.values()].filter(project => project.workspaceId === request.workspaceId
+        && this.visibleProject(project) !== undefined
+        && (projectRefFilter === undefined || project.projectRef === projectRefFilter)).map(project => {
+        const subscriptions = this.subscriptionsOfProject(project.projectRef)
+        return Object.freeze({
+          project,
+          ownerIds: this.projectOwnerIds(project.projectRef),
+          participating: this.isProjectMember(project.projectRef, memberId!),
+          subscriptions: Object.freeze({
+            active: subscriptions.filter(subscription => subscription.state === 'active').length,
+            paused: subscriptions.filter(subscription => subscription.state === 'paused').length,
+          }),
+        })
+      })),
+      memberIds: Object.freeze([...this.state.members.values()].filter(member => member.state !== 'inactive' && member.state !== 'archived'
+        && this.participatesIn(member.memberId, request.workspaceId)).map(member => member.memberId)),
+    })
     return Object.freeze({
       humanMemberId: initialization.data.humanMemberId,
       workspaces: Object.freeze(memberId === undefined ? [] : this.workspacesOfFrom(this.state, memberId)
         .map(workspaceId => Object.freeze({ workspaceId, default: workspaceId === this.state.members.get(memberId)?.workspaceId }))),
       projects: Object.freeze(projects),
+      ...(directory === undefined ? {} : { directory }),
       // Project participation is derived, so this roster is too: every Member
       // that takes part in a visible Project, by explicit enrolment a ledger
       // still carries or by having taken part in one of its Threads. Reading
@@ -3833,11 +3853,20 @@ export class AgentTeamLedger {
     this.requireProjectOwnerActor(actor, projectRef)
   }
 
-  /**
-   * Reading is a Project fact, not an owner's: the Human and any Member of the
-   * Project may list its subscriptions and read the scripts they carry. A
-   * Member who merely shares the Workspace may not.
-   */
+  /** Workspace members may discover subscription metadata; scripts, credential references, webhook arms and logs stay Project-gated. */
+  assertSubscriptionMetadataAuthority(actor: AgentTeamActor, projectRef: AgentTeamProjectRef, workspaceId: WorkspaceId): void {
+    const project = this.state.projects.get(projectRef)
+    if (project === undefined || project.workspaceId !== workspaceId) throw new Error(`Project '${projectRef}' is not in Workspace '${workspaceId}'`)
+    if (actor.kind === 'host') throw new Error('reading subscriptions needs a Human or Agent Member actor')
+    if (actor.kind === 'human') {
+      this.assertHumanActor(actor)
+      return
+    }
+    const member = this.assertMemberActor(actor)
+    if (!this.participatesIn(member.memberId, workspaceId)) throw new Error(`Agent Member '${member.memberId}' is not authorized for Workspace '${workspaceId}'`)
+  }
+
+  /** Full subscription reads remain Project facts: run logs and the Human Client's script-bearing list. */
   assertSubscriptionReadAuthority(actor: AgentTeamActor, projectRef: AgentTeamProjectRef, workspaceId: WorkspaceId): void {
     // Reading spans archiving: the list and the run history are the audit
     // surface of what a Project ran, and archiving must not erase them.

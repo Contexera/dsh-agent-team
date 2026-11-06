@@ -73,6 +73,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - `contextContinuity` unit 经 Harness projection registry 增量折叠活动 Session 事件，只保留恢复所需的旧 intent、checkpoint、continuation 与未答复输入。激活与退休 Session 恢复也可全量折叠被检视日志。
 - Member clock baseline 经 `session-event-cursor.ts` 只消费追加事件。Session 身份、继承前缀、日志长度或锚点事件变化时从头重折。守卫依赖日志只追加的契约；同一 sequence、同一事件类型的就地替换不在检测范围内。
 - 读取投影按用途定界。`view` 只回答它自己那一页 fact 加上请求点名的 Thread：catalog 字段带的是这一页的 Task、Thread、显示序号与 Claim。只有 `includeCatalog` 才返回整个请求 scope 的 Task/Thread/Claim catalog，也就是模型侧 `team_view` 渲染的 address book 投影。
+- Agent view 额外请求 `includeWorkspaceDirectory`：独立目录列出全部 active Project、owners、读者参与关系和订阅计数，以及 Workspace Member roster。这个目录绝不提供内容 catalog 使用的 Project refs，因此 `directory only` 不会泄露 Thread、Task 或 Claim。
 - 一页读取沿 fact ledger 走到超出 limit 的第一个匹配为止。catalog 读取再多一次对 scope 内 Thread 的目录过滤，以及每个 Task 行一次活 Claim 查询。这些分量必须分开报告，不合并成一个总数：只报返回行数看不出这次读取走过了什么。
 - Claim 按 Task 分桶，由重放派生的索引支撑，所以按 Task 的读取（Claim 列表、Thread 画面、Inbox 行、Task board）绝不走账本的全部 Claim。这里每个索引都由重放重建，绝不是第二份 durable 权威。
 

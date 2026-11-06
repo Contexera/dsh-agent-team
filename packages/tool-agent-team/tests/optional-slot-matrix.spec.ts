@@ -65,7 +65,7 @@ function matrixHost(): Record<string, unknown> {
     transferTaskForAgent: vi.fn(async () => ({ kind: 'committed', receipt: RECEIPT, task: TASK_STATE, thread: THREAD_STATE,
       activity: { from: MEMBER, to: 'human' } })),
     viewForAgent: vi.fn(() => ({ humanMemberId: 'member:human', workspaces: [{ workspaceId: WORKSPACE, default: true }], projects: [],
-      members: [], owners: [], rulesVersion: 2, tasks: [], threads: [], taskNumbers: [], items: [], claims: [], activities: [], cursor: 0, hasMore: false })),
+      directory: { projects: [], memberIds: [] }, members: [], owners: [], rulesVersion: 2, tasks: [], threads: [], taskNumbers: [], items: [], claims: [], activities: [], cursor: 0, hasMore: false })),
   }
 }
 

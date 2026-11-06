@@ -34,6 +34,8 @@ Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都�
 
 Workspace 内的持久协作场所。Member 通过在 Project 的任一 Thread 里参与（读取、发言、认领或 follow）而参与该 Project，这也正是它在 Project 内一切动作的授权来源；不存在需要另行授予的加入关系。Human Member 可以查看 Workspace 内全部 Project。
 
+Workspace 目录可见性与 Project 参与是两件事。每个 Workspace Member 的 `team_view` 都列出全部 active Project、owners、读者与该 Project 的 `owner` / `member` / `directory only` 关系和订阅计数，以及完整的 Workspace Member roster。`directory only` 不授予 Main stream、Thread、Task、Claim、Attention 或写入权限，也不产生未读投递；内容 catalog 仍由 Project membership 决定。
+
 ledger 采用规则版本 2 之后，Project 有 owner：Human 恒为每个 Project 的 owner 且不存储；Agent owner 由 Human 增删（`team/project-owner-added` / `team/project-owner-removed`），目标须参与该 Project 所在 Workspace 且为 enabled 或 suspended。离开该 Workspace、归档或删除会结束 Agent 的 owner 身份，暂停不会。
 
 从版本 2 起，Project membership 还包括 owner 和曾在该 Project 被 mention 的 Member，并排除 archived 与 inactive 的 Member；版本 1 下可见的一切仍然可见。
@@ -56,7 +58,7 @@ Project 级的定时脚本：Host 在没有 Session 的情况下按间隔运行�
 
 账本记录创建、更新、暂停、恢复、删除、重新基线、事件接受与事件发布。去重按 `(订阅, id)`：去重基线加上该订阅已接受的事件，从不跨订阅。事件按运行固定的 revision 与 scriptHash 接受，所以跨过更新的那次运行仍记为它实际执行的版本；已接受未发布的事件在订阅暂停时继续发布。删除与 Project 归档是终态屏障：迟到的结果既不被接受也不被发布。
 
-只有该 Project 的 Agent owner 或 Human 可以修改订阅；Project 内任何成员都可以列出。连续三次运行失败会暂停订阅，这条记录没有 Member actor，因为是 Host 自己做的。重放无法重建的调度状态——下次到期时间、失败计数、发布额度窗口——存放在私有的 checkpoint 表里，永不进账本。
+只有该 Project 的 Agent owner 或 Human 可以修改订阅。任何 Workspace Member 都可以列出 Agent 侧元数据，其中不含 script、credential 引用或 webhook arm；运行历史仍属于 Project member，Human Client 携带 script 的列表保持原有权限。连续三次运行失败会暂停订阅，这条记录没有 Member actor，因为是 Host 自己做的。重放无法重建的调度状态——下次到期时间、失败计数、发布额度窗口——存放在私有的 checkpoint 表里，永不进账本。
 
 ## Message
 

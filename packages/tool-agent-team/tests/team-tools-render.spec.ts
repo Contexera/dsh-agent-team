@@ -15,11 +15,30 @@ describe('team_view renders one address book', () => {
       projects: [
         { projectRef: PROJECT, name: 'general', owners: ['human', 'Tars'], role: 'owner' },
         { projectRef: 'project:aaaa1111-0000-4000-8000-000000000002', name: 'ops', owners: ['human'], role: 'member' },
+        { projectRef: 'project:aaaa1111-0000-4000-8000-000000000003', name: 'releases', owners: ['human', 'Ferry'], role: 'directory only', subscriptions: { active: 1, paused: 1 } },
       ],
       members: [], threads: [], tasks: [], cursor: 1, hasMore: false,
     })
     expect(text).toContain(`${PROJECT} · general · owners @human, @Tars · you: owner`)
     expect(text).toContain('project:aaaa1111-0000-4000-8000-000000000002 · ops · owners @human · you: member')
+    expect(text).toContain('project:aaaa1111-0000-4000-8000-000000000003 · releases · owners @human, @Ferry · you: directory only · subscriptions 1 active, 1 paused')
+  })
+
+  it('distinguishes a directory-only Project from a Project with no Threads', () => {
+    const text = renderText(teamTools().get('team_view')!, {}, {
+      workspaces: WORKSPACES,
+      projects: [{ projectRef: PROJECT, name: 'releases', owners: ['human'], role: 'directory only', subscriptions: { active: 0, paused: 0 } }],
+      directoryOnly: true, members: [], threads: [], tasks: [], cursor: 1, hasMore: false,
+    })
+    expect(text).toContain('subscriptions 0')
+    expect(text).toContain('Directory only: Thread rows require Project membership.')
+    expect(text).not.toContain('No top-level Threads')
+
+    const emptyMemberships = renderText(teamTools().get('team_view')!, {}, {
+      workspaces: WORKSPACES, projects: [{ projectRef: PROJECT, name: 'releases', role: 'directory only' }],
+      members: [], threads: [], tasks: [], cursor: 1, hasMore: false,
+    })
+    expect(emptyMemberships).toContain('No top-level Threads in your Project memberships at this cursor.')
   })
 
   it('first page: labelled sections, newest-first subjects, Task inline — no Task index, message count, or revision label', () => {
@@ -35,10 +54,10 @@ describe('team_view renders one address book', () => {
       cursor: 8394, hasMore: true,
     })
     expect(text).toContain('Team directory')
-    expect(text).toContain('Projects — current')
+    expect(text).toContain('Projects — Workspace directory')
     expect(text).toContain('Members — current')
     // Sections come in order: Projects, Threads, Members.
-    expect(text.indexOf('Projects — current')).toBeLessThan(text.indexOf('Threads'))
+    expect(text.indexOf('Projects — Workspace directory')).toBeLessThan(text.indexOf('Threads'))
     expect(text.indexOf('Threads')).toBeLessThan(text.indexOf('Members — current'))
     // Each Thread row carries its bounded subject and inline Task standing.
     expect(text).toContain(`${THREAD} · ${PROJECT} · ${TASK} (#7), in_progress — Review the render contract`)
@@ -73,7 +92,7 @@ describe('team_view renders one address book', () => {
       tasks: [], cursor: 100, hasMore: false, page: 'threads',
     })
     expect(text).toContain('Threads')
-    expect(text).not.toContain('Projects — current')
+    expect(text).not.toContain('Projects — Workspace directory')
     expect(text).not.toContain('Members — current')
     expect(text).not.toContain('team_task board')
     expect(text).toContain('Thread cursor 100; hasMore=false')

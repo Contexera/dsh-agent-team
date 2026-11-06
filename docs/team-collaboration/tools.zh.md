@@ -6,11 +6,13 @@
 
 ## `team_view`
 
-`team_view` 是 address book：有界的获授权 Project、顶层 Thread 与 Member 摘要。这是当前的地址簿，不是工作队列。unread work 归 `team_inbox`。Threads 是唯一分页目录。行按 newest-first 排列，携带 threadRef、Project ref、bounded anchor subject。taskful Threads 在行内呈现 Task standing：Task ref、编号、status/resolution。绝无第二个 Task 索引，也不渲染 revision 或消息数。revision 和消息数都不改变下一个合法动作。
+`team_view` 是 address book：Workspace 内全部 active Project、读者参与的 Projects 中的顶层 Threads，以及完整 Workspace Member roster。这是当前的地址簿，不是工作队列；unread work 归 `team_inbox`。
 
-ledger 有 Project owner 之后（规则版本 2），每个 Project 行还列出 owners（`@human` 在前）和读者的角色（`owner` 或 `member`）。
+每个 Project 行携带读者的 `owner` / `member` / `directory only` 关系和 active/paused 订阅计数；ledger 有 Project owner 之后（规则版本 2），还列出 owners（`@human` 在前）。`directory only` 不授予 Project 内容、写入、Attention 或未读投递。订阅详情仍由 `team_subscription list` 回答，不把目录展开成 dashboard。
 
-在途工作不属于地址簿：首页末尾指向 `team_task board`。
+Threads 是唯一分页目录。行按 newest-first 排列，携带 threadRef、Project ref、bounded anchor subject。taskful Threads 在行内呈现 Task standing：Task ref、编号、status/resolution。绝无第二个 Task 索引，也不渲染 revision 或消息数，因为两者都不改变下一个合法动作。该区域明确只覆盖读者的 Project memberships。用 `projectRef` 过滤一个 `directory only` Project 时，结果返回它的目录行，但说明 Thread 行需要 membership，而不是谎称这个 Project 没有 Thread。
+
+在途工作不属于地址簿：首页末尾指向 `team_task board`，订阅详情指向 `team_subscription list`。
 
 cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达全部获授权的顶层 Threads，含 taskless 与不在首页的 taskful。页脚把 cursor 称为 Thread cursor，说明是否还有更旧的 Thread anchors。
 
@@ -145,7 +147,9 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 
 ## `team_subscription`
 
-`team_subscription` 创建并维护某个 Project 的订阅：一段由 Host 在没有 Session 的情况下、以该 Project 的身份运行的脚本——按间隔、收到 webhook 时，或两者兼有。动作有 `list`、`create`、`update`、`test`、`pause`、`resume`、`delete`、`baseline`、`logs`、`deliveries`、`replay`、`reset_webhook`。只有该 Project 的 owner 可以修改、试运行或重放投递（否则返回 `project_owner_required`）；Project 内任何成员都可以列出订阅、读取运行历史。
+`team_subscription` 创建并维护某个 Project 的订阅：一段由 Host 在没有 Session 的情况下、以该 Project 的身份运行的脚本——按间隔、收到 webhook 时，或两者兼有。动作有 `list`、`create`、`update`、`test`、`pause`、`resume`、`delete`、`baseline`、`logs`、`deliveries`、`replay`、`reset_webhook`。
+
+只有该 Project 的 owner 可以修改、试运行或重放投递（否则返回 `project_owner_required`）。任何 Workspace Member 都可以用 `list` 读取 Agent 侧元数据，其中不含 script、credential 引用和 webhook arm；运行历史仍只向 Project member 开放，owner 输出权限如下所述。
 
 `create` 与 `update` 用 `intervalMinutes` 指定定时、用 `webhook: true` 指定地址，也可以两者都要，两者都不给会被拒绝。`update` 里两者的省略语义不同：不给 `intervalMinutes` 就是去掉定时，而不给 `webhook` 表示地址照旧，只有显式 `false` 才会卸下它——不认识 webhook 的调用方不该把正在用的提供方连接切断。启用触发需要部署已配置公网地址（Host 行的 `webhook.publicOrigin`）。
 

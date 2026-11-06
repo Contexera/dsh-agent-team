@@ -1078,6 +1078,22 @@ export interface AgentTeamViewRequest {
   /** Include public Claim and Task activities in the bounded stream (default true). */
   readonly includeActivities?: boolean
   readonly includeCatalog?: boolean
+  /** Agent address-book reads also include Workspace-wide directory metadata without widening Project content. */
+  readonly includeWorkspaceDirectory?: boolean
+}
+
+export interface AgentTeamProjectDirectoryEntry {
+  readonly project: AgentTeamProject
+  readonly ownerIds: readonly AgentTeamMemberId[]
+  /** Whether the viewing Member participates in this Project's content and writes. */
+  readonly participating: boolean
+  readonly subscriptions: { readonly active: number; readonly paused: number }
+}
+
+export interface AgentTeamWorkspaceDirectory {
+  readonly projects: readonly AgentTeamProjectDirectoryEntry[]
+  /** Every current Member participating in the Workspace, including Members with no Project membership. */
+  readonly memberIds: readonly AgentTeamMemberId[]
 }
 
 /** Bounded public collaboration facts plus a continuation sequence. */
@@ -1086,6 +1102,8 @@ export interface AgentTeamView {
   /** Every Workspace the viewing Member participates in — the address book for the optional `workspace` selector; `default` marks the Workspace its Session roots in. */
   readonly workspaces: readonly AgentTeamWorkspaceParticipation[]
   readonly projects: readonly AgentTeamProject[]
+  /** Present for the Agent address book; never used to authorize the content catalog above. */
+  readonly directory?: AgentTeamWorkspaceDirectory
   readonly members: readonly AgentTeamProjectMembership[]
   /** Agent owners of the listed Projects. The Human owns every Project and is not listed. */
   readonly owners: readonly AgentTeamProjectMembership[]
@@ -1196,8 +1214,10 @@ export interface AgentTeamSubscriptionRunSummary {
  * One stored subscription as the Project page lists it: its backlog, what the
  * ledger counts as events, and the timestamps a reader scans for.
  */
-export interface AgentTeamSubscriptionListEntry {
-  readonly subscription: AgentTeamSubscription
+export type AgentTeamSubscriptionMetadata = Omit<AgentTeamSubscription, 'script' | 'credentials' | 'webhook'>
+
+export interface AgentTeamSubscriptionListEntry<TSubscription = AgentTeamSubscription> {
+  readonly subscription: TSubscription
   readonly unpublished: number
   /** Events this subscription's runs had accepted into the ledger, published or waiting. */
   readonly eventCount: number
@@ -1214,8 +1234,8 @@ export interface AgentTeamSubscriptionListRequest {
   readonly projectRef: AgentTeamProjectRef
 }
 
-export interface AgentTeamSubscriptionListResult {
-  readonly entries: readonly AgentTeamSubscriptionListEntry[]
+export interface AgentTeamSubscriptionListResult<TSubscription = AgentTeamSubscription> {
+  readonly entries: readonly AgentTeamSubscriptionListEntry<TSubscription>[]
 }
 
 /** One recorded run as a log read returns it: the summary everyone sees, the tails only an owner does. */

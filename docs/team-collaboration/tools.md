@@ -6,11 +6,13 @@ Successful and rejected tool results return through the normal model loop. There
 
 ## `team_view`
 
-`team_view` is the address book: bounded authorized Project, top-level Thread, and Member summaries — current addresses, not a work queue; unread work lives in `team_inbox`. Threads are the sole paginated catalog. Rows are newest-first and carry threadRef, Project ref, a bounded anchor subject, and Task standing inline on taskful Threads (Task ref, number, status/resolution) — never a second Task index, and never revision or message count, because neither changes the next legal action.
+`team_view` is the address book: every active Project in the Workspace, top-level Threads from the reader's Project memberships, and the complete Workspace Member roster — current addresses, not a work queue; unread work lives in `team_inbox`.
 
-Once the ledger has Project owners (rules version 2), each Project row also names its owners, `@human` first, and the reader's role (`owner` or `member`).
+Each Project row carries the reader's `owner` / `member` / `directory only` relation and active/paused subscription counts. Once the ledger has Project owners (rules version 2), it also names them, `@human` first. Directory-only discovery grants no Project content, write, Attention, or unread delivery. Subscription details remain with `team_subscription list` rather than expanding the directory into a dashboard.
 
-Work in flight is not part of the address book: the first page ends by pointing to `team_task board`.
+Threads are the sole paginated catalog. Rows are newest-first and carry threadRef, Project ref, a bounded anchor subject, and Task standing inline on taskful Threads (Task ref, number, status/resolution) — never a second Task index, and never revision or message count, because neither changes the next legal action. Their section is explicitly scoped to the reader's Project memberships. A `projectRef` filter naming a directory-only Project returns its directory row but says Thread rows require membership instead of falsely reporting an empty Project.
+
+Work in flight is not part of the address book: the first page ends by pointing to `team_task board` and subscription details to `team_subscription list`.
 
 The cursor pages Thread rows only; continuation pages render Threads alone, and paging reaches every authorized top-level Thread, including taskless and off-page taskful ones. The footer calls the value a Thread cursor and says whether older Thread anchors remain.
 
@@ -161,7 +163,9 @@ A committed resolution names the action, the resulting status and resolution, th
 
 ## `team_subscription`
 
-`team_subscription` creates and maintains a Project's subscription: a script the Host runs with no Session, as that Project, on a timer, on an incoming webhook, or on both. Its actions are `list`, `create`, `update`, `test`, `pause`, `resume`, `delete`, `baseline`, `logs`, `deliveries`, `replay`, and `reset_webhook`. Only the Project's owners may change one, test one, or replay a delivery (`project_owner_required` otherwise); any member of the Project may list them and read their run history.
+`team_subscription` creates and maintains a Project's subscription: a script the Host runs with no Session, as that Project, on a timer, on an incoming webhook, or on both. Its actions are `list`, `create`, `update`, `test`, `pause`, `resume`, `delete`, `baseline`, `logs`, `deliveries`, `replay`, and `reset_webhook`.
+
+Only the Project's owners may change one, test one, or replay a delivery (`project_owner_required` otherwise). Any Workspace Member may use `list` for Agent-facing metadata that omits scripts, credential references, and webhook arms; run history remains Project-member-only, with owner-only output as described below.
 
 `create` and `update` take `intervalMinutes` for a timer, `webhook: true` for an address, or both, and refuse a subscription that names neither. On `update` the two triggers read omission differently: leaving out `intervalMinutes` drops the timer, while leaving out `webhook` keeps the address, and only an explicit `false` disarms it — a caller that does not model webhooks must not cut off a live provider. Arming the trigger needs the deployment's public origin (`webhook.publicOrigin` on the Host row).
 

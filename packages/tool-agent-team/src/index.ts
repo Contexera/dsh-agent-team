@@ -1444,7 +1444,7 @@ function taskRejection(
 
 const teamView = defineTool({
   name: 'team_view',
-  description: 'Discover your authorized Team addresses: current Projects (with their owners and your role), a newest-first page of top-level Threads (each with its bounded anchor subject; Task standing inline on taskful rows), and current Members. This is an address book, not a work queue: unread work lives in team_inbox, work in flight on team_task board, and a Thread is read with team_thread read. The cursor pages Thread rows only.',
+  description: 'Discover your authorized Team addresses: every active Project in the Workspace (with owners, your owner/member/directory-only relation, and subscription counts), a newest-first page of top-level Threads from your Project memberships (each with its bounded anchor subject; Task standing inline on taskful rows), and current Workspace Members. Directory visibility grants no Project content or write access. This is an address book, not a work queue: unread work lives in team_inbox, work in flight on team_task board, and a Thread is read with team_thread read. The cursor pages Thread rows only.',
   parameters: {
     projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     limit: { type: 'number' }, cursor: { type: 'number' }, workspace: workspaceParam,
@@ -1455,7 +1455,11 @@ const teamView = defineTool({
         projectRef: { type: 'string', required: true }, name: { type: 'string', required: true },
         // Present only once the ledger has Project owners (rules version 2).
         owners: { type: 'array', items: { type: 'string' } }, role: { type: 'string' },
+        subscriptions: { type: 'object', additionalProperties: false, properties: {
+          active: { type: 'number', required: true }, paused: { type: 'number', required: true },
+        } },
       } } },
+      directoryOnly: { type: 'boolean' },
       workspaceId: { type: 'string', required: true },
       workspaces: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { workspaceId: { type: 'string', required: true }, title: { type: 'string' }, default: { type: 'boolean', required: true } } } },
       members: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
@@ -1473,13 +1477,19 @@ const teamView = defineTool({
       const continuation = value.page === 'threads'
       const lines: string[] = [`Workspace: ${value.workspaceId}`]
       if (!continuation) {
-        lines.push('Team directory', '', 'Projects — current')
-        if (value.projects.length === 0) lines.push('No authorized Projects.')
-        else lines.push(...value.projects.map(project => `${project.projectRef} · ${project.name}${project.owners === undefined ? '' : ` · owners ${project.owners.map(handle => `@${handle}`).join(', ')} · you: ${project.role}`}`))
+        lines.push('Team directory', '', 'Projects — Workspace directory')
+        if (value.projects.length === 0) lines.push('No active Projects in this Workspace.')
+        else lines.push(...value.projects.map(project => {
+          const counts = project.subscriptions === undefined ? '' : project.subscriptions.active === 0 && project.subscriptions.paused === 0
+            ? ' · subscriptions 0'
+            : ` · subscriptions ${project.subscriptions.active === 0 ? '' : `${project.subscriptions.active} active`}${project.subscriptions.active > 0 && project.subscriptions.paused > 0 ? ', ' : ''}${project.subscriptions.paused === 0 ? '' : `${project.subscriptions.paused} paused`}`
+          return `${project.projectRef} · ${project.name}${project.owners === undefined ? '' : ` · owners ${project.owners.map(handle => `@${handle}`).join(', ')} · you: ${project.role}`}${counts}`
+        }))
         lines.push('')
       }
-      lines.push('Threads')
-      if (value.threads.length === 0) lines.push(`No top-level Threads${!continuation && value.projects.length === 1 ? ` in ${value.projects[0]!.projectRef}` : ''} at this cursor.`)
+      lines.push('Threads — your Project memberships')
+      if (value.directoryOnly === true) lines.push('Directory only: Thread rows require Project membership.')
+      else if (value.threads.length === 0) lines.push('No top-level Threads in your Project memberships at this cursor.')
       else lines.push(...value.threads.map(thread => `${thread.threadRef} · ${thread.projectRef}${thread.taskRef === undefined ? ' · taskless' : ` · ${taskStanding(thread)}`} — ${thread.subject}${thread.lastActivityAt === undefined ? '' : ` · last activity ${formatTeamTimestamp(thread.lastActivityAt)}`}`))
       lines.push(`Thread cursor ${value.cursor}; hasMore=${value.hasMore ? 'true' : 'false'}${value.hasMore ? ' — older Thread anchors exist; page again with this cursor.' : ' — no older Threads remain.'}`)
       if (!continuation && value.workspaces.length > 1) {
@@ -1490,7 +1500,7 @@ const teamView = defineTool({
         lines.push('', 'Members — current')
         if (value.members.length === 0) lines.push('No visible Members.')
         else lines.push(...value.members.map(m => `${m.memberId} · @${m.handle} (${m.kind}, ${m.presence})${m.description === '' ? '' : ` — ${m.description}`}`))
-        lines.push('', 'Work in flight lives on the Task board: team_task board.')
+        lines.push('', 'Subscription details: team_subscription list. Work in flight: team_task board.')
       }
       return [{ type: 'text', text: lines.join('\n') }]
     },
@@ -1503,7 +1513,8 @@ const teamView = defineTool({
     const workspaceId = workspaceOf(args, agent)
         // `includeCatalog` makes this the address book: the radar and Task/Thread catalog of the whole Workspace scope, not just this page's Threads. Other `view` callers keep the bounded page projection.
     const view = host.viewForAgent(agent, { workspaceId, ...(args.projectRef === undefined ? {} : { projectRef: projectRefOf(args.projectRef) as never }), ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.cursor === undefined ? {} : { cursor: args.cursor }), topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true })
-    const visibleMemberIds = new Set(view.members.map(membership => membership.memberId))
+    if (view.directory === undefined) throw new Error('team_view requires the Workspace directory projection')
+    const visibleMemberIds = new Set(view.directory.memberIds)
     const self = host.memberForAgent(agent)
     const handles = new Map(host.members().map(status => [status.member.memberId, status.member.handle]))
     const ownership = view.rulesVersion >= 2
@@ -1511,13 +1522,15 @@ const teamView = defineTool({
       workspaceId,
       workspaces: view.workspaces.map(participation => ({ workspaceId: participation.workspaceId,
         ...(participation.title === undefined ? {} : { title: participation.title }), default: participation.default })),
-      projects: view.projects.map(project => {
-        if (!ownership) return { projectRef: project.projectRef, name: project.name }
-        const ownerIds = view.owners.filter(owner => owner.projectRef === project.projectRef).map(owner => owner.memberId)
-        return { projectRef: project.projectRef, name: project.name,
+      projects: view.directory.projects.map(entry => {
+        const { project, ownerIds, participating, subscriptions } = entry
+        if (!ownership) return { projectRef: project.projectRef, name: project.name, subscriptions,
+          role: participating ? 'member' : 'directory only' }
+        return { projectRef: project.projectRef, name: project.name, subscriptions,
           owners: [host.humanHandle(), ...ownerIds.map(memberId => handles.get(memberId) ?? memberId)],
-          role: self !== undefined && ownerIds.includes(self.memberId) ? 'owner' : 'member' }
+          role: participating ? (self !== undefined && ownerIds.includes(self.memberId) ? 'owner' : 'member') : 'directory only' }
       }),
+      directoryOnly: args.projectRef !== undefined && view.directory.projects.length === 1 && !view.directory.projects[0]!.participating,
       members: [
         { memberId: view.humanMemberId, kind: 'human', handle: host.humanHandle(), description: 'Human Team Member', presence: 'available' },
         ...host.members().filter(status => visibleMemberIds.has(status.member.memberId)).map(status => ({ memberId: status.member.memberId,

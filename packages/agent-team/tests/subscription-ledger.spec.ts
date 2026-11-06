@@ -559,6 +559,58 @@ describe('who may read a Project\'s subscriptions', () => {
     expect(() => team.ledger.assertSubscriptionReadAuthority(team.outsider.actor, team.projectRef, alpha)).toThrow(/not_project_member/)
     expect(() => team.ledger.assertSubscriptionReadAuthority(host, team.projectRef, alpha)).toThrow(/Human or Agent Member/)
   })
+
+  it('allows Workspace-wide metadata discovery without widening full reads', async () => {
+    const team = await seed()
+    expect(() => team.ledger.assertSubscriptionMetadataAuthority(team.outsider.actor, team.projectRef, alpha)).not.toThrow()
+    expect(() => team.ledger.assertSubscriptionReadAuthority(team.outsider.actor, team.projectRef, alpha)).toThrow(/not_project_member/)
+    expect(() => team.ledger.assertSubscriptionMetadataAuthority(host, team.projectRef, alpha)).toThrow(/Human or Agent Member/)
+  })
+})
+
+describe('the Workspace directory', () => {
+  it('lists every Project and subscription count without widening Thread or Task content', async () => {
+    const team = await seed()
+    await team.create(team.owner.actor)
+    const pausedRef = subscriptionRefOf(await team.create(team.owner.actor))
+    await team.ledger.pauseSubscription({ requestId: requestId('directory-pause'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef: pausedRef, expectedRevision: 1, reason: 'manual' })
+    const deletedRef = subscriptionRefOf(await team.create(team.owner.actor))
+    await team.ledger.deleteSubscription({ requestId: requestId('directory-delete'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef: deletedRef, expectedRevision: 1 })
+    const otherProject = (await team.ledger.createProject({ requestId: requestId('directory-other-project'), actor: human,
+      workspaceId: alpha, name: 'other', description: '', memberIds: [] })).value.project.projectRef
+    await team.ledger.startThread({ requestId: requestId('directory-own-task'), actor: human, workspaceId: alpha,
+      projectRef: team.projectRef, kind: 'task', body: 'own task' })
+    await team.ledger.startThread({ requestId: requestId('directory-other-task'), actor: human, workspaceId: alpha,
+      projectRef: otherProject, kind: 'task', body: 'other task' })
+
+    const outsiderView = team.ledger.view({ workspaceId: alpha, includeWorkspaceDirectory: true, includeCatalog: true,
+      topLevelOnly: true, includeActivities: false, direction: 'before' }, team.outsider.memberId)
+    expect(outsiderView.projects).toEqual([])
+    expect(outsiderView.items).toEqual([])
+    expect(outsiderView.tasks).toEqual([])
+    expect(outsiderView.directory?.projects.map(entry => entry.project.projectRef)).toEqual([team.projectRef, otherProject])
+    expect(outsiderView.directory?.projects[0]).toMatchObject({
+      participating: false, ownerIds: [team.owner.memberId], subscriptions: { active: 1, paused: 1 },
+    })
+    expect(outsiderView.directory?.memberIds).toEqual(expect.arrayContaining([team.owner.memberId, team.writer.memberId, team.outsider.memberId]))
+
+    const filtered = team.ledger.view({ workspaceId: alpha, projectRef: team.projectRef, includeWorkspaceDirectory: true,
+      includeCatalog: true }, team.outsider.memberId)
+    expect(filtered.directory?.projects).toHaveLength(1)
+    expect(filtered.tasks).toEqual([])
+    expect(filtered.threads).toEqual([])
+    expect(() => team.ledger.view({ workspaceId: alpha, projectRef: team.projectRef }, team.outsider.memberId)).toThrow(/not authorized/)
+
+    const memberView = team.ledger.view({ workspaceId: alpha, includeWorkspaceDirectory: true, includeCatalog: true,
+      topLevelOnly: true, includeActivities: false, direction: 'before' }, team.writer.memberId)
+    expect(memberView.projects.map(project => project.projectRef)).toEqual([team.projectRef])
+    expect(memberView.directory?.projects.map(entry => entry.project.projectRef)).toEqual([team.projectRef, otherProject])
+    expect(memberView.directory?.projects.map(entry => entry.participating)).toEqual([true, false])
+    expect(memberView.items.map(item => item.message.body)).toEqual(['own task'])
+    expect(memberView.tasks.map(task => task.projectRef)).toEqual([team.projectRef])
+  })
 })
 
 describe('a request id means one payload', () => {
