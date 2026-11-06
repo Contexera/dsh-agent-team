@@ -25,6 +25,7 @@
 | 2026-11 | agent-tools-context-rendering | 七工具的上下文呈现与拒绝恢复：01–06 交付并随 v0.2.6 发布，生产日志核对输出形状无回退；付费模型理解评测未获授权、按未运行归档。 | [README](archive/2026-11/agent-tools-context-rendering/README.md) |
 | 2026-11 | project-event-notifications | Member 提醒与 Project 定时/webhook 订阅 01–06 全部验收；真实 GitHub CI 事件已唤醒 Agent owner。 | [README](archive/2026-11/project-event-notifications/README.md) |
 | 2026-11 | test-ablation | 通过 30 种故障实验验证测试精简，减少 24 项测试并修正三类漏检。 | [README](archive/2026-11/test-ablation/README.md) |
+| 2026-11 | member-compaction-summary-truncation | 成员摘要截断导致的反复锁死：摘要改由能力门通过的拟用路由写、失败后最多补一次并跨轮断路、在真实窗口内放行，默认预算 32768；合入本地 master，独立验收通过。 | [README](archive/2026-11/member-compaction-summary-truncation/README.md) |
 | 2026-08 | agent-team-quality-audit | 只读简化与可维护性审查；发现已实施或记为保留/延后，政策结论进架构与开发文档。 | [README](archive/2026-08/agent-team-quality-audit/README.md) |
 | 2026-08 | agent-team-storage-architecture | 设计操作账本持久化（v7→v8 事故后），0.1.0 发布 01+02，03/04/05 延后。 | [README](archive/2026-08/agent-team-storage-architecture/README.md) |
 | 2026-08 | community-outreach | 社区外联操作；发布节奏与产品链接归 root README 与开发文档。 | [README](archive/2026-08/community-outreach/README.md) |
