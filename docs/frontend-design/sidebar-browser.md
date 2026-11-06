@@ -34,9 +34,9 @@ When a Member's generation is swapped, the Agents panel observes the old→new S
 
 The Inbox and Task board icons are destinations: clicking one opens its page and expands the sidebar; the Projects/Agents icons expand the sidebar and focus their section header. Agent creation carries no Project page and the Agent editor carries no membership section.
 
-The Agent editor does carry that Member's own reminders, as a block under the form rather than inside it: each row shows the note, the stored schedule, the state, and the occurrence facts, and only a reminder that can still fire carries a withdraw button.
+The Agent editor does carry that Member's own reminders, as a block under the form rather than inside it: only a reminder that can still fire is listed, with its note, stored schedule, state, and occurrence facts, and it carries the withdraw button; a fired or cancelled reminder stays in the ledger but leaves this management surface.
 
-The block reads through the `memberReminders` Remote and withdraws through `cancelMemberReminder`, never optimistically — the row keeps its withdraw affordance until the Host answers with the cancelled state. Project participation is derived from taking part in a Thread, so no surface manages it: the create dialog still seeds initial members and a Project-less Member stays reachable through its DM view.
+The block reads through the `memberReminders` Remote and withdraws through `cancelMemberReminder`, never optimistically — the row keeps its withdraw affordance until the Host answers with the cancelled state, and then leaves the list. Project participation is derived from taking part in a Thread, so no surface manages it: the create dialog still seeds initial members and a Project-less Member stays reachable through its DM view.
 
 The create dialog is also the one import entry: a single disclosure button toggles between creating a new Member and bringing an existing one in from another Workspace. The import view reuses the shared `TeamMemberRow` roster and offers only Members that exist globally and do not yet participate here (suspended Members included — joining does not depend on availability). Confirming routes the durable `joinWorkspace` and the row appears through the workspace refetch, with retry reusing the exact failed request.
 

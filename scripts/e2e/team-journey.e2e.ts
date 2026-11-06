@@ -451,7 +451,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Agent has set none, so the block states that rather than rendering an empty list.
   const reminders = agentEditor.getByRole('group', { name: '提醒' })
   await reminders.waitFor()
-  await expect.poll(() => reminders.textContent()).toContain('这个 Agent 还没有给自己设过提醒。')
+  await expect.poll(() => reminders.textContent()).toContain('这个 Agent 当前没有生效中的提醒。')
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-empty.png'), fullPage: true })
   // The same block at the narrow lane: the dialog reflows inside the 390px viewport
   // instead of overflowing it, exactly as the create and Project dialogs do.
@@ -487,6 +487,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await reminderRow.getByRole('button', { name: '取消提醒 · 每半小时看一眼 CI 队列' }).count()).toBe(1)
   await settleAnimations(page)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-filled.png'), fullPage: true })
+  // Withdrawing the last reminder leaves the management block empty: a cancelled
+  // record stays in the ledger but no longer occupies a row here.
+  await reminderRow.getByRole('button', { name: '取消提醒 · 每半小时看一眼 CI 队列' }).click()
+  await expect.poll(() => reminderSection.textContent()).toContain('这个 Agent 当前没有生效中的提醒。')
+  await settleAnimations(page)
+  await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-after-cancel.png'), fullPage: true })
   // No narrow seat for this dialog: below the wide breakpoint the sidebar renders
   // its rail instead of the panels, and the Agent panel owns this dialog.
   await agentEditor.getByRole('button', { name: '关闭', exact: true }).click()

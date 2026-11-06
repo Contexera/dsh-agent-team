@@ -216,10 +216,10 @@ function reminderTimingText(view: AgentTeamMemberReminderView, t: TeamSidebarPro
 }
 
 /**
- * One Member's reminders in Member detail. Read-only by construction: the Human sees what the
- * Member asked of itself and may withdraw a reminder, but never invents one — a reminder has
- * exactly one recipient, and only that Member creates its own. Every write re-reads the list,
- * so the rows are never an optimistic guess at what the Host stored.
+ * One Member's reminders that can still fire, in Member detail. Read-only by construction: the
+ * Human sees what the Member asked of itself and may withdraw a reminder, but never invents one —
+ * a reminder has exactly one recipient, and only that Member creates its own. Every write re-reads
+ * the list, so the rows are never an optimistic guess at what the Host stored.
  */
 export function MemberRemindersSection({ workspaceId, memberId, loadMemberReminders, cancelMemberReminder, disabled, t }: {
   readonly workspaceId: WorkspaceId
@@ -275,14 +275,17 @@ export function MemberRemindersSection({ workspaceId, memberId, loadMemberRemind
     }
   }
 
+  // The ledger keeps a reminder after it fires or is withdrawn, but Member detail is a
+  // management surface: a row that can no longer fire has nothing left to manage.
+  const manageable = reminders?.filter(view => view.reminder.state === 'active')
   return (
     <div className={createCss.remindersSection} role="group" aria-label={t('memberReminders')} data-team-member-reminders>
       <span className={createCss.sectionLabel}>{t('memberReminders')}</span>
-      {reminders === undefined && error === undefined && <small className={css.editHint}>{t('memberRemindersLoading')}</small>}
-      {reminders !== undefined && reminders.length === 0 && <small className={css.editHint}>{t('memberRemindersEmpty')}</small>}
-      {reminders !== undefined && reminders.length > 0 && (
+      {manageable === undefined && error === undefined && <small className={css.editHint}>{t('memberRemindersLoading')}</small>}
+      {manageable !== undefined && manageable.length === 0 && <small className={css.editHint}>{t('memberRemindersEmpty')}</small>}
+      {manageable !== undefined && manageable.length > 0 && (
         <ul className={createCss.reminderList}>
-          {reminders.map(view => (
+          {manageable.map(view => (
             <li className={createCss.reminderRow} key={view.reminder.reminderRef} data-reminder-state={view.reminder.state}>
               <div className={createCss.reminderBody}>
                 <span className={createCss.reminderNote}>{view.reminder.note}</span>

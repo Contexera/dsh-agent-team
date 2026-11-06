@@ -13,6 +13,7 @@ const WORKSPACE = 'workspace:40459c33-743d-4030-9e50-9419d72abe06' as WorkspaceI
 const MEMBER = 'member:b138210c-6534-4e6d-a419-af161f54d459' as AgentTeamMemberId
 const ACTIVE = 'reminder:0f0a1b2c-3d4e-4f50-8a9b-0c1d2e3f4a5b' as AgentTeamReminderRef
 const DONE = 'reminder:aaaa1111-0000-4000-8000-000000000002' as AgentTeamReminderRef
+const CANCELLED = 'reminder:bbbb1111-0000-4000-8000-000000000003' as AgentTeamReminderRef
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -86,17 +87,31 @@ describe('Member detail reminder list', () => {
     expect(await screen.findByText('待读取，始于：2026-11-03 09:00')).toBeTruthy()
   })
 
-  it('offers a withdraw button only on a reminder that can still fire', async () => {
-    harness({ load: async () => ok([view(), view({ reminder: { ...view().reminder, reminderRef: DONE, state: 'done' } })]) })
-    await waitFor(() => { expect(screen.getAllByRole('button', { name: /^取消提醒 · / })).toHaveLength(1) })
+  it('lists only the reminders that can still fire', async () => {
+    harness({
+      load: async () => ok([
+        view(),
+        view({ reminder: { ...view().reminder, reminderRef: DONE, note: 'the one-shot is over', state: 'done' } }),
+        view({ reminder: { ...view().reminder, reminderRef: CANCELLED, note: 'the old promise was withdrawn', state: 'cancelled' } }),
+      ]),
+    })
+    expect(await screen.findByText('check the build')).toBeTruthy()
+    // A fired or withdrawn reminder stays in the ledger but leaves this management surface.
+    expect(screen.queryByText('the one-shot is over')).toBeNull()
+    expect(screen.queryByText('the old promise was withdrawn')).toBeNull()
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
     // The control names the row it withdraws, so two reminders never read alike.
     expect(screen.getByRole('button', { name: '取消提醒 · check the build' })).toBeTruthy()
-    expect(factLine('check the build', 1)).toContain('已触发')
   })
 
-  it('says so when the Member set no reminder at all', async () => {
-    harness({ load: async () => ok([]) })
-    expect(await screen.findByText('这个 Agent 还没有给自己设过提醒。')).toBeTruthy()
+  it('says so when the Member has no active reminder', async () => {
+    harness({
+      load: async () => ok([
+        view({ reminder: { ...view().reminder, reminderRef: DONE, state: 'done' } }),
+        view({ reminder: { ...view().reminder, reminderRef: CANCELLED, state: 'cancelled' } }),
+      ]),
+    })
+    expect(await screen.findByText('这个 Agent 当前没有生效中的提醒。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^取消提醒 · / })).toBeNull()
   })
 })
@@ -113,7 +128,7 @@ describe('Member detail reminder withdrawal', () => {
     expect(cancel.mock.calls[0]?.[0]).toMatchObject({ workspaceId: WORKSPACE, reminderRef: ACTIVE })
     // The row keeps its withdraw affordance until the Host answers with the cancelled state.
     await waitFor(() => { expect(screen.queryByRole('button', { name: /^取消提醒 · / })).toBeNull() })
-    expect(factLine('check the build')).toContain('已取消')
+    expect(await screen.findByText('这个 Agent 当前没有生效中的提醒。')).toBeTruthy()
   })
 
   it('keeps the answered refusal visible with a retry that re-reads, and leaves the row withdrawable', async () => {

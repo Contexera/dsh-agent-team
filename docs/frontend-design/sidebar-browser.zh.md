@@ -35,7 +35,7 @@ Agent 编辑器（`编辑 Agent`）：名称/说明输入框 + 模型选择。�
 
 编辑只能替换模型，不能清空回 Host 默认；既有账本里没有模型的旧记录仍按当时默认运行。改模型对活跃 Member 原地更新 live model selection，保持 Agent 与 Session 身份不变。后续请求使用新选择。纯展示编辑不重启。
 
-编辑器还带这个 Member 自己的 reminder 区块，放在表单之外而不是表单里：每行显示 note、存储的 schedule、state 与 occurrence 事实，只有仍可能触发的 reminder 才有撤回按钮。区块经 `memberReminders` Remote 读取，撤回走 `cancelMemberReminder`，全程非乐观——在 Host 以 cancelled 状态作答之前，那一行一直保留撤回按钮。
+编辑器还带这个 Member 自己的 reminder 区块，放在表单之外而不是表单里：只列出仍可能触发的 reminder，每行显示 note、存储的 schedule、state 与 occurrence 事实，并带撤回按钮；已触发或已取消的 reminder 留在账本里，但不再出现在这个管理面。区块经 `memberReminders` Remote 读取，撤回走 `cancelMemberReminder`，全程非乐观——在 Host 以 cancelled 状态作答之前，那一行一直保留撤回按钮，作答后离开列表。
 
 Agent 卡片会话视图里，Agent 行的头像与文案整体是选择按钮。按钮读作 `打开 {name} 的会话`，点击不再退出 Team 模式。导航快照保留当前 Project/Thread，并叠加运行时字段 `memberSessionId`。同时附 `returnToSessionId`，两者均不持久化。再调用 `sessions.open(memberSessionId)`。
 - `conversation` 影子此时让位。shipped 会话根在 Team 侧栏之间渲染这个 Member Session。任何显式 Team 导航（选工作区/Project/Thread）都会关闭成员视图，并恢复导航前的 Team 位置。页脚「对话」关闭成员视图，还原 `returnToSessionId`，再离开 Team。普通外壳不会停在成员会话里。
