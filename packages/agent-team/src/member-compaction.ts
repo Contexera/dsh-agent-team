@@ -80,7 +80,7 @@ export function installMemberCompaction(
   }
   const bindStepRoute = (route: MemberStepRoute | undefined): void => {
     stepRoute = route
-    memberEngine()?.useStepRoute(route)
+    memberEngine()?.useStepRoute(agent, route)
   }
 
   ctx.on('session/event', (session, event) => {

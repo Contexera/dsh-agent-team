@@ -27,6 +27,9 @@ type SummaryDecision =
   | { readonly kind: 'committed' }
   | { readonly kind: 'route'; readonly route: MemberSummaryRoute }
 
+const sameRoute = (left: MemberSummaryRoute, right: MemberSummaryRoute): boolean =>
+  left.provider === right.provider && left.model === right.model
+
 export default class MemberCompactionEngine extends BasicCompactionEngine {
   private stepRoute: MemberStepRoute | undefined
   private alternativeSpent = false
@@ -42,15 +45,19 @@ export default class MemberCompactionEngine extends BasicCompactionEngine {
   }
 
   /** Bind the step's fixed route, or clear it at that step's end. */
-  useStepRoute(route: MemberStepRoute | undefined): void {
+  useStepRoute(agent: Agent, route: MemberStepRoute | undefined): void {
     this.stepRoute = route
-    if (route !== undefined) this.alternativeSpent = false
+    if (route === undefined) return
+    this.alternativeSpent = false
+    // A pause names the route that failed; another route makes it stale, so the Agent's return can try again.
+    const failed = this.degradedRoutes.get(agent)
+    if (failed !== undefined && !sameRoute(failed, route)) this.degradedRoutes.delete(agent)
   }
 
   /** Whether a bounded failure opened the circuit for this route. */
   degraded(agent: Agent, route: MemberSummaryRoute): boolean {
     const recorded = this.degradedRoutes.get(agent)
-    return recorded !== undefined && recorded.provider === route.provider && recorded.model === route.model
+    return recorded !== undefined && sameRoute(recorded, route)
   }
 
   /** Whether the last automatic attempt failed for a reason other than cancellation. */

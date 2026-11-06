@@ -476,6 +476,60 @@ describe('Member summary target and bounded fallback', () => {
     expect(lastTurn(agent)?.kind).toBe('completed')
   })
 
+  it('tries the failed route again once another route held the summary', async () => {
+    const { agent, adapter, engine } = await fixture()
+    await history(agent)
+    adapter.silentRoutes.add('large')
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['large'])
+    expect(engine.degraded(agent, { provider: 'budget-test', model: 'large' })).toBe(true)
+    // Another route writes the checkpoint, so the failure belonged to 'large' alone.
+    adapter.silentRoutes.delete('large')
+    adapter.windows.set('middle', 1_000_000)
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    await send(agent, 1_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['large', 'middle'])
+    agent.model.select({ provider: 'budget-test', model: 'large' })
+    await send(agent, 260_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['large', 'middle', 'large'])
+    expect(engine.degraded(agent, { provider: 'budget-test', model: 'large' })).toBe(false)
+  })
+
+  it('clears the step route when pre-step rejects the step', async () => {
+    const { agent, adapter, engine } = await fixture()
+    await history(agent)
+    adapter.windows.set('middle', 1_000_000)
+    let rejecting = false
+    agent.ctx.on('agent/pre-step', async (_payload, next) => (rejecting ? { kind: 'reject' as const } : next()))
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    rejecting = true
+    await send(agent, 1_000)
+    expect(lastTurn(agent)?.kind).toBe('blocked')
+    expect(adapter.requests).toHaveLength(3)
+    rejecting = false
+    await engine.compactNow(agent, new AbortController().signal)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['large'])
+  })
+
+  it('clears the step route when pre-step throws', async () => {
+    const { agent, adapter, engine } = await fixture()
+    await history(agent)
+    adapter.windows.set('middle', 1_000_000)
+    let failing = false
+    agent.ctx.on('agent/pre-step', async (_payload, next) => {
+      if (failing) throw new Error('fixture pre-step failure')
+      return next()
+    })
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    failing = true
+    await send(agent, 1_000)
+    expect(lastTurn(agent)?.kind).toBe('error')
+    expect(adapter.requests).toHaveLength(3)
+    failing = false
+    await engine.compactNow(agent, new AbortController().signal)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['large'])
+  })
+
   it('pays for at most one region and its one alternative per step, switching or not', async () => {
     // Per step the shipped paths allow one Team admission region, compactionRetries + 1
     // model-switch regions and maxOverflowRetries overflow regions. The fallback adds one
