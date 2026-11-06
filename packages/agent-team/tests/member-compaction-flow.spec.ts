@@ -3,6 +3,7 @@ import { installModelSelection, type Agent } from '@deepseek-ai/dsh-agent'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { CONTEXT_WINDOW_EXCEEDED_CODE, createUserMessage, LlmAdapter, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import { afterEach, describe, expect, it } from 'vitest'
 import MemberCompactionEngine from '../src/member-compaction-engine.ts'
@@ -13,11 +14,17 @@ class BudgetAdapter extends LlmAdapter {
   readonly summaries: GenerateOptions[] = []
   outputLimit = 128_000
   overflowAtRequest: number | undefined
+  failRequestAt: number | undefined
   summary = 'Durable checkpoint: continue the requested work.'
+  /** Routes whose summary spends the whole cap on reasoning and returns no text. */
+  readonly silentRoutes = new Set<string>()
+  /** Per-model windows that override the defaults below. */
+  readonly windows = new Map<string, number>()
+  beforeSummary: (() => void) | undefined
 
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     return Promise.resolve({ provider, id: model, name: model,
-      context: { contextWindow: model === 'small' ? 272_000 : model === 'tiny' ? 8_000 : 2_000_000 },
+      context: { contextWindow: this.windows.get(model) ?? (model === 'small' ? 272_000 : model === 'tiny' ? 8_000 : 2_000_000) },
       defaultMaxTokens: this.outputLimit,
     })
   }
@@ -26,6 +33,17 @@ class BudgetAdapter extends LlmAdapter {
     const summarizing = options.purpose === 'compaction'
     if (summarizing) this.summaries.push(options)
     else this.requests.push(options)
+    if (summarizing) {
+      this.beforeSummary?.()
+      if (this.silentRoutes.has(options.model)) {
+        yield { type: 'finish', reason: { kind: 'max-tokens' } }
+        return
+      }
+    }
+    if (!summarizing && this.requests.length === this.failRequestAt) {
+      yield { type: 'finish', reason: { kind: 'error', failure: { code: 'ADAPTER_FAILURE', message: 'fixture provider failure' } } }
+      return
+    }
     if (!summarizing && this.requests.length === this.overflowAtRequest) {
       yield { type: 'finish', reason: { kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE, message: 'fixture context overflow' } } }
       return
@@ -39,7 +57,7 @@ class BudgetAdapter extends LlmAdapter {
 const contexts: Context[] = []
 afterEach(async () => { await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose())) })
 
-async function fixture(model = 'large', settings: MemberCompactionConfig = { ...DEFAULT_MEMBER_COMPACTION }, maxTokens?: number): Promise<{
+async function fixture(model = 'large', settings: MemberCompactionConfig = { ...DEFAULT_MEMBER_COMPACTION }, maxTokens?: number, engineConfig: BasicCompactionConfig = { maxTokens: MEMBER_SUMMARY_TOKENS }): Promise<{
   ctx: Context; agent: Agent; adapter: BudgetAdapter; engine: MemberCompactionEngine;
 }> {
   const ctx = new Context()
@@ -49,7 +67,7 @@ async function fixture(model = 'large', settings: MemberCompactionConfig = { ...
   const adapter = new BudgetAdapter()
   ctx.llm.registerAdapter(['budget-test'], adapter)
   ctx.provide('agentTeam', { config: { memberCompaction: { get: () => settings } } } as never)
-  await ctx.plugin(MemberCompactionEngine, { maxTokens: MEMBER_SUMMARY_TOKENS })
+  await ctx.plugin(MemberCompactionEngine, engineConfig)
   const engine = ctx.get('compaction') as MemberCompactionEngine
   const harness = await mountAgentLoopTestHarness(ctx)
   const agent = await harness.create(SessionId(`budget-${model}`), {
@@ -243,5 +261,178 @@ describe('Member compaction through real requests', () => {
     await send(agent, 10)
     expect(served).toBe(1)
     expect(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')?.data.reason.kind).toBe('completed')
+  })
+})
+
+describe('Member summary target and bounded fallback', () => {
+  const lastTurn = (agent: Agent) => agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')?.data.reason
+  /** Three balanced turns just under the default budget, so a later step has a compactable range. */
+  const history = async (agent: Agent): Promise<void> => {
+    await send(agent, 85_000)
+    await send(agent, 85_000)
+    await send(agent, 80_000)
+  }
+
+  it('routes a switching step summary to the model the switch names, with the real call envelope', async () => {
+    const { agent, adapter } = await fixture()
+    await history(agent)
+    adapter.windows.set('middle', 1_000_000)
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    await send(agent, 40_000)
+    expect(adapter.summaries).toHaveLength(1)
+    expect(adapter.summaries[0]!.model).toBe('middle')
+    expect(adapter.summaries[0]!.sessionId).toBe(agent.session.id)
+    expect(adapter.summaries[0]!.toolHistory).toEqual(agent.session.toolHistory())
+    expect(agent.session.requestHeader()?.config.model).toBe('middle')
+  })
+
+  it('refuses a proposed window the summary input would exactly fill', async () => {
+    const exact = await fixture()
+    await history(exact.agent)
+    exact.adapter.windows.set('edge', exact.ctx.tokenMeter.measure(exact.agent.session).totalTokens + MEMBER_SUMMARY_TOKENS)
+    exact.agent.model.select({ provider: 'budget-test', model: 'edge' })
+    await send(exact.agent, 40_000)
+    expect(exact.adapter.summaries[0]!.model).toBe('large')
+
+    const roomy = await fixture()
+    await history(roomy.agent)
+    roomy.adapter.windows.set('edge', roomy.ctx.tokenMeter.measure(roomy.agent.session).totalTokens + MEMBER_SUMMARY_TOKENS + 1)
+    roomy.agent.model.select({ provider: 'budget-test', model: 'edge' })
+    await send(roomy.agent, 40_000)
+    expect(roomy.adapter.summaries[0]!.model).toBe('edge')
+  })
+
+  it('prices the capability gate from the route summary cap a model policy resolves', async () => {
+    const { agent, adapter, ctx } = await fixture('large', { ...DEFAULT_MEMBER_COMPACTION }, undefined,
+      { maxTokens: MEMBER_SUMMARY_TOKENS, modelPolicies: [{ provider: 'budget-test', model: 'middle', maxTokens: 8_192 }] })
+    await history(agent)
+    const surface = ctx.tokenMeter.measure(agent.session).totalTokens
+    adapter.windows.set('middle', surface + 8_193)
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    await send(agent, 40_000)
+    expect(adapter.summaries[0]!.model).toBe('middle')
+  })
+
+  it('summarizes once more on the committed route after the proposed one cannot write', async () => {
+    const { agent, adapter } = await fixture()
+    await history(agent)
+    adapter.windows.set('middle', 1_000_000)
+    adapter.silentRoutes.add('middle')
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['middle', 'large'])
+    expect(agent.session.requestHeader()?.config.model).toBe('middle')
+  })
+
+  it('passes the request through after a bounded failure and stops summarizing that route', async () => {
+    const { agent, adapter } = await fixture()
+    await history(agent)
+    adapter.silentRoutes.add('large')
+    await send(agent, 40_000)
+    expect(adapter.summaries).toHaveLength(1)
+    expect(adapter.requests).toHaveLength(4)
+    expect(lastTurn(agent)?.kind).toBe('completed')
+    const failures = agent.session.snapshotEvents()
+      .filter(event => event.type === 'compaction/end' && event.data.error !== undefined)
+    expect(failures).toHaveLength(1)
+    await send(agent, 1_000)
+    expect(adapter.summaries).toHaveLength(1)
+    expect(adapter.requests).toHaveLength(5)
+    expect(lastTurn(agent)?.kind).toBe('completed')
+  })
+
+  it('clears the circuit after a successful manual compaction, which still tries while it is open', async () => {
+    const { agent, adapter, engine } = await fixture()
+    await history(agent)
+    adapter.silentRoutes.add('large')
+    await send(agent, 40_000)
+    expect(adapter.summaries).toHaveLength(1)
+    await send(agent, 1_000)
+    expect(adapter.summaries).toHaveLength(1)
+    expect(lastTurn(agent)?.kind).toBe('completed')
+    adapter.silentRoutes.delete('large')
+    await engine.compactNow(agent, new AbortController().signal)
+    expect(adapter.summaries).toHaveLength(2)
+    await send(agent, 260_000)
+    expect(adapter.summaries).toHaveLength(3)
+  })
+
+  it('does not open the circuit when the turn is cancelled mid-summary', async () => {
+    const { agent, adapter, engine } = await fixture()
+    await history(agent)
+    adapter.silentRoutes.add('large')
+    adapter.beforeSummary = () => agent.cancel({ kind: 'user' })
+    await send(agent, 40_000)
+    expect(adapter.summaries).toHaveLength(1)
+    expect(lastTurn(agent)?.kind).toBe('aborted')
+    expect(engine.degraded(agent, { provider: 'budget-test', model: 'large' })).toBe(false)
+    adapter.beforeSummary = undefined
+    await send(agent, 40_000)
+    expect(adapter.summaries).toHaveLength(2)
+  })
+
+  it('refuses a request whose route left the step selection before summarizing', async () => {
+    const { agent, adapter } = await fixture()
+    await history(agent)
+    agent.model.select({ provider: 'budget-test', model: 'small' })
+    agent.ctx.on('agent/request', async (_payload, next) => ({ ...(await next()), model: 'large' }))
+    await send(agent, 40_000)
+    expect(adapter.summaries).toHaveLength(0)
+    expect(lastTurn(agent)).toMatchObject({ kind: 'error', error: { message: expect.stringContaining('disagrees') } })
+  })
+
+  it('keeps the step route out of a later manual compaction', async () => {
+    const { agent, adapter, engine } = await fixture()
+    await history(agent)
+    adapter.silentRoutes.add('small')
+    agent.model.select({ provider: 'budget-test', model: 'small' })
+    agent.ctx.on('agent/request', async (_payload, next) => ({ ...(await next()), model: 'large' }))
+    await send(agent, 40_000)
+    expect(adapter.summaries).toHaveLength(0)
+    await engine.compactNow(agent, new AbortController().signal)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['large'])
+  })
+
+  it('lets an explicit summary configuration outrank the step route', async () => {
+    const { agent, adapter } = await fixture('large', { ...DEFAULT_MEMBER_COMPACTION }, undefined,
+      { maxTokens: MEMBER_SUMMARY_TOKENS, summarizationProvider: 'budget-test', summarizationModel: 'summarizer' })
+    await history(agent)
+    adapter.windows.set('middle', 1_000_000)
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['summarizer'])
+  })
+
+  it('keeps the step route readable for that step overflow recovery', async () => {
+    const { agent, adapter } = await fixture('large', { enabled: true, tokens: 2_000_000 })
+    await send(agent, 20_000)
+    adapter.windows.set('middle', 1_000_000)
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    adapter.overflowAtRequest = 2
+    await send(agent, 5_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['middle'])
+    expect(lastTurn(agent)?.kind).toBe('completed')
+  })
+
+  it('pays for at most one region and its one alternative per step, switching or not', async () => {
+    // Per step the shipped paths allow one Team admission region, compactionRetries + 1
+    // model-switch regions and maxOverflowRetries overflow regions. The fallback adds one
+    // further summary for the step, and a failure then pauses every automatic summary on
+    // that route, so two is the ceiling — not two per region, and none on later turns.
+    const { agent, adapter, engine } = await fixture()
+    await history(agent)
+    adapter.windows.set('far', 400_000)
+    adapter.silentRoutes.add('far')
+    adapter.silentRoutes.add('large')
+    agent.model.select({ provider: 'budget-test', model: 'far' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['far', 'large'])
+    expect(lastTurn(agent)?.kind).toBe('error')
+    await send(agent, 1_000)
+    expect(adapter.summaries).toHaveLength(2)
+    adapter.silentRoutes.delete('large')
+    adapter.silentRoutes.delete('far')
+    await engine.compactNow(agent, new AbortController().signal)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['far', 'large', 'large'])
   })
 })

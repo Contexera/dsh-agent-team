@@ -4,6 +4,7 @@ import { createSystemMessage, LlmError, type LlmCallConfig, type LlmResolvedMode
 import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 import type ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import { renderPrompt, type PromptPresentation } from '@deepseek-ai/dsh-system-prompt'
+import MemberCompactionEngine, { type MemberStepRoute } from './member-compaction-engine.ts'
 
 export interface MemberCompactionConfig {
   readonly enabled: boolean
@@ -14,7 +15,7 @@ export const MEMBER_COMPACT_TOKENS = 256_000
 const MEMBER_WINDOW_RATIO = 0.8
 const MEMBER_CONTEXT_RESERVE = 16_384
 const MEMBER_OUTPUT_RESERVE = 4_096
-export const MEMBER_SUMMARY_TOKENS = 16_384
+export const MEMBER_SUMMARY_TOKENS = 32_768
 
 export const DEFAULT_MEMBER_COMPACTION: MemberCompactionConfig = Object.freeze({
   enabled: true,
@@ -23,9 +24,7 @@ export const DEFAULT_MEMBER_COMPACTION: MemberCompactionConfig = Object.freeze({
 
 export function memberCompactionThreshold(tokens: number, contextWindow: number | undefined): number | undefined {
   if (contextWindow === undefined) return tokens
-  // A window this small cannot hold the fixed context reserve plus a minimal
-  // output allowance: the trigger would fire on every request while no request
-  // could fit, so the route is left to the Agent's own limits instead.
+  // Too small for the fixed reserves: the Agent's own limits apply instead.
   if (contextWindow < MEMBER_CONTEXT_RESERVE + MEMBER_OUTPUT_RESERVE) return undefined
   return Math.floor(Math.min(tokens, contextWindow * MEMBER_WINDOW_RATIO, contextWindow - MEMBER_CONTEXT_RESERVE))
 }
@@ -71,12 +70,26 @@ export function installMemberCompaction(
   type OutputClamp = { readonly provider: string; readonly model: string; readonly applied: number; readonly requested: number | undefined }
   let loggedClamp: OutputClamp | undefined
   let preparedClamp: OutputClamp | undefined
+  let stepRoute: MemberStepRoute | undefined
+
+  const memberEngine = (): MemberCompactionEngine | undefined => {
+    const engine = engineFor()
+    return engine instanceof MemberCompactionEngine ? engine : undefined
+  }
+  const bindStepRoute = (route: MemberStepRoute | undefined): void => {
+    stepRoute = route
+    memberEngine()?.useStepRoute(route)
+  }
 
   ctx.on('session/event', (session, event) => {
-    if (session !== agent.session || event.type !== 'request/header') return
+    if (session !== agent.session) return
+    if (event.type === 'step/end') {
+      bindStepRoute(undefined)
+      return
+    }
+    if (event.type !== 'request/header') return
     const actual = event.data.header.config
-    // An adapter may clamp further than the prepared value; adopt whatever was
-    // logged so the next request can still restore the original allowance.
+    // An adapter may clamp further; adopt what it logged to restore the original.
     loggedClamp = preparedClamp !== undefined && actual.provider === preparedClamp.provider
       && actual.model === preparedClamp.model && actual.maxTokens !== undefined
       ? { ...preparedClamp, applied: actual.maxTokens } : undefined
@@ -88,7 +101,17 @@ export function installMemberCompaction(
     return assembly
   }, { prepend: true })
   ctx.on('agent/pre-step', async (payload, next) => {
-    const decision = await next()
+    // The step's route is frozen before this waterfall; a request hook may only
+    // adjust controls, so the same route must reach every summary.
+    bindStepRoute({ step: payload.step, provider: payload.modelSelection.provider, model: payload.modelSelection.model })
+    let decision
+    try {
+      decision = await next()
+    } catch (error) {
+      bindStepRoute(undefined)
+      throw error
+    }
+    if (decision.kind !== 'enter') bindStepRoute(undefined)
     pending = decision.kind === 'enter' ? decision.messages : []
     claimed = decision.kind === 'enter' ? payload.messages : []
     return decision
@@ -103,6 +126,11 @@ export function installMemberCompaction(
       else request.maxTokens = loggedClamp.requested
     }
     preparedClamp = undefined
+    const step = stepRoute
+    // One frozen selection: a hook rewriting the request makes the target a guess.
+    if (step !== undefined && (step.provider !== request.provider || step.model !== request.model)) {
+      throw new Error(`agent-team: the step's fixed route ${step.provider}/${step.model} disagrees with this request's ${request.provider}/${request.model}; refusing to summarize before the route contract is restored`)
+    }
     const settings = config()
     if (!settings.enabled) return request
     const llm = ctx.get('llm')
@@ -116,31 +144,45 @@ export function installMemberCompaction(
     signal.throwIfAborted()
     const window = info?.context?.contextWindow
     const threshold = memberCompactionThreshold(settings.tokens, window)
-    // A window that cannot hold the fixed reserve leaves this policy no room to
-    // act; the Agent's own upstream limits still apply to the request.
+    // No room to act: the Agent's own upstream limits still apply.
     if (threshold === undefined) return request
     const measure = (): number => measureMemberInput(ctx, agent, request, offered, assembly, stepTools)
     let inputTokens = measure()
     if (inputTokens >= threshold) {
       const engine = engineFor()
       if (engine === undefined) throw new Error('agent-team: Member reached its context budget without a compaction engine')
-      const prune = (ctx.get('agentPresets')?.serviceFor(agent, 'toolResultPruner') as ToolResultPruner | undefined)
-        ?? ctx.get('toolResultPruner')
-      if (prune !== undefined) {
-        try {
-          prune.pruneSession(agent.session)
+      const member = memberEngine()
+      // The request continues without a checkpoint; the clamp below still refuses
+      // a window that cannot hold it.
+      let passedThrough = member !== undefined && member.degraded(agent, request)
+      if (passedThrough) {
+        ctx.logger.warn(`agent-team: ${request.provider}/${request.model} summarized nothing after a bounded attempt; passing this request through without a checkpoint (${inputTokens} tokens) until its route or summary configuration changes`)
+      } else {
+        const prune = (ctx.get('agentPresets')?.serviceFor(agent, 'toolResultPruner') as ToolResultPruner | undefined)
+          ?? ctx.get('toolResultPruner')
+        if (prune !== undefined) {
+          try {
+            prune.pruneSession(agent.session)
+            inputTokens = measure()
+          } catch {
+            // Pruning is an optional saving: its failure must not cost the step.
+          }
+        }
+        if (inputTokens >= threshold) {
+          try {
+            await engine.compactIfNeeded(agent, 'context-overflow', signal)
+          } catch (error) {
+            signal.throwIfAborted()
+            if (member === undefined || !member.takeSummaryFailure(agent)) throw error
+            // Bounded: the engine tried the step's route and one alternative.
+            passedThrough = true
+            ctx.logger.warn(`agent-team: summarization failed for ${request.provider}/${request.model} (${error instanceof Error ? error.message : String(error)}); passing this request through without a checkpoint and stopping further attempts for this route`)
+          }
+          signal.throwIfAborted()
           inputTokens = measure()
-        } catch {
-          // Pruning is an optional saving, not a prerequisite: a failure must not
-          // cost the step when the engine can still reduce the context itself.
         }
       }
-      if (inputTokens >= threshold) {
-        await engine.compactIfNeeded(agent, 'context-overflow', signal)
-        signal.throwIfAborted()
-        inputTokens = measure()
-      }
-      if (inputTokens >= threshold) {
+      if (!passedThrough && inputTokens >= threshold) {
         throw new Error(`agent-team: context still exceeds the Member budget after compaction (${inputTokens} >= ${threshold}); shorten the input or increase memberCompaction.tokens`)
       }
     }
@@ -163,8 +205,7 @@ export function installMemberCompaction(
     try {
       return await prepareBudget(proposed, offered, signal)
     } catch (error) {
-      // Restore only when this policy refused the step; a cancel or dispose owns
-      // its own inbox semantics and must not have input resurrected.
+      // A cancel or dispose owns its own inbox semantics; never resurrect input.
       if (!signal.aborted && !retiring() && claimedNow.length > 0) {
         agent.inbox.splice('next-turn', 0, 0, [...claimedNow])
       }

@@ -212,7 +212,7 @@
                 - id: compaction-basic
                   name: '@contexera/dsh-agent-team/member-compaction-engine'
                   config:
-                    maxTokens: 16384
+                    maxTokens: 32768
 
                 # The member session keeps the shipped composer, whose global command
                 # vocabulary is fully available; this row routes the member's own

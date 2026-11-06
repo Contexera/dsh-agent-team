@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+**Improved**
+
+- A Member's compaction summary is written by the model its next request is routed to, when that model can hold the replayed region plus the summary cap strictly inside its own window; otherwise the route the last request committed keeps writing it, and an explicit summarization target still outranks both. The step's fixed route is captured from `agent/pre-step` and retained for that step alone, so a request whose route departs from it is refused before any summary runs and a later manual `/compact` never inherits it.
+- The summary output cap rises from 16384 to 32768 tokens, still overridable per model. A summary the cap cannot finish no longer locks the Member out: the turn continues without a checkpoint and the failed attempt stays in the session log, one further attempt on the committed route is allowed, never a model rotation, and that route stops being summarized — every later admission sends its request through instead — until the route or the summary configuration changes or a manual `/compact` succeeds. An input the real window cannot hold still ends the turn explicitly.
+
 ## [0.2.7] - 2026-11-05
 
 **Added**
