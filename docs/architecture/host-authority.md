@@ -234,6 +234,8 @@ For an update, the Host compares the operation with the subscription state at it
 
 The scheduler reaches the world only through ports, so the runtime tests drive a fake clock and a fake executor. A timer run executes the stored snapshot through `ctx.shell` — the same executor the Member's shell tool uses — under a policy the Host builds itself from the trusted Workspace record: `workspace-write` rooted at that Workspace, 60 seconds, a 65,536-byte stdout cap, and never the escalating mode, because an unattended run has no one to approve it.
 
+A run starts in that Workspace directory, never in the Host process's own working directory; a script that bakes in an absolute checkout path fails after a move instead of reading the old tree.
+
 The Team runner caps recovered raw script stdout at 65,536 bytes; this is not a tool or caller setting.
 The executor receives `ShellExecSpec.stdoutMaxBytes=1` only to force the Harness public collector to publish `spillPath`; after capture, Team restores and bounds the raw bytes, then removes that spill.
 The provider's default `maxSpillBytes` is 64 MiB; an oversized, missing, or otherwise incomplete spill is refused rather than accepted from decoded text.

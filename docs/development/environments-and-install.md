@@ -112,3 +112,21 @@ git push --dry-run origin master    # add the version tag when the push is a rel
 ```
 
 A third ref means a local-only ref would go public — stop and resolve it first. `git push --all` and `git push --tags` bypass this gate and are never the release command. A release push is this same fence with the version tag added; the sequence around it is in [`release-runbook.md`](../release-runbook.md) §5.
+
+## Unattended work in a container
+
+Subscriptions and reminders run inside the Host process; no external scheduler is involved. Occurrences and due instants are durable facts, so a stopped container runs nothing and the next boot makes up at most one occurrence per reminder and one run per due subscription, from the persisted due instant rather than a fresh window. [host-authority.md](../architecture/host-authority.md) owns that scheduling authority.
+
+- **Sandbox backend.** Every run is pinned to `workspace-write`, so the Host needs a backend that enforces it: `bwrap`, or Landlock where the kernel enforces it. The `bwrap` verdict is probed once by spawning it from the Host's own `PATH` and cached for the process, so a backend installed after boot needs a restart; without one, no subscription runs.
+- **Shell executor.** A mounted executor must answer one shell family's probe (`bash` or `pwsh`), and that answer is cached for the process too. A snapshot recorded under the other family fails rather than running under a shell it was not written for.
+- **Credentials.** Every declared reference must be configured in the `$DSH_HOME` credential store. The run environment is built from scratch — managed `DSH_TEAM_*` facts plus the resolved references — so a token exported in a shell profile never reaches a script. A subscription declaring no credential runs anonymously, and a provider that limits per egress IP will count a container's shared address against every client behind it, not just this script.
+- **Workspace.** The Project Workspace directory from the Host registry must exist in the container, because the run starts there: a script carrying an absolute path from the previous host fails instead of reading the old tree ([host-authority.md](../architecture/host-authority.md)).
+- **Webhook ingress.** The listener binds `127.0.0.1:$DSH_TEAM_WEBHOOK_PORT` behind a tunnel or reverse proxy, and `webhook.publicOrigin` must name that public origin. A moved origin invalidates every address already registered with a provider, so re-arm the subscription and register the new address.
+
+## After a migration
+
+The ledger moves with the Host, so the schedule itself needs no repair; the deployment facts around it do. Verify in this order:
+
+1. **Reminder timing.** Create a `once` reminder two minutes out: its notice must arrive at that instant, and `list` must show the occurrence. This exercises the timer, the wake lane and the ledger without touching any subscription.
+2. **Sandbox, executor and content.** Run a trial (`test`) on a paused subscription and read its category: `executor-missing`, `spawn-failed`, `shell-mismatch`, `workspace-missing` and `credentials-missing` each name one prerequisite above. A trial that reaches the script but dies on a path from the previous host is a script fix, not a Host fix.
+3. **First real interval.** Resume only after a passing trial, then confirm the first scheduled run in `team_subscription logs`. An `empty` run counts as a pass only when the script exits non-zero on a failed read of its own inputs — otherwise a blind script is indistinguishable from a quiet one. A restored capability without a real run is not a restored subscription.

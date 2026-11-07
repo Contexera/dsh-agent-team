@@ -104,3 +104,21 @@ git push --dry-run origin master    # 发布版再加版本 tag
 ```
 
 出现第三个 ref，就说明有本地-only ref 会进公开仓库——停下先处理。`git push --all` 与 `git push --tags` 会绕过这道闸门，永远不是发布命令。发布时的 push 就是这条栅栏再加上版本 tag。它前后的完整顺序见 [`release-runbook.md`](../release-runbook.md) §5。
+
+## 容器里的无人值守工作
+
+订阅与 reminder 都在 Host 进程内运行，不依赖外部调度器。occurrence 与到期时刻是持久事实，所以容器停着就什么都不跑，下次启动至多补发一次 reminder occurrence、并为每个到期订阅跑一次，且沿用它自己持久化的到期时刻，不会重新开一个窗口。调度的权威说明见 [host-authority.md](../architecture/host-authority.md)。
+
+- **沙箱后端。** 每次运行都钉在 `workspace-write`，所以 Host 需要一个能真正执行它的后端：`bwrap`，或内核确实强制执行的 Landlock。`bwrap` 的判定是从 Host 自己的 `PATH` 上 spawn 探测一次并缓存在进程里，所以启动之后才装好的后端必须重启才生效；没有可用后端时，一条订阅也不会跑。
+- **Shell 执行器。** 已挂载的执行器必须能应答某一 shell 家族（`bash` 或 `pwsh`）的探测，这个答案同样缓存在进程里。在另一家族下记录的脚本会直接失败，而不是被塞进它并未针对的 shell。
+- **凭据。** 每个声明的引用都必须在 `$DSH_HOME` 的凭据存储里配好。运行环境是从零构造的——只有托管的 `DSH_TEAM_*` 事实加上解析出的引用——因此在 shell 配置里导出的 token 到不了脚本。没有声明凭据的订阅以匿名身份运行，而按出口 IP 限流的提供方会把这台容器的共享地址算到它身后所有客户端头上，不只是这个脚本。
+- **Workspace。** Host registry 里的 Project Workspace 目录必须在容器里存在，因为运行就从那里开始：写死上一台机器绝对路径的脚本会失败，而不是读到旧树（见 [host-authority.md](../architecture/host-authority.md)）。
+- **Webhook 入口。** 监听绑定在 `127.0.0.1:$DSH_TEAM_WEBHOOK_PORT`，通过隧道或反向代理对外发布，并且 `webhook.publicOrigin` 必须写这个公开 origin。origin 一变，已经注册到提供方的地址全部失效，需要重新 arm 订阅并登记新地址。
+
+## 迁移之后
+
+账本随 Host 一起搬走，所以时间表本身不需要修；要修的是它周围的部署事实。按这个顺序验证：
+
+1. **Reminder 计时。** 建一条两分钟后的 `once` reminder：通知必须准点到达，`list` 里必须看到该 occurrence。这一步同时验证计时器、唤醒通道和账本，不碰任何订阅。
+2. **沙箱、执行器与脚本内容。** 对一条 paused 订阅跑 `test`，读它的 category：`executor-missing`、`spawn-failed`、`shell-mismatch`、`workspace-missing`、`credentials-missing` 分别指名上面的一项前置。如果 trial 已经进到脚本、却死在上一台机器的路径上，那要修的是脚本，不是 Host。
+3. **首个真实 interval。** 只有 trial 通过后再 resume，然后在 `team_subscription logs` 里确认第一次定时运行。只有脚本在自身输入读不到时会以非零 code 退出，`empty` 才算通过——否则「读不见」与「没有新事件」无法区分。能力恢复不等于订阅恢复，真实运行过才算。
