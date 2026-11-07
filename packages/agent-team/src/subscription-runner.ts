@@ -60,6 +60,10 @@ export async function missingCredentials(credentials: SubscriptionCredentials | 
 /** A probe must never outlive a run's own budget, and a hung executor must not hang the scheduler. */
 export const SUBSCRIPTION_PROBE_TIMEOUT_MS = 10_000
 
+function failureDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /** How much of one stream a refusal returns: enough to fix the script, never a whole log. */
 export const SUBSCRIPTION_FAILURE_TAIL_BYTES = 8 * 1024
 
@@ -123,7 +127,7 @@ async function readCapturedStdout(result: ShellRunResult, maxBytes: number): Pro
   } catch (error) {
     return {
       ok: false,
-      reason: `the shell executor could not expose raw stdout: ${error instanceof Error ? error.message : String(error)}`,
+      reason: `the shell executor could not expose raw stdout: ${failureDetail(error)}`,
     }
   } finally {
     try {
@@ -215,35 +219,48 @@ export function failureTail(text: string, maxBytes: number = SUBSCRIPTION_FAILUR
   return buffer.subarray(start).toString('utf8')
 }
 
-/**
- * Which shell family the mounted executor runs, decided by running each
- * family's probe and reading what came back. `undefined` means neither probe
- * answered: there is no executor this Host can run a script under.
- */
-export async function detectShellFamily(executor: SubscriptionShellExecutor | undefined): Promise<SubscriptionShell | undefined> {
-  if (executor === undefined) return undefined
-  for (const family of ['bash', 'pwsh'] as const) {
-    const result = await probe(executor, family)
-    if (result !== undefined) return family
-  }
-  return undefined
+/** The family the executor answered as, or the refusal an owner can act on. */
+export interface ShellFamilyProbe {
+  readonly family?: SubscriptionShell | undefined
+  readonly failure?: string | undefined
 }
 
-async function probe(executor: SubscriptionShellExecutor, family: SubscriptionShell): Promise<ShellRunResult | undefined> {
+/** The first family that answers, or the first refusal's own words. */
+export async function probeShellFamily(executor: SubscriptionShellExecutor | undefined): Promise<ShellFamilyProbe> {
+  if (executor === undefined) return {}
+  let failure: string | undefined
+  for (const family of ['bash', 'pwsh'] as const) {
+    const answered = await probe(executor, family)
+    if (answered.family !== undefined) return answered
+    failure ??= answered.failure
+  }
+  return failure === undefined ? {} : { failure }
+}
+
+/** The family the executor runs, or undefined when no probe answered at all. */
+export async function detectShellFamily(executor: SubscriptionShellExecutor | undefined): Promise<SubscriptionShell | undefined> {
+  return (await probeShellFamily(executor)).family
+}
+
+async function probe(executor: SubscriptionShellExecutor, family: SubscriptionShell): Promise<ShellFamilyProbe> {
   let spec: ShellExecSpec
   try {
     spec = executor.resolve({ command: SHELL_PROBES[family], timeoutMs: SUBSCRIPTION_PROBE_TIMEOUT_MS, stdoutMaxBytes: 128 })
-  } catch {
-    return undefined
+  } catch (error) {
+    return { failure: `the Host could not prepare a ${family} probe: ${failureDetail(error)}` }
   }
   try {
     const result = await (await executor.execute(spec)).result()
-    if (result.timedOut || result.stdout.truncated) return undefined
-    return result.exitCode === 0 && result.stdout.text.trim().length > 0 ? result : undefined
-  } catch {
-    // A probe that cannot even spawn is not evidence of a family; the caller
-    // reports the missing executor instead of a made-up one.
-    return undefined
+    if (result.timedOut) return { failure: `the ${family} probe exceeded ${SUBSCRIPTION_PROBE_TIMEOUT_MS} ms` }
+    if (result.stdout.truncated) return { failure: `the ${family} probe printed a truncated answer` }
+    if (result.exitCode !== 0) {
+      const stderr = result.stderr.text.trim()
+      return { failure: `the ${family} probe exited with code ${String(result.exitCode)}${stderr.length === 0 ? '' : `: ${stderr}`}` }
+    }
+    if (result.stdout.text.trim().length === 0) return { failure: `the ${family} probe printed no family proof` }
+    return { family }
+  } catch (error) {
+    return { failure: `the ${family} probe could not run: ${failureDetail(error)}` }
   }
 }
 
@@ -252,6 +269,8 @@ export interface SubscriptionRunRequest {
   readonly credentials: SubscriptionCredentials | undefined
   /** The family the mounted executor was probed as; the snapshot must agree. */
   readonly liveShell: SubscriptionShell | undefined
+  /** Why the family probe answered nothing; a refused run hands this to the owner. */
+  readonly liveShellFailure?: string | undefined
   readonly subscription: AgentTeamSubscription
   /** What triggered this run: a timer, a webhook delivery, or an owner's trial. */
   readonly trigger: 'interval' | 'webhook' | 'test'
@@ -290,9 +309,15 @@ async function resolveCredentials(
  */
 export async function runSubscriptionScript(request: SubscriptionRunRequest): Promise<SubscriptionRunReport> {
   const script = request.subscription.script
+  if (request.executor === undefined) return failed('executor-missing', 'no shell executor is available for unattended runs')
+  if (request.liveShell === undefined) {
+    // An unattended run cannot widen its own policy, so a mounted executor that
+    // cannot spawn the pinned mode runs nothing: name its own refusal.
+    return failed('spawn-failed',
+      `the Host's shell executor could not answer a probe, so this run never started: ${request.liveShellFailure ?? 'no reason was recorded'}`)
+  }
   const mismatch = shellMismatchReason(script.shell, request.liveShell)
   if (mismatch !== undefined) return failed('shell-mismatch', mismatch)
-  if (request.executor === undefined) return failed('executor-missing', 'no shell executor is available for unattended runs')
   if (request.workspaceRoot === undefined) {
     return failed('workspace-missing', 'the Project Workspace directory does not exist, so the script has nowhere to run')
   }
@@ -325,13 +350,13 @@ export async function runSubscriptionScript(request: SubscriptionRunRequest): Pr
       sandboxPolicy: { mode: 'workspace-write', workspaceRoot: request.workspaceRoot },
     })
   } catch (error) {
-    return failed('spawn-failed', `the Host could not prepare this run: ${error instanceof Error ? error.message : String(error)}`)
+    return failed('spawn-failed', `the Host could not prepare this run: ${failureDetail(error)}`)
   }
   let result: ShellRunResult
   try {
     result = await (await request.executor.execute(spec)).result()
   } catch (error) {
-    return failed('spawn-failed', `the shell executor failed before the script produced output: ${error instanceof Error ? error.message : String(error)}`)
+    return failed('spawn-failed', `the shell executor failed before the script produced output: ${failureDetail(error)}`)
   }
   const stdoutMaxBytes = request.stdoutMaxBytes ?? SUBSCRIPTION_STDOUT_MAX_BYTES
   const captured = await readCapturedStdout(result, stdoutMaxBytes)

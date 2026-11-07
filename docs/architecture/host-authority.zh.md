@@ -216,6 +216,8 @@ update 由 Host 比较该 operation 与前一 revision 的订阅状态；普通 
 
 调度器只通过 ports 触达外部，所以 runtime 测试可以用假时钟和假执行器驱动。定时运行经 `ctx.shell` 执行快照——与 Member 的 shell 工具是同一个执行器——但 policy 由 Host 自己从可信的 Workspace 记录构造：以该 Workspace 为根的 `workspace-write`、60 秒、65,536 字节 stdout 上限，且永不用提权模式，因为无人值守运行没有当场批准的人。当前挂载的 shell 家族靠行为探测一次并缓存；用另一个家族记录的快照会以该原因失败，而不会在它并非为其编写的 shell 下运行。
 
+根本没有挂载执行器时，每次运行都在脚本启动前以 `executor-missing` 失败。执行器已挂载、却起不来钉死 policy 的探测——例如部署里没有可用的沙箱后端——则以 `spawn-failed` 失败，原因就是执行器自己给出的拒绝，这样被暂停的订阅会指向沙箱，而不是让人去找一个其实已挂载的执行器。所以没有可用沙箱后端的部署，任何订阅都跑不起来。
+
 Team runner 对恢复后的原始脚本 stdout 限 65,536 字节；这不是工具或调用方可配置的字段。
 执行器收到的 `ShellExecSpec.stdoutMaxBytes=1` 只用于迫使 Harness 公共采集器发布 `spillPath`；Team 随后从 spill 恢复原始字节、按上限校验，并清理这次 spill。
 provider 默认 `maxSpillBytes` 是 64 MiB；spill 超限、缺失或不完整时一律拒绝，不回退为接受解码后的文本。

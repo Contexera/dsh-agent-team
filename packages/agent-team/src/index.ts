@@ -58,9 +58,9 @@ import { coldInboxOf } from './cold-inbox.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
 import { INITIAL_CHECKPOINT, SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
-import { baselineIdsOf, detectShellFamily, failureCategory, failureTail, missingCredentials, runSubscriptionScript, type SubscriptionCredentials, type SubscriptionRunCategory, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
+import { baselineIdsOf, failureCategory, failureTail, missingCredentials, probeShellFamily, runSubscriptionScript, type ShellFamilyProbe, type SubscriptionCredentials, type SubscriptionRunCategory, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
 import { deliveryEntryOf, deliveryKey, deliveryKeysOf, deliveryRecordOf, evictedDeliveries, evictedRunKeys, failedDeliveries, replayKey, replayKeysOf, runRecordOf, runSummaryOf, subscriptionRunKey, subscriptionRunKeysOf, SUBSCRIPTION_DELIVERY_LIMIT, SUBSCRIPTION_RUN_HISTORY_LIMIT, type SubscriptionDeliveryInput, type SubscriptionDeliveryRecord, type SubscriptionReplayRecord, type SubscriptionRunRecord, type SubscriptionRunTrigger } from './subscription-runs.ts'
-import { snapshotScript, subscriptionDefinitionProblem, SUBSCRIPTION_FAILURES_BEFORE_PAUSE, SUBSCRIPTION_PENDING_MAX, SUBSCRIPTION_SCRIPT_MAX_BYTES, type SubscriptionCredential, type SubscriptionEvent, type SubscriptionScriptSnapshot, type SubscriptionShell, type SubscriptionTriggers } from './subscriptions.ts'
+import { snapshotScript, subscriptionDefinitionProblem, SUBSCRIPTION_FAILURES_BEFORE_PAUSE, SUBSCRIPTION_PENDING_MAX, SUBSCRIPTION_SCRIPT_MAX_BYTES, type SubscriptionCredential, type SubscriptionEvent, type SubscriptionScriptSnapshot, type SubscriptionTriggers } from './subscriptions.ts'
 import { SqliteStorageBackend } from './vendor/storage-sqlite/index.ts'
 import { formatTeamTimestamp } from './time-format.ts'
 import { planInboxDelivery, type InboxDeliveryPlan, type InboxMemberReminder } from './inbox-delivery.ts'
@@ -226,7 +226,7 @@ import type {
 export { agentTeamDomainSpec, agentTeamOperationSchema } from './spec.ts'
 export { subscriptionDomainSpec } from './subscription-store.ts'
 export { SubscriptionScheduler, type SubscriptionAdmissionPolicy, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
-export { baselineIdsOf, detectShellFamily, failureTail, missingCredentials, runSubscriptionScript, type SubscriptionCredentials, type SubscriptionRunReport } from './subscription-runner.ts'
+export { baselineIdsOf, detectShellFamily, failureTail, missingCredentials, probeShellFamily, runSubscriptionScript, type ShellFamilyProbe, type SubscriptionCredentials, type SubscriptionRunReport } from './subscription-runner.ts'
 export {
   parseSubscriptionOutput,
   scriptHash,
@@ -463,8 +463,8 @@ export default class AgentTeam extends TypertRemoteService {
    * failure count, or three spent retries would pause later than the third.
    */
   private readonly subscriptionWriteTails = new Map<AgentTeamSubscriptionRef, Promise<void>>()
-  /** The probed shell family, cached for the composition's lifetime; a probe that found nothing is retried. */
-  private subscriptionShellProbe: Promise<SubscriptionShell | undefined> | undefined
+  /** The probe once it answers with a family, cached for the composition's lifetime; a refusal is retried. */
+  private subscriptionShellProbe: Promise<ShellFamilyProbe> | undefined
   private readonly handles = new Map<AgentTeamMemberId, AgentHandle>()
   /** Reader of the awaited context-projection registration; unloading Team releases it. */
   private contextProjection: ProjectionHandle<TeamContextProjectionState> | undefined
@@ -3230,15 +3230,14 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * The shell family the mounted executor actually runs, decided by behavior
-   * once and then cached. A probe that found no executor is not cached: the
-   * executor may be mounted after this Host, and the next run must ask again.
+   * The mounted executor's family answer, decided by behavior once and cached;
+   * a refusal is retried because the executor may be mounted later.
    */
-  private liveShellFamily(): Promise<SubscriptionShell | undefined> {
+  private mountedShellProbe(): Promise<ShellFamilyProbe> {
     if (this.subscriptionShellProbe === undefined) {
-      this.subscriptionShellProbe = detectShellFamily(this.shellExecutor()).then(family => {
-        if (family === undefined) this.subscriptionShellProbe = undefined
-        return family
+      this.subscriptionShellProbe = probeShellFamily(this.shellExecutor()).then(answer => {
+        if (answer.family === undefined) this.subscriptionShellProbe = undefined
+        return answer
       })
     }
     return this.subscriptionShellProbe
@@ -3246,10 +3245,12 @@ export default class AgentTeam extends TypertRemoteService {
 
   private async executeSubscriptionRun(subscription: AgentTeamSubscription, trigger: SubscriptionRunTrigger,
     extra: { readonly stdin?: string | undefined; readonly deliveryId?: string | undefined } = {}): Promise<SubscriptionRunReport> {
+    const probe = await this.mountedShellProbe()
     return runSubscriptionScript({
       executor: this.shellExecutor(),
       credentials: this.credentialProvider(),
-      liveShell: await this.liveShellFamily(),
+      liveShell: probe.family,
+      ...(probe.failure === undefined ? {} : { liveShellFailure: probe.failure }),
       subscription,
       trigger,
       workspaceRoot: this.subscriptionWorkspaceRoot(subscription),
@@ -4235,9 +4236,12 @@ export default class AgentTeam extends TypertRemoteService {
    */
   private async snapshotSubscriptionScript(source: AgentTeamSubscriptionScriptSource, agent: Agent | undefined): Promise<SubscriptionScriptSnapshot> {
     const content = 'scriptContent' in source ? source.scriptContent : await this.readAgentScript(source.scriptPath, agent)
-    const shell = await this.liveShellFamily()
-    if (shell === undefined) throw new Error('no shell executor is available, so a script cannot be snapshotted')
-    const snapshot = snapshotScript(content, shell)
+    const probe = await this.mountedShellProbe()
+    if (probe.family === undefined) {
+      // The refusal has to name why: the executor is usually mounted.
+      throw new Error(`the Host's shell executor could not answer a probe, so a script cannot be snapshotted: ${probe.failure ?? 'no reason was recorded'}`)
+    }
+    const snapshot = snapshotScript(content, probe.family)
     if (!snapshot.ok) throw new Error(`this script cannot be stored: ${snapshot.reason}`)
     return snapshot.script
   }

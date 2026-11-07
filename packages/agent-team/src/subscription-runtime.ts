@@ -482,9 +482,8 @@ export class SubscriptionScheduler {
   }
 }
 
-/** The shell a snapshot was recorded under, as the executor reported itself; a mismatch fails the run with this. */
-export function shellMismatchReason(recorded: SubscriptionShell, actual: SubscriptionShell | undefined): string | undefined {
-  if (actual === undefined) return 'no shell executor is available for unattended runs'
+/** The shell a snapshot was recorded under, as the executor reported itself; a different family fails the run with this. */
+export function shellMismatchReason(recorded: SubscriptionShell, actual: SubscriptionShell): string | undefined {
   if (recorded === actual) return undefined
   return `this subscription was created for ${recorded}, but the Host runs ${actual}`
 }

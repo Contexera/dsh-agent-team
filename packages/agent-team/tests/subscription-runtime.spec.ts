@@ -742,6 +742,5 @@ describe('the shell a snapshot was recorded under', () => {
   it('fails the run when the live executor is a different shell family', () => {
     expect(shellMismatchReason('bash', 'bash')).toBeUndefined()
     expect(shellMismatchReason('bash', 'pwsh')).toBe('this subscription was created for bash, but the Host runs pwsh')
-    expect(shellMismatchReason('pwsh', undefined)).toBe('no shell executor is available for unattended runs')
   })
 })

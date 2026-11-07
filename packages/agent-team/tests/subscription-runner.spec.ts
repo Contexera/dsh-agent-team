@@ -15,7 +15,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { failureTail, runSubscriptionScript, type SubscriptionCredentials } from '../src/subscription-runner.ts'
+import { failureTail, probeShellFamily, runSubscriptionScript, type SubscriptionCredentials } from '../src/subscription-runner.ts'
 import { SUBSCRIPTION_RUN_TIMEOUT_MS, SUBSCRIPTION_STDOUT_MAX_BYTES, snapshotScript } from '../src/subscriptions.ts'
 import type { AgentTeamSubscription, AgentTeamSubscriptionRef } from '../src/types.ts'
 
@@ -185,6 +185,39 @@ describe('what one run is handed', () => {
     expect(report.ok).toBe(false)
     expect(report.reason).toMatch(/created for bash, but the Host runs pwsh/)
     expect(shell.recorded).toHaveLength(0)
+  })
+
+  it('names the mounted executor refusal when no probe can run, instead of a missing executor', async () => {
+    const refusal = 'sandbox mode "workspace-write" is requested but no sandbox backend is usable on this host'
+    const refusing = {
+      resolve: (request: ShellExecSpec) => request,
+      execute: async (): Promise<{ result(): Promise<ShellRunResult> }> => { throw new Error(refusal) },
+    }
+    await expect(probeShellFamily(refusing)).resolves.toEqual({ failure: expect.stringContaining(refusal) })
+    const report = await runSubscriptionScript({
+      executor: refusing, credentials: credentials({}), liveShell: undefined,
+      liveShellFailure: `the bash probe could not run: ${refusal}`,
+      subscription: subscription(), trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
+    })
+    expect(report.ok).toBe(false)
+    expect(report.category).toBe('spawn-failed')
+    expect(report.reason).toContain(refusal)
+    expect(report.reason).not.toMatch(/no shell executor/)
+  })
+
+  it('keeps the missing-executor reason for a Host that mounts no executor at all', async () => {
+    const report = await runSubscriptionScript({
+      executor: undefined, credentials: credentials({}), liveShell: undefined,
+      subscription: subscription(), trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
+    })
+    expect(report).toMatchObject({ ok: false, category: 'executor-missing' })
+    expect(report.reason).toMatch(/no shell executor/)
+  })
+
+  it('answers a probe with the family the executor really runs', async () => {
+    const bash = executor(() => ({ stdoutText: '5.2.15' }))
+    await expect(probeShellFamily(bash)).resolves.toEqual({ family: 'bash' })
+    await expect(probeShellFamily(undefined)).resolves.toEqual({})
   })
 
   it('fails the run when a declared credential is not configured', async () => {

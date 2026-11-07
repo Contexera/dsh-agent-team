@@ -240,6 +240,8 @@ The provider's default `maxSpillBytes` is 64 MiB; an oversized, missing, or othe
 
 The mounted shell family is probed by behavior once and cached. A snapshot recorded under the other family fails its runs with that reason instead of running under a shell it was not written for.
 
+No mounted executor fails every run as `executor-missing` before the script starts. A mounted executor that cannot spawn the pinned policy's probe — a deployment without a usable sandbox backend, for instance — fails them as `spawn-failed`, and the reason is the executor's own refusal, so a paused subscription names the sandbox instead of sending its owner after an executor that is mounted. A deployment without a usable sandbox backend therefore runs no subscription at all.
+
 A run's stdout is the output contract: one JSON object per line, validated by the Team's own byte-level parser from the recovered raw spill.
 The recovered raw bytes must be complete, valid UTF-8, and within the Team limit, so a decoded or valid-looking tail cannot pass as the full stream.
 
