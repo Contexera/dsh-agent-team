@@ -773,7 +773,7 @@ describe('Agent Team Member lifecycle', () => {
     }
 
     const discovered = await call('team_view', {})
-    expect(discovered.projects).toEqual([{ projectRef: project.project.projectRef, name: 'engineering', role: 'member', owners: ['human'] }])
+    expect(discovered.projects).toEqual([{ projectRef: project.project.projectRef, name: 'engineering', role: 'member', owners: ['human'], subscriptions: { active: 0, paused: 0 } }])
     expect(discovered.members).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'human' }),
       expect.objectContaining({ memberId: builder.status.member.memberId, handle: 'builder' }),
@@ -820,7 +820,9 @@ describe('Agent Team Member lifecycle', () => {
     const privateThreadRef = (privateStart as { thread: { threadRef: string } }).thread.threadRef
     const afterPrivate = await call('team_view', {})
     expect(afterPrivate.threads.some((thread: { threadRef: string }) => thread.threadRef === privateThreadRef)).toBe(false)
-    expect(afterPrivate.projects.some((entry: { projectRef: string }) => entry.projectRef === privateProject.project.projectRef)).toBe(false)
+    expect(afterPrivate.projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ projectRef: privateProject.project.projectRef, role: 'directory only' }),
+    ]))
 
     // team_message attachments: the tool passes absolute paths, the Host
     // validates and copies them into the cache, and the committed message
