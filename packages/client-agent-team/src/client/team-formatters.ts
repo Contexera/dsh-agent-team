@@ -102,8 +102,7 @@ function takeCodePoints(value: string, limit: number): string {
 export function plainGist(text: string, max = GIST_MAX_CHARACTERS): string {
   const firstLine = text.split('\n').map(line => line.trim()).find(line => line !== '') ?? ''
   const projected = extractMarkdownPlainText(takeCodePoints(firstLine, GIST_SOURCE_MAX_CHARACTERS), { mode: 'first-line' }).replace(/\s+/g, ' ').trim()
-  const characters = [...projected]
-  return characters.length > max ? `${characters.slice(0, max - 1).join('')}…` : projected
+  return takeCodePoints(projected, max) === projected ? projected : `${takeCodePoints(projected, max - 1)}…`
 }
 
 export function memberHue(memberId: string): number {
