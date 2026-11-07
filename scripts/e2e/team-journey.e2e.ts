@@ -493,6 +493,49 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => reminderSection.textContent()).toContain('这个 Agent 当前没有生效中的提醒。')
   await settleAnimations(page)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-after-cancel.png'), fullPage: true })
+  // A note long enough to be a wall folds to a three-line preview. The fold has to be
+  // real geometry rather than a class name that clips nothing — an inline box ignores
+  // max-height — so the preview is measured against its own text, before and after.
+  await agentEditor.getByRole('button', { name: '关闭', exact: true }).click()
+  const longNote = '每十五分钟看一眼 CI 队列的排队情况，需要时重跑失败的那一条集成测试任务，并把结论同步到 Thread 里给同组的人看，避免同一件事被两个人同时问起；连续三次都是同一个用例失败就先把它标记为已知不稳定，再开一条讨论把它定性下来，不要每次都从头查一遍，并把这次排查的结论写进那个用例所在文件的顶部注释里'
+  await scaffold.ctx.agentTeam.createMemberReminderForAgent(scaffold.ctx.agents.get(reminderBuilder.member.sessionId)!, {
+    requestId: 'req:journey-reminder-long' as never,
+    workspaceId: reminderWorkspace.id,
+    reminderRef: 'reminder:journey-long' as never,
+    schedule: { kind: 'every', minutes: 15 },
+    note: longNote,
+  })
+  await builderRow.hover()
+  await builderRow.getByRole('button', { name: 'builder 的操作' }).click()
+  await page.getByRole('menuitem', { name: '编辑 Agent' }).click()
+  const longRow = page.locator('[data-team-member-reminders] li').first()
+  await longRow.getByRole('button', { name: '展开全文' }).waitFor()
+  const longNoteBox = longRow.locator('[data-reminder-note]')
+  const folded = await longNoteBox.evaluate(node => ({ client: node.clientHeight, scroll: node.scrollHeight }))
+  expect(folded.scroll).toBeGreaterThan(folded.client + 1)
+  expect(folded.client).toBeLessThanOrEqual(61)
+  await settleAnimations(page)
+  await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-long.png'), fullPage: true })
+  await longRow.getByRole('button', { name: '展开全文' }).click()
+  await expect.poll(() => longRow.getByRole('button', { name: '收起' }).count()).toBe(1)
+  const opened = await longNoteBox.evaluate(node => ({ client: node.clientHeight, scroll: node.scrollHeight }))
+  expect(opened.client).toBeGreaterThan(folded.client)
+  expect(opened.scroll).toBeLessThanOrEqual(opened.client + 1)
+  // The narrow row keeps the withdraw control on its own line instead of pushing the
+  // dialog past the viewport, and nothing inside the block scrolls sideways.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  const longRowBox = await longRow.boundingBox()
+  const longCancelBox = await longRow.getByRole('button', { name: `取消提醒 · ${longNote}` }).boundingBox()
+  expect(longRowBox).not.toBeNull()
+  expect(longCancelBox).not.toBeNull()
+  expect(longRowBox!.x + longRowBox!.width).toBeLessThanOrEqual(390)
+  expect(longCancelBox!.x + longCancelBox!.width).toBeLessThanOrEqual(longRowBox!.x + longRowBox!.width + 1)
+  expect(await maxHorizontalScroll(page, '[data-team-member-reminders]')).toBe(0)
+  await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-long-narrow.png'), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await longRow.getByRole('button', { name: `取消提醒 · ${longNote}` }).click()
+  await expect.poll(() => reminderSection.textContent()).toContain('这个 Agent 当前没有生效中的提醒。')
   // No narrow seat for this dialog: below the wide breakpoint the sidebar renders
   // its rail instead of the panels, and the Agent panel owns this dialog.
   await agentEditor.getByRole('button', { name: '关闭', exact: true }).click()

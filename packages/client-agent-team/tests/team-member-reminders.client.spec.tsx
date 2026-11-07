@@ -74,6 +74,28 @@ describe('Member detail reminder list', () => {
     expect(facts).toContain('下次：2026-11-03 17:30')
   })
 
+  it('folds a note that would dominate the row behind a Show more toggle', async () => {
+    const note = '折叠测试'.repeat(50)
+    harness({ load: async () => ok([view({ reminder: { ...view().reminder, note } })]) })
+    const toggle = await screen.findByRole('button', { name: '展开全文' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    // The preview is the clamp class's job: jsdom lays nothing out, so what a unit test
+    // can hold is which class the folded note carries and that expanding drops it.
+    const folded = document.querySelector('[data-reminder-note]')!
+    expect([...folded.classList].some(className => className.includes('reminderNoteClamp'))).toBe(true)
+    fireEvent.click(toggle)
+    // The control flips to its collapse label and reports the new state, so the fold is never silent.
+    expect(screen.getByRole('button', { name: '收起' }).getAttribute('aria-expanded')).toBe('true')
+    const expanded = document.querySelector('[data-reminder-note]')!
+    expect([...expanded.classList].some(className => className.includes('reminderNoteClamp'))).toBe(false)
+  })
+
+  it('leaves a short note unfolded, with no Show more control', async () => {
+    harness()
+    expect(await screen.findByText('check the build')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '展开全文' })).toBeNull()
+  })
+
   it('names the zone a cron expression is read in, because the Member wrote it against UTC+8', async () => {
     harness({ load: async () => ok([view({ reminder: { ...view().reminder, schedule: { kind: 'cron', expression: '0 9 * * 1-5' } } })]) })
     await screen.findByText('check the build')

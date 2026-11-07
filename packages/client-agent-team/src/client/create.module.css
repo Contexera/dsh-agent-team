@@ -178,8 +178,7 @@
   margin-top: 16px;
 }
 
-/* One reminder per line, separated like every other list in the app: the withdraw
-   control holds its own column, so a wrapped note never pushes it around. */
+/* One reminder per line, separated like every other list in the app. */
 .reminderList {
   display: grid;
   list-style: none;
@@ -188,12 +187,8 @@
 }
 
 .reminderRow {
-  align-items: start;
   border-bottom: 1px solid var(--dsw-alias-border-l2);
-  display: grid;
-  gap: 2px 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 8px 0;
+  padding: 10px 0;
 }
 
 .reminderRow:first-child {
@@ -207,20 +202,62 @@
 
 .reminderBody {
   display: grid;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
 }
 
 .reminderNote {
+  color: var(--dsw-alias-label-primary);
+  display: block;
   font-size: 13px;
   line-height: 20px;
   overflow-wrap: anywhere;
 }
 
-/* A reminder that is no longer waiting is history, and reads as such without a badge. */
-.reminderRow[data-reminder-state="done"] .reminderNote,
-.reminderRow[data-reminder-state="cancelled"] .reminderNote {
-  color: var(--dsw-alias-label-secondary);
+/* A note long enough to be a wall folds to a three-line preview behind the same alpha-mask
+   fade the Message body uses, so the cutoff reads as "there is more" rather than a hard clip. */
+.reminderNoteClamp {
+  -webkit-mask-image: linear-gradient(#000 68%, transparent 100%);
+  mask-image: linear-gradient(#000 68%, transparent 100%);
+  max-height: 60px;
+  overflow: hidden;
+}
+
+/* The expand toggle owns its own line under the note, matching the Message body's Show more:
+   colour and underline are the only feedback. */
+.reminderExpand {
+  background: transparent;
+  border: 0;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  display: block;
+  font-size: 12px;
+  line-height: 20px;
+  padding: 0;
+  width: fit-content;
+}
+.reminderExpand:focus-visible {
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+@media (hover: hover) {
+  .reminderExpand:hover {
+    color: var(--dsw-alias-label-primary);
+    outline: none;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+
+/* Facts take the left of one footer line, the withdraw control the right; on a narrow row the
+   action still trails because it claims the free space itself. */
+.reminderFooter {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }
 
 /* Two declared lines rather than a wrapped run of facts: a separator that wraps
@@ -232,6 +269,11 @@
   gap: 2px;
   line-height: 18px;
   margin: 0;
+}
+
+.reminderCancel {
+  flex: none;
+  margin-left: auto;
 }
 
 .sectionLabel {

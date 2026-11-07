@@ -286,26 +286,14 @@ export function MemberRemindersSection({ workspaceId, memberId, loadMemberRemind
       {manageable !== undefined && manageable.length > 0 && (
         <ul className={createCss.reminderList}>
           {manageable.map(view => (
-            <li className={createCss.reminderRow} key={view.reminder.reminderRef} data-reminder-state={view.reminder.state}>
-              <div className={createCss.reminderBody}>
-                <span className={createCss.reminderNote}>{view.reminder.note}</span>
-                <p className={createCss.reminderFacts}>
-                  <span>{`${reminderScheduleText(view.reminder.schedule, t)} · ${t(REMINDER_STATE_KEYS[view.reminder.state])}`}</span>
-                  {reminderTimingText(view, t) !== undefined && <span>{reminderTimingText(view, t)}</span>}
-                </p>
-              </div>
-              {view.reminder.state === 'active' && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`${t('memberReminderCancel')} · ${view.reminder.note}`}
-                  disabled={disabled || withdrawing !== undefined}
-                  onClick={() => { void cancel(view.reminder.reminderRef) }}
-                >
-                  {withdrawing === view.reminder.reminderRef ? t('memberReminderCancelling') : t('memberReminderCancel')}
-                </Button>
-              )}
-            </li>
+            <ReminderRow
+              key={view.reminder.reminderRef}
+              view={view}
+              disabled={disabled}
+              withdrawing={withdrawing}
+              onCancel={reminderRef => { void cancel(reminderRef) }}
+              t={t}
+            />
           ))}
         </ul>
       )}
@@ -318,6 +306,55 @@ export function MemberRemindersSection({ workspaceId, memberId, loadMemberRemind
         </p>
       )}
     </div>
+  )
+}
+
+/** A note long enough to dominate the row folds to a fixed preview with an expand toggle,
+ *  reusing the Message body's alpha-mask fade so the cutoff reads as "there is more". */
+const REMINDER_NOTE_EXPAND_CHARS = 120
+
+/** One manageable reminder: the note leads, the schedule/state/timing facts and the withdraw
+ *  control share a footer line, and an over-long note folds until expanded. */
+function ReminderRow({ view, disabled, withdrawing, onCancel, t }: {
+  readonly view: AgentTeamMemberReminderView
+  readonly disabled: boolean
+  readonly withdrawing: AgentTeamMemberReminderView['reminder']['reminderRef'] | undefined
+  readonly onCancel: (reminderRef: AgentTeamMemberReminderView['reminder']['reminderRef']) => void
+  readonly t: TeamSidebarProps['t']
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const note = view.reminder.note
+  const clampable = note.length > REMINDER_NOTE_EXPAND_CHARS
+  const timing = reminderTimingText(view, t)
+  return (
+    <li className={createCss.reminderRow}>
+      <div className={createCss.reminderBody}>
+        <span data-reminder-note="" className={`${createCss.reminderNote!} ${clampable && !expanded ? createCss.reminderNoteClamp! : ''}`}>{note}</span>
+        {clampable && (
+          <button type="button" className={createCss.reminderExpand} aria-expanded={expanded} onClick={() => { setExpanded(value => !value) }}>
+            {expanded ? t('collapseMessage') : t('expandMessage')}
+          </button>
+        )}
+        <div className={createCss.reminderFooter}>
+          <p className={createCss.reminderFacts}>
+            <span>{`${reminderScheduleText(view.reminder.schedule, t)} · ${t(REMINDER_STATE_KEYS[view.reminder.state])}`}</span>
+            {timing !== undefined && <span>{timing}</span>}
+          </p>
+          {view.reminder.state === 'active' && (
+            <Button
+              className={createCss.reminderCancel!}
+              size="sm"
+              variant="ghost"
+              aria-label={`${t('memberReminderCancel')} · ${note}`}
+              disabled={disabled || withdrawing !== undefined}
+              onClick={() => { onCancel(view.reminder.reminderRef) }}
+            >
+              {withdrawing === view.reminder.reminderRef ? t('memberReminderCancelling') : t('memberReminderCancel')}
+            </Button>
+          )}
+        </div>
+      </div>
+    </li>
   )
 }
 
