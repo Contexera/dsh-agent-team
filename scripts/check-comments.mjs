@@ -133,11 +133,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // the face-and-word group on a card whose Task was claimed, its accessible roster, and the circles
 // that paint nothing — which until then only the component suite rendered. The scope had been left
 // at zero slack; 1660 restores the ~3% the rule asks for over that audited count.
+// 2026-11-08: addressed events added reasons no name carries — the version ladder that keeps an older
+// ledger replaying, the recipients publish freezes, the write that drops a departed one. 4365 audited; 4495.
 const COMMENT_BUDGETS = {
-  'packages/agent-team/src': 4315,
+  'packages/agent-team/src': 4495,
   'packages/client-agent-team/src': 1250,
   'packages/tool-agent-team/src': 242,
-  'scripts': 1660,
+  'scripts': 1671,
 }
 
 const EXCLUDED_DIRECTORY = 'vendor'

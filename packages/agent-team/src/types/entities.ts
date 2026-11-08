@@ -618,6 +618,13 @@ export interface AgentTeamSubscription {
    */
   readonly webhook?: import('../subscription-webhook.ts').SubscriptionWebhookArm | undefined
   readonly createdBy: AgentTeamMemberId
+  /**
+   * The members its published events are for: the only ones whose Inbox the
+   * event reaches. An empty set is legal and means the timeline alone keeps the
+   * event. Records written before this field existed read it back as
+   * `[createdBy]`, which is what the old owner-wide delivery was not.
+   */
+  readonly notify: readonly AgentTeamMemberId[]
   readonly createdAt: string
 }
 

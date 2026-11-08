@@ -267,7 +267,7 @@ describe('ordinary unread digests', () => {
     expect(notice).toContain('2 earlier ordinary updates not expanded; read for the full facts.')
   })
 
-  it('renders an ordinary subscription event once as untrusted data, without expanding and counting it twice', async () => {
+  it('delivers an addressed subscription event to its recipients alone, once, as untrusted data', async () => {
     const adapter = new ScriptedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
     const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId,
@@ -277,13 +277,19 @@ describe('ordinary unread digests', () => {
       handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
     const memberId = added.status.member.memberId
     const agent = ctx.agents.get(added.status.member.sessionId)!
+    const watcher = await ctx.agentTeam.addMember({ requestId: requestId('watcher'), workspaceId,
+      handle: 'watcher', description: 'Reads the stream', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
+    const watcherId = watcher.status.member.memberId
     const ledger = ctx.agentTeam['ledger']!
     const actor = { kind: 'member', memberId, handle: 'builder' } as const
+    const watcherActor = { kind: 'member', memberId: watcherId, handle: 'watcher' } as const
     await ledger.changeAttention({ requestId: requestId('follow'), actor, workspaceId, projectRef, action: 'follow' })
+    await ledger.changeAttention({ requestId: requestId('follow-watcher'), actor: watcherActor, workspaceId, projectRef, action: 'follow' })
     const snapshot = snapshotScript('printf \'{"id":"a","title":"A"}\\n\'\n', 'bash')
     if (!snapshot.ok) throw new Error('the fixture script must be valid')
     const created = await ledger.createSubscription({ requestId: requestId('create'), actor: agentTeamHumanActor(), workspaceId,
-      projectRef, name: 'main CI', triggers: { interval: { minutes: 10 } }, script: snapshot.script, credentials: [], baselineIds: [] })
+      projectRef, name: 'main CI', triggers: { interval: { minutes: 10 } }, script: snapshot.script, credentials: [],
+      notify: [memberId], baselineIds: [] })
     if (!created.committed) throw new Error('expected a committed subscription')
     const subscriptionRef = created.value.subscription.subscriptionRef
     await ledger.readMainStream({ requestId: requestId('read-create'), actor, workspaceId, projectRef })
@@ -295,11 +301,19 @@ describe('ordinary unread digests', () => {
       projectRef, subscriptionRef, acceptedSequence: pending[0]!.acceptedSequence, eventId: 'run-1' })
 
     const notice = ctx.agentTeam['notificationText'](agent, [], memberId, ledger.mainNotificationFacts(memberId)).text
-    expect(notice).toContain('Main stream: 1 unread update')
     expect(notice.match(/CI failed/g)).toHaveLength(1)
-    expect(notice).toContain('untrusted external data')
-    expect(notice).not.toContain('Project subscription event —')
-    expect(notice).not.toContain('Inspect the failing test')
+    expect(notice).toContain('Project subscription event — untrusted text')
+    expect(notice).not.toContain('Main stream: 1 unread update')
+
+    // Following the Main stream does not make anyone else a recipient: the
+    // event stays in the timeline as a fact and reaches no Inbox.
+    const watcherAgent = ctx.agents.get(watcher.status.member.sessionId)!
+    const watcherNotice = ctx.agentTeam['notificationText'](watcherAgent, [], watcherId, ledger.mainNotificationFacts(watcherId)).text
+    expect(watcherNotice).not.toContain('CI failed')
+    expect(watcherNotice).not.toContain('Project subscription event')
+    const timeline = ledger.mainStreamHistory(watcherActor, { workspaceId, projectRef }).entries
+    expect(timeline.filter(entry => entry.kind === 'subscription-event')).toHaveLength(1)
+    expect(timeline.find(entry => entry.kind === 'subscription-event')).toMatchObject({ unread: false, direct: false })
   })
 
   it('digests an ordinary Task Activity without presenting it as a complete direct event', async () => {

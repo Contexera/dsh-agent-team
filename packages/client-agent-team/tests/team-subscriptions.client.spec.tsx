@@ -30,6 +30,7 @@ function subscription(overrides: Partial<AgentTeamSubscription> = {}): AgentTeam
     revision: 3,
     state: 'active',
     createdBy: 'member:human' as AgentTeamMemberId,
+    notify: ['member:human' as AgentTeamMemberId],
     createdAt: '2026-11-03T01:00:00.000Z',
     ...overrides,
   }
@@ -102,6 +103,24 @@ describe('the Project subscription tab', () => {
     expect(empty.view.queryByRole('button')).toBeNull()
   })
 
+  it('names the notification set once, and adds the owner only when it is not a recipient', () => {
+    const alone = renderTab({ entries: [entry({}, { notify: ['member:human' as AgentTeamMemberId] })] })
+    expect(alone.view.getByText('通知 human')).toBeTruthy()
+    cleanup()
+
+    const several = renderTab({ entries: [entry({}, { notify: ['member:human' as AgentTeamMemberId, 'member:vera' as AgentTeamMemberId] })] })
+    expect(several.view.getByText('通知 human、vera')).toBeTruthy()
+    cleanup()
+
+    const withoutOwner = renderTab({ entries: [entry({}, { notify: ['member:vera' as AgentTeamMemberId] })] })
+    expect(withoutOwner.view.getByText('通知 vera · 负责人 human')).toBeTruthy()
+    cleanup()
+
+    // An empty set is a decision, not a missing value: the timeline still keeps the event.
+    const nobody = renderTab({ entries: [entry({}, { notify: [] })] })
+    expect(nobody.view.getByText('不推送通知（事件仍进主对话时间线） · 负责人 human')).toBeTruthy()
+  })
+
   it('reads a card from the Host projection and offers no write control', () => {
     const seeded = entry({
       eventCount: 3,
@@ -111,7 +130,10 @@ describe('the Project subscription tab', () => {
     const { view } = renderTab({ entries: [seeded] })
     expect(view.getByRole('heading', { name: 'main CI' })).toBeTruthy()
     expect(view.getByText('每 10 分钟')).toBeTruthy()
-    expect(view.getByText('负责人 human')).toBeTruthy()
+    // The owner is one of the recipients by default, so it is named once: as the
+    // notification target, not again as an owner.
+    expect(view.getByText('通知 human')).toBeTruthy()
+    expect(view.queryByText('负责人 human')).toBeNull()
     expect(view.getByText('共 3 条事件')).toBeTruthy()
     expect(view.getByText('已暂停：连续运行失败（退出码非 0）')).toBeTruthy()
     expect(view.getByRole('button', { name: '运行记录 · main CI' })).toBeTruthy()

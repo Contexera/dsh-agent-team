@@ -1,10 +1,10 @@
 # Subscription patterns
 
-Choose the trigger before choosing a provider.
+Pick the trigger first, then the provider.
 
 ## Poll an API
 
-Use polling for facts that still exist: open incidents, overdue work, expiring certificates, or unhealthy services.
+Use polling for facts that still exist: open incidents, overdue work, or unhealthy services.
 
 ```bash
 #!/usr/bin/env bash
@@ -61,8 +61,8 @@ team_subscription({
 })
 ```
 
-For timer input, query a bounded recent window; for webhook input, parse stdin. Keep the same event identity so recovery does not republish an accepted fact.
+For timer input, query a bounded recent window; for webhook input, parse stdin. Keep one event identity so recovery republishes nothing.
 
 ## Choose another tool
 
-Use a reminder for “remind me tomorrow”, a one-off query for “show current incidents”, and a subscription for “publish observed incidents as they appear”. Follow-up mutations need a separate authorized, idempotent design.
+Use a reminder for “remind me tomorrow”, a one-off query for “show current incidents”, and a subscription for “publish observed incidents as they appear”. Follow-up mutations need their own authorized, idempotent design.

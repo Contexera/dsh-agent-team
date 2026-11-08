@@ -21,6 +21,9 @@ function fakeHost(overrides: Record<string, unknown> = {}) {
     state: 'active', triggers: { interval: { minutes: 10 } } }
   return {
     workspacesForAgent: () => [{ workspaceId: WORKSPACE, path: undefined, default: true }],
+    // The Member surface a caller's written name is resolved against.
+    members: () => [],
+    humanHandle: () => 'human',
     subscriptionLogsForAgent: vi.fn((_agent: unknown, _request: Record<string, unknown>) => ({ subscription, runs: [{ runRef: RUN, trigger: 'webhook',
       startedAt: '2026-11-03T09:00:00.000Z', durationMs: 42, category: 'accepted', succeeded: true, eventCount: 1,
       exitCode: 0, timedOut: false, subscriptionRevision: 2, scriptHash: SCRIPT_HASH, deliveryRef: 'delivery:d1',
@@ -114,5 +117,73 @@ describe('team_subscription arms and resets the webhook address', () => {
     const request = host.updateSubscriptionForAgent.mock.calls[0]![1]
     expect(request).toMatchObject({ intervalMinutes: 60 })
     expect(request, 'an edit that says nothing about the webhook must not disarm it').not.toHaveProperty('webhook')
+  })
+})
+
+describe('team_subscription addressed events', () => {
+  const recipient = 'member:2eb79b61-1d71-4c97-823f-04b3d33f9e87'
+  const changed = (notify: readonly string[]) => ({ kind: 'changed', subscription: { subscriptionRef: SUBSCRIPTION, projectRef: PROJECT,
+    name: 'main CI', state: 'active', revision: 1, triggers: { interval: { minutes: 10 } }, notify } })
+
+  it('passes the recipients through, and keeps "not named" apart from "nobody"', async () => {
+    const create = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => changed([recipient]))
+    const update = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => changed([]))
+    const host = fakeHost({ createSubscriptionForAgent: create, updateSubscriptionForAgent: update })
+    const tool = teamTools().get('team_subscription')!
+    const created = await call(tool, { action: 'create', projectRef: PROJECT, name: 'main CI', intervalMinutes: 10,
+      scriptContent: 'true\n', notify: [recipient] }, host) as { notify: readonly string[] }
+    expect(create.mock.calls[0]![1]).toMatchObject({ notify: [recipient] })
+    expect(created.notify).toEqual([recipient])
+
+    // An omitted set must reach the Host as omitted: on a create that is the
+    // Creating Member, and sending [] instead would silently mean "nobody".
+    await call(tool, { action: 'create', projectRef: PROJECT, name: 'main CI', intervalMinutes: 10, scriptContent: 'true\n' }, host)
+    expect(create.mock.calls[1]![1]).not.toHaveProperty('notify')
+
+    // Clearing is a real instruction and must survive as an empty array.
+    const cleared = await call(tool, { action: 'update', projectRef: PROJECT, subscriptionRef: SUBSCRIPTION, name: 'main CI',
+      expectedRevision: 1, scriptContent: 'true\n', notify: [] }, host) as { notify: readonly string[] }
+    expect(update.mock.calls[0]![1]).toMatchObject({ notify: [] })
+    expect(cleared.notify).toEqual([])
+  })
+
+  it('reads a recipient the way a caller writes it: @Handle, a 6+ hex prefix, or the Human', async () => {
+    // Every Member-taking field accepts the form an Agent actually sees; a
+    // handle that resolved would otherwise be reported as "not a Project member".
+    const createForAgent = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => changed([]))
+    const host = fakeHost({
+      members: () => [
+        { member: { memberId: 'member:2eb79b61-1d71-4c97-823f-04b3d33f9e87', handle: 'Cole' } },
+        // Shares its first six hex characters with Cole, so a prefix can be ambiguous.
+        { member: { memberId: 'member:2eb79baa-4a85-4e08-86bb-a41b1a0bef48', handle: 'Iris' } },
+      ],
+      createSubscriptionForAgent: createForAgent,
+    })
+    const tool = teamTools().get('team_subscription')!
+    const create = { action: 'create', projectRef: PROJECT, name: 'main CI', intervalMinutes: 10, scriptContent: 'true\n' }
+    await call(tool, { ...create, notify: ['@cole', 'Iris', 'human'] }, host)
+    const sent = createForAgent.mock.calls[0]![1]
+    expect(sent.notify).toEqual(['member:2eb79b61-1d71-4c97-823f-04b3d33f9e87', 'member:2eb79baa-4a85-4e08-86bb-a41b1a0bef48', 'member:human'])
+
+    // A unique prefix resolves; a shared one names the candidates instead.
+    await call(tool, { ...create, notify: ['member:2eb79baa'] }, host)
+    expect(createForAgent.mock.calls[1]![1]).toMatchObject({ notify: ['member:2eb79baa-4a85-4e08-86bb-a41b1a0bef48'] })
+
+    // An unknown form names the accepted forms instead of blaming membership.
+    await expect(call(tool, { ...create, notify: ['nobody-here'] }, host)).rejects.toThrow(/pass a memberRef, an @Handle, a unique 6\+ hex prefix, or 'human'/)
+    // An ambiguous prefix says so, and offers the candidates.
+    await expect(call(tool, { ...create, notify: ['2eb79b'] }, host)).rejects.toThrow(/matches 2 Members/)
+  })
+
+  it('lists the recipients each subscription wakes', async () => {
+    const host = fakeHost({
+      subscriptionsForAgent: vi.fn(() => ({ entries: [{ subscription: { subscriptionRef: SUBSCRIPTION, projectRef: PROJECT,
+        name: 'main CI', state: 'active', revision: 1, triggers: { interval: { minutes: 10 } }, notify: [] }, unpublished: 0, eventCount: 0 }] })),
+    })
+    const result = await call(teamTools().get('team_subscription')!, { action: 'list', projectRef: PROJECT }, host) as {
+      subscriptions: readonly { notify: readonly string[] }[] }
+    expect(result.subscriptions[0]!.notify).toEqual([])
+    const rendered = teamTools().get('team_subscription')!.output!.render!({ action: 'list' } as never, result as never) as readonly { text: string }[]
+    expect(rendered[0]!.text).toContain('notify: nobody (published to the timeline only)')
   })
 })

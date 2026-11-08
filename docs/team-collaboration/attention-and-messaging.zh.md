@@ -51,7 +51,7 @@ Attention 决定 ordinary 工作是否存在，不决定它传播得多快：Thr
 
 展开的 Activity 通知渲染事件自身的不可变字段——actor、对象，以及记录的 Claim refs 或 transfer 两端——绝不用当前 Task/Claim 状态补写。送达或阅读它只是上下文，不是确认：未读状态要等显式 `team_thread read` 才改变。通知中完整渲染的 Message 正文或 Activity 事件，正好绑定那段文本供之后的写入使用；被截断的正文、只有身份的行、摘要和省略的事实都不增加绑定。只有身份的行，上下文检查用的是 surface 上先前那段完整文本。
 
-Direct 信号在所有 scope 之间排在普通工作之前。尚未完整出现在 Member Session 里的 direct Message、Task/Claim Activity，以及以读者为目标的 Project ownership Activity，最先出现，跨 Thread 与 Main stream 按最新优先。普通 Message、Activity 和非 owner 的订阅事件按 scope 形成一份有界摘要：标题保留总数与最新时间，最多三条最新条目按时间顺序给出操作者/动作或 240 字符文本摘录，更早条目合成溢出数量。每条 Main 摘要标明所属 Project；同一事实只出现一次——展开、摘要或计入溢出——不会既展开又计数。
+Direct 信号在所有 scope 之间排在普通工作之前。尚未完整出现在 Member Session 里的 direct Message、Task/Claim Activity，以及以读者为目标的 Project ownership Activity，最先出现，跨 Thread 与 Main stream 按最新优先。普通 Message 与 Activity 按 scope 形成一份有界摘要：标题保留总数与最新时间，最多三条最新条目按时间顺序给出操作者/动作或 240 字符文本摘录，更早条目合成溢出数量。每条 Main 摘要标明所属 Project；同一事实只出现一次——展开、摘要或计入溢出——不会既展开又计数。
 
 已经完整出现在 Session surface 上的 direct 事实随后只显示一行身份，标记 `already in current context; still unread`，不再增加绑定。投递意图不是 Session 输出，已排队但尚未读取的通知不能让自身的事实变成可见。回复的身份信息仍保留回复对象与引用摘要。Task reminder 作为详细内容排在其后，被省略时计入明确的 direct 信号警告；普通摘要与 Main stream Thread 卡片最后。
 
@@ -106,6 +106,10 @@ Team 工具返回的 branded ref（`task:`、`thread:`、`project:`、`member:`�
 
 已发布的订阅事件是 Main stream 中一种独立记录类型，不是 Message：它写出 Project、订阅，以及脚本打印的内容。它没有发送者、不属于任何 Thread，因此不产生 Attention 行，也不是 Thread fact；它出现在 Main stream 时间线与 `team_thread` 渲染的 Main stream 页里。
 
-送达方式是 marker，在发布提交时按该 Project 当时的全部 owner 冻结，包含 Human。取消关注 Main stream 的 owner 依然会收到；处于暂停状态的 owner 也会，marker 会等他。关注 Main stream 的非 owner 作为普通 unread 看到这条事件；完全没有该行的 Member 只看到自己的 marker。
+送达是定向的。订阅在 `notify` 里写明收件人，发布提交时冻结该集合——即其中仍属于该 Project 的 Member；集合为空时事件照常发布，但不写任何 marker。owner 身份不能替代收件人：拥有该 Project 不会让事件路由给他，Human 只有在订阅点名时才收到。收件人字段出现之前写下的记录，一律按创建者本人读取。
+
+离开该 Project 的成员不再是收件人：下一次把订阅记录整条写入的操作会把他丢掉，因此不会有记录带着无人可投的地址。取消关注 Main stream 的收件人依然会收到；处于暂停状态的也会，marker 会等他。
+
+其他人不会被打断。事件对所有读者都留在 Main stream 时间线上，记录因此仍可审计；但它不为任何人产生普通 unread——没被点名的读者只能在那里读到它，不会因此进 Inbox，也不会被唤醒。
 
 标题、链接与说明都是脚本打印的外部文本：不从中解析 mention，不渲染 Markdown，每个界面都说明它们只是数据、不是指令——model-facing 渲染把事件标注为不可信，Client 用同一含义的措辞显示同样的提醒。阅读 Main stream 按与其他 marker 相同的规则消费它们，多条事件按“替换而不叠加”的规则合并成一条通知，而不是逐条堆积。

@@ -209,9 +209,13 @@ The third tab reads the Project's subscriptions: the Host's `subscriptions` proj
 
 The page authors nothing: a Project owner arms and maintains subscriptions through the `team_subscription` tool, so no control here creates or edits one, and an empty projection explains that model instead of offering a form. Supervision stays the Human's — `暂停`/`恢复` and `删除` act on what an owner armed, under the revision the card was read at — while an archived Project drops those two and keeps the list.
 
-A card states the subscription and whether it is doing anything: its name, the trigger the Host reports (`每 10 分钟`, `webhook`), the owner who armed it, the last run, the due instant in the reader's own local time, the event count once it is above zero, and pending count while events wait. Zero is stated once: an unrun subscription reads `还没有运行记录` alone, and `共 0 条事件` never appears. A paused card states its reason in place, and only the state control that applies is drawn.
+A card states the subscription, who its events are addressed to, and whether it is doing anything: its name, the trigger the Host reports (`每 10 分钟`, `webhook`), the recipient set, the last run, the due instant in the reader's own local time, the event count once it is above zero, and pending count while events wait.
 
-Reads stay quiet and writes stay visible: `运行记录` and `脚本` are text actions at the head of the row, while the two controls that change what runs are buttons, so the row carries one hierarchy instead of a wall of peers. A filled list states once, under the last card, who maintains these subscriptions and where their output goes.
+The recipients lead the facts, because that set is what decides whether a reader is woken at all; the owner who armed it is named on the same line only when the owner is not one of them, so the default card names that Member once instead of twice under two labels. A cleared set states itself — `不推送通知（事件仍进主对话时间线）` — rather than vanishing, because an event nobody was woken for is still public record.
+
+Zero is stated once: an unrun subscription reads `还没有运行记录` alone, and `共 0 条事件` never appears. A paused card states its reason in place, and only the state control that applies is drawn.
+
+Reads stay quiet and writes stay visible: `运行记录` and `脚本` are text actions at the head of the row, while the two controls that change what runs are buttons, so the row carries one hierarchy instead of a wall of peers. A filled list states once, under the last card, who maintains these subscriptions, that each one notifies only the recipients it names, and where their output goes.
 
 `运行记录` opens one subscription's runs, newest first: trigger, outcome category, duration, event count, and on request the last 8 KiB of stdout and stderr under their own captions. Only a row that has output is a disclosure, and the whole row is the target: a leading chevron takes a reserved seat so every clock stays in one column, and the row's accessible name is its own facts — starting with the time — so a screen reader can tell which run it opens. A row whose outcome already names the trigger (`试运行通过`) does not print it twice.
 

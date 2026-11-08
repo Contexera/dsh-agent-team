@@ -23,6 +23,13 @@ const SCRIPT = [
   `printf '%s\\n' '{"id":"pipeline-1","title":"pipeline 通了","url":"https://example.test/runs/1","detail":"由订阅脚本发出；标题、链接与说明都是数据。"}'`,
 ].join('\n')
 
+/** A later delivery prints a new id and title; a trial still prints nothing, so an edit alone never publishes. */
+const laterScript = (id: string, title: string): string => [
+  `payload=$(cat)`,
+  `case "$payload" in *'"x-team-event":"test"'*) echo 'waiting for a push' >&2; exit 0 ;; esac`,
+  `printf '%s\\n' '{"id":"${id}","title":"${title}"}'`,
+].join('\n')
+
 /**
  * A published subscription event as the Main stream meets it. The exact shape a
  * provider meets is not the point of this lane — the Host's own tests own the
@@ -129,6 +136,61 @@ it('reads a published subscription event as script data in one text column', asy
   expect(Math.abs(narrowColumns[0]!.x - narrowColumns[1]!.x)).toBeLessThanOrEqual(1)
   await settleAnimations(page)
   await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'subscription-event-mobile.png'), fullPage: true })
+
+  // The Inbox is the one face that shows an arrival without reading it: the Project page
+  // acknowledges its own Main stream on mount, which would swallow the count.
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+  const inboxCard = page.locator('button[class*="inboxCard"]')
+  const unreadOf = async (): Promise<number> => {
+    const label = (await inboxCard.getAttribute('aria-label')) ?? ''
+    const count = /，(\d+) 条未读/u.exec(label)
+    return count === null ? 0 : Number(count[1])
+  }
+  await inboxCard.click()
+  await page.locator('[data-team-inbox]').waitFor()
+  // Whatever the Project page left unread when it acknowledged its own stream:
+  // this counts the arrival, it does not assume a standing.
+  const unreadBefore = await unreadOf()
+
+  // The Creating Member is a recipient until an owner says otherwise: this is the control.
+  const addressed = await team.updateSubscription({
+    requestId: 'req:event-addressed' as AgentTeamRequestId, workspaceId, projectRef,
+    subscriptionRef: seeded.subscription.subscriptionRef, expectedRevision: seeded.subscription.revision,
+    name: 'pipeline', webhook: true, script: { scriptContent: laterScript('pipeline-2', '二次投递') },
+  })
+  if (addressed.kind !== 'changed') throw new Error('the Host refused the second script')
+  expect((await team.intakeWebhookDelivery({ token, headers: { 'x-github-event': 'push' }, body: '{"ref":"main"}' })).kind).toBe('queued')
+  await expect.poll(unreadOf, { timeout: 30_000 }).toBe(unreadBefore + 1)
+
+  // The reader's own path to it, and the block the unaddressed case still has to show.
+  await page.locator('[data-team-inbox] button').filter({ hasText: /主对话/u }).click()
+  await page.locator('[data-main-entry="subscription-event"]').filter({ hasText: '二次投递' }).waitFor({ timeout: 30_000 })
+  await expect.poll(unreadOf, { timeout: 30_000 }).toBe(0)
+
+  // An empty set is timeline, not Inbox: the badge that moved above does not move here.
+  const unaddressed = await team.updateSubscription({
+    requestId: 'req:event-unaddressed' as AgentTeamRequestId, workspaceId, projectRef,
+    subscriptionRef: seeded.subscription.subscriptionRef, expectedRevision: addressed.subscription.revision,
+    name: 'pipeline', webhook: true, script: { scriptContent: laterScript('pipeline-3', '三次投递') }, notify: [],
+  })
+  if (unaddressed.kind !== 'changed') throw new Error('the Host refused the cleared recipient set')
+  await inboxCard.click()
+  await page.locator('[data-team-inbox]').waitFor()
+  expect((await team.intakeWebhookDelivery({ token, headers: { 'x-github-event': 'push' }, body: '{"ref":"main"}' })).kind).toBe('queued')
+  // The publish itself is the barrier, so "no badge" is not a slow runner.
+  await expect.poll(async () => {
+    const entry = (await team.subscriptionsForClient({ workspaceId, projectRef })).entries
+      .find(item => item.subscription.subscriptionRef === seeded.subscription.subscriptionRef)
+    return entry === undefined ? undefined : { events: entry.eventCount, unpublished: entry.unpublished }
+  }, { timeout: 30_000 }).toStrictEqual({ events: 3, unpublished: 0 })
+  expect(await unreadOf()).toBe(0)
+
+  // …and readable by the reader it woke nobody for: the stream stays auditable.
+  await page.getByRole('button', { name: '# event-web', exact: true }).click()
+  await page.locator('[data-main-entry="subscription-event"]').filter({ hasText: '三次投递' }).waitFor({ timeout: 30_000 })
+  await settleAnimations(page)
+  await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'unaddressed-event-desktop.png'), fullPage: true })
 
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 240_000)

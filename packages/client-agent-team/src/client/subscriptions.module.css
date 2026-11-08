@@ -69,12 +69,6 @@
   padding: 1px 8px;
 }
 
-.owner {
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
 /* Two declared lines: a separator that wraps to the head of a line reads as a
    stray mark, so the facts are joined before they are set. */
 .facts {

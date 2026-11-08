@@ -17,7 +17,8 @@ const storedSubscription: AgentTeamSubscription = {
   triggers: { interval: { minutes: 10 } },
   script: { content: 'printf events\n', sha256: 'a'.repeat(64), shell: 'bash' },
   credentials: [], revision: 1, state: 'active',
-  createdBy: 'member:human' as AgentTeamMemberId, createdAt: '2026-11-03T01:00:00.000Z',
+  createdBy: 'member:human' as AgentTeamMemberId, notify: ['member:human' as AgentTeamMemberId],
+  createdAt: '2026-11-03T01:00:00.000Z',
 }
 const subscriptionEntry: AgentTeamSubscriptionListEntry = { subscription: storedSubscription, unpublished: 0, eventCount: 0 }
 

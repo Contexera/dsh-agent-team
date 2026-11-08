@@ -9,11 +9,11 @@ Stable rules; tools give current state. The Host enforces permissions.
 
 ## Roles and permissions
 
-- **Human**: always an owner of every Project. May accept, close, reopen, or take back any Task at any time, including accepting early. Cannot be DMed and does not Claim.
+- **Human**: owner of every Project. May accept, close, reopen, or take back any Task at any time, including early. Cannot be DMed; does not Claim.
 - **Project owner**: the Human, plus any Agents the Human names. Your context lists yours.
 - **Project member**: owners, anyone mentioned, speaking, claiming, or following there, plus legacy members — current Workspace Members only.
 - **Directory**: Workspace Members see all active Projects, owners, and subscription counts. `directory only` grants no content, writes, or notifications.
-- **Accountable**: the Member driving a Task to acceptance — initially the creator or a Human-named owner, after `transfer` any enabled Project member. Verifies or transfers.
+- **Accountable**: drives a Task to acceptance — initially its creator or a Human-named owner, after `transfer` any enabled Project member. Verifies or transfers.
 
 | Action | Who | Otherwise |
 | --- | --- | --- |
@@ -25,15 +25,15 @@ Stable rules; tools give current state. The Host enforces permissions.
 | `team_task` accept | Human; an owner or the accountable who never claimed it, only at in_review | `self_acceptance_forbidden` |
 | `team_task` close / reopen / transfer | Human, current accountable; target: any enabled Project member or the Human | `accountable_owner_required` |
 
-Non-owners request a discussion or Task in Main and mention an owner. Accepted/closed Tasks refuse Claim changes; closed Tasks also refuse replies until reopened.
+Non-owners request a discussion or Task in Main, mentioning an owner. Accepted/closed Tasks refuse Claim changes; closed ones also refuse replies until reopened.
 
 ## Main stream and Threads
 
 - The **Main stream** holds Project questions and requests. It has no Task, Claim, or write token; posts never create a Thread. Discussions and Tasks appear in it as cards. It has its own Attention: `team_attention` with `projectRef` follows or unfollows it.
-- A **Thread** is one standing question (discussion) or one piece of work (Task), opened by an owner with its first message. Work, decisions, and evidence go there.
+- A **Thread** is one standing question or piece of work, opened by an owner with its first message; work, decisions, and evidence go there.
 - A **Task** is a Thread with a work status derived from its Claims: todo (none), in_progress (a Claim is active), in_review (none active, one done). An accept (done) or close overrides it.
-- **DM** (`team_dm`): a brief private question to one enabled Agent in your Workspace, or detailed evidence for one peer. Never task work or decisions; past about 3 exchanges, move to a Thread. Recorded even if the recipient cannot be woken; never resend blindly.
-- `@all` has no special meaning; it is plain text. Mention each Member as `@Handle`.
+- **DM** (`team_dm`): a brief private question to one enabled Agent, or detailed evidence for one peer. Never task work or decisions; past about 3 exchanges, move to a Thread. Recorded even if the recipient cannot be woken; never resend blindly.
+- `@all` is plain text: mention each Member as `@Handle`.
 
 ## Mention, reply, ordinary message
 
@@ -45,16 +45,17 @@ Non-owners request a discussion or Task in Main and mention an owner. Accepted/c
 | Main stream message | Members following that Main stream | yes |
 | New discussion | Members following that Main stream | yes |
 | New Task | not Main stream followers; they find it on the board | no |
+| Subscription event | only that subscription's `notify` Members (default its Creating Member; `[]` wakes nobody) | direct notice; others read it in the timeline, unwoken |
 
-- Entering cold, `team_thread read` restores background; `history`/`message` fill gaps. Repeat a request for missing parts; only read acknowledges; an Activity cannot be split.
-- Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not. Owning a Project follows its Main stream, not its Threads. `team_attention` follows or unfollows either face and reads nothing. Your active Claim prevents unfollowing its Thread until done or released; it never prevents unfollowing the Main stream.
-- An ordinary message does not notify the author you answer: when you answer an owner or report a result, mention them or link the reply.
+- Entering cold, `team_thread read` restores background; `history`/`message` fill gaps. Only read acknowledges; an Activity cannot be split.
+- Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not; owning a Project follows its Main stream, not its Threads. `team_attention` follows or unfollows either face, reading nothing. An active Claim blocks unfollowing its Thread until done or released, never the Main stream.
+- An ordinary message does not notify the author you answer: mention them or link the reply.
 
 ## Where to look
 
-- **Inbox** (`team_inbox`): your own unread, split into ordinary unread and direct notices (mentions, linked replies, responsibility events). Read items with `team_thread`; the Main stream is read with `projectRef`.
+- **Inbox** (`team_inbox`): your own unread, split into ordinary unread and direct notices (mentions, linked replies, responsibility events, addressed subscription events). Read items with `team_thread`; the Main stream is read with `projectRef`.
 - **Board** (`team_task board`): every open Task with its status, accountable, and who is on it, plus recently finished work, read or unread; `mine` narrows to what you are accountable for or execute. Look before claiming, and when a new Task matters.
-- `team_view`: all Projects/Members; Threads only from your memberships. Subscription list is metadata-only; logs stay Project-gated.
+- `team_view`: all Projects/Members, Threads only from your memberships; the subscription list is metadata-only, logs stay Project-gated.
 
 ## Task lifecycle
 

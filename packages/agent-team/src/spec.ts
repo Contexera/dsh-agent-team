@@ -306,6 +306,8 @@ const subscriptionSchema = z.object({
   /** Present exactly while this subscription has a webhook address an outside service may post to. */
   webhook: subscriptionWebhookSchema.optional(),
   createdBy: memberIdSchema,
+  /** Absent in records written before events became addressed; the projection reads those as `[createdBy]`. */
+  notify: z.array(memberIdSchema).optional(),
   createdAt: z.string().datetime(),
 }).strict().transform(omitUndefined)
 

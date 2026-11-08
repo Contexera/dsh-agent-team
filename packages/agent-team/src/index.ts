@@ -4304,12 +4304,15 @@ export default class AgentTeam extends TypertRemoteService {
     readonly triggers: SubscriptionTriggers
     readonly script: SubscriptionScriptSnapshot
     readonly credentials: readonly SubscriptionCredential[]
+    readonly notify?: readonly AgentTeamMemberId[] | undefined
   }): AgentTeamSubscription {
+    const createdBy = actor.kind === 'host' ? AGENT_TEAM_HUMAN_MEMBER_ID : actor.memberId
     return Object.freeze({
       subscriptionRef: `subscription:trial-${randomUUID()}` as AgentTeamSubscriptionRef,
       projectRef: definition.projectRef, name: definition.name, triggers: definition.triggers, script: definition.script,
       credentials: definition.credentials, revision: 1, state: 'active',
-      createdBy: actor.kind === 'host' ? AGENT_TEAM_HUMAN_MEMBER_ID : actor.memberId, createdAt: new Date().toISOString(),
+      createdBy, notify: Object.freeze([...(definition.notify ?? [createdBy])].sort()),
+      createdAt: new Date().toISOString(),
     })
   }
 
@@ -4363,7 +4366,7 @@ export default class AgentTeam extends TypertRemoteService {
     })
     const replayed = ledger.subscriptionWriteReplay({ kind: 'create', requestId: request.requestId, workspaceId: request.workspaceId,
       projectRef: request.projectRef, actor, name: request.name, intervalMinutes: request.intervalMinutes, webhook: request.webhook,
-      script: request.script, credentials: request.credentials, baseline: requestIntent.baseline })
+      script: request.script, credentials: request.credentials, notify: request.notify, baseline: requestIntent.baseline })
     if (replayed !== undefined) return this.replayedSubscriptionWrite(replayed.value, replayed.addressArmed)
     const script = await this.snapshotSubscriptionScript(request.script, agent)
     const triggers = this.subscriptionTriggersOf(request)
@@ -4371,15 +4374,17 @@ export default class AgentTeam extends TypertRemoteService {
     const name = request.name.trim()
     const problem = subscriptionDefinitionProblem({ name, triggers, script, credentials })
     if (problem !== undefined) throw new Error(`this subscription cannot be created: ${problem}`)
+    const notifyProblem = ledger.subscriptionNotifyProblem(request.projectRef, request.notify)
+    if (notifyProblem !== undefined) throw new Error(`this subscription cannot be created: ${notifyProblem}`)
     const missing = await missingCredentials(this.credentialProvider(), credentials)
     if (missing.length > 0) throw new Error(this.missingCredentialMessage(missing))
     const origin = triggers.webhook === true ? this.webhookOrigin() : undefined
-    const trial = await this.trialSubscriptionRun(this.draftSubscription(actor, { projectRef: request.projectRef, name, triggers, script, credentials }))
+    const trial = await this.trialSubscriptionRun(this.draftSubscription(actor, { projectRef: request.projectRef, name, triggers, script, credentials, notify: request.notify }))
     if (!trial.ok) return Object.freeze({ kind: 'trial-failed', failure: this.trialFailureOf(trial) })
     const baselineIds = (request.baseline ?? 'current-output') === 'current-output' ? baselineIdsOf(trial.events) : []
     const result = await ledger.createSubscription({
       requestId: request.requestId, workspaceId: request.workspaceId, projectRef: request.projectRef, name, triggers, script,
-      credentials, baselineIds, actor,
+      credentials, notify: request.notify, baselineIds, actor,
     }, requestIntent)
     if (result.committed) this.emitCommitted(result.value.receipt)
     return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity,
@@ -4410,7 +4415,7 @@ export default class AgentTeam extends TypertRemoteService {
     const replayed = ledger.subscriptionWriteReplay({ kind: 'update', requestId: request.requestId, workspaceId: request.workspaceId,
       projectRef: request.projectRef, subscriptionRef: request.subscriptionRef, expectedRevision: request.expectedRevision,
       actor, name: request.name, intervalMinutes: request.intervalMinutes, webhook: request.webhook,
-      script: request.script, credentials: request.credentials })
+      script: request.script, credentials: request.credentials, notify: request.notify })
     if (replayed !== undefined) return this.replayedSubscriptionWrite(replayed.value, replayed.addressArmed)
     const prior = ledger.subscription(request.subscriptionRef)
     if (prior === undefined || prior.projectRef !== request.projectRef) {
@@ -4423,6 +4428,8 @@ export default class AgentTeam extends TypertRemoteService {
     const name = request.name.trim()
     const problem = subscriptionDefinitionProblem({ name, triggers, script, credentials })
     if (problem !== undefined) throw new Error(`this subscription cannot be updated: ${problem}`)
+    const notifyProblem = ledger.subscriptionNotifyProblem(request.projectRef, request.notify)
+    if (notifyProblem !== undefined) throw new Error(`this subscription cannot be updated: ${notifyProblem}`)
     const missing = await missingCredentials(this.credentialProvider(), credentials)
     if (missing.length > 0) throw new Error(this.missingCredentialMessage(missing))
     // An edit that keeps the address needs no origin check here: the address it
@@ -4434,7 +4441,7 @@ export default class AgentTeam extends TypertRemoteService {
     if (!trial.ok) return Object.freeze({ kind: 'trial-failed', failure: this.trialFailureOf(trial) })
     const result = await ledger.updateSubscription({
       requestId: request.requestId, workspaceId: request.workspaceId, projectRef: request.projectRef, subscriptionRef: request.subscriptionRef,
-      expectedRevision: request.expectedRevision, name, triggers, script, credentials, actor,
+      expectedRevision: request.expectedRevision, name, triggers, script, credentials, notify: request.notify, actor,
     }, requestIntent)
     if (result.committed) this.emitCommitted(result.value.receipt)
     return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity,

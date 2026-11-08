@@ -7,9 +7,11 @@
  * @module @contexera/dsh-agent-team-tools/subscription
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { AgentTeamRequestId, AgentTeamProjectRef, AgentTeamSubscriptionRef } from '@contexera/dsh-agent-team/types'
+import type AgentTeam from '@contexera/dsh-agent-team/host'
+import type { AgentTeamMemberId, AgentTeamRequestId, AgentTeamProjectRef, AgentTeamSubscriptionRef } from '@contexera/dsh-agent-team/types'
 import type { SubscriptionCredential } from '@contexera/dsh-agent-team/host'
 import { service, workspaceOf, workspaceParam } from './host-access.ts'
+import { memberTarget } from './member-target.ts'
 
 /** What one tool call answers, and what its render reads back. */
 interface SubscriptionResult {
@@ -27,6 +29,8 @@ interface SubscriptionResult {
   /** Present when this call is a resolved retry of one that armed the address: it was shown once and cannot be fetched again. */
   webhookAddressGone?: true
   unpublished?: number
+  /** The Members whose Inbox this subscription's events reach; empty means the timeline alone. */
+  notify?: string[]
   baselineIds?: string[]
   events?: string[]
   stdoutTail?: string
@@ -39,6 +43,7 @@ interface SubscriptionResult {
     revision: number
     intervalMinutes?: number
     webhook: boolean
+    notify?: string[]
     unpublished: number
   }[]
   runs?: {
@@ -76,6 +81,7 @@ const SUBSCRIPTION_SCHEMA = {
     subscriptionRef: { type: 'string' }, name: { type: 'string' },
     state: { type: 'string' }, revision: { type: 'number' }, intervalMinutes: { type: 'number' },
     webhook: { type: 'boolean' }, unpublished: { type: 'number' },
+    notify: { type: 'array', items: { type: 'string' } },
   },
 } as const
 
@@ -107,6 +113,7 @@ const OUTPUT_SCHEMA = {
     subscriptionRef: { type: 'string' }, name: { type: 'string' }, state: { type: 'string' },
     revision: { type: 'number' }, intervalMinutes: { type: 'number' }, webhook: { type: 'boolean' },
     webhookAddress: { type: 'string' }, webhookAddressGone: { type: 'boolean' }, unpublished: { type: 'number' },
+    notify: { type: 'array', items: { type: 'string' } },
     baselineIds: { type: 'array', items: { type: 'string' } },
     // One rendered line per event: what the script printed, quoted as data.
     events: { type: 'array', items: { type: 'string' } },
@@ -121,6 +128,11 @@ const OUTPUT_SCHEMA = {
 
 const intervalOf = (subscription: { readonly triggers: { readonly interval?: { readonly minutes: number } | undefined } }): number | undefined =>
   subscription.triggers.interval?.minutes
+/** Who an event wakes: the addressed set, or that nobody is woken and the timeline alone keeps it. */
+function notifyLine(notify: readonly string[]): string {
+  return notify.length === 0 ? 'notify: nobody (published to the timeline only)' : `notify: ${notify.join(', ')}`
+}
+
 
 /** Which of the two triggers a subscription carries: either one alone is a complete subscription. */
 function triggersOf(subscription: { readonly intervalMinutes?: number | undefined; readonly webhook?: boolean | undefined }): string {
@@ -136,6 +148,17 @@ function credentialsFrom(entries: readonly string[] | undefined): readonly Subsc
     if (separator < 0) return Object.freeze({ ref: entry.trim(), env: entry.trim() })
     return Object.freeze({ ref: entry.slice(0, separator).trim(), env: entry.slice(separator + 1).trim() })
   }))
+}
+
+/**
+ * Recipients stay distinguishable from "not named": omitting the argument keeps
+ * what is stored (or the Creating Member on a create), while an empty array is a
+ * deliberate "timeline only", so the two must not collapse into one value here.
+ * Each entry reads as a Member ref, an `@Handle`, or the Human's alias, exactly
+ * as every other Member-taking field does.
+ */
+function notifyFrom(host: AgentTeam, entries: readonly string[]): readonly AgentTeamMemberId[] {
+  return Object.freeze(entries.map(entry => memberTarget(host, entry)))
 }
 
 function requireSubscriptionRef(value: string | undefined): AgentTeamSubscriptionRef {
@@ -159,6 +182,7 @@ type SubscriptionWrite = { readonly kind: 'changed'; readonly subscription: {
   readonly state: string
   readonly revision: number
   readonly triggers: { readonly interval?: { readonly minutes: number } | undefined; readonly webhook?: true | undefined }
+  readonly notify?: readonly string[]
   readonly webhook?: unknown
 }, readonly webhookAddress?: string | undefined, readonly webhookAddressGone?: true | undefined
 } | { readonly kind: 'trial-failed'; readonly failure: { readonly reason: string; readonly stdoutTail: string; readonly stderrTail: string } }
@@ -171,6 +195,7 @@ function written(action: string, result: SubscriptionWrite, base: { readonly wor
   const intervalMinutes = intervalOf(subscription)
   return { kind: action, ...base, subscriptionRef: subscription.subscriptionRef, name: subscription.name, state: subscription.state,
     revision: subscription.revision, webhook: subscription.triggers.webhook === true,
+    ...(subscription.notify === undefined ? {} : { notify: [...subscription.notify] }),
     ...(intervalMinutes === undefined ? {} : { intervalMinutes }),
     // Only the call that armed or reset the address has it: the ledger keeps a
     // hash, so this is the one time a caller can read the whole thing.
@@ -205,7 +230,7 @@ function outputLines(run: RenderedRun): string {
 
 export const teamSubscription = defineTool({
   name: 'team_subscription',
-  description: `Create and maintain a Project's subscription: a script the Host runs on a timer, on an incoming webhook, or both, with no Session, as this Project. Only the Project's owners may create, change, test, pause, resume, delete, re-baseline one, or replay a failed delivery; any Workspace member may list their metadata, while run history remains available to Project members. Create and update take the script from a file path (resolved against your working directory) or as pasted content, snapshot it (at most 16 KiB), validate the declared credential references, and run it once — a failing trial refuses the write and returns the tail of its stdout and stderr. A new subscription ignores the ids its trial printed by default, so the first live run does not republish what the script already found; pass baseline: ignore-history to publish everything it sees from the start. An update keeps the existing deduplication waterline, so an id that appeared between two polls is never swallowed; after changing the script's id rule, call baseline with the ids to ignore. Events the script prints (one JSON object per line: id, title, optional url and detail) are deduplicated inside this subscription and published to the Project's Main stream at most 20 per minute; the Host pauses a subscription after three failed runs in a row. logs reads the newest recorded runs: trigger, start, duration, structured outcome, event count, the revision it pinned, and for a webhook run the delivery and attempt that asked for it; the Project's owners and the Human also see why a run failed and the tails of what it printed, passing runs included, while any other member sees only the summary. deliveries lists — for the owners, because a delivery carries the request body it arrived with — the webhook deliveries whose automatic retries were spent, with a stable ref, the last error, and an expiry — each counted one failure when its retries ran out; replay runs one again — the definition as it stands now by default, so a fix can handle an old request, or the version it arrived under. A replay never counts as a failure of the subscription, it takes a run slot and the subscription's own exclusion like any other run, and it is refused while the subscription is paused or gone. Repeating a call answers with what the first one did; one call id names one delivery and one version, and a delivery that already replayed successfully is not run again. Create or update with webhook: true arms an address under the Host's public origin, at <public origin>/team/hooks/<token>. The Host stores only a hash of the token, so the complete address is returned exactly once — register it with the provider in the same turn; reset_webhook replaces it and shows the new address once, the old one stops resolving immediately, and deliveries already queued keep running. A webhook run reads {headers, body} on stdin with lower-case header names from a fixed whitelist, and its output is accepted into the ledger before publication, so a 202 is never lost to a throttled publish: a run whose batch has no room in that queue keeps it and retries only the accept, without running the script again. An update that does not name a trigger keeps the webhook address, because a provider already posts to it; only webhook: false drops it.`,
+  description: `Create and maintain a Project's subscription: a script the Host runs on a timer, on an incoming webhook, or both, with no Session, as this Project. Only the Project's owners may create, change, test, pause, resume, delete, re-baseline one, or replay a failed delivery; any Workspace member may list their metadata, while run history remains available to Project members. Create and update take the script from a file path (resolved against your working directory) or as pasted content, snapshot it (at most 16 KiB), validate the declared credential references, and run it once — a failing trial refuses the write and returns the tail of its stdout and stderr. A new subscription ignores the ids its trial printed by default, so the first live run does not republish what the script already found; pass baseline: ignore-history to publish everything it sees from the start. An update keeps the existing deduplication waterline, so an id that appeared between two polls is never swallowed; after changing the script's id rule, call baseline with the ids to ignore. Events the script prints (one JSON object per line: id, title, optional url and detail) are deduplicated inside this subscription and published to the Project's Main stream at most 20 per minute; publication addresses them: they reach only the Members named in notify (default: the Creating Member), while everyone else can still read them in the timeline without being woken. The Host pauses a subscription after three failed runs in a row. logs reads the newest recorded runs: trigger, start, duration, structured outcome, event count, the revision it pinned, and for a webhook run the delivery and attempt that asked for it; the Project's owners and the Human also see why a run failed and the tails of what it printed, passing runs included, while any other member sees only the summary. deliveries lists — for the owners, because a delivery carries the request body it arrived with — the webhook deliveries whose automatic retries were spent, with a stable ref, the last error, and an expiry — each counted one failure when its retries ran out; replay runs one again — the definition as it stands now by default, so a fix can handle an old request, or the version it arrived under. A replay never counts as a failure of the subscription, it takes a run slot and the subscription's own exclusion like any other run, and it is refused while the subscription is paused or gone. Repeating a call answers with what the first one did; one call id names one delivery and one version, and a delivery that already replayed successfully is not run again. Create or update with webhook: true arms an address under the Host's public origin, at <public origin>/team/hooks/<token>. The Host stores only a hash of the token, so the complete address is returned exactly once — register it with the provider in the same turn; reset_webhook replaces it and shows the new address once, the old one stops resolving immediately, and deliveries already queued keep running. A webhook run reads {headers, body} on stdin with lower-case header names from a fixed whitelist, and its output is accepted into the ledger before publication, so a 202 is never lost to a throttled publish: a run whose batch has no room in that queue keeps it and retries only the accept, without running the script again. An update that does not name a trigger keeps the webhook address, because a provider already posts to it; only webhook: false drops it.`,
   parameters: {
     action: { type: 'string', required: true,
       enum: ['list', 'create', 'update', 'test', 'pause', 'resume', 'delete', 'baseline', 'logs', 'deliveries', 'replay', 'reset_webhook'] },
@@ -218,6 +243,8 @@ export const teamSubscription = defineTool({
     scriptContent: { type: 'string', description: 'The script itself, for a caller with no file to point at. Mutually exclusive with scriptPath.' },
     credentials: { type: 'array', items: { type: 'string' },
       description: 'Credential references to inject on every run, at most 8, each written REF or REF=ENV_NAME. Values are never stored here; the Host resolves them at each run.' },
+    notify: { type: 'array', items: { type: 'string' },
+      description: 'For create or update: the Members whose Inbox this subscription event reaches — each as a memberRef, an @Handle, or the Human (any current Project Member, owner or not). Omitted on create means the Creating Member alone; omitted on update keeps the stored set; an empty array means the timeline alone, with nobody woken. Non-recipients still see the event on the Main stream.' },
     baseline: { type: 'string', enum: ['current-output', 'ignore-history'], description: 'Which history a brand-new subscription ignores. Default current-output.' },
     expectedRevision: { type: 'number', description: 'The revision an update, pause, resume, reset_webhook, or delete must still be at. Read it from list; a concurrent change makes this call fail instead of overwriting.' },
     ids: { type: 'array', items: { type: 'string' }, description: 'For baseline: ids to ignore from now on. They append; nothing earlier is cleared.' },
@@ -232,7 +259,7 @@ export const teamSubscription = defineTool({
     render: (_args, value) => {
       const where = `Workspace: ${value.workspaceId} · Project: ${value.projectRef}`
       if (value.kind === 'list') {
-        const rows = (value.subscriptions ?? []).map(row => `- ${row.subscriptionRef} — ${row.name} · ${row.state} · r${row.revision} · ${triggersOf(row)}${row.unpublished === 0 ? '' : ` · ${row.unpublished} waiting to publish`}`)
+        const rows = (value.subscriptions ?? []).map(row => `- ${row.subscriptionRef} — ${row.name} · ${row.state} · r${row.revision} · ${triggersOf(row)}${row.notify === undefined ? '' : ` · ${notifyLine(row.notify)}`}${row.unpublished === 0 ? '' : ` · ${row.unpublished} waiting to publish`}`)
         return [{ type: 'text', text: `${where}\nSubscriptions (${rows.length}):\n${rows.length === 0 ? '- none' : rows.join('\n')}` }]
       }
       if (value.kind === 'trial-failed') {
@@ -277,7 +304,7 @@ export const teamSubscription = defineTool({
       const gone = value.webhookAddressGone === true
         ? '\nThe webhook address was shown once when this change committed and cannot be fetched again; call reset_webhook to arm a new one.'
         : ''
-      return [{ type: 'text', text: `${where}\n${value.kind}: ${value.name ?? 'subscription'} (${value.subscriptionRef}) · ${value.state ?? 'active'} · r${value.revision ?? 1}${interval}${hook}${address}${gone}` }]
+      return [{ type: 'text', text: `${where}\n${value.kind}: ${value.name ?? 'subscription'} (${value.subscriptionRef}) · ${value.state ?? 'active'} · r${value.revision ?? 1}${interval}${hook}${address}${gone}${value.notify === undefined ? '' : `\n${notifyLine(value.notify)}`}` }]
     },
   },
   async execute(rawArgs, exec): Promise<SubscriptionResult> {
@@ -296,6 +323,7 @@ export const teamSubscription = defineTool({
         return { subscriptionRef: entry.subscription.subscriptionRef, name: entry.subscription.name,
           state: entry.subscription.state, revision: entry.subscription.revision, unpublished: entry.unpublished,
           webhook: entry.subscription.triggers.webhook === true,
+          ...(entry.subscription.notify === undefined ? {} : { notify: [...entry.subscription.notify] }),
           ...(minutes === undefined ? {} : { intervalMinutes: minutes }) }
       }) }
     }
@@ -304,7 +332,9 @@ export const teamSubscription = defineTool({
       const result = await host.createSubscriptionForAgent(agent, { requestId, ...base, name: args.name,
         ...(args.intervalMinutes === undefined ? {} : { intervalMinutes: args.intervalMinutes }),
         ...(args.webhook === undefined ? {} : { webhook: args.webhook }),
-        script: scriptSource(args), credentials: credentialsFrom(args.credentials), baseline: args.baseline ?? 'current-output' })
+        script: scriptSource(args), credentials: credentialsFrom(args.credentials),
+        ...(args.notify === undefined ? {} : { notify: notifyFrom(host, args.notify) }),
+        baseline: args.baseline ?? 'current-output' })
       return written('create', result, base)
     }
     const subscriptionRef = requireSubscriptionRef(args.subscriptionRef)
@@ -315,7 +345,8 @@ export const teamSubscription = defineTool({
       const result = await host.updateSubscriptionForAgent(agent, { requestId, ...base, subscriptionRef, expectedRevision: args.expectedRevision,
         name: args.name, ...(args.intervalMinutes === undefined ? {} : { intervalMinutes: args.intervalMinutes }),
         ...(args.webhook === undefined ? {} : { webhook: args.webhook }),
-        script: scriptSource(args), credentials: credentialsFrom(args.credentials) })
+        script: scriptSource(args), credentials: credentialsFrom(args.credentials),
+        ...(args.notify === undefined ? {} : { notify: notifyFrom(host, args.notify) }) })
       return written('update', result, base)
     }
     if (args.action === 'test') {

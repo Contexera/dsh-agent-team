@@ -262,7 +262,7 @@ export const TASK_BOARD_FINISHED_PER_PROJECT = 5
  * that grant was the Member's last Project participation. Version 4 lets a closed Task's Thread be followed:
  * closing ends every Attention row, so refusing the follow left a finished Task with no follower to hand it to.
  */
-export const AGENT_TEAM_RULES_VERSION = 4
+export const AGENT_TEAM_RULES_VERSION = 5
 
 function freezeActor(actor: AgentTeamActor): AgentTeamActor {
   if (actor.kind === 'host') return Object.freeze({ kind: 'host', handle: actor.handle })
@@ -411,6 +411,8 @@ export interface AgentTeamCreateSubscriptionRequest {
   readonly triggers: SubscriptionTriggers
   readonly script: SubscriptionScriptSnapshot
   readonly credentials: readonly SubscriptionCredential[]
+  /** Who its events are for; omitted means the Creating Member alone. */
+  readonly notify?: readonly AgentTeamMemberId[] | undefined
   /** Ids the trial run printed that this subscription must never publish; empty means ignore that history. */
   readonly baselineIds: readonly string[]
 }
@@ -430,6 +432,8 @@ export interface AgentTeamUpdateSubscriptionRequest {
   readonly triggers: SubscriptionTriggers
   readonly script: SubscriptionScriptSnapshot
   readonly credentials: readonly SubscriptionCredential[]
+  /** Who its events are for; omitted keeps the stored set, and `[]` clears it to the timeline alone. */
+  readonly notify?: readonly AgentTeamMemberId[] | undefined
 }
 
 export interface AgentTeamAuthorizedUpdateSubscriptionRequest extends AgentTeamUpdateSubscriptionRequest {
@@ -486,6 +490,7 @@ type AgentTeamSubscriptionWriteReplayBase = {
   readonly intervalMinutes?: number | undefined
   readonly webhook?: boolean | undefined
   readonly script: AgentTeamSubscriptionScriptSource
+  readonly notify?: readonly AgentTeamMemberId[] | undefined
 }
 
 export type AgentTeamSubscriptionWriteReplayRequest =
@@ -1113,6 +1118,10 @@ export class AgentTeamLedger {
       if (problem !== undefined) throw new Error(`this subscription cannot be created: ${problem}`)
       const baselineProblem = subscriptionIdsProblem(request.baselineIds)
       if (baselineProblem !== undefined) throw new Error(`this subscription cannot be created: ${baselineProblem}`)
+      const createdBy = this.actorMemberOf(request.actor)
+      const notifyProblem = this.subscriptionNotifyProblem(request.projectRef, request.notify)
+      if (notifyProblem !== undefined) throw new Error(`this subscription cannot be created: ${notifyProblem}`)
+      const notify = this.subscriptionNotifyOf(request.notify, createdBy)
       const live = this.subscriptionsOfProject(request.projectRef).filter(entry => entry.state !== 'deleted')
       if (live.length >= SUBSCRIPTION_MAX_PER_PROJECT) {
         throw new Error(`Project '${request.projectRef}' already has ${SUBSCRIPTION_MAX_PER_PROJECT} subscriptions`)
@@ -1130,7 +1139,8 @@ export class AgentTeamLedger {
         revision: 1,
         state: 'active',
         ...(armed.webhook === undefined ? {} : { webhook: armed.webhook }),
-        createdBy: this.actorMemberOf(request.actor),
+        createdBy,
+        notify,
         createdAt: base.occurredAt,
       })
       const activity = this.subscriptionActivity(subscription, 'subscription-created', request.actor, sequence, base.occurredAt)
@@ -1161,6 +1171,10 @@ export class AgentTeamLedger {
       if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
       const problem = subscriptionDefinitionProblem(request)
       if (problem !== undefined) throw new Error(`this update cannot be stored: ${problem}`)
+      const notifyProblem = request.notify === undefined
+        ? undefined : this.subscriptionNotifyProblem(request.projectRef, request.notify)
+      if (notifyProblem !== undefined) throw new Error(`this update cannot be stored: ${notifyProblem}`)
+      const notify = request.notify === undefined ? prior.notify : this.subscriptionNotifyOf(request.notify, prior.createdBy)
       const sequence = this.nextSequence()
       const base = this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence)
       const armed = this.armedWebhook(prior.webhook, request.triggers, base.occurredAt)
@@ -1172,6 +1186,7 @@ export class AgentTeamLedger {
         credentials: freezeSubscriptionCredentials(request.credentials),
         revision: prior.revision + 1,
         webhook: armed.webhook,
+        notify,
       })
       const activity = this.subscriptionActivity(subscription, 'subscription-updated', request.actor, sequence, base.occurredAt)
       const operation: AgentTeamSubscriptionUpdatedOperation = Object.freeze({ ...base, kind: 'team/subscription-updated',
@@ -1336,7 +1351,9 @@ export class AgentTeamLedger {
 
   /**
    * Publish one accepted event. The recipients are frozen here, at the publish
-   * commit: every owner of the Project as it stands now, the Human included.
+   * commit: the subscription's own `notify` set, minus anyone who has left the
+   * Project since. Ownership never substitutes for it — an event is addressed
+   * intelligence, so a subscription whose recipients are all gone reaches nobody.
    */
   publishSubscriptionEvent(request: AgentTeamPublishSubscriptionEventRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionPublishResult>> {
     return this.enqueue(async () => {
@@ -1357,8 +1374,12 @@ export class AgentTeamLedger {
       if (accepted.publishedSequence !== undefined) throw new Error(`event '${request.eventId}' was already published`)
       const sequence = this.nextSequence()
       const eventRef = `event:${sequence}` as AgentTeamSubscriptionEventRef
-      const markers = [AGENT_TEAM_HUMAN_MEMBER_ID, ...this.projectOwnerIds(subscription.projectRef)]
-        .map(memberId => Object.freeze({ memberId, projectRef: subscription.projectRef, eventRef, sequence }))
+      const markers = this.state.rulesVersion >= 5
+        ? subscription.notify
+          .filter(memberId => this.notifyRecipientIsLive(subscription.projectRef, memberId))
+          .map(memberId => Object.freeze({ memberId, projectRef: subscription.projectRef, eventRef, sequence }))
+        : [AGENT_TEAM_HUMAN_MEMBER_ID, ...this.projectOwnerIds(subscription.projectRef)]
+          .map(memberId => Object.freeze({ memberId, projectRef: subscription.projectRef, eventRef, sequence }))
       const operation: AgentTeamSubscriptionEventPublishedOperation = Object.freeze({
         ...this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence),
         kind: 'team/subscription-event-published',
@@ -1432,7 +1453,20 @@ export class AgentTeamLedger {
       throw new Error(`subscription '${subscriptionRef}' does not belong to Project '${request.projectRef}'`)
     }
     if (subscription.state === 'deleted') throw new Error(`subscription '${subscriptionRef}' is deleted (subscription_deleted)`)
-    return subscription
+    return this.subscriptionCarriedForward(subscription)
+  }
+
+  /**
+   * The prior subscription as a write may store it again. Every lifecycle
+   * record copies the whole subscription forward, and replay requires each
+   * stored recipient to belong to the Project at its own commit, so an address
+   * that can no longer receive is dropped here — at the write, never tolerated
+   * in validation, which would let a real corruption through with it.
+   */
+  private subscriptionCarriedForward(subscription: AgentTeamSubscription): AgentTeamSubscription {
+    const live = subscription.notify.filter(memberId => this.notifyRecipientIsLive(subscription.projectRef, memberId))
+    if (live.length === subscription.notify.length) return subscription
+    return Object.freeze({ ...subscription, notify: Object.freeze(live) })
   }
 
   private subscriptionStaleRevision(prior: AgentTeamSubscription, expected: number): string {
@@ -1523,7 +1557,7 @@ export class AgentTeamLedger {
     const stored = existing.data.subscription
     const credentials = Object.freeze([...(request.credentials ?? [])])
     const common = request.projectRef === stored.projectRef && request.name.trim() === stored.name
-      && isDeepStrictEqual(credentials, stored.credentials)
+      && isDeepStrictEqual(credentials, stored.credentials) && this.sameAskedNotify(request.notify, stored.notify)
     if (!common) this.throwRequestCollision(existing.requestId)
     if ('scriptContent' in request.script && request.script.scriptContent !== stored.script.content) {
       this.throwRequestCollision(existing.requestId)
@@ -1551,6 +1585,16 @@ export class AgentTeamLedger {
     } else if (!this.sameLegacyUpdateReplay(existing, request)) {
       this.throwRequestCollision(existing.requestId)
     }
+  }
+
+  /**
+   * Whether a retry asks for the recipients the committed write stored. An
+   * omitted set asks for nothing of its own — on a create that is the
+   * Creating Member, on an update the set already stored — so it can never
+   * contradict the first answer.
+   */
+  private sameAskedNotify(asked: readonly AgentTeamMemberId[] | undefined, stored: readonly AgentTeamMemberId[]): boolean {
+    return asked === undefined || isDeepStrictEqual(Object.freeze([...new Set(asked)].sort()), stored)
   }
 
   private createSubscriptionRequestIntent(request: Extract<AgentTeamSubscriptionWriteReplayRequest, { readonly kind: 'create' }>): AgentTeamCreateSubscriptionRequestIntent {
@@ -1622,6 +1666,7 @@ export class AgentTeamLedger {
         return asked.projectRef === stored.projectRef && asked.name === stored.name
           && isDeepStrictEqual(asked.triggers, stored.triggers) && isDeepStrictEqual(asked.script, stored.script)
           && isDeepStrictEqual(asked.credentials, stored.credentials)
+          && this.sameAskedNotify(asked.notify, stored.notify)
           && isDeepStrictEqual(asked.baselineIds, existing.data.baselineIds)
       }
       case 'team/subscription-updated': {
@@ -1631,6 +1676,7 @@ export class AgentTeamLedger {
           && asked.expectedRevision === existing.data.previousRevision && asked.name === stored.name
           && isDeepStrictEqual(asked.triggers, stored.triggers) && isDeepStrictEqual(asked.script, stored.script)
           && isDeepStrictEqual(asked.credentials, stored.credentials)
+          && this.sameAskedNotify(asked.notify, stored.notify)
       }
       case 'team/subscription-paused': {
         const asked = request as AgentTeamAuthorizedPauseSubscriptionRequest
@@ -3883,6 +3929,49 @@ export class AgentTeamLedger {
     return Object.freeze([...this.state.owners.get(projectRef)?.keys() ?? []].sort())
   }
 
+  /**
+   * One subscription's event recipients as a create or update states them. The
+   * Human is a member of every Project even though ownership is derived rather
+   * than listed; anyone else must still belong to it. Deduplicated and sorted,
+   * so the stored set has exactly one order to compare.
+   */
+  private subscriptionNotifyOf(notify: readonly AgentTeamMemberId[] | undefined,
+    fallback: AgentTeamMemberId): readonly AgentTeamMemberId[] {
+    return Object.freeze([...new Set(notify ?? [fallback])].sort())
+  }
+
+  /**
+   * Why a proposed recipient set cannot be stored, if it cannot. The Host asks
+   * before its trial run, so a typo costs a rejected form rather than a script
+   * execution.
+   */
+  subscriptionNotifyProblem(projectRef: AgentTeamProjectRef, notify: readonly AgentTeamMemberId[] | undefined): string | undefined {
+    const foreign = [...new Set(notify ?? [])].filter(memberId => !this.notifyRecipientIsLive(projectRef, memberId))
+    return foreign.length === 0 ? undefined
+      : `event recipient ${foreign.map(memberId => `'${memberId}'`).join(', ')} is not a member of Project '${projectRef}' (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`
+  }
+
+  /** Whether one addressed recipient can still receive: the Human always, a Member only while it belongs to the Project. */
+  private notifyRecipientIsLive(projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
+    return this.notifyRecipientLiveFrom(this.state, projectRef, memberId)
+  }
+
+  /** The same predicate over a replay projection, so validation judges each segment at its own point in the ledger. */
+  private notifyRecipientLiveFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
+    return memberId === AGENT_TEAM_HUMAN_MEMBER_ID || this.isProjectMemberFrom(projection, projectRef, memberId)
+  }
+
+  /**
+   * A stored subscription as the projection should hold it. Records written
+   * before events were addressed carry no `notify`; they read back as the
+   * Creating Member alone, so replay of an old ledger never routes an event to
+   * someone the subscription never named.
+   */
+  private subscriptionWithNotify(subscription: AgentTeamSubscription): AgentTeamSubscription {
+    if (Array.isArray((subscription as { readonly notify?: unknown }).notify)) return subscription
+    return Object.freeze({ ...subscription, notify: Object.freeze([subscription.createdBy]) })
+  }
+
   /** Active Projects the Agent Member owns, in creation order. */
   ownedProjects(memberId: AgentTeamMemberId): readonly AgentTeamProject[] {
     return Object.freeze([...this.state.projects.values()]
@@ -5270,6 +5359,21 @@ export class AgentTeamLedger {
       const definition = subscriptionDefinitionProblem(subscription)
       if (definition !== undefined) throw new Error(`${at}: ${definition}`)
       if (subscription.projectRef !== projectRef) throw new Error(`${at} stores a subscription of another Project`)
+      // Events are addressed from version 5 on. The stored set must be canonical
+      // (sorted, unique) and name only Members of this Project at this commit;
+      // an older segment never carried the field, and inventing one there would
+      // reroute events the record itself sent to the owners.
+      const addressed = (subscription as { readonly notify?: readonly AgentTeamMemberId[] | undefined }).notify
+      if (addressed !== undefined) {
+        if (!isDeepStrictEqual([...addressed].sort(), addressed) || new Set(addressed).size !== addressed.length) {
+          throw new Error(`${at} stores subscription recipients in no canonical order`)
+        }
+        for (const memberId of addressed) {
+          if (!this.notifyRecipientLiveFrom(projection, projectRef, memberId)) {
+            throw new Error(`${at} addresses an event to a Member outside the Project`)
+          }
+        }
+      }
       // The address exists exactly as long as the trigger asks for one; a record
       // that disagrees would make the entry resolve a token nothing can post to.
       if ((subscription.webhook !== undefined) !== (subscription.triggers.webhook === true)) {
@@ -5420,10 +5524,12 @@ export class AgentTeamLedger {
     const published: AgentTeamSubscriptionEventPublished = Object.freeze({ eventRef,
       projectRef: subscription.projectRef, subscriptionRef: subscription.subscriptionRef, subscriptionName: subscription.name,
       event: source.event, acceptedSequence: source.acceptedSequence, sequence: operation.sequence, occurredAt: operation.occurredAt })
-    const recipients = [human.data.humanMemberId, ...([...projection.owners.get(projectRef)?.keys() ?? []].sort())]
+    const recipients = projection.rulesVersion >= 5
+      ? subscription.notify.filter(memberId => this.notifyRecipientLiveFrom(projection, projectRef, memberId))
+      : [human.data.humanMemberId, ...([...projection.owners.get(projectRef)?.keys() ?? []].sort())]
     const expected = this.inboxDelta([], [], [], [], [], [], recipients.map(memberId => Object.freeze({ memberId,
       projectRef: subscription.projectRef, eventRef, sequence: operation.sequence })))
-    if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error(`${at} does not mark exactly the Project's owners`)
+    if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error(`${at} does not mark exactly the event recipients of this subscription`)
     this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [], [], [], [published])
     this.addRef(refs, eventRef)
   }
@@ -5744,7 +5850,8 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
       || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
       || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-webhook-reset') {
-      const { subscription, activity } = operation.data
+      const { activity } = operation.data
+      const subscription = this.subscriptionWithNotify(operation.data.subscription)
       // The creation order is the list order; an update must not move its row.
       if (!target.subscriptions.has(subscription.subscriptionRef)) {
         const refs = target.subscriptionsByProject.get(subscription.projectRef) ?? []
@@ -6884,6 +6991,10 @@ export class AgentTeamLedger {
       for (let index = sources.length - 1; index >= 0 && sources[index]!.sequence > floor; index -= 1) {
         const source = sources[index]!
         if (source.kind === 'thread' && !source.unreadable) continue
+        // A published event is addressed intelligence, not Project news: it
+        // stays on the timeline for every reader (the stream remains auditable)
+        // and only its recipients' markers may interrupt anyone.
+        if (source.kind === 'subscription-event') continue
         if (this.mainProducerFrom(projection, source) === memberId) continue
         found.set(source.sequence, { source, ordinary: true, direct: false })
       }

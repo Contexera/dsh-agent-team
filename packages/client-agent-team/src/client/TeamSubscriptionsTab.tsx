@@ -92,6 +92,8 @@ export function TeamSubscriptionsTab({
         entry={entry}
         canManage={canManage}
         owner={memberOf(entry.subscription.createdBy)?.handle ?? t('memberUnknown')}
+        recipients={entry.subscription.notify.map(memberId => memberOf(memberId)?.handle ?? t('memberUnknown'))}
+        ownerNamed={entry.subscription.notify.includes(entry.subscription.createdBy)}
         pending={pending !== undefined && pending.ref === entry.subscription.subscriptionRef ? pending.kind : undefined}
         failure={failure?.ref === entry.subscription.subscriptionRef ? failure : undefined}
         t={t}
@@ -142,10 +144,14 @@ function SurfaceError({ message, retry, onRetry }: { readonly message: string; r
   </div>
 }
 
-function SubscriptionCard({ entry, canManage, owner, pending, failure, t, onScript, onLogs, onPause, onResume, onDelete }: {
+function SubscriptionCard({ entry, canManage, owner, recipients, ownerNamed, pending, failure, t, onScript, onLogs, onPause, onResume, onDelete }: {
   readonly entry: AgentTeamSubscriptionListEntry
   readonly canManage: boolean
   readonly owner: string
+  /** Handles of the Members this subscription's events wake, in the Host's canonical order. */
+  readonly recipients: readonly string[]
+  /** Whether the Creating Member is one of them, which is when the owner needs no second mention. */
+  readonly ownerNamed: boolean
   readonly pending: PendingAction['kind'] | undefined
   readonly failure: CardFailure | undefined
   readonly t: TeamConversationProps['t']
@@ -167,6 +173,10 @@ function SubscriptionCard({ entry, canManage, owner, pending, failure, t, onScri
     lastRun === undefined ? t('subscriptionLastRunNever') : t('subscriptionLastRun', { time: formatInboxTime(lastRun.startedAt, t) }),
     ...(entry.nextRunAt === undefined ? [] : [t('subscriptionNextRunAt', { time: formatInboxTime(entry.nextRunAt, t) })]),
   ].join(' · ')
+  const notifyFacts = (recipients.length === 0
+    ? t('subscriptionNotifyNobody')
+    : t('subscriptionNotify', { names: recipients.join(t('nameListSeparator')) }))
+    + (ownerNamed ? '' : ` · ${t('subscriptionOwner', { name: owner })}`)
   const eventFacts = [
     ...(entry.eventCount > 0 ? [t('subscriptionEventCount', { count: entry.eventCount })] : []),
     ...(entry.unpublished > 0 ? [t('subscriptionUnpublished', { count: entry.unpublished })] : []),
@@ -175,9 +185,12 @@ function SubscriptionCard({ entry, canManage, owner, pending, failure, t, onScri
     <div className={css.cardHead}>
       <h3 className={css.cardName}>{name}</h3>
       <span className={css.trigger}>{triggerText(subscription.triggers, t)}</span>
-      <span className={css.owner}>{t('subscriptionOwner', { name: owner })}</span>
     </div>
     <p className={css.facts}>
+      {/* Who the events are for leads the facts: the same set decides whether a
+          reader is woken, so it outranks the run counters. The owner is named
+          only when it is not already one of the recipients. */}
+      <span>{notifyFacts}</span>
       <span>{runFacts}</span>
       {eventFacts !== '' && <span>{eventFacts}</span>}
     </p>

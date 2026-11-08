@@ -21,6 +21,7 @@ function subscription(name: string, minutes = 5): AgentTeamSubscription {
     subscriptionRef: `subscription:${name}` as AgentTeamSubscriptionRef,
     projectRef: 'project:p' as never,
     name,
+    notify: [],
     triggers: { interval: { minutes } },
     script: { content: 'true\n', sha256: 'a'.repeat(64), shell: 'bash' },
     credentials: [],

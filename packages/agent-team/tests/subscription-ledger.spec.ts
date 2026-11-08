@@ -12,18 +12,21 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from '../src/ledger.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_RULES_VERSION, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import { snapshotScript, SUBSCRIPTION_PENDING_MAX, type SubscriptionTriggers } from '../src/subscriptions.ts'
 import { webhookTokenHash } from '../src/subscription-webhook.ts'
 import type {
   AgentTeamAgentMember,
+  AgentTeamHumanActor,
+  AgentTeamMainTimelineEntry,
   AgentTeamMemberActor,
   AgentTeamMemberId,
   AgentTeamOperation,
   AgentTeamOperationId,
   AgentTeamProjectRef,
   AgentTeamRequestId,
+  AgentTeamSubscription,
   AgentTeamSubscriptionRef,
 } from '../src/types.ts'
 
@@ -71,7 +74,7 @@ async function addAgent(ledger: AgentTeamLedger, handle: string, projectRefs: Ag
 }
 
 /** One Project with an Agent owner, an enrolled Agent writer, and an Agent that never joined. */
-async function seed(options: { readonly webhookToken?: () => string } = {}) {
+async function seed(options: { readonly webhookToken?: () => string; readonly rulesVersion?: number } = {}) {
   const pool = new MemoryMediaPool()
   const table = await openTable(pool)
   const ledger = new AgentTeamLedger(table, { rulesVersion: 2, ...options })
@@ -724,5 +727,174 @@ describe('a run is pinned to the script its revision carried', () => {
     const tampered = { ...last, data: { ...last.data, subscriptionRevision: 1 } }
     const reloaded = await openTable(poolOf([...stored.slice(0, -1), [key, tampered]]))
     expect(() => replayed(reloaded)).toThrow(/pairs revision 1 with a script that revision never carried/)
+  })
+})
+
+describe('addressed subscription events', () => {
+  const current = AGENT_TEAM_RULES_VERSION
+  const replayedAt = (table: Table, rulesVersion: number) => new AgentTeamLedger(table, { rulesVersion })
+
+  /** A publish-ready subscription whose events are addressed to `notify`. */
+  const addressed = async (team: Seeded, notify: readonly AgentTeamMemberId[]): Promise<AgentTeamSubscriptionRef> => {
+    const created = await team.ledger.createSubscription({ requestId: requestId('create'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, name: 'main CI', triggers: { interval: { minutes: 10 } }, script, credentials: [], notify, baselineIds: [] })
+    if (!created.committed) throw new Error('expected a committed subscription')
+    return created.value.subscription.subscriptionRef
+  }
+
+  /** Accept and publish one event, then answer the Main stream entry each reader gets for it. */
+  const publishOne = async (team: Seeded, subscriptionRef: AgentTeamSubscriptionRef,
+    eventId = 'e1'): Promise<(reader: AgentTeamHumanActor | AgentTeamMemberActor) => AgentTeamMainTimelineEntry | undefined> => {
+    await team.ledger.acceptSubscriptionEvents({ requestId: requestId('accept'), actor: host, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, subscriptionRevision: 1, scriptHash: team.scriptHash, events: [{ id: eventId, title: 'Build failed' }] })
+    const pending = team.ledger.pendingSubscriptionEvents(subscriptionRef)
+    await team.ledger.publishSubscriptionEvent({ requestId: requestId('publish'), actor: host, workspaceId: alpha, projectRef: team.projectRef,
+      subscriptionRef, acceptedSequence: pending[0]!.acceptedSequence, eventId })
+    return reader => team.ledger.mainStreamHistory(reader, { workspaceId: alpha, projectRef: team.projectRef })
+      .entries.find(entry => entry.kind === 'subscription-event' && entry.event.event.id === eventId)
+  }
+
+  it('marks only the addressed recipients, and leaves the owners and the Human no Inbox entry', async () => {
+    const team = await seed({ rulesVersion: current })
+    const subscriptionRef = await addressed(team, [team.writer.memberId])
+    const entryFor = await publishOne(team, subscriptionRef)
+
+    const writer = entryFor(team.writer.actor)
+    expect(writer).toMatchObject({ unread: true, direct: true })
+    const owner = entryFor(team.owner.actor)
+    expect(owner).toMatchObject({ unread: false, direct: false })
+    const humanView = entryFor(human)
+    expect(humanView).toMatchObject({ unread: false, direct: false })
+    // The event is still a readable timeline fact for everyone who was not addressed.
+    expect(owner?.kind === 'subscription-event' && owner.event.event.title).toBe('Build failed')
+    expect(() => replayedAt(team.table, current)).not.toThrow()
+  })
+
+  it('publishes an event with an empty recipient set and wakes nobody', async () => {
+    const team = await seed({ rulesVersion: current })
+    const subscriptionRef = await addressed(team, [])
+    const entryFor = await publishOne(team, subscriptionRef)
+    expect(entryFor(team.owner.actor)).toMatchObject({ unread: false, direct: false })
+    expect(entryFor(team.writer.actor)).toMatchObject({ unread: false, direct: false })
+    expect(entryFor(human)).toMatchObject({ unread: false, direct: false })
+    expect(() => replayedAt(team.table, current)).not.toThrow()
+  })
+
+  it('drops a recipient who has left the Project instead of falling back to an owner', async () => {
+    const team = await seed({ rulesVersion: current })
+    const subscriptionRef = await addressed(team, [team.writer.memberId])
+    await team.ledger.removeMember({ requestId: requestId('remove'), actor: human, memberId: team.writer.memberId })
+    const entryFor = await publishOne(team, subscriptionRef)
+    expect(entryFor(team.owner.actor)).toMatchObject({ unread: false, direct: false })
+    expect(entryFor(human)).toMatchObject({ unread: false, direct: false })
+    expect(() => replayedAt(team.table, current)).not.toThrow()
+  })
+
+  it('still delivers an automatic failure pause to every owner and the Human, whatever the recipients are', async () => {
+    const team = await seed({ rulesVersion: current })
+    const subscriptionRef = await addressed(team, [team.writer.memberId])
+    await team.ledger.pauseSubscription({ requestId: requestId('pause'), actor: host, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, reason: 'failures' })
+    // Addresses decide events, never the Host's own health report about them.
+    const pauseOf = (reader: AgentTeamHumanActor | AgentTeamMemberActor): boolean => team.ledger.mainStreamHistory(reader, { workspaceId: alpha, projectRef: team.projectRef })
+      .entries.some(entry => entry.kind === 'activity' && entry.activity.kind === 'subscription-paused' && entry.direct)
+    expect(pauseOf(team.owner.actor)).toBe(true)
+    expect(pauseOf(human)).toBe(true)
+    expect(pauseOf(team.writer.actor)).toBe(false)
+    expect(() => replayedAt(team.table, current)).not.toThrow()
+  })
+
+  it('drops a departed recipient before a lifecycle write carries the record forward', async () => {
+    const team = await seed({ rulesVersion: current })
+    const subscriptionRef = await addressed(team, [team.owner.memberId, team.writer.memberId])
+    const written = new Set([...team.table.entries()].map(([key]) => key))
+    await team.ledger.removeMember({ requestId: requestId('remove'), actor: human, memberId: team.writer.memberId })
+    // Every transition stores the prior record whole, so an address that can no
+    // longer receive has to be gone by the time the next one is written.
+    await team.ledger.pauseSubscription({ requestId: requestId('pause'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, reason: 'manual' })
+    await team.ledger.resumeSubscription({ requestId: requestId('resume'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1 })
+    await team.ledger.updateSubscription({ requestId: requestId('update'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, name: 'main CI (2)', triggers: { interval: { minutes: 5 } },
+      script, credentials: [] })
+    await team.ledger.deleteSubscription({ requestId: requestId('delete'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 2 })
+
+    expect(team.ledger.subscription(subscriptionRef)?.notify).toEqual([team.owner.memberId])
+    // The create keeps the address it was written with; every record after the
+    // removal must not, whatever transition wrote it.
+    for (const [key, operation] of team.table.entries()) {
+      if (written.has(key)) continue
+      const record = (operation.data as { readonly subscription?: AgentTeamSubscription }).subscription
+      if (record?.notify !== undefined) expect(record.notify).not.toContain(team.writer.memberId)
+    }
+    expect(() => replayedAt(team.table, current)).not.toThrow()
+  })
+
+  it('drops a departed recipient when a webhook reset carries the record forward', async () => {
+    const team = await seed({ rulesVersion: current })
+    const created = await team.ledger.createSubscription({ requestId: requestId('create'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, name: 'main CI', triggers: { webhook: true }, script, credentials: [],
+      notify: [team.owner.memberId, team.writer.memberId], baselineIds: [] })
+    if (!created.committed) throw new Error('expected a committed subscription')
+    const subscriptionRef = created.value.subscription.subscriptionRef
+    await team.ledger.removeMember({ requestId: requestId('remove'), actor: human, memberId: team.writer.memberId })
+    await team.ledger.resetSubscriptionWebhook({ requestId: requestId('reset'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1 })
+
+    expect(team.ledger.subscription(subscriptionRef)?.notify).toEqual([team.owner.memberId])
+    expect(() => replayedAt(team.table, current)).not.toThrow()
+  })
+
+  it('drops a departed creator before the Host carries an upgraded record into a failure pause', async () => {
+    const team = await seed()
+    const subscriptionRef = subscriptionRefOf(await team.create(team.owner.actor))
+    const records = [...team.table.entries()].sort((left, right) => left[1].sequence - right[1].sequence)
+    const [key, last] = records.at(-1)!
+    if (last.kind !== 'team/subscription-created') throw new Error('expected the create at the ledger head')
+    const { notify: _dropped, ...legacy } = last.data.subscription
+    const table = await openTable(poolOf([...records.slice(0, -1), [key, { ...last, data: { ...last.data, subscription: legacy } }]]))
+    const reloaded = new AgentTeamLedger(table, { rulesVersion: current })
+    await reloaded.initialize()
+
+    // The creator reads back as the only recipient of a record that predates
+    // addressing; once it leaves, the Host's own pause must not store its
+    // address, or the next boot cannot load the ledger.
+    await reloaded.removeMember({ requestId: requestId('remove'), actor: human, memberId: team.owner.memberId })
+    await reloaded.pauseSubscription({ requestId: requestId('pause'), actor: host, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, reason: 'failures' })
+
+    expect(reloaded.subscription(subscriptionRef)?.notify).toEqual([])
+    expect(() => replayedAt(table, current)).not.toThrow()
+  })
+
+  it('accepts the Human as an addressed recipient and wakes only them', async () => {
+    const team = await seed({ rulesVersion: current })
+    const subscriptionRef = await addressed(team, [AGENT_TEAM_HUMAN_MEMBER_ID])
+    const entryFor = await publishOne(team, subscriptionRef)
+    expect(entryFor(human)).toMatchObject({ unread: true, direct: true })
+    expect(entryFor(team.owner.actor)).toMatchObject({ unread: false, direct: false })
+    expect(() => replayedAt(team.table, current)).not.toThrow()
+  })
+
+  it('reads a record written before recipients existed as its Creating Member alone', async () => {
+    const team = await seed()
+    const subscriptionRef = subscriptionRefOf(await team.create(team.owner.actor))
+    const records = [...team.table.entries()].sort((left, right) => left[1].sequence - right[1].sequence)
+    const [key, last] = records.at(-1)!
+    if (last.kind !== 'team/subscription-created') throw new Error('expected the create at the ledger head')
+    const { notify: _dropped, ...legacy } = last.data.subscription
+    const tampered = { ...last, data: { ...last.data, subscription: legacy } }
+    const reloaded = new AgentTeamLedger(await openTable(poolOf([...records.slice(0, -1), [key, tampered]])), { rulesVersion: current })
+    await reloaded.initialize()
+
+    expect(reloaded.subscription(subscriptionRef)?.notify).toEqual([team.owner.memberId])
+    // The legacy default is the creator, not the old owner-wide delivery: the
+    // Human is the discriminator, since the previous rule always reached them.
+    const legacyTeam = { ...team, ledger: reloaded }
+    const entryFor = await publishOne(legacyTeam, subscriptionRef, 'legacy')
+    expect(entryFor(team.owner.actor)).toMatchObject({ unread: true, direct: true })
+    expect(entryFor(human)).toMatchObject({ unread: false, direct: false })
   })
 })

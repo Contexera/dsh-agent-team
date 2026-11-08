@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamDmDeliveryError, markAgentTeamPreset, reminderRefForCallId, teamMessageSurface, activityText } from '@contexera/dsh-agent-team/host'
 import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
 import { projectRefOf, service, workspaceOf, workspaceParam } from './host-access.ts'
+import { memberTarget } from './member-target.ts'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
 import type {
   AgentTeamActivity,
@@ -1094,7 +1095,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
       if (kind === 'discussion' && args.sourceThreadRefs !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'start (discussion)', parameter: 'sourceThreadRefs', owner: 'start' }))
       const request = { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent), projectRef: projectRefOf(args.projectRef) as never, body: args.body, ...paths }
       const result = await host.startThreadForAgent(agent, { ...request, kind,
-        ...(args.accountable === undefined ? {} : { accountable: accountableTarget(host, args.accountable) }),
+        ...(args.accountable === undefined ? {} : { accountable: memberTarget(host, args.accountable) }),
         ...(args.sourceThreadRefs === undefined ? {} : { sourceThreadRefs: args.sourceThreadRefs.map(ref => ref as AgentTeamThreadRef) }) })
       return messageOutcome(result, 'start')
     }
@@ -1217,16 +1218,7 @@ function withTaskAuthorityHint(error: unknown, host: AgentTeam, agent: Parameter
  * The Human is addressable by role — by the configured handle or the literal `human` — because `member:human` is the one id no roster lists.
  * A bare Agent handle resolves too: a model reading a board row or a message body has handles in front of it, and the ledger only resolves refs.
  */
-function accountableTarget(host: AgentTeam, raw: string): AgentTeamMemberId {
-  const trimmed = raw.trim()
-  const lower = trimmed.replace(/^@/u, '').toLowerCase()
-  if (trimmed === AGENT_TEAM_HUMAN_MEMBER_ID || lower === 'human' || lower === host.humanHandle().toLowerCase()) return AGENT_TEAM_HUMAN_MEMBER_ID
-  const member = host.members().find(status => status.member.handle.toLowerCase() === lower)
-  if (member === undefined && !trimmed.startsWith('member:')) {
-    throw new Error(recoveryFor('unknown_ref').sentence({ refused: trimmed }))
-  }
-  return member === undefined ? trimmed as AgentTeamMemberId : member.member.memberId
-}
+
 
 const teamTask = defineTool({
   name: 'team_task',
@@ -1347,7 +1339,7 @@ const teamTask = defineTool({
       if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) throw new Error(recoveryFor('missing_write_token').sentence({}))
       const result = await host.promoteThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
         threadRef: args.threadRef as AgentTeamThreadRef, baseRevision,
-        ...(args.accountable === undefined ? {} : { accountable: accountableTarget(host, args.accountable) }) })
+        ...(args.accountable === undefined ? {} : { accountable: memberTarget(host, args.accountable) }) })
       if (result.kind === 'committed') return { kind: result.kind, action: 'promote', taskRef: result.task.taskRef, threadRef: result.thread.threadRef,
         revision: result.thread.revision, status: result.task.status, accountable: result.task.accountable, occurredAt: result.receipt.occurredAt }
       if (result.kind === 'unread_required') return { kind: result.kind, threadRef: result.threadRef, revision: result.revision,
@@ -1374,7 +1366,7 @@ const teamTask = defineTool({
     if (args.action === 'transfer') {
       if (args.direction !== undefined || args.claimRef !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'transfer', parameter: args.direction === undefined ? 'claimRef' : 'direction', owner: args.direction === undefined ? 'done' : 'claim' }))
       if (args.target === undefined || args.target.trim() === '') throw new Error('transfer needs target — the enabled Project member who becomes accountable for this Task, or human.')
-      const target = accountableTarget(host, args.target)
+      const target = memberTarget(host, args.target)
       let transferred: Awaited<ReturnType<AgentTeam['transferTaskForAgent']>>
       try {
         transferred = await host.transferTaskForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, target, baseRevision })

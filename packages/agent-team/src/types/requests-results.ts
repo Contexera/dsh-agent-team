@@ -1354,6 +1354,8 @@ export interface AgentTeamCreateSubscriptionRequest {
   readonly webhook?: boolean | undefined
   readonly script: AgentTeamSubscriptionScriptSource
   readonly credentials?: readonly import('../subscriptions.ts').SubscriptionCredential[] | undefined
+  /** Who its events are for; omitted means the Creating Member alone. Every id must be a current Project member. */
+  readonly notify?: readonly AgentTeamMemberId[] | undefined
   readonly baseline?: AgentTeamSubscriptionBaselineChoice | undefined
 }
 
@@ -1370,6 +1372,8 @@ export interface AgentTeamUpdateSubscriptionRequest {
   readonly webhook?: boolean | undefined
   readonly script: AgentTeamSubscriptionScriptSource
   readonly credentials?: readonly import('../subscriptions.ts').SubscriptionCredential[] | undefined
+  /** Who its events are for; omitted keeps the stored set, and `[]` clears it to the timeline alone. */
+  readonly notify?: readonly AgentTeamMemberId[] | undefined
 }
 
 export interface AgentTeamTestSubscriptionRequest {

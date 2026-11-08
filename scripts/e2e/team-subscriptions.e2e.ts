@@ -77,7 +77,10 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await card.getByRole('heading', { name: 'main 分支 CI 失败' }).waitFor()
   const cardText = await card.textContent()
   expect(cardText).toContain('每 10 分钟')
-  expect(cardText).toContain('负责人')
+  // The recipient line leads, and the owner is not printed twice: by default they are one Member.
+  const human = team.humanHandle()
+  expect(cardText).toContain(`通知 ${human}`)
+  expect(cardText).not.toContain('· 负责人')
   expect(cardText).toContain('还没有运行记录')
   // A zero count is stated once, never as both "no events" and "0 events".
   expect(cardText).not.toContain('共 0 条事件')
@@ -94,15 +97,50 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
 
   // An owner's edit leaves the trial run this page reads; the run record is the
   // one place the script's own output is shown.
-  await team.updateSubscription({
+  const edited = await team.updateSubscription({
     requestId: 'req:seed-edit' as AgentTeamRequestId, workspaceId, projectRef,
     subscriptionRef: seeded.subscription.subscriptionRef,
     expectedRevision: seeded.subscription.revision,
     name: 'main 分支 CI 失败', intervalMinutes: 10, script: { scriptContent: EDITED_SCRIPT },
   })
+  if (edited.kind !== 'changed') throw new Error('the Host refused the edited script')
   await tabs.getByRole('tab', { name: '主对话' }).click()
   await subscriptionsTab.click()
   await card.getByText(/上次运行/).waitFor()
+
+  // An empty set wakes nobody but still states itself: the timeline keeps every event.
+  const cleared = await team.updateSubscription({
+    requestId: 'req:seed-notify-clear' as AgentTeamRequestId, workspaceId, projectRef,
+    subscriptionRef: seeded.subscription.subscriptionRef,
+    expectedRevision: edited.subscription.revision,
+    name: 'main 分支 CI 失败', intervalMinutes: 10, script: { scriptContent: EDITED_SCRIPT }, notify: [],
+  })
+  if (cleared.kind !== 'changed') throw new Error('the Host refused an empty recipient set')
+  await card.getByText(`不推送通知（事件仍进主对话时间线） · 负责人 ${human}`).waitFor()
+  await settleAnimations(page)
+  await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'notify-cleared-desktop.png'), fullPage: true })
+
+  // The cleared line is the longest fact a card can carry, so it is the wrapping one.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await card.waitFor()
+  expect(await maxHorizontalScroll(page, '[data-team-subscriptions]')).toBe(0)
+  await settleAnimations(page)
+  await card.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'notify-cleared-mobile.png') })
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+
+  // Naming the owner again returns the card to one line.
+  const restored = await team.updateSubscription({
+    requestId: 'req:seed-notify-restore' as AgentTeamRequestId, workspaceId, projectRef,
+    subscriptionRef: seeded.subscription.subscriptionRef,
+    expectedRevision: cleared.subscription.revision,
+    name: 'main 分支 CI 失败', intervalMinutes: 10, script: { scriptContent: EDITED_SCRIPT },
+    notify: [team.view({ workspaceId }).humanMemberId],
+  })
+  if (restored.kind !== 'changed') throw new Error('the Host refused the restored recipient set')
+  await card.getByText(`通知 ${human}`).waitFor()
+  expect(await card.getByText(/负责人/).count()).toBe(0)
 
   await card.getByRole('button', { name: '运行记录 · main 分支 CI 失败' }).click()
   const logs = page.getByRole('dialog', { name: '运行记录 · main 分支 CI 失败' })

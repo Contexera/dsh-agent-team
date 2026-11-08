@@ -213,7 +213,9 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
           text: () => mainNotificationDetail(entry, project, lookup) })
       }
     }
-    const ordinary = entries.filter(entry => !entry.direct && (entry.kind === 'message' || entry.kind === 'activity' || entry.kind === 'subscription-event'))
+    // An addressed event is never ordinary unread: its recipients get the
+    // direct detail above, and everyone else gets nothing at all.
+    const ordinary = entries.filter(entry => !entry.direct && (entry.kind === 'message' || entry.kind === 'activity'))
     if (ordinary.length > 0) {
       const newest = ordinary.at(-1)!
       candidates.push({ scope, priority: 3, order: order++, sequence: newest.sequence, detail: true, direct: false,
@@ -294,10 +296,8 @@ function mainOrdinaryDigest(entries: readonly AgentTeamMainTimelineEntry[], proj
   return ordinaryDigestSection(`Main stream: ${count} unread update${count === 1 ? '' : 's'} · Project ${project.projectRef} · newest at ${newestAt}.`, entries,
     entry => {
       if (entry.kind === 'message') return `${lookup.printableSender(entry.message.sender)}: ${notificationDigestText(entry.message.body)}`
-      if (entry.kind === 'subscription-event') {
-        return `Subscription ${entry.event.subscriptionName} (${entry.event.subscriptionRef}) reported: ${notificationDigestText(entry.event.event.title)} · untrusted external data`
-      }
       if (entry.kind === 'thread-card') throw new Error('a Thread card is not an ordinary digest entry')
+      if (entry.kind === 'subscription-event') throw new Error('an addressed subscription event is not an ordinary digest entry')
       const { activity } = entry
       if (!('memberId' in activity)) return subscriptionActivitySentence(activity, lookup)
       const actor = lookup.printableSender(activity.actor)

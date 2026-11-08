@@ -622,6 +622,7 @@ const fixtureSubscription: AgentTeamSubscription = {
   subscriptionRef: 'subscription:protocol-1' as AgentTeamSubscriptionRef,
   projectRef,
   name: 'protocol feed',
+  notify: [],
   triggers: { interval: { minutes: 15 } },
   script: protocolScript.script,
   credentials: [],

@@ -32,6 +32,7 @@ function subscription(overrides: { readonly script?: ReturnType<typeof script>; 
     subscriptionRef: 'subscription:runner' as AgentTeamSubscriptionRef,
     projectRef: 'project:p' as never,
     name: 'runner',
+    notify: [],
     triggers: { interval: { minutes: 10 } },
     script: overrides.script ?? script('printf \'{"id":"a","title":"A"}\\n\'\n'),
     credentials: overrides.credentials ?? [],

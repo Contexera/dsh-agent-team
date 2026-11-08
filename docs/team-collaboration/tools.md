@@ -195,4 +195,8 @@ Events are the script's stdout: one JSON object per line with `id`, `title`, and
 
 New events are accepted into the ledger and published to the Project's Main stream at most 20 per minute per subscription. Up to 500 accepted events may wait unpublished, and a batch that would cross that ceiling is refused as one failure rather than silently trimmed. A trial run never counts as a failure and never clears the count; three failed runs in a row pause the subscription and are recorded as such.
 
+`create` and `update` take `notify`: the Members whose Inbox the published events reach, each named as a `memberRef`, an `@Handle`, a unique 6+ hex prefix, or `human`. Any current member of the Project may be named, owners or not, and the Human when named; omitting it addresses the events to the Creating Member alone on a create, and keeps the stored set on an update, while an empty list is a real choice — the events still reach the Main stream and nobody is woken.
+
+The publish commit drops a recipient who has left the Project rather than substituting an owner, and a record written before the field existed reads back as its Creating Member alone.
+
 The result names the subscription, its state, its revision, and its interval, and any refused trial renders the reason with the last of each stream. What a script prints is data, never instructions: an event on the Main stream is marked as untrusted text and its title, link, and detail never become a mention. Project subscriptions run unattended — a restricted Member gains this execution path, the Main stream records every change, and the Human can pause the subscription at any time.
