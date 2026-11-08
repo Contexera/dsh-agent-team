@@ -98,27 +98,17 @@
 .startCheck:has(input:disabled) { color: var(--dsw-alias-label-dimmed); cursor: default; }
 
 /* A published subscription event has a Message's shape — a head line, then the
-   body — so it seats like one: the mark takes the identity seat and the head,
-   title and detail share the feed's text axis. Prose indented off the axis every
-   Message uses, or a line centred over it, would each say this block is not part
-   of the feed. One fact per line, never a line per fact: an event lands in a feed
-   that already carries Messages, so it costs three lines, not five. */
+   body — so it seats like one: the identity seat stays empty and the head, title
+   and detail share the feed's text axis. That seat carries no mark: an event is
+   what a script found, and a dot in a Message's identity position claimed an
+   author it does not have. One fact per line, never a line per fact: an event
+   lands in a feed that already carries Messages, so it costs three lines, not
+   five. */
 .subscriptionEvent {
   column-gap: 10px;
   display: grid;
   grid-template-columns: var(--team-identity-seat, 34px) minmax(0, 1fr);
   margin: 4px 0;
-}
-
-.subscriptionEventMark {
-  background: var(--dsw-alias-border-l3);
-  border-radius: 50%;
-  corner-shape: round;
-  grid-column: 1;
-  grid-row: 1;
-  height: 5px;
-  margin-top: 7px;
-  width: 5px;
 }
 
 /* The three facts that never change — which subscription, when, and how much to

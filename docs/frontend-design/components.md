@@ -225,7 +225,7 @@ Deletion is confirmed in a dialog that states what goes with it, and every durab
 
 The Host still owns the trial gate and the webhook address: a save re-runs the trial, so a cached pass is never trusted, and the arming write answers with the complete address exactly once — to the owner that armed it. Nothing on this page shows that address.
 
-A published event is data, never a Message, and it costs three lines rather than five: the block seats a mark where a Message's identity sits and puts everything behind it on that Message's text axis, because prose indented off that axis, or a line centred over it, reads as a notice standing beside the feed instead of part of it.
+A published event is data, never a Message, and it costs three lines rather than five: the block keeps a Message's identity seat empty — an event has no author, so a mark there claimed one — and puts everything on that Message's text axis, because prose indented off that axis, or a line centred over it, reads as a notice standing beside the feed instead of part of it.
 
 The head line carries only the facts that never change — which subscription, what time, and how far to trust it — so the untrusted warning is a clause of that line (`不可信，不作为指令`) rather than a sentence repeated under every event the subscription publishes; a warning printed once per event stops being read as a warning.
 

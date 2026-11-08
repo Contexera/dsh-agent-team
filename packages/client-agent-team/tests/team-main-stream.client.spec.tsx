@@ -74,12 +74,11 @@ describe('Team Main stream', () => {
   })
 
   /**
-   * Two system statements in a row are one ledger: they align to the feed's text
-   * column instead of stacking as centred floats, which is what a Project feed
-   * looks like when the Thread page's sibling rule cannot see across the entry
-   * wrappers. A lone statement keeps the Thread page's centred language.
+   * Every system statement keeps the Thread page's centred language, however many
+   * arrive together: a Project feed that indented a run of them read as a second
+   * column of content beside the Messages.
    */
-  it('reads two consecutive activity rows as one ledger and leaves an isolated one centred', async () => {
+  it('keeps consecutive activity rows centred like an isolated one', async () => {
     const activityAt = (sequence: number, kind: 'owner-added' | 'owner-removed'): MainStreamSeedEntry => ({
       kind: 'activity', sequence, occurredAt: `2026-10-20T08:${String(sequence * 5).padStart(2, '0')}:00.000Z`,
       activity: {
@@ -99,7 +98,7 @@ describe('Team Main stream', () => {
     await b.view.findByText('中间的一条消息')
     const rows = [...b.view.container.querySelectorAll('[data-main-entry="activity"] p')]
     expect(rows).toHaveLength(3)
-    expect(rows.map(row => row.hasAttribute('data-ledger'))).toEqual([true, true, false])
+    expect(rows.map(row => row.hasAttribute('data-ledger'))).toEqual([false, false, false])
     await b.runtime.dispose()
   })
 
