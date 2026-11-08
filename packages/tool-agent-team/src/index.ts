@@ -1214,12 +1214,6 @@ function withTaskAuthorityHint(error: unknown, host: AgentTeam, agent: Parameter
   return new Error(`${message} Currently ${base.taskRef} is ${listed.task.status}${listed.task.resolution === 'open' ? '' : ` (${listed.task.resolution})`}, accountable to ${accountableLabel(host, listed.task.accountable)}.`)
 }
 
-/**
- * The Human is addressable by role — by the configured handle or the literal `human` — because `member:human` is the one id no roster lists.
- * A bare Agent handle resolves too: a model reading a board row or a message body has handles in front of it, and the ledger only resolves refs.
- */
-
-
 const teamTask = defineTool({
   name: 'team_task',
   description: 'Work with Tasks. board lists the Task board of the Projects you can see — every open Task with its status, who is accountable for it, and the Members on it, plus each Project\'s newest finished Tasks — filtered by projectRef or to your own responsibility with mine; it is current state, not unread, so check it before you claim or when a Workspace change surprises you. promote turns a discussion Thread into a Task (Project owners only) and takes accountable to name the owner responsible for it; a Task started with team_message start takes the same field. list, claim, done and release manage your Direction Claims. Every Task has one accountable: the Human or an Agent Member. accept finishes a Task as verified work; close ends it without acceptance; reopen returns it to open work; transfer hands accountability to another enabled Project member or back to the Human, and the new accountable starts following the Thread. Who may do which is the Host\'s call, not yours to reason around: accept belongs to the Human, to a Project owner, or to the Task\'s own accountable, and never to a Member that held any Claim on it (an Agent may accept only an in_review Task); close, reopen and transfer belong to the Human or the current accountable. Finishing your own Claim is not acceptance, and an Agent that executed a Task cannot verify it. transfer moves responsibility only — Claims and their owners stay where they are. Mutations need a current token from a drained read, your own commit, or a complete rejection that provides one. Reconsider the facts first; each attempt rechecks them and Task permissions. list only refreshes active Claims.',

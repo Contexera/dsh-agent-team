@@ -133,7 +133,6 @@ function notifyLine(notify: readonly string[]): string {
   return notify.length === 0 ? 'notify: nobody (published to the timeline only)' : `notify: ${notify.join(', ')}`
 }
 
-
 /** Which of the two triggers a subscription carries: either one alone is a complete subscription. */
 function triggersOf(subscription: { readonly intervalMinutes?: number | undefined; readonly webhook?: boolean | undefined }): string {
   const timer = subscription.intervalMinutes === undefined ? '' : `every ${subscription.intervalMinutes} min`
