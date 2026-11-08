@@ -800,6 +800,46 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await pickerPromise
   await page.locator('[data-team-composer] input[type="file"]').setInputFiles([{ name: '验收截图.png', mimeType: 'image/png', buffer: pngBytes }])
   await page.getByText('验收截图.png').waitFor()
+
+  // Dragging a file onto the composer is the same intake as the picker: the
+  // composer states what releasing does, then takes the file instead of letting
+  // the browser navigate to it.
+  const dragging = await page.evaluate(() => {
+    const target = document.querySelector('[data-team-composer]')
+    if (target === null) throw new Error('the Team composer is not on screen')
+    const canvas = document.createElement('canvas')
+    canvas.width = 4
+    canvas.height = 4
+    const painted = canvas.getContext('2d')
+    painted!.fillStyle = '#f59e0b'
+    painted!.fillRect(0, 0, 4, 4)
+    return new Promise<boolean>(resolve => {
+      canvas.toBlob(blob => {
+        const transfer = new DataTransfer()
+        transfer.items.add(new File([blob!], '拖进来的截图.png', { type: 'image/png' }))
+        const fire = (type: string): boolean => target.dispatchEvent(new DragEvent(type, { dataTransfer: transfer, bubbles: true, cancelable: true }))
+        fire('dragenter')
+        resolve(fire('dragover') === false)
+      }, 'image/png')
+    })
+  })
+  // A drag the composer accepts cancels the default, which is what stops the tab
+  // from opening the file.
+  expect(dragging).toBe(true)
+  await page.getByText('松开即可把文件加进这条消息').waitFor()
+  const dropped = await page.evaluate(() => {
+    const target = document.querySelector('[data-team-composer]')
+    if (target === null) throw new Error('the Team composer is not on screen')
+    const transfer = new DataTransfer()
+    transfer.items.add(new File(['dropped'], '拖进来的截图.png', { type: 'image/png' }))
+    return target.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true })) === false
+  })
+  expect(dropped).toBe(true)
+  await page.getByText('拖进来的截图.png').waitFor()
+  await page.screenshot({ path: join(UI04_SHOTS, 'composer-drop-chip.png'), fullPage: true })
+  await page.getByRole('button', { name: '移除 拖进来的截图.png' }).click()
+  await expect.poll(async () => await page.getByText('拖进来的截图.png').count()).toBe(0)
+
   await projectComposer.fill('这是带附件的验收消息')
   await page.screenshot({ path: join(UI04_SHOTS, 'composer-attachment-chip.png'), fullPage: true })
   await page.getByRole('button', { name: '发送' }).click()

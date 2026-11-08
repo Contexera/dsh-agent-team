@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { ChangeEvent, ClipboardEvent, KeyboardEvent, ReactNode } from 'react'
+import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent, ReactNode } from 'react'
 import { startsMentionAt } from '@contexera/dsh-agent-team/mentions'
 import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { IconPaperclipOutlineMedium, IconSendOutlineRegular, Tooltip, useAnchoredMaxHeight, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -101,9 +101,12 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
   const menuRef = useRef<HTMLDivElement>(null)
   const activeOptionRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
+  /** Nested dragenter depth: a drag crossing the composer's children reports leaves it never left. */
+  const dragDepth = useRef(0)
   // Subscribing here, not in the hosting page, keeps a keystroke off the timeline.
   const { draft } = useSyncExternalStore(drafts.subscribe, () => drafts.getSnapshot(draftKey))
   const [mention, setMention] = useState<MentionMatch>()
+  const [dropHover, setDropHover] = useState(false)
   const [highlight, setHighlight] = useState(0)
   const mentionSurface = mentionSurfaceOf(draftKey)
   const groups = mention === undefined
@@ -211,6 +214,53 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
     onFilesChange([...pendingFiles, ...files])
   }
 
+  // A file dragged over the composer is the same intake as a pasted one, so it
+  // lands on the same list; `dragDepth` survives the child elements a drag
+  // crosses, which would otherwise report a leave between every one of them.
+  const acceptsDrop = (event: DragEvent<HTMLElement>): boolean =>
+    onFilesChange !== undefined && pendingFiles !== undefined && !pending
+    && event.dataTransfer.types.includes('Files')
+  const onDragEnter = (event: DragEvent<HTMLDivElement>): void => {
+    if (!acceptsDrop(event)) return
+    event.preventDefault()
+    dragDepth.current += 1
+    setDropHover(true)
+  }
+  const onDragOver = (event: DragEvent<HTMLDivElement>): void => {
+    if (!acceptsDrop(event)) return
+    // Without this the browser navigates the tab to the dropped file.
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+  const onDragLeave = (): void => {
+    if (dragDepth.current === 0) return
+    dragDepth.current -= 1
+    if (dragDepth.current === 0) setDropHover(false)
+  }
+  const onDrop = (event: DragEvent<HTMLDivElement>): void => {
+    if (!acceptsDrop(event) || onFilesChange === undefined || pendingFiles === undefined) return
+    event.preventDefault()
+    const dropped = [...event.dataTransfer.files]
+    dragDepth.current = 0
+    setDropHover(false)
+    if (dropped.length > 0) onFilesChange([...pendingFiles, ...dropped])
+  }
+
+  // A file dropped beside the composer must not navigate the tab to it either:
+  // the composer takes the drop, everything else declines it.
+  useEffect(() => {
+    if (onFilesChange === undefined || pendingFiles === undefined) return undefined
+    const guard = (event: globalThis.DragEvent): void => {
+      if (event.dataTransfer?.types.includes('Files') === true) event.preventDefault()
+    }
+    document.addEventListener('dragover', guard)
+    document.addEventListener('drop', guard)
+    return () => {
+      document.removeEventListener('dragover', guard)
+      document.removeEventListener('drop', guard)
+    }
+  }, [onFilesChange, pendingFiles])
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     const composing = composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
     if (menuOpen && options.length > 0 && event.key === 'ArrowDown') {
@@ -247,7 +297,9 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
     event.preventDefault()
     if (!pending && draft.trim() !== '') onSubmit()
   }}>
-    <div className={css.card} data-team-composer>
+    <div className={css.card} data-team-composer
+      onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+      {dropHover && <p className={css.notice} role="status" data-drop-active>{t('composerDropHint')}</p>}
       {notice !== undefined && <p className={css.notice} role="status">{notice}</p>}
       {replyTo !== undefined && <div className={css.replyBanner} data-reply-banner="">
         <span className={css.replyBannerBody}>

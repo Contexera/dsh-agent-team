@@ -34,6 +34,7 @@
 - 收件人提示行：通知集合非空时在草稿与工具栏之间渲染 quiet 提示行（`.notifyRow`，`composerNotify` 文案 + `{ids}` 句柄列表）。发送前即可看到"将通知谁"。集合由正文手打的 `@Handle` 派生（`mentionedMemberIds`，与 Host 同一套大小写不敏感、ASCII 词边界的规则），回复时再加上被引用 Message 的作者。正文是唯一的投递依据，请求不再携带任何显式收件人列表，所以提示行与发送读出的是同一个集合。Project 还没包含的收件人会在提示行里被点名为「加入本项目」，于是这次点名会提交的成员关系在发送前就可见。空集合不占位。
 - 点名读者这件事只在行上表达一次，不在 chip 上：所有 mention chip 同样式，卡片上给出「提到了你」提示。正文写的是读者改名前的 handle 时，行与提示一样成立 —— 判定跟着身份走，不跟着拼写走。
 - Project composer 发到 Main stream，工具区是 `讨论/任务` 开关。它是 pressed button；打开后出现原生复选框 `作为任务`。关闭时发 `postMainMessage`（引用 Main 消息时带 `replyToMessageRef`）；打开时发 `startThread`，勾选则建 Task，否则建讨论；Task 提交后页面切到 `看板` 页签并把焦点放上去。引用会关掉开关，打开开关会丢掉引用，因为新 Thread 没有引用目标。Host 返回 `main_unread_required` 时保留草稿，刷新并读取主对话，用状态行提示 Human 先看一下再发；重发是新的 operation。版本 2 的回复不再要求确认；Main stream 与 Thread composer 都不提供 `@all`，也不把它展开为 recipients，手打的 `@all` 就是普通文本。
+- 文件有三条进草稿的路，落进同一份列表：选择器、携带文件的粘贴、拖到 composer 上。携带文件的拖动先用 composer 自己的状态行说明松开会发生什么；落下时取消浏览器默认，所以在 composer 旁边松手也不会把页面导航到那个文件。
 - 草稿缓存：草稿内容不在页面局部，按 `project:<projectRef>` / `thread:<threadRef>` 键存放。每 Client 上下文存一份 `TeamDraftStore`（`drafts.ts`）。它用单一 localStorage 键 `dsh.agent-team.drafts.v1`，写穿持久化，按 savedAt 淘汰最旧 ~50 条，每条只存正文与保存时刻。切换视图或刷新后草稿原样恢复。发送提交成功即清除对应键，失败保留。旧版草稿里残留的 `recipientIds` 字段在读取时直接忽略，不做迁移。Project 的「作为任务」意图不进入草稿缓存：默认关闭，成功提交后再次复位关闭。
 - taskless Thread 的「转为任务」是 Human-only durable mutation，不做乐观 overlay。成功后重新读取 Thread 与补充 Project/Member 投影；unread/stale fence 时保留 Host 返回错误并重新读取相关事实。
 

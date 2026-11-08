@@ -519,6 +519,33 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
+  it('takes a dropped file as the same attachment a paste or picker adds', async () => {
+    const b = await runtimeWithTeam({ initialProjects: true })
+    fireEvent.click(b.view.getByRole('button', { name: '团队' }))
+    await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
+    const chipCount = (): number => b.view.container.querySelectorAll('ul[aria-label="添加附件"] > li').length
+    const card = b.view.container.querySelector('[data-team-composer]')!
+    const dropped = new File(['shot'], 'dragged.png', { type: 'image/png' })
+    const transfer = (): { types: string[]; files: File[]; items: never[]; dropEffect: string } =>
+      ({ types: ['Files'], files: [dropped], items: [], dropEffect: 'none' })
+
+    // The hint is the composer's own status line, and the depth guard keeps it
+    // steady while the drag crosses the composer's children.
+    fireEvent.dragEnter(card, { dataTransfer: transfer() })
+    await waitFor(() => { expect(b.view.container.querySelector('[data-drop-active]')?.textContent).toBe('松开即可把文件加进这条消息') })
+    fireEvent.dragEnter(card, { dataTransfer: transfer() })
+    fireEvent.dragLeave(card, { dataTransfer: transfer() })
+    expect(b.view.container.querySelector('[data-drop-active]')).toBeTruthy()
+
+    fireEvent.drop(card, { dataTransfer: transfer() })
+    await waitFor(() => { expect(chipCount()).toBe(1) })
+    expect(b.view.container.querySelector('[class*="fileChipName"]')?.textContent).toContain('dragged.png')
+    expect(b.view.container.querySelector('[data-drop-active]')).toBeNull()
+    await b.runtime.dispose()
+  })
+
   it('caches composer drafts across view switches and clears them on committed sends', async () => {
     const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))

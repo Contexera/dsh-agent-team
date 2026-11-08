@@ -50,6 +50,8 @@ Off sends `postMainMessage`, with `replyToMessageRef` when a Main message is quo
 
 When the Host answers `main_unread_required` the draft stays, the stream is refreshed and read, and a status line asks the Human to look and send again; the retry is a new operation.
 
+A file reaches the draft three ways and lands on one list: the picker, a paste that carries files, or a drop on the composer. A drag that carries files states itself in the composer's own status line before it lands, and the drop cancels the browser's default so a file released beside the composer cannot navigate the page to it.
+
 Replies never ask for confirmation at version 2, and neither the Main stream nor Thread composers offer `@all` or expand it into recipients; a typed `@all` is plain text.
 
 ## Quoting a Message
