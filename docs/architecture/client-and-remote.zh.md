@@ -68,7 +68,7 @@ UI work 的边界如下：
   Thread reads 使用 Host projections（`readThread`、`threadHistory`）和 Host mutations（replies、promotion、Task actions）。 当前 Thread UI 不提供 Attention controls 或 observations。这些 controls 的 Host Remote methods 留给后续自有 UI。 Browser 会持久化四样东西。Team navigation mode、Workspace selection、最近选中的 Project 或 Thread，还有 Inbox 页位置。回到 Team 时恢复位置。unread 或 Attention 不持久化。
 
   Agent Inbox 仍由 Host 持有，并通过 `team_inbox` 提供。
-- Sidebar row order（Projects/Agents）是每个 browser 的 Human presentation preference，保存在 `localStorage`。加载时折叠到 Remote default order 上。保留的 refs 保持顺序，移除的 refs 丢弃，新的 refs 追加。它从不成为 ledger fact。Whole-row native drag 复用 Harness list interaction model。它是 Team-owned rows 唯一的重排控件。
+- Sidebar row order（Projects/Agents）是 Human presentation preference，存进 Team Host row 的 `sidebarOrder` 设置（与 Human profile 并列），并按浏览器缓存到 `localStorage`；加载时折叠到 Remote default order 上。保留的 refs 保持顺序，移除的 refs 丢弃，新的 refs 追加。它从不成为 ledger fact，也不是 Agent 可读的偏好。Whole-row native drag 复用 Harness list interaction model，是 Team-owned rows 唯一的重排控件；一次拖拽向 Host 写一次，丢了缓存的浏览器也能读回同一顺序。
 - 嵌入的 Team Member Session 使用未修改的 shipped composer。Team 不注册任何成员会话的 composer 表面。它不接管 seat，没有 trigger sources，没有 dock 提示条。rc.1 把 trigger-menu overlay 移进了 `conversation.composer.bar` 的 children。接管者会一并继承渲染义务，并使 overlay 悬空。Team 自有的命令/成员引用入口相对 shipped 词汇表不再有不可替代的价值，因此一并移除。普通会话与 Member Session 共享同一 composer 与词汇表。
 - 有对应能力时复用 public Harness primitives 和 `--dsw-*` theme tokens。
 - CSS 保持在 CSS Modules 中；不要 import private Harness CSS。

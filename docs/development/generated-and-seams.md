@@ -12,7 +12,7 @@ Keyboard: visible focus, Tab/Enter/Space/Escape behavior, accessible dialog/menu
 State: failed submits preserve input; durable mutations render Host projections
 ```
 
-Browser-local presentation preferences — for example the Team sidebar's Project/Agent row order in `dsh.agent-team.sidebar-order` — are UI-preference persistence, not Team facts: when their shape changes, verify drag and post-refresh reconcile against the review list above.
+UI presentation preferences — the Team sidebar's Project/Agent row order is the Host row's `sidebarOrder` setting, cached in `dsh.agent-team.sidebar-order` — are not Team facts and never enter the ledger: when their shape changes, verify drag, the Host write, the cached read, and post-refresh reconcile against the review list above.
 
 These screenshots are human review material, not pixel snapshots. Keep only a small set of milestone images under `.scratch/archive/YYYY-MM/<work>/validation/`, with filenames, acceptance points, and rerun commands. Keep debug screenshots, recordings, logs, and complete test-run image sets ignored.
 

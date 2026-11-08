@@ -69,6 +69,7 @@ import { TeamQueries, teamQueryKey, type TeamQueryIdentity, type WorkspaceScopeK
 import { TeamDraftStore } from './drafts.ts'
 import { TeamPanelIcon } from './TeamPanelIcon.tsx'
 import { TeamConversation } from './TeamConversation.tsx'
+import { attachSidebarOrderHost } from './sidebar-order.ts'
 import { TeamWorkspaceBrowser } from './TeamWorkspaceBrowser.tsx'
 import { TeamSettingsNavIcon } from './TeamSettingsNavIcon.tsx'
 import { en, zh, type TeamKey } from './locales.ts'
@@ -354,6 +355,12 @@ function applyUi(ctx: ClientContext): void {
       if (!result.ok || !result.value.mediaType.startsWith('image/')) return null
       return `data:${result.value.mediaType};base64,${result.value.bytesBase64}`
     },
+  })
+  // The sidebar row order is a Host preference (the row's `sidebarOrder` setting) cached in
+  // this browser; the panels persist through these two calls without threading props.
+  attachSidebarOrderHost({
+    load: () => ctx.remote.agentTeam.sidebarOrder({}),
+    save: request => ctx.remote.agentTeam.setSidebarOrder(request),
   })
   // An installation fact, not part of the Human's identity. Read once on the first subscriber; never written back.
   const environment = new TeamEnvironmentCheck({

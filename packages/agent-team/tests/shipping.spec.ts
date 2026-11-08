@@ -205,13 +205,18 @@ describe('Agent Team shipping contract', () => {
     // volatile node, so a write lands without a remount and the settings
     // service can derive it at all.
     const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
-    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'wakeRecycle', 'webhook'])
+    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'sidebarOrder', 'wakeRecycle', 'webhook'])
     expect(rowFields.wakeRecycle?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.wakeRecycle?.dict ?? {}).sort()).toEqual(['enabled', 'idleMs', 'minContextTokens'])
     expect(Object.values(rowFields.wakeRecycle?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
     expect(rowFields.memberCompaction?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.memberCompaction?.dict ?? {}).sort()).toEqual(['enabled', 'tokens'])
     expect(Object.values(rowFields.memberCompaction?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
+    // The sidebar order is the Human's own presentation, not a Team fact, so it
+    // rides the same row and must stay volatile for a drag to reach the Host.
+    expect(rowFields.sidebarOrder?.meta.volatile).toBe(true)
+    expect(Object.keys(rowFields.sidebarOrder?.dict ?? {}).sort()).toEqual(['lists', 'version'])
+    expect(Object.values(rowFields.sidebarOrder?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
     // The webhook entry's public address is deployment, not Team fact: it is a
     // volatile group on the same row, and its only field defaults to "unset".
     expect(rowFields.webhook?.meta.volatile).toBe(true)

@@ -303,6 +303,24 @@ export interface AgentTeamHumanProfileResult {
   readonly latestVersion?: string | undefined
 }
 
+/**
+ * Read of the Human's own sidebar row order: one map from `<workspaceId>|projects`
+ * or `<workspaceId>|agents` to the refs in the order the Human dragged them.
+ * Presentation only; no Agent tool reads or writes it.
+ */
+export interface AgentTeamSidebarOrderRequest {
+}
+
+export interface AgentTeamSidebarOrderResult {
+  readonly lists: Readonly<Record<string, readonly string[]>>
+}
+
+/** Replace one list's saved order; the Host judges the key and the refs, then answers with the whole map. */
+export interface AgentTeamSidebarOrderWriteRequest {
+  readonly key: string
+  readonly refs: readonly string[]
+}
+
 /** Local environment read: how the running DSH compares to the declared support line. */
 export interface AgentTeamEnvironmentRequest {
 }

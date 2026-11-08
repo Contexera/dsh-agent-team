@@ -56,6 +56,8 @@ const EXPECTED_REMOTE_METHODS = [
   'resolveThreadRefs',
   'resumeSubscription',
   'setHumanProfile',
+  'setSidebarOrder',
+  'sidebarOrder',
   'startThread',
   'subscriptionDeliveries',
   'subscriptionLogs',

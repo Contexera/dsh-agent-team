@@ -48,7 +48,7 @@ It also carries a second 「最近活跃」 slice that an Agent's Inbox never do
 
 Team navigation mode, Workspace selection, the last Project/Thread, and the Inbox page position are browser-persisted; unread and Attention are Host-owned.
 
-The Team sidebar keeps Projects/Agents ordering as a browser-only `localStorage` preference, merged over Remote defaults.
+The Team sidebar keeps Projects/Agents ordering as a Host-row setting (`sidebarOrder`, beside the Human profile), merged over Remote defaults and cached per browser: one drag writes the Host once, and a browser that lost its cache reads the same order back.
 
 An embedded Member Session uses the shipped composer unmodified: the Team registers no member-session composer surface — no seat shadow, no trigger sources, no dock strip. rc.1 moved the trigger-menu overlay into `conversation.composer.bar`'s children, where a shadowing entry would inherit — and strand — the overlay. The Team's own command/member reference entry points carried no irreplaceable value over the shipped vocabulary, so they were removed together.
 

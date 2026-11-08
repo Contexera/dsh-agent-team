@@ -306,6 +306,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.reload()
   await page.getByRole('heading', { name: '# delivery' }).waitFor({ timeout: 20_000 })
   await expect.poll(projectOrder, { timeout: 20_000 }).toEqual(['delivery', 'engineering'])
+  await expect.poll(() => Object.keys(scaffold.ctx.agentTeam.sidebarOrderForClient({}).lists).length, { timeout: 20_000 }).toBe(1)
+  await page.evaluate(() => { localStorage.removeItem('dsh.agent-team.sidebar-order') })
+  expect(await page.evaluate(() => localStorage.getItem('dsh.agent-team.sidebar-order'))).toBeNull()
+  await page.reload()
+  await page.getByRole('heading', { name: '# delivery' }).waitFor({ timeout: 20_000 })
+  await expect.poll(projectOrder, { timeout: 20_000 }).toEqual(['delivery', 'engineering'])
   // A brand-new project appends after the user's saved entries.
   await page.getByRole('button', { name: '新建项目' }).click()
   const rampDialog = page.getByRole('dialog', { name: '新建项目' })

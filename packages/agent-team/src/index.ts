@@ -37,6 +37,7 @@ import { reportEnvironment } from './environment-check.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile, type LegacyHumanProfileFields } from './human-profile.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowWrite } from './host-row-settings.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
+import { readableSidebarOrders, sanitizeSidebarOrderRefs, sidebarOrderKeyProblem } from './sidebar-order.ts'
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from './human-avatar.ts'
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
@@ -98,6 +99,9 @@ import type {
   AgentTeamGetHumanAvatarRequest,
   AgentTeamGetHumanAvatarResult,
   AgentTeamHumanProfileRequest,
+  AgentTeamSidebarOrderRequest,
+  AgentTeamSidebarOrderResult,
+  AgentTeamSidebarOrderWriteRequest,
   AgentTeamHumanProfileResult,
   AgentTeamPutHumanAvatarRequest,
   AgentTeamPutHumanAvatarResult,
@@ -1980,6 +1984,36 @@ export default class AgentTeam extends TypertRemoteService {
       await settings.mutate(HUMAN_PROFILE_SETTINGS_NAMESPACE, ops)
     }
     return Object.freeze({ ...this.humanProfile() })
+  }
+
+  /**
+   * The Human's own sidebar row order. Presentation only: it rides the Host row
+   * beside the profile because it must survive a browser, and it never becomes a
+   * ledger fact or an Agent-readable preference.
+   */
+  @Remote('sidebarOrder')
+  sidebarOrderForClient(_request: AgentTeamSidebarOrderRequest): AgentTeamSidebarOrderResult {
+    return Object.freeze({ lists: readableSidebarOrders(this.config.sidebarOrder.get().lists) })
+  }
+
+  /**
+   * Replace one sidebar list's saved order. Last write wins, like the profile
+   * beside it: two windows dragging the same list resolve to whichever drop
+   * landed last, and the next drag corrects it.
+   */
+  @Remote('setSidebarOrder')
+  async setSidebarOrder(request: AgentTeamSidebarOrderWriteRequest): Promise<AgentTeamSidebarOrderResult> {
+    this.requireAccepting()
+    const problem = sidebarOrderKeyProblem(request.key)
+    if (problem !== undefined) throw new Error(problem)
+    const refs = sanitizeSidebarOrderRefs(request.refs)
+    const settings = this.ctx.get('settings')
+    if (settings === undefined) throw new Error('the settings service is unavailable')
+    // One gesture, one write: the path addresses this list inside the row's
+    // `sidebarOrder.lists` dict, so neither the other Workspaces' lists nor the
+    // sibling Host-row groups are restated.
+    await settings.mutate(HUMAN_PROFILE_SETTINGS_NAMESPACE, [{ op: 'set', path: ['sidebarOrder', 'lists', request.key], value: refs }])
+    return Object.freeze({ lists: readableSidebarOrders({ ...this.config.sidebarOrder.get().lists, [request.key]: refs }) })
   }
 
   /** Human existing-Thread reply; unread and revision conflicts are business outcomes. */

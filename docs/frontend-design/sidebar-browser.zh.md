@@ -18,6 +18,8 @@ Workspace 概览是当前页时，概览携带 `aria-current='page'`。与原先
 
 刻意保持安静。折叠头无 hover 底色，仅 chevron 变色反馈。不展示分区计数。行形态有两样。项目行保留 `#` 标识。Agent 行复用头像语言并叠加 presence 角标。行内元数据（成员计数、presence 文字）已移除，保持列表简洁。
 
+行序来自 Human 自己的拖拽，且不只存在本浏览器：Team Host row 的 `sidebarOrder` 设置按工作区、按列表（Projects/Agents）各存一份顺序，本浏览器缓存一份以免首屏等读，设置在启用前已经排好的顺序会在首次读时带上去。一次拖拽只写一次 Host；后来者仍追加，被移除的行仍退出。
+
 定位高亮单一化，对齐宿主会话树「父静叶亮」的惯例。任一时刻侧栏只有一行携带 `aria-current='page'` 与 hover 底色。打开 Project/Thread 时是项目行。Member Session 视图打开时，是被选 Agent 卡片（`.agentSelect[aria-current='page']`）。否则：全局面（Inbox、任务看板）在屏时是它自己的入口行，工作区概览在屏时才是选择器。全局面绝不把高亮留给其下的工作区选择器——它下面没有站着的概览。
 
 嵌入的 Member Session 是唯一能压在「读者仍身处的 Team 面」之上的覆盖层。那可能是 Inbox 页、任务看板页，也可能是读者打开这个 Agent 时所处的 Project/Thread。此时高亮归嵌入 Session 自己的 Agent 卡片。下层那个面保留原位，但不携带高亮。覆盖层关闭后原样取回。Inbox 与任务看板入口同样如此：入口页面在屏上时才是被标记的那一行。

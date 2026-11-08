@@ -10,6 +10,7 @@ import type { Volatile } from '@deepseek-ai/cordis'
 import { DEFAULT_MEMBER_COMPACTION, type MemberCompactionConfig } from './member-compaction.ts'
 import { DEFAULT_WAKE_RECYCLE, type WakeRecycleConfig } from './wake-recycle.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_SETTINGS_SCHEMA, assertValidHumanName } from './human-profile.ts'
+import { SIDEBAR_ORDER_SETTINGS_SCHEMA, SIDEBAR_ORDER_VALUE_SCHEMA, type SidebarOrderConfig } from './sidebar-order.ts'
 
 /**
  * The webhook trigger's deployment facts: not the listener's host and port, which the
@@ -34,6 +35,7 @@ export interface Config {
   wakeRecycle: Volatile<WakeRecycleConfig>
   memberCompaction: Volatile<MemberCompactionConfig>
   webhook: Volatile<WebhookConfig>
+  sidebarOrder: Volatile<SidebarOrderConfig>
 }
 
 /**
@@ -79,17 +81,20 @@ export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   wakeRecycle: WAKE_RECYCLE_SETTINGS_SCHEMA,
   memberCompaction: MEMBER_COMPACTION_SETTINGS_SCHEMA,
   webhook: WEBHOOK_SETTINGS_SCHEMA,
+  sidebarOrder: SIDEBAR_ORDER_SETTINGS_SCHEMA,
 })
 
 /** Every field the row stores, in the order a migration writes them. */
-export const HOST_ROW_FIELDS = ['name', 'avatarRef', 'wakeRecycle', 'memberCompaction', 'webhook'] as const
+export const HOST_ROW_FIELDS = ['name', 'avatarRef', 'wakeRecycle', 'memberCompaction', 'webhook', 'sidebarOrder'] as const
 
 export type HostRowField = typeof HOST_ROW_FIELDS[number]
 
 /** The values one migration writes into the current namespace; a field is present only when it must be written. */
 export type HostRowWrite = {
   readonly [K in HostRowField]?: K extends 'name' | 'avatarRef' ? string
-    : K extends 'wakeRecycle' ? WakeRecycleConfig : K extends 'memberCompaction' ? MemberCompactionConfig : WebhookConfig
+    : K extends 'wakeRecycle' ? WakeRecycleConfig
+      : K extends 'memberCompaction' ? MemberCompactionConfig
+        : K extends 'webhook' ? WebhookConfig : SidebarOrderConfig
 }
 
 /**
@@ -135,7 +140,8 @@ function carriedField(field: HostRowField, raw: unknown): unknown {
     return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
   }
   const schema = field === 'wakeRecycle' ? WAKE_RECYCLE_VALUE
-    : field === 'memberCompaction' ? MEMBER_COMPACTION_VALUE : WEBHOOK_VALUE
+    : field === 'memberCompaction' ? MEMBER_COMPACTION_VALUE
+      : field === 'webhook' ? WEBHOOK_VALUE : SIDEBAR_ORDER_VALUE_SCHEMA
   try {
     // The group schema fills the fields an older row never stored, so a partial
     // group arrives complete instead of silently keeping a stale default.
