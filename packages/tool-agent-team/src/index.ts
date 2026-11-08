@@ -1674,6 +1674,58 @@ function reminderResult(action: 'create' | 'list' | 'cancel', workspaceId: strin
   }
 }
 
+/**
+ * The one delegation entry: a Project-scoped Worker run whose result returns to
+ * this Member's own session. It never creates a Thread, a Task, or a Main stream
+ * post, and the Worker holds no Team identity of its own.
+ */
+const teamWorker = defineTool({
+  name: 'team_worker',
+  description: `Delegate one self-contained piece of work to a local Worker engine (Codex or Claude Code) that runs with its own tools, login, and settings. Use it for work you can hand over completely: investigation, a scoped change in a prepared working directory, or a check that needs another engine. The Worker does not see this conversation, holds no Team identity, and cannot claim, accept, or answer for you, so the task text must carry the goal, the background, the scope, and what evidence to bring back. The call returns as soon as the execution is accepted; keep working and do not poll — its result arrives in this session when it finishes. A Worker affects Project responsibility in no way: if you delegate work on a Task, the Claim stays yours and you still verify the result yourself. Nothing is published to the Project: the result comes back to you alone, and a Human reads it through you. Delegation needs the Team setting "allow Project owners to delegate Workers" and an enabled engine; a refusal names which condition failed.`,
+  parameters: {
+    project: { type: 'string', required: true, description: 'The Project whose ownership authorizes this delegation, as a project: ref from team_view.' },
+    task: { type: 'string', required: true, description: 'The complete task for the Worker: goal, background it needs, working scope, and the evidence to return. It cannot ask you follow-up questions.' },
+    engine: { type: 'string', enum: ['codex', 'claude'], description: 'Engine to run. Omit for the Project default the Host settings name.' },
+    cwd: { type: 'string', description: 'Absolute working directory the Worker runs in. Omit to use this session\'s own directory.' },
+    requestId: { type: 'string', description: 'Optional idempotency key: resending the same value returns the execution the first call started instead of starting another.' },
+    workspace: workspaceParam,
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: false, properties: {
+      workerRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
+      engine: { type: 'string', required: true }, state: { type: 'string', required: true },
+      cwd: { type: 'string', required: true }, startedAt: { type: 'string', required: true },
+    } },
+    render: (_args, value) => [{
+      type: 'text',
+      text: [
+        `Worker ${value.workerRef} · ${value.engine} · ${value.state}`,
+        `Project: ${value.projectRef}`,
+        `Working directory: ${value.cwd}`,
+        `Started at: ${formatTeamTimestamp(value.startedAt)}`,
+        'The execution runs in the background and reports back to this session when it ends. Keep working; there is nothing to poll.',
+      ].join('\n'),
+    }],
+  },
+  async execute(rawArgs, exec) {
+    const args = rawArgs
+    const agent = exec.agent
+    if (agent === undefined) throw new Error('team_worker requires an Agent session')
+    const host = service(agent)
+    const run = await host.workerStartForAgent(agent, {
+      requestId: (args.requestId ?? requestId(agent.id, exec.callId)) as Parameters<typeof host.workerStartForAgent>[1]['requestId'],
+      projectRef: projectRefOf(args.project) as Parameters<typeof host.workerStartForAgent>[1]['projectRef'],
+      task: args.task,
+      ...(args.engine === undefined ? {} : { engine: args.engine as 'codex' | 'claude' }),
+      ...(args.cwd === undefined ? {} : { cwd: args.cwd }),
+    })
+    return {
+      workerRef: run.workerRef, projectRef: run.projectRef, engine: run.engine,
+      state: run.state, cwd: run.cwd, startedAt: run.startedAt,
+    }
+  },
+})
+
 export function apply(ctx: Context): void {
   ctx.tools.register(teamInbox)
   ctx.tools.register(teamReminder)
@@ -1684,4 +1736,5 @@ export function apply(ctx: Context): void {
   ctx.tools.register(teamTask)
   ctx.tools.register(teamView)
   ctx.tools.register(teamSubscription)
+  ctx.tools.register(teamWorker)
 }

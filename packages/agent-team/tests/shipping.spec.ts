@@ -205,10 +205,15 @@ describe('Agent Team shipping contract', () => {
     // volatile node, so a write lands without a remount and the settings
     // service can derive it at all.
     const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
-    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'sidebarOrder', 'wakeRecycle', 'webhook'])
+    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'sidebarOrder', 'wakeRecycle', 'webhook', 'worker'])
     expect(rowFields.wakeRecycle?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.wakeRecycle?.dict ?? {}).sort()).toEqual(['enabled', 'idleMs', 'minContextTokens'])
     expect(Object.values(rowFields.wakeRecycle?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
+    // The experimental Worker switch is volatile for the same reason every
+    // other group is: flipping it must reach the running Host without a remount.
+    expect(rowFields.worker?.meta.volatile).toBe(true)
+    expect(Object.keys(rowFields.worker?.dict ?? {}).sort()).toEqual(['defaultEngine', 'enabled', 'engines', 'timeoutMs'])
+    expect(Object.values(rowFields.worker?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
     expect(rowFields.memberCompaction?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.memberCompaction?.dict ?? {}).sort()).toEqual(['enabled', 'tokens'])
     expect(Object.values(rowFields.memberCompaction?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
@@ -330,7 +335,7 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('past 16 KiB it is not injected at all')
     expect(preset).toContain('the bundled `member-memory-manager` skill')
     expect([...teamTools().keys()].sort()).toEqual([
-      'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view', 'team_subscription', 'team_reminder',
+      'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view', 'team_subscription', 'team_reminder', 'team_worker',
     ].sort())
 
     const manifest = JSON.parse(manifestText) as {
@@ -348,7 +353,10 @@ describe('Agent Team shipping contract', () => {
     // Only this bundle's own two regular dependencies remain: the external
     // context engine and its judge are gone, so nothing here resolves a
     // package the profile would have to install for us.
+    // OAR joined them with the Worker provider: the Profile must install it
+    // because the Host resolves it at run time, not as a peer the Host already has.
     expect(manifest.dependencies).toEqual({
+      '@botiverse/oar': '0.95.1',
       yaml: '^2.9.1',
       zod: '^4.4.3',
     })

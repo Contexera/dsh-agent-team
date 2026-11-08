@@ -27,6 +27,9 @@ export type AgentTeamTaskRef = Branded<'AgentTeamTaskRef'>
 /** Stable identifier of one Thread. */
 export type AgentTeamThreadRef = Branded<'AgentTeamThreadRef'>
 
+/** Stable identifier of one Worker execution. Team-owned: never an engine session id or activation id. */
+export type AgentTeamWorkerRef = Branded<'AgentTeamWorkerRef'>
+
 /** Stable identifier of one Claim. */
 export type AgentTeamClaimRef = Branded<'AgentTeamClaimRef'>
 

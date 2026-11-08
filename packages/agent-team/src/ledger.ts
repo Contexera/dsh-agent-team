@@ -3924,6 +3924,11 @@ export class AgentTeamLedger {
     this.requireProjectMemberActor(actor, projectRef)
   }
 
+  /** Whether one Project exists at all; a delegation may not guess one from a directory or a page. */
+  hasProject(projectRef: AgentTeamProjectRef): boolean {
+    return this.state.projects.has(projectRef)
+  }
+
   /** Agent owners of one Project, sorted. The Human owns every Project and is not listed. */
   projectOwnerIds(projectRef: AgentTeamProjectRef): readonly AgentTeamMemberId[] {
     return Object.freeze([...this.state.owners.get(projectRef)?.keys() ?? []].sort())

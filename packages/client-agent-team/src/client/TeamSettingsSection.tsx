@@ -1,17 +1,19 @@
 import { useId, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { Button, Input, SettingsForm, SettingsValueField } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, SettingsForm, SettingsValueField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { HUMAN_AVATAR_MAX_BYTES } from '@contexera/dsh-agent-team/human-settings'
 import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
 import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'
 import { formLabels } from './locales.ts'
-import { useTeamConfig, type TeamConfigFace } from './team-config.ts'
+import { WORKER_ENGINES, WORKER_SANDBOX_MODES } from '@contexera/dsh-agent-team/worker-settings'
+import { useTeamConfig, useWorkerConfig, type TeamConfigFace, type WorkerConfigFace } from './team-config.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import { identityInitial } from './team-formatters.ts'
 import css from './team-settings.module.css'
 
-/** The Team's settings page: identity, the Host row's compaction threshold, the local environment check, and the version footnote. It owns no durable fact and no copy of one — identity writes through the Team Remote, the threshold through the shared configuration form — and a failed write keeps the typed value and reports the Host's reason. */
+/** The Team's settings page: identity, the Host row's two configuration groups, the local environment check, and the version footnote. It owns no durable fact and no copy of one — identity writes through the Team Remote, both groups through the shared configuration form — and a failed write keeps the typed value and reports the Host's reason. */
 
 export interface TeamSettingsInjected {
   /** The shared Human identity projection: profile facts plus post-write refresh. */
@@ -24,6 +26,8 @@ export interface TeamSettingsInjected {
   environment: TeamEnvironmentSource
   /** The Host row's compaction threshold; absent when the settings service is. */
   teamConfig?: TeamConfigFace | undefined
+  /** The Host row's Worker delegation group; absent when the settings service is. */
+  workerConfig?: WorkerConfigFace | undefined
 }
 
 export type TeamSettingsProps =
@@ -81,6 +85,155 @@ function ContextSettings(props: { t: TeamSettingsProps['t']; face: TeamConfigFac
           onEdit={(text) => { face.edit('tokens', text) }}
           onReset={() => { face.resetField('tokens') }}
         />
+      </div>
+    </SettingsForm>
+  </section>
+}
+
+/**
+ * One labelled control in a settings group, in the shipped field's rhythm, for
+ * what that field does not cover: a native select and a typed path. The hint is
+ * the control's description, so the guidance is read with the field.
+ * @param props - the field's copy, the control's id, and the control itself.
+ * @returns the labelled field.
+ */
+function Field(props: {
+  id: string
+  label: string
+  hint: ReactNode
+  render: (describedBy: string) => ReactNode
+}) {
+  const hintId = `${props.id}-hint`
+  return <div className={css.field}>
+    <label className={css.fieldLabel} htmlFor={props.id}>{props.label}</label>
+    {props.render(hintId)}
+    <p className={css.fieldHint} id={hintId}>{props.hint}</p>
+  </div>
+}
+
+/** Each engine's copy and the command its path falls back to. */
+const ENGINE_COPY = {
+  codex: { name: 'workerEngineCodex', hint: 'workerEngineCodexHint', command: 'codex' },
+  claude: { name: 'workerEngineClaude', hint: 'workerEngineClaudeHint', command: 'claude' },
+} as const
+
+/**
+ * The Host row's Worker group, staged by its own settings form for the same
+ * reason the context group is. Its intro states what the switch turns on — a
+ * local CLI under its own native permissions — and the engines stay disabled
+ * until it is on, so the group reads top-down as what is allowed, then how.
+ * @param props - the page's locale reader and the Worker group's face.
+ * @returns the group's heading, its switches and fields, and its save.
+ */
+function WorkerSettings(props: { t: TeamSettingsProps['t']; face: WorkerConfigFace }) {
+  const { t, face } = props
+  const state = useWorkerConfig(face)
+  const headingId = useId()
+  const prefix = useId()
+  const on = state.enabled.text === 'true'
+  const locked = !state.writable || state.saving
+  const engineLocked = locked || !on
+  const defaultEngine = state.defaultEngine.text
+  // A row whose default engine is off refuses every delegation that names none.
+  const defaultEngineOff = (defaultEngine === 'codex' ? state.codexEnabled : state.claudeEnabled).text !== 'true'
+  const sandbox = state.codexSandbox.text
+  // A stored policy stays selectable; the modes are Codex's own spellings. An
+  // explicitly stored empty policy — which this page never writes — is named for
+  // what it runs instead of being shown as a mode it would not use.
+  const sandboxModes: readonly string[] = (WORKER_SANDBOX_MODES as readonly string[]).includes(sandbox)
+    ? WORKER_SANDBOX_MODES
+    : [...WORKER_SANDBOX_MODES, sandbox]
+  return <section className={css.worker} aria-labelledby={headingId} data-worker-settings>
+    <h3 className={css.groupHeading} id={headingId}>{t('workerTitle')}</h3>
+    <p className={css.groupIntro}>{t('workerIntro')}</p>
+    <SettingsForm labels={formLabels(t)} state={state} onSave={face.save} onDiscard={face.discard}>
+      <div className={css.workerFields}>
+        <div className={css.row}>
+          <div className={css.rowText}>
+            <div className={css.title}>{t('workerEnabled')}</div>
+            <div className={css.desc}>{t('workerEnabledHint')}</div>
+          </div>
+          <div className={css.controls}>
+            <Switch
+              checked={on}
+              label={t('workerEnabled')}
+              disabled={locked}
+              onChange={(next) => { face.setSwitch('enabled', next) }}
+            />
+          </div>
+        </div>
+        <Field
+          id={`${prefix}-default-engine`}
+          label={t('workerDefaultEngine')}
+          hint={defaultEngineOff
+            ? <>{t('workerDefaultEngineHint')} {t('workerDefaultEngineUnavailable')}</>
+            : t('workerDefaultEngineHint')}
+          render={describedBy => <select
+            id={`${prefix}-default-engine`}
+            className={`${css.control} ${css.select}`}
+            value={defaultEngine}
+            aria-describedby={describedBy}
+            disabled={engineLocked}
+            onChange={(event) => { face.edit('defaultEngine', event.target.value) }}
+          >
+            {WORKER_ENGINES.map(engine => <option key={engine} value={engine}>{t(ENGINE_COPY[engine].name)}</option>)}
+          </select>}
+        />
+        {WORKER_ENGINES.map((engine) => {
+          const name = t(ENGINE_COPY[engine].name)
+          const pathId = `${prefix}-${engine}-path`
+          const isCodex = engine === 'codex'
+          return <div className={css.engine} key={engine} data-worker-engine={engine}>
+            <div className={css.row}>
+              <div className={css.rowText}>
+                <div className={css.title}>{name}</div>
+                <div className={css.desc}>{t(ENGINE_COPY[engine].hint)}</div>
+              </div>
+              <div className={css.controls}>
+                <Switch
+                  checked={(isCodex ? state.codexEnabled : state.claudeEnabled).text === 'true'}
+                  label={t('workerEngineSwitch', { engine: name })}
+                  disabled={engineLocked}
+                  onChange={(next) => { face.setSwitch(isCodex ? 'codexEnabled' : 'claudeEnabled', next) }}
+                />
+              </div>
+            </div>
+            <Field
+              id={pathId}
+              label={t('workerExecutable')}
+              hint={t('workerExecutableHint', { command: ENGINE_COPY[engine].command })}
+              render={describedBy => <input
+                id={pathId}
+                className={css.control}
+                value={(isCodex ? state.codexExecutable : state.claudeExecutable).text}
+                // Both engines label this field the same way, so the engine is
+                // what tells a screen reader which path it is on.
+                aria-label={t('workerExecutableFor', { engine: name })}
+                aria-describedby={describedBy}
+                placeholder={t('workerExecutablePlaceholder', { command: ENGINE_COPY[engine].command })}
+                spellCheck={false}
+                autoComplete="off"
+                disabled={engineLocked}
+                onChange={(event) => { face.edit(isCodex ? 'codexExecutable' : 'claudeExecutable', event.target.value) }}
+              />}
+            />
+            {!isCodex ? null : <Field
+              id={`${prefix}-codex-sandbox`}
+              label={t('workerSandbox')}
+              hint={t('workerSandboxHint')}
+              render={describedBy => <select
+                id={`${prefix}-codex-sandbox`}
+                className={`${css.control} ${css.select}`}
+                value={sandbox}
+                aria-describedby={describedBy}
+                disabled={engineLocked}
+                onChange={(event) => { face.edit('codexSandbox', event.target.value) }}
+              >
+                {sandboxModes.map(mode => <option key={mode} value={mode}>{mode === '' ? t('workerSandboxUnset') : mode}</option>)}
+              </select>}
+            />}
+          </div>
+        })}
       </div>
     </SettingsForm>
   </section>
@@ -221,6 +374,7 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
       </div>
     </div>
     {props.teamConfig === undefined ? null : <ContextSettings t={t} face={props.teamConfig} />}
+    {props.workerConfig === undefined ? null : <WorkerSettings t={t} face={props.workerConfig} />}
     <div className={css.environment}>
       <EnvironmentCheck t={t} environment={props.environment} />
     </div>

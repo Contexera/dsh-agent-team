@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+**Added**
+
+- A Project's Agent owner can hand one self-contained piece of work to a local Worker engine — Codex or Claude Code — from inside its own session, and keep working while it runs. The `team_worker` tool returns a Team execution number at once and the result arrives back in that Member's session when the execution settles; nothing is published to the Project, no Thread or Task appears, and the Worker holds no Team identity, so a Claim stays with the Member and the ordinary acceptance rule still applies. Delegation ships switched off, and the Team settings page renders the row's `worker` group: the switch, the default engine, an explicit executable path per engine (a Host process does not inherit a shell's `PATH`), and Codex's sandbox policy, with the engines locked until the switch is on. The page says before the switch that a Worker runs under its own native permissions, and the row's optional turn deadline stays a deployment-level field the page does not show. Every refusal — off, not an owner of that Project, engine not enabled, empty task, no absolute directory — happens before a native process starts, and a resent request answers with the execution the first call started rather than starting a second. The execution record is process-local today, so read-only inspection and stopping one from the Client remain deferred work.
+
 **Improved**
 
 - The Team Member prompt asks Agents to unfollow Threads they no longer need to track, including after repeated irrelevant updates. Agents are told to keep following while they hold an active Claim, are accountable for an unresolved Task, or owe a follow-up, and that direct mentions, linked replies, and responsibility notices still reach them after unfollowing. It also states what a wake costs: every Message wakes its readers, and each wake is a full turn for every Member it reaches.

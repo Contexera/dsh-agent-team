@@ -8,6 +8,8 @@
 import z from '@deepseek-ai/schemastery'
 import type { Volatile } from '@deepseek-ai/cordis'
 import { DEFAULT_MEMBER_COMPACTION, type MemberCompactionConfig } from './member-compaction.ts'
+import { DEFAULT_WORKER_CONFIG, type WorkerConfig } from './worker-service.ts'
+import { DEFAULT_WORKER_SANDBOX } from './worker-settings.ts'
 import { DEFAULT_WAKE_RECYCLE, type WakeRecycleConfig } from './wake-recycle.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_SETTINGS_SCHEMA, assertValidHumanName } from './human-profile.ts'
 import { SIDEBAR_ORDER_SETTINGS_SCHEMA, SIDEBAR_ORDER_VALUE_SCHEMA, type SidebarOrderConfig } from './sidebar-order.ts'
@@ -34,6 +36,7 @@ export interface Config {
   avatarRef: Volatile<string | undefined>
   wakeRecycle: Volatile<WakeRecycleConfig>
   memberCompaction: Volatile<MemberCompactionConfig>
+  worker: Volatile<WorkerConfig>
   webhook: Volatile<WebhookConfig>
   sidebarOrder: Volatile<SidebarOrderConfig>
 }
@@ -69,6 +72,30 @@ const WEBHOOK_VALUE = z.object({
   publicOrigin: z.string().default(DEFAULT_WEBHOOK_CONFIG.publicOrigin),
 })
 
+/**
+ * One engine's Worker settings: whether the operator allows it, where its CLI
+ * lives, and (Codex only) the sandbox policy it runs under. The executable is a
+ * deployment fact, not a per-call choice: a model never names a binary.
+ */
+const workerEngineValue = (sandbox: string) => z.object({
+  enabled: z.boolean().default(false),
+  executable: z.string().default(''),
+  sandbox: z.string().default(sandbox),
+})
+
+const WORKER_VALUE = z.object({
+  enabled: z.boolean().default(DEFAULT_WORKER_CONFIG.enabled),
+  defaultEngine: z.union(['codex', 'claude'] as const).default(DEFAULT_WORKER_CONFIG.defaultEngine),
+  engines: z.object({
+    codex: workerEngineValue(DEFAULT_WORKER_SANDBOX).default({}),
+    claude: workerEngineValue('').default({}),
+  }).default({}),
+  timeoutMs: z.number().min(0).default(DEFAULT_WORKER_CONFIG.timeoutMs),
+})
+
+/** The experimental Worker delegation group; off until the operator turns it on. */
+export const WORKER_SETTINGS_SCHEMA = WORKER_VALUE.default({}).volatile()
+
 /** The webhook deployment group. */
 export const WEBHOOK_SETTINGS_SCHEMA = WEBHOOK_VALUE.default({}).volatile()
 
@@ -80,12 +107,13 @@ export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   ...HUMAN_PROFILE_SETTINGS_SCHEMA.dict,
   wakeRecycle: WAKE_RECYCLE_SETTINGS_SCHEMA,
   memberCompaction: MEMBER_COMPACTION_SETTINGS_SCHEMA,
+  worker: WORKER_SETTINGS_SCHEMA,
   webhook: WEBHOOK_SETTINGS_SCHEMA,
   sidebarOrder: SIDEBAR_ORDER_SETTINGS_SCHEMA,
 })
 
 /** Every field the row stores, in the order a migration writes them. */
-export const HOST_ROW_FIELDS = ['name', 'avatarRef', 'wakeRecycle', 'memberCompaction', 'webhook', 'sidebarOrder'] as const
+export const HOST_ROW_FIELDS = ['name', 'avatarRef', 'wakeRecycle', 'memberCompaction', 'worker', 'webhook', 'sidebarOrder'] as const
 
 export type HostRowField = typeof HOST_ROW_FIELDS[number]
 
@@ -94,6 +122,7 @@ export type HostRowWrite = {
   readonly [K in HostRowField]?: K extends 'name' | 'avatarRef' ? string
     : K extends 'wakeRecycle' ? WakeRecycleConfig
       : K extends 'memberCompaction' ? MemberCompactionConfig
+        : K extends 'worker' ? WorkerConfig
         : K extends 'webhook' ? WebhookConfig : SidebarOrderConfig
 }
 

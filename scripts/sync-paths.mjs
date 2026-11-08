@@ -33,6 +33,7 @@ const own = {
   '@contexera/dsh-agent-team/time-format': ['./packages/agent-team/src/time-format.ts'],
   '@contexera/dsh-agent-team/mentions': ['./packages/agent-team/src/mentions.ts'],
   '@contexera/dsh-agent-team/human-settings': ['./packages/agent-team/src/human-settings.ts'],
+  '@contexera/dsh-agent-team/worker-settings': ['./packages/agent-team/src/worker-settings.ts'],
   '@contexera/dsh-agent-team/recovery-hints': ['./packages/agent-team/src/recovery-hints.ts'],
   '@contexera/dsh-agent-team/member-skills': ['./packages/agent-team/src/member-skills.ts'],
   '@contexera/dsh-agent-team/tools': ['./packages/tool-agent-team/src/index.ts'],

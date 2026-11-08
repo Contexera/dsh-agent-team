@@ -55,6 +55,7 @@ import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentT
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
+import { WorkerRegistry, type AgentTeamWorkerRun, type WorkerStartRequest } from './worker-service.ts'
 import { coldInboxOf } from './cold-inbox.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
@@ -497,6 +498,16 @@ export default class AgentTeam extends TypertRemoteService {
     /** The post-commit configuration apply failed; the stored row is ahead of the live surface. */
     capabilityApply?: AgentTeamMemberDiagnostic
   }>()
+  /**
+   * The Workers this Host started. Team owns the execution record and the refusal
+   * rules; the Harness subagent service owns admission and the parent notice.
+   */
+  private readonly workerRegistry = new WorkerRegistry(this.ctx, {
+    config: () => this.config.worker.get(),
+    projectExists: projectRef => this.requireLedger().hasProject(projectRef),
+    projectOwners: projectRef => this.requireLedger().projectOwnerIds(projectRef),
+    warn: message => { this.ctx.logger.warn(`agent-team: ${message}`) },
+  })
   /** Team notice ids waiting for a turn boundary, keyed by the live Agent message id. */
   private readonly pendingTeamWakes = new Map<string, { readonly memberId: AgentTeamMemberId; readonly sessionId: SessionId }>()
   /** Agents that already spent their one acceptance boundary; cleared when the Agent settles. */
@@ -1044,6 +1055,7 @@ export default class AgentTeam extends TypertRemoteService {
       this.memberRuntime.releaseTurnWaits()
       this.recovery.dispose()
       this.contextManagement.dispose()
+      await this.workerRegistry.dispose()
       if (this.attachmentGcTimer !== undefined) clearInterval(this.attachmentGcTimer)
       this.attachmentGcTimer = undefined
       if (this.admissionPumpTimer !== undefined) clearInterval(this.admissionPumpTimer)
@@ -3567,6 +3579,24 @@ export default class AgentTeam extends TypertRemoteService {
       .filter((record): record is SubscriptionRunRecord => record !== undefined)
     return Object.freeze(records.sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)
       || (left.runRef < right.runRef ? -1 : 1)))
+  }
+
+  /**
+   * Start one Worker for the calling Member. The Project authorization and the
+   * experimental switch are checked before any native process exists; the result
+   * reaches this Member's own session through the subagent service's parent notice.
+   */
+  async workerStartForAgent(agent: Agent, request: WorkerStartRequest): Promise<AgentTeamWorkerRun> {
+    const actor = this.memberActor(agent)
+    const workingDirectory = agent.ctx.get('workingDirectory') as { get(session: Agent['session']): string } | undefined
+    const cwd = request.cwd ?? workingDirectory?.get(agent.session)
+    return this.workerRegistry.start(actor.memberId, agent, cwd === undefined ? request : { ...request, cwd })
+  }
+
+  /** Every Worker this Host started, for the caller's own inspection. */
+  workerRunsForAgent(agent: Agent): readonly AgentTeamWorkerRun[] {
+    this.memberActor(agent)
+    return this.workerRegistry.list()
   }
 
   /** One run as the caller may read it: the summary always, the output only an owner. */

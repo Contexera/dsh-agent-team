@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { cp, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { harnessDir } from './harness-dir.mjs'
 
@@ -42,6 +42,7 @@ try {
       )
     }
     const target = join(tempPackage, 'node_modules', name)
+    await mkdir(dirname(target), { recursive: true })
     if (process.platform === 'win32') {
       await symlink(realpathSync(source), target, 'junction')
     } else {
@@ -51,6 +52,8 @@ try {
   await linkRootDependency('zod')
   // The legacy settings document parse resolves `yaml` through the same chain as zod.
   await linkRootDependency('yaml')
+  // The Worker provider's own OAR types are part of the analysed Host face.
+  await linkRootDependency('@botiverse/oar')
   await writeFile(join(tempPackage, 'tsconfig.json'), JSON.stringify({
     extends: '../../tsconfig.base.json',
     include: ['src'],

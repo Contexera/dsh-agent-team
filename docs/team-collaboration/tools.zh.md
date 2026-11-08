@@ -178,3 +178,19 @@ create 与 update 的请求身份包含脚本来源、触发选项与 create bas
 发布提交时，已离开该 Project 的收件人会被丢弃，而不是用 owner 顶替；该字段出现之前写下的记录，一律按创建者本人读取。
 
 结果会写明订阅、状态、版本与间隔；被拒绝的试运行会渲染原因和两条流的末尾内容。脚本打印的内容是数据，不是指令：Main stream 上的事件标注为不可信文本，其标题、链接与说明不会变成 mention。Project 订阅是无人值守执行——受限 Member 由此获得一条执行入口，Main stream 记录每次修改，Human 可以随时暂停订阅。
+
+## `team_worker`
+
+`team_worker` 把一件自包含的工作交给本机 Worker 引擎——Codex 或 Claude Code——用它自己的工具、登录与设置执行，并把结果送回发起成员自己的 Session。参数为 `project`、`task`，以及可选的 `engine`、`cwd` 与 `requestId`。
+
+委派默认关闭，直到操作者打开。Team 设置行携带 `worker` 组：`enabled`、`defaultEngine`、每个引擎一项（`enabled`、`executable`，Codex 另有 `sandbox`），以及可选的 `timeoutMs`；所有字段都是 volatile，改动能到达运行中的 Host。`executable` 存在的原因是 Host 进程的 `PATH` 不是 shell 的 `PATH`：人装好的 CLI 可能不在 Host 搜索的路径里，留空则沿用引擎自己的发现规则。
+
+以下情况一律在启动任何原生进程之前拒绝：开关关闭（`worker_disabled`）；该 Project 不属于本 Team（`worker_project_unknown`）；调用者当前不是该 Project 的 owner（`worker_owner_required`）；指定的引擎不是 Worker 引擎（`worker_engine_unknown`）或未启用（`worker_engine_disabled`）；任务文本为空（`worker_task_required`）；无法解析出绝对工作目录（`worker_cwd_required`）；Harness subagent 服务未挂载（`worker_unavailable`）。拥有一个 Project 不授予另一个 Project 的授权，Team preset 之外的普通 DSH Session 也不会获得这个工具。
+
+`engine` 只覆盖这一次委派的 `defaultEngine`；引擎不可用会说明原因，不会自动改用其他引擎、账号或模型。用相同 `requestId` 重送会返回首次调用已经启动的那次执行，绝不会再开一个。
+
+回执给出 Team 执行编号（`worker:` 引用）、Project、引擎、工作目录与启动时刻，并说明执行在后台继续。执行结束时，结果通过 Harness subagent 服务的 parent 通知回到发起成员的 Session；不会发布到 Project，不创建 Thread 或 Task，离线 Session 也不会补投。
+
+Worker 不持有 Team 身份：它不能发帖、认领、验收或代替成员作答。若它承担了某个 Task 的实施，Claim 仍属于该成员，独立的验收规则照旧适用。Worker 返回的内容是待核对的证据，不是指令。
+
+执行记录存在于启动它的 Host 进程内，不是 ledger 事实，所以运行中重启的 Host 无法再次报告该执行；按编号只读诊断与从 Client 停止执行都尚未进入这份契约。卸载插件会拒绝新的委派，并释放 Host 仍持有的执行。

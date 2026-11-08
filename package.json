@@ -74,6 +74,7 @@
     }
   },
   "dependencies": {
+    "@botiverse/oar": "0.95.1",
     "yaml": "^2.9.1",
     "zod": "^4.4.3"
   },
@@ -158,6 +159,10 @@
       "types": "./packages/agent-team/lib/types/human-settings.d.ts",
       "default": "./packages/agent-team/lib/human-settings.js"
     },
+    "./worker-settings": {
+      "types": "./packages/agent-team/lib/types/worker-settings.d.ts",
+      "default": "./packages/agent-team/lib/worker-settings.js"
+    },
     "./member-skills": {
       "types": "./packages/agent-team/lib/types/member-skills.d.ts",
       "default": "./packages/agent-team/lib/member-skills.js"
@@ -212,6 +217,7 @@
     "@deepseek-ai/dsh-session-format-catalog": ">=0.2.2-rc.1 <0.2.3",
     "@deepseek-ai/dsh-session-persistence": ">=0.2.2-rc.1 <0.2.3",
     "@deepseek-ai/dsh-shell": ">=0.2.2-rc.1 <0.2.3",
+    "@deepseek-ai/dsh-subagent": ">=0.2.2-rc.1 <0.2.3",
     "@deepseek-ai/dsh-skill": ">=0.2.2-rc.1 <0.2.3",
     "@deepseek-ai/dsh-skill-filesystem": ">=0.2.2-rc.1 <0.2.3",
     "@deepseek-ai/dsh-storage-domain": ">=0.2.2-rc.1 <0.2.3",

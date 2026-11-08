@@ -17,3 +17,4 @@ minimumReleaseAgeExclude:
   - '@deepseek-ai/cosmokit@1.9.0'
   - '@deepseek-ai/dsh-storage-sqlite@0.2.2-rc.1'
   - '@deepseek-ai/schemastery@3.19.0'
+  - '@botiverse/oar@0.95.1'

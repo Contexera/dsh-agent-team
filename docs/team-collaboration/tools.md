@@ -200,3 +200,21 @@ New events are accepted into the ledger and published to the Project's Main stre
 The publish commit drops a recipient who has left the Project rather than substituting an owner, and a record written before the field existed reads back as its Creating Member alone.
 
 The result names the subscription, its state, its revision, and its interval, and any refused trial renders the reason with the last of each stream. What a script prints is data, never instructions: an event on the Main stream is marked as untrusted text and its title, link, and detail never become a mention. Project subscriptions run unattended — a restricted Member gains this execution path, the Main stream records every change, and the Human can pause the subscription at any time.
+
+## `team_worker`
+
+`team_worker` delegates one self-contained piece of work to a local Worker engine — Codex or Claude Code — running with its own tools, its own login, and its own settings, and reports the result back into the calling Member's own session. It takes `project`, `task`, an optional `engine`, an optional `cwd`, and an optional `requestId`.
+
+Delegation is off until the operator turns it on. The Team settings row carries a `worker` group — `enabled`, `defaultEngine`, one entry per engine with `enabled`, `executable`, and (Codex only) `sandbox`, plus an optional `timeoutMs` — and every field is volatile so a change reaches a running Host. `executable` exists because a Host's `PATH` is not a shell's: the CLI a human installed may be nowhere the Host process searches, and an empty value keeps the engine's own discovery.
+
+A call is refused before any native process exists for each of these reasons: the switch is off (`worker_disabled`); the Project is not one this Team has (`worker_project_unknown`); the caller does not currently own that Project (`worker_owner_required`); the named engine is not a Worker engine (`worker_engine_unknown`) or is not enabled (`worker_engine_disabled`); the task text is empty (`worker_task_required`); no absolute working directory can be resolved (`worker_cwd_required`); the Harness subagent service is not mounted (`worker_unavailable`).
+
+Ownership of one Project never authorizes another, and an ordinary DSH Session outside the Team preset never acquires the tool.
+
+`engine` overrides `defaultEngine` for that one delegation, and an engine that is unavailable reports why instead of falling back to another engine, account, or model. Repeating a call with the same `requestId` answers with the execution the first call started; it never starts a second one.
+
+The receipt names the Team execution (`worker:` ref), the Project, the engine, the working directory, and the start instant, and states that the work continues in the background. The result reaches the calling Member's session through the Harness subagent service's parent notice when the execution settles; nothing is published to the Project, no Thread or Task is created, and an offline session is not re-delivered.
+
+A Worker holds no Team identity: it cannot post, claim, accept, or answer for the Member. If it performs work on a Task, the Claim stays with the Member and the ordinary independent-acceptance rule still applies. What a Worker returns is evidence to check, not instructions.
+
+The execution record lives with the Host process that started it: it is not a ledger fact, so a Host restarted mid-run cannot report that execution again, and `inspect`-style read-only diagnostics and stopping an execution from the Client are not part of this contract yet. Unloading the bundle refuses new delegations and releases what the Host still holds.

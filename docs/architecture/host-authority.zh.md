@@ -235,6 +235,20 @@ credential 值每次运行前经 `ctx.credentials` 解析，并在执行器自�
 
 同一个 `$DSH_HOME` 最多只能运行一个 Host 进程。订阅的定时器与私有 checkpoint 都在这个 home 里；两个 Host 共用时会各自触发每一次到期、各自推进账本投影与序号，提交操作因此互相竞争。这是部署约束，不是 bundle 强制的锁：同时运行的 profile 要各用独立的 `DSH_HOME`，不要在别的 Host 正在使用的 home 上再启动一个 `dsh web`。
 
+## Worker 委派
+
+每次 Member 委派的 Worker，其授权与执行记录归 Host；准入、激活容量与完成通知归 Harness subagent 服务。两者由 `WorkerRegistry`（`packages/agent-team/src/worker-service.ts`）与 `TeamWorkerProvider`（`packages/agent-team/src/worker-runtime.ts`）接起来。
+
+subagent 服务跟随 Host，而不是跟随 Member：Team 组合的是一处 `@deepseek-ai/dsh-subagent` 挂载加每个已启用引擎一行 provider，Member 的工具调用从它自己的 Agent context 抵达该服务，并把该 live Agent 作为激活的 `parent` 传入。按 Member 各挂一份 provider 会让同一个 projection 在每位 Member 处重复注册，并给每人一棵独立激活树，因此不是本设计。
+
+授权在调用时从 ledger 判定，不看当前页面或目录：指定的 `project:` 引用必须存在，调用者必须是它当前的 Agent owner 之一，并且 Host 设置行的 `worker` 组里开关与该引擎都已打开。Human 拥有每个 Project 但不调用 Team 工具，所以不存在 Human 入口。任何拒绝都发生在原生进程启动之前；已接纳的 `requestId` 返回它自己的那次执行。
+
+provider 为每次委派打开一个 OAR 会话，使用操作者显式给出的引擎设置，并把设置行里的 Codex 权限模式带进那次打开：精确 pin 的 OAR 0.95.1 从 Host 进程自己的 `OAR_CODEX_SANDBOX` 读取它——会话的 `env` 只到子进程，库也没有逐会话的选项——所以这个值只在打开调用期间设置，到 app-server 握手返回后恢复——这是本 Host 里另一个 Codex 会话打开时可能看到它的唯一窗口。从未存过该策略的设置行解析为 `workspace-write`。
+
+provider 还保留引擎的原生 session 身份与工作目录，供后续变更加入的只读诊断使用。它直接使用精确 pin 的 `@botiverse/oar`，而不是 Harness 的 OAR provider：Worker 必须暴露该原生身份，且执行记录必须归 Team；该库按需导入，所以没有它的 Host 依然能启动，普通 Session 也不受影响。
+
+结果按 parent delivery 返回：通知到达发起成员自己的 Session，不写 ledger、Thread、Task 或 Main stream。因此执行记录是进程内的——运行中重启的 Host 无法再次报告该执行——Team 侧的停止、Client 检查与持久执行事实都是延后工作，不是当前行为。卸载插件会拒绝新的委派，并等待本 Host 仍持有的执行完成清理。
+
 ## Composer attachments（cache，不是 archive）
 
 Composer attachments 是有界 cache，不是 archive，也不是 ledger bytes。cache 目录是 `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/`，存经过清理的原始名称和 `meta.json` sidecar。

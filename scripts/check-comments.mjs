@@ -138,9 +138,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // 2026-11-08: the composer took a dropped file, and the journey lane is the only place a drag is real — the
 // hint a reader sees before releasing, and the cancelled default that keeps the tab off the file. 1676 was
 // the audited count; 1730 restores the ~3% the rule above asks for.
+// 2026-11-09: the Worker settings group made the Client stage a Host row group two levels
+// deep — the leaf paths it writes, the presence it reads along them, and why a stored sandbox
+// policy stays selectable — and gave the Host one dependency-free module the Client may import.
+// Client 1305 audited → 1344; agent-team 4502 audited → 4637.
 const COMMENT_BUDGETS = {
-  'packages/agent-team/src': 4495,
-  'packages/client-agent-team/src': 1250,
+  'packages/agent-team/src': 4637,
+  'packages/client-agent-team/src': 1344,
   'packages/tool-agent-team/src': 242,
   'scripts': 1730,
 }

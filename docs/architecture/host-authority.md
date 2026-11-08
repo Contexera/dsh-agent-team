@@ -255,6 +255,20 @@ Credential values are resolved per run through `ctx.credentials` and merged afte
 
 A single `$DSH_HOME` must run at most one Host process. Subscriptions schedule their timers and keep private checkpoints in that home; two Hosts sharing it would each fire every due instant and each advance their own ledger projection and sequence numbers, so committed operations race. This is a deployment constraint rather than a lock the bundle enforces: give profiles that run at the same time separate `DSH_HOME` values, and never start a second `dsh web` against a home another Host is using.
 
+## Worker delegation
+
+The Host owns the authorization and the execution record of every Worker a Member delegates; the Harness subagent service owns admission, activation capacity, and the completion notice. The two are wired by `WorkerRegistry` (`packages/agent-team/src/worker-service.ts`) and `TeamWorkerProvider` (`packages/agent-team/src/worker-runtime.ts`).
+
+The subagent service follows the Host, not the Member: one `@deepseek-ai/dsh-subagent` mount with one provider row per enabled engine is what the Team composes, and a Member's tool call reaches it from that Member's own Agent context, passing that live Agent as the activation's `parent`. Mounting a provider per Member would register the same projection once per Member and give each Member its own activation tree, so it is not the shape.
+
+Authorization is decided from the ledger at call time, never from the current page or directory: the named `project:` ref must exist, the caller must be one of its current Agent owners, and the Host settings row's `worker` group must have the switch and that engine both on. The Human owns every Project but does not call Team tools, so no Human path exists. Any refusal happens before a native process starts, and a `requestId` already admitted answers with its own execution.
+
+The provider opens one OAR session per delegation with the operator's explicit engine settings, and carries the row's Codex permission mode into that open: the pinned OAR 0.95.1 reads it from the Host process's own `OAR_CODEX_SANDBOX` — a session's `env` only reaches the child process, and the library exposes no per-session option — so the value is set for the open call and restored once the app-server handshake returns — the one window in which another Codex session opening in this Host would see it. A row that never stored the policy resolves to `workspace-write`.
+
+The provider keeps the engine's native session identity and working directory for the read-only diagnostic a later change adds. It uses the pinned `@botiverse/oar` package directly rather than the Harness OAR provider, because a Worker must expose that native identity and Team must own the execution record; the library is imported on demand, so a Host without it still boots and every ordinary Session is unaffected.
+
+Results return by parent delivery: the notice reaches the delegating Member's session, and nothing enters the ledger, a Thread, a Task, or the Main stream. The execution record is therefore process-local — a Host that restarts mid-run cannot report that execution again — and the Team-side stop, Client inspection, and durable execution facts are deferred work, not current behavior. Unloading the bundle refuses new delegations and awaits the cleanup of the executions this Host still holds.
+
 ## Composer attachments (cache, not archive)
 
 Attachments live in the bounded cache `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/`, with a sanitized original name and `meta.json`; they are never ledger bytes or an archive. `putAttachment` enforces a 10 MB file cap and sanitizes names; `getAttachment` serves Client display. Messages record metadata while the stored body contains machine-facing `[attachment] <absolute path>` lines. The Client strips those lines and renders thumbnails/chips.

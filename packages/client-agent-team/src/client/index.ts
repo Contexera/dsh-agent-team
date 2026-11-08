@@ -59,7 +59,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { TeamSettingsSection } from './TeamSettingsSection.tsx'
-import { TeamConfigController, teamConfigScope } from './team-config.ts'
+import {
+  TeamConfigController, WorkerConfigController, teamConfigScope, workerConfigScope, type TeamConfigSection,
+} from './team-config.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
@@ -366,19 +368,21 @@ function applyUi(ctx: ClientContext): void {
   const environment = new TeamEnvironmentCheck({
     loadEnvironment: () => ctx.remote.agentTeam.environment({}),
   })
-  // The Host row's compaction threshold. The shared settings form addresses
-  // top-level section fields only, so `teamConfigScope` flattens the one group
-  // this page edits and maps its writes back onto that group's child paths —
-  // saving a threshold never restates the sibling fields beside it.
-  const teamConfig = ctx.configForms === undefined
-    ? undefined
-    : new TeamConfigController(teamConfigScope(ctx.configForms.get(HUMAN_PROFILE_SETTINGS_NAMESPACE)))
+  // The Host row's two configuration groups. The shared settings form addresses
+  // top-level section fields only, so each scope flattens one group this page
+  // edits and maps its writes back onto that group's child paths — saving a
+  // threshold never restates the sibling fields beside it, and saving a Worker
+  // setting never restates the group's own siblings either.
+  const rowForm = ctx.configForms?.get<TeamConfigSection>(HUMAN_PROFILE_SETTINGS_NAMESPACE)
+  const teamConfig = rowForm === undefined ? undefined : new TeamConfigController(teamConfigScope(rowForm))
+  const workerConfig = rowForm === undefined ? undefined : new WorkerConfigController(workerConfigScope(rowForm))
   ctx.effect(() => () => {
     navigation.dispose()
     drafts.dispose()
     humanIdentity.dispose()
     environment.dispose()
     teamConfig?.dispose()
+    workerConfig?.dispose()
     void disposeNavigation()
     void disposeDrafts()
   }, 'agent-team: navigation service')
@@ -472,6 +476,7 @@ function applyUi(ctx: ClientContext): void {
       identity: humanIdentity,
       environment,
       teamConfig,
+      workerConfig,
       saveName: async (name: string) => {
         const saved = await ctx.remote.agentTeam.setHumanProfile({ name })
         if (!saved.ok) return saved.error.message
