@@ -17,6 +17,13 @@ DSH_BENCH_STORAGE=1 npx vitest run packages/agent-team/tests/storage-bench.spec.
 
 JSON's whole-file rewrite cost grows with history — about 2.7× from 1k to 10k operations — while SQLite stays near the per-statement fsync floor. The startup path remains full `loadAll()` plus full replay, and the checkpoint/log direction is in [the storage architecture archive](../../.scratch/archive/2026-08/agent-team-storage-architecture/).
 
+## A ledger that does not replay
+The Host replays and validates its durable ledger while it constructs it: a record whose sequence is not its position, a broken previous-operation link, a repeated operation or request id, or a first record that is not `team/initialized` throws there, naming the record. `agent-team ledger expected sequence 27968, found 27967` is a repeated sequence, not a gap.
+
+A throw at that point is an entry that never activates: the Host row fails, its companion `contexera-agent-team-invariant` row waits for an `agentTeam` service that now never arrives, and the Harness loader warns which entries did not activate. The companion adopts the constructor's verdict rather than replaying again, and re-runs the full replay only when the ledger state moved; after activation the same replay runs after each commit, logging a divergence at error level and re-raising it on later commits until a replay comes back clean.
+
+The tools report `Agent Team Host is unavailable` in that state, and in a normal startup window too: they inject only `tools` and resolve `agentTeam` on the call, while the Host applies once its own nine services are ready. Only the boot log separates the two — the tool error names neither.
+
 ## Multi-page notification regression
 `npm run test:browser` includes four pages in the same BrowserContext (not four isolated connection pools), then a separate BrowserContext. It checks rendered Projects, cross-page messages, closing a page, leaving Team mode, and browser-originated member queries under a 3-second regression threshold. This is a small-fixture regression bound, not a production latency guarantee. The complete journey also checks recovery without a new commit after intentional network loss. Screenshots remain under `artifacts/browser/`, including desktop and 390×844 multi-page views.
 
