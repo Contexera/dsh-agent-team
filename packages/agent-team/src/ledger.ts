@@ -4718,7 +4718,10 @@ export class AgentTeamLedger {
         || memberId !== actorMemberId() || readThroughSequence > this.mainHeadFrom(projection, projectRef)
         || (actor !== undefined && !this.isProjectMemberFrom(projection, projectRef, actor.memberId))) throw new Error('invalid Main stream read')
       const expected = this.prepareMainReadFrom(projection, memberId, projectRef, readThroughSequence)
-      if (!isDeepStrictEqual(operation.data.inbox, expected.inbox)) throw new Error('invalid Main stream read receipt')
+      if (!isDeepStrictEqual(operation.data.inbox, expected.inbox)
+        && !this.isLegacySubscriptionEventReadAdvance(projection, memberId, projectRef, readThroughSequence, operation.data.inbox, expected)) {
+        throw new Error('invalid Main stream read receipt')
+      }
       this.validateInboxDelta(operation.data.inbox, projection, refs)
       return
     }
@@ -7052,6 +7055,32 @@ export class AgentTeamLedger {
         ? this.inboxDelta([], [], [], [], [], [], [], consumed, [], [], [Object.freeze({ ...attention, readThroughSequence: readThrough })])
         : this.inboxDelta([], [], [], [], [], [], [], consumed)
     return Object.freeze({ advances, consumed, inbox })
+  }
+
+  /**
+   * A receipt dev builds of this train wrote while a published event still
+   * counted as Project news: that event alone advanced the reader's watermark.
+   * The current model gives a marker-only read no watermark to move, so the
+   * stored receipt is the one this build derives plus the standing row the old
+   * model moved. Only that exact shape is accepted, and it replays as written —
+   * the records after it were written against the watermark it set.
+   */
+  private isLegacySubscriptionEventReadAdvance(projection: Projection, memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef,
+    readThrough: number, inbox: AgentTeamInboxDelta, expected: { readonly advances: boolean; readonly consumed: readonly AgentTeamMainMarker[] }): boolean {
+    // The Human's standing is derived rather than stored, so only a Member's receipt can carry the row.
+    if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID || expected.advances) return false
+    const advanced = inbox.mainAttention?.set ?? []
+    if (advanced.length !== 1 || (inbox.mainAttention?.removed.length ?? 0) !== 0) return false
+    const attention = this.mainAttentionForFrom(projection, memberId, projectRef)
+    if (attention === undefined || readThrough <= attention.readThroughSequence) return false
+    // The row is this reader's own standing moved to this read, and nothing else.
+    if (!isDeepStrictEqual(advanced[0], { ...attention, readThroughSequence: readThrough })) return false
+    // Only an event could have advanced it: every other source in the window is
+    // ordinary unread, which this build would advance on too.
+    const eventAdvanced = this.mainSourcesFrom(projection, projectRef).some(source => source.kind === 'subscription-event'
+      && source.sequence > attention.readThroughSequence && source.sequence <= readThrough)
+    if (!eventAdvanced) return false
+    return isDeepStrictEqual(inbox, this.inboxDelta([], [], [], [], [], [], [], expected.consumed, [], [], advanced))
   }
 
   /** The newest page through `readThrough` a read answers with, plus any older entry whose marker the read consumes, so no marker is cleared unseen. */

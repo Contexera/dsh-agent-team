@@ -804,6 +804,37 @@ describe('addressed subscription events', () => {
     expect(() => replayedAt(team.table, current)).not.toThrow()
   })
 
+  it('replays the receipt a build wrote when the addressed event alone advanced the watermark', async () => {
+    const team = await seed({ rulesVersion: current })
+    const subscriptionRef = await addressed(team, [team.writer.memberId])
+    await team.ledger.changeAttention({ requestId: requestId('follow'), actor: team.writer.actor, workspaceId: alpha,
+      projectRef: team.projectRef, action: 'follow' })
+    await publishOne(team, subscriptionRef)
+    await team.ledger.readMainStream({ requestId: requestId('read'), actor: team.writer.actor, workspaceId: alpha, projectRef: team.projectRef })
+    const records = [...team.table.entries()].sort((left, right) => left[1].sequence - right[1].sequence)
+    const follow = records.find(([, operation]) => operation.kind === 'team/main-attention-changed' && operation.data.memberId === team.writer.memberId)
+    if (follow?.[1].kind !== 'team/main-attention-changed') throw new Error('expected the follow record')
+    const standing = follow[1].data.inbox.mainAttention?.set[0]
+    if (standing === undefined) throw new Error('expected the standing row the follow established')
+    const index = records.findIndex(([, operation]) => operation.kind === 'team/main-stream-read' && operation.data.memberId === team.writer.memberId)
+    const [key, read] = records[index]!
+    if (read.kind !== 'team/main-stream-read') throw new Error('expected the read record')
+    // The marker it consumed plus the watermark the event used to move: what a
+    // build wrote while a published event still counted as Project news.
+    const receipt = (row: typeof standing) => ({ ...read, data: { ...read.data,
+      inbox: { ...read.data.inbox, mainAttention: { set: [{ ...row, readThroughSequence: read.data.readThroughSequence }], removed: [] } } } })
+    const replay = async (operation: AgentTeamOperation): Promise<AgentTeamLedger> =>
+      new AgentTeamLedger(await openTable(poolOf([...records.slice(0, index), [key, operation], ...records.slice(index + 1)])), { rulesVersion: current })
+    const replayed = await replay(receipt(standing))
+    await replayed.initialize()
+    // Replayed as written, so the read still holds and nothing is left unread.
+    expect(replayed.mainStreamHistory(team.writer.actor, { workspaceId: alpha, projectRef: team.projectRef }).standing)
+      .toMatchObject({ following: true, unreadCount: 0, directCount: 0 })
+    // The acceptance is that one row: a standing row this read never moved still fails.
+    await expect(replay(receipt({ ...standing, startSequence: standing.startSequence + 1 })))
+      .rejects.toThrow('invalid Main stream read receipt')
+  })
+
   it('drops a departed recipient before a lifecycle write carries the record forward', async () => {
     const team = await seed({ rulesVersion: current })
     const subscriptionRef = await addressed(team, [team.owner.memberId, team.writer.memberId])
