@@ -1,6 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createSystemMessage, LlmError, type LlmCallConfig, type LlmResolvedModelInfo, type Message, type ToolSchema, type UserMessage } from '@deepseek-ai/dsh-llm'
+import { SessionSeq, type EpochHeader } from '@deepseek-ai/dsh-session'
+import { estimateToolsTokens } from '@deepseek-ai/dsh-token-meter/estimate'
 import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 import type ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import { renderPrompt, type PromptPresentation } from '@deepseek-ai/dsh-system-prompt'
@@ -37,16 +39,54 @@ export function memberOutputTokens(inputTokens: number, contextWindow: number, r
   return Math.min(requestedTokens ?? available, available)
 }
 
+/**
+ * The header the newest provider count belongs to: the `request/header` in force
+ * when the last usage-bearing `assistant/message` settled. A failed, aborted, or
+ * still-streaming attempt logs a header and no usage, so the latest header is
+ * not necessarily that one.
+ */
+function anchorHeaderOf(session: Agent['session']): EpochHeader | undefined {
+  let settled = false
+  for (let seq = Number(session.seq) - 1; seq >= 0; seq -= 1) {
+    const event = session.eventAt(SessionSeq(seq))
+    if (event === undefined) continue
+    if (!settled) {
+      if (event.type === 'assistant/message' && event.data.usage !== undefined) settled = true
+      continue
+    }
+    if (event.type === 'request/header') return event.data.header
+  }
+  return undefined
+}
+
 export function measureMemberInput(ctx: Context, agent: Agent, config: LlmCallConfig, pending: readonly Message[], assembly?: PromptPresentation, stepTools?: readonly ToolSchema[]): number {
   const meter = ctx.get('tokenMeter')
   if (meter === undefined) throw new Error('agent-team: token meter unavailable')
   const header = agent.session.requestHeader()
-  const measurement = meter.measure(agent.session, {
-    ...header,
-    config,
-    // The header names the previous request's tools; a captured step replaces them with the set the next request will actually declare.
-    ...(assembly !== undefined && stepTools !== undefined ? { tools: [...stepTools] } : {}),
-  })
+  // The header names the previous request's tools; a captured step replaces them with the set the next request will actually declare.
+  const stepHeader: EpochHeader | undefined = header !== undefined && assembly !== undefined && stepTools !== undefined
+    ? { ...header, tools: [...stepTools] }
+    : header
+  // The meter reuses the provider's own prompt count only for the header that
+  // request was sent with, and it keeps two headers at most. This hook clamps
+  // `maxTokens` per request, so the header carrying the proposed config never
+  // matches, and a failed or aborted attempt logs a header with no usage — the
+  // latest header is then not the one the count belongs to either. Resolve the
+  // header in force when the newest usage settled and price that one.
+  const anchor = anchorHeaderOf(agent.session)
+  const comparable = anchor !== undefined
+    && anchor.config.provider === config.provider && anchor.config.model === config.model
+  const anchored = comparable ? meter.measure(agent.session, anchor) : undefined
+  // A provider count already holds the anchored request's tools, so only a set
+  // this step declares beyond them is added; the fixed density heuristic prices
+  // a long Session well below that count and cannot stand in for it.
+  const measurement = anchored !== undefined && anchored.baseline?.kind === 'usage'
+    ? { totalTokens: anchored.totalTokens + Math.max(0, estimateToolsTokens(stepHeader) - estimateToolsTokens(anchor)) }
+    : meter.measure(agent.session, {
+      ...header,
+      config,
+      ...(assembly !== undefined && stepTools !== undefined ? { tools: [...stepTools] } : {}),
+    })
   let inputTokens = measurement.totalTokens + pending.reduce((sum, message) => sum + meter.estimateMessage(message), 0)
   if (assembly !== undefined) {
     const head = agent.session.surface.nodes[0]
