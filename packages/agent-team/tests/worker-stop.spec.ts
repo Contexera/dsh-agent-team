@@ -4,9 +4,10 @@
  * report, and the order a released Host follows.
  *
  * The Harness subagent service is faked here because the cases are about the
- * decisions Team owns. The Harness contract this fake copies — the parent is
- * told the run's own result before teardown, and a cancelled run's result waits
- * for disposal — is pinned against the real service in `worker-stop-notice.spec.ts`.
+ * decisions Team owns. The Harness contract this fake copies — teardown runs
+ * first, and the parent is then told the result captured before it, which a
+ * teardown failure never edits — is pinned against the real service in
+ * `worker-stop-notice.spec.ts`.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'

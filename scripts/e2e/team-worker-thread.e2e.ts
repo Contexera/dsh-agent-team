@@ -1,6 +1,7 @@
 import { afterEach, it, expect } from 'vitest'
 import { join } from 'node:path'
-import { WORKER_SHOTS, acknowledgeReloadConnectionLoss, chooseMemberModel, closeScenario, maxHorizontalScroll, openSettings, openTeamPage, scaffold, settleLayout } from './__external-agent-team-support.ts'
+import { WORKER_SHOTS, acknowledgeReloadConnectionLoss, chooseMemberModel, closeScenario, maxHorizontalScroll, memberAgent,
+  openSettings, openTeamPage, scaffold, settleLayout, waitForMemberAgent } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -34,12 +35,15 @@ it('leaves a delegated Worker run in its own Thread', async () => {
   const taskful = await team.startThread({ requestId: 'e2e-worker-taskful' as never, workspaceId, projectRef,
     kind: 'discussion', body: '**TASKFUL** 一条会提升成 Task 的讨论' })
   const taskfulRef = taskful.thread.threadRef
-  const agent = scaffold!.ctx.agents.get(runner.sessionId)!
-  expect(agent).toBeDefined()
-  const opened = await team.readThreadForAgent(agent, { requestId: 'e2e-worker-read-open' as never, workspaceId, threadRef: taskfulRef })
+  // A Member-scoped read needs the Host to have registered this Agent for the
+  // Member: the name and a non-null Agent appear before that attach completes.
+  await waitForMemberAgent(scaffold!, workspaceId, runner.memberId)
+  const opened = await team.readThreadForAgent(memberAgent(scaffold!, workspaceId, runner.memberId),
+    { requestId: 'e2e-worker-read-open' as never, workspaceId, threadRef: taskfulRef })
   await team.promoteThread({ requestId: 'e2e-worker-promote' as never, workspaceId, threadRef: taskfulRef,
     baseRevision: opened.thread.revision })
-  const promoteState = team.readThreadForAgent(agent, { requestId: 'e2e-worker-read-promoted' as never, workspaceId, threadRef: taskfulRef })
+  const promoteState = team.readThreadForAgent(memberAgent(scaffold!, workspaceId, runner.memberId),
+    { requestId: 'e2e-worker-read-promoted' as never, workspaceId, threadRef: taskfulRef })
   expect((await promoteState).thread.taskRef ?? (await promoteState).task).toBeDefined()
 
   await openSettings(page)
@@ -72,18 +76,19 @@ it('leaves a delegated Worker run in its own Thread', async () => {
   ] as const
   const cwd = scaffold!.ctx.workspaceRegistry.list()[0]!.path
   for (const delegation of delegations) {
-    const outcome = await team.workerStartForAgent(agent, { requestId: delegation.requestId as never,
+    const outcome = await team.workerStartForAgent(memberAgent(scaffold!, workspaceId, runner.memberId), { requestId: delegation.requestId as never,
       threadRef: delegation.threadRef, task: '把这条讨论收尾', cwd }).then(() => undefined, (error: unknown) => error)
     expect(outcome).toBeInstanceOf(Error)
   }
 
   for (const delegation of delegations) {
     // A Thread read consumes the batch's markers, so reading it first would prove the read rather than the wake.
-    const inbox = team.inboxForAgent(agent, { workspaceId })
+    const inbox = team.inboxForAgent(memberAgent(scaffold!, workspaceId, runner.memberId), { workspaceId })
     const row = inbox.items.find(item => item.thread.threadRef === delegation.threadRef)
     expect(row).toBeDefined()
     expect(row!.directCount).toBeGreaterThanOrEqual(1)
-    const read = await team.readThreadForAgent(agent, { requestId: `e2e-worker-read-${delegation.threadRef}` as never, workspaceId, threadRef: delegation.threadRef })
+    const read = await team.readThreadForAgent(memberAgent(scaffold!, workspaceId, runner.memberId),
+      { requestId: `e2e-worker-read-${delegation.threadRef}` as never, workspaceId, threadRef: delegation.threadRef })
     // The initiator's own read carries the durable state, not its own start row: that fact is unmarked and self-authored.
     // The surface holding both rows is the Thread a follower reads, opened in the browser below.
     expect(read.workerStates).toHaveLength(1)

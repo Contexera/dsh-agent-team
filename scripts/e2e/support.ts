@@ -116,6 +116,50 @@ export async function closeScenario(): Promise<void> {
   await scaffold?.close(); scaffold = undefined
 }
 
+/** A Member record as the Host currently reports it. */
+export type MemberRecord = ReturnType<WebScaffold['ctx']['agentTeam']['members']>[number]['member']
+
+/** The Workspace a Member-scoped lookup names. */
+type MemberWorkspace = Parameters<WebScaffold['ctx']['agentTeam']['members']>[0]['workspaceId']
+
+/**
+ * The Host's current record for one Member, re-read by id. A record captured at
+ * creation is a snapshot: a ledger generation swap replaces the Member's
+ * Session, so every later lookup has to start from the Host's own list.
+ */
+function findMember(scaffold: WebScaffold, workspaceId: MemberWorkspace, memberId: MemberRecord['memberId']): MemberRecord | undefined {
+  return scaffold.ctx.agentTeam.members({ workspaceId }).find(entry => entry.member.memberId === memberId)?.member
+}
+
+/** The Agent the Host currently holds for this Member, taken from that current record. */
+export function memberAgent(scaffold: WebScaffold, workspaceId: MemberWorkspace, memberId: MemberRecord['memberId']):
+NonNullable<ReturnType<WebScaffold['ctx']['agents']['get']>> {
+  const member = findMember(scaffold, workspaceId, memberId)
+  if (member === undefined) throw new Error(`Member '${memberId}' is not in this Workspace`)
+  const agent = scaffold.ctx.agents.get(member.sessionId)
+  if (agent === undefined) throw new Error(`Member '${memberId}' has no Agent`)
+  return agent
+}
+
+/**
+ * Wait until the Host itself confirms this Agent belongs to that Member. A
+ * Member-scoped read needs that identity: a visible name or a non-null Agent is
+ * not readiness, because the Host registers the live handle only after the
+ * Workspace attach completes. The wait is bounded and reads the Host's own
+ * answer each round, so it neither sleeps a fixed time nor retries the refusal.
+ */
+export async function waitForMemberAgent(scaffold: WebScaffold, workspaceId: MemberWorkspace, memberId: MemberRecord['memberId']):
+Promise<NonNullable<ReturnType<WebScaffold['ctx']['agents']['get']>>> {
+  const deadline = Date.now() + 20_000
+  for (;;) {
+    const member = findMember(scaffold, workspaceId, memberId)
+    const agent = member === undefined ? undefined : scaffold.ctx.agents.get(member.sessionId)
+    if (agent !== undefined && scaffold.ctx.agentTeam.memberForAgent(agent)?.memberId === memberId) return agent
+    if (Date.now() > deadline) throw new Error(`Member '${memberId}' is not readable by the Host yet`)
+    await new Promise(resolve => setTimeout(resolve, 25))
+  }
+}
+
 export const TEAM_ROOT = '__TEAM_ROOT__'
 export const HOME = '__HOME__'
 export const CHROME = '__CHROME__'

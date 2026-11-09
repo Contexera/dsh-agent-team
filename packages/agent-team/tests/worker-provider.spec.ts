@@ -99,8 +99,8 @@ describe('the Worker provider', () => {
       const unconfirmed = new AbortController()
       const stopped = await provider.start({ ...request(cwd), signal: unconfirmed.signal })
       unconfirmed.abort()
-      // The Harness hands the parent this result before it awaits teardown, so the
-      // cleanup verdict and the output so far have to be in it.
+      // The Harness waits for teardown but hands the parent the result it captured
+      // here, so the cleanup verdict and the output so far have to be in it.
       expect(await stopped.result).toEqual({ output: [{ type: 'text', text: 'partial output' }], stopReason: 'error',
         diagnostic: WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC })
       // The engine's own teardown is the separate failure the Harness reports to the caller.

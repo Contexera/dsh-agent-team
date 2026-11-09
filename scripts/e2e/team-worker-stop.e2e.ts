@@ -2,8 +2,8 @@ import { afterEach, it, expect } from 'vitest'
 import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WORKER_STOP_SHOTS, chooseMemberModel, closeScenario, maxHorizontalScroll, openSettings, openSidebar,
-  openTeamPage, scaffold, settleLayout } from './__external-agent-team-support.ts'
+import { WORKER_STOP_SHOTS, chooseMemberModel, closeScenario, maxHorizontalScroll, memberAgent, openSettings, openSidebar,
+  openTeamPage, scaffold, settleLayout, waitForMemberAgent } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -95,11 +95,12 @@ it('stops one of two live Worker runs from the edit-Agent dialog and leaves the 
   expect(team.config.worker.get().engines.codex).toMatchObject({ enabled: true, executable: fakeCodex })
 
   // Two delegations through the production start path, both bound to one Thread.
-  const agent = scaffold!.ctx.agents.get(runner.sessionId)!
+  // The Host confirms the Agent belongs to the Member before any Member-scoped call.
+  await waitForMemberAgent(scaffold!, workspaceId, runner.memberId)
   const cwd = scaffold!.ctx.workspaceRegistry.list()[0]!.path
-  const first = await team.workerStartForAgent(agent, { requestId: 'e2e-worker-stop-a' as never, threadRef,
+  const first = await team.workerStartForAgent(memberAgent(scaffold!, workspaceId, runner.memberId), { requestId: 'e2e-worker-stop-a' as never, threadRef,
     task: '把第一条讨论收尾', cwd })
-  const second = await team.workerStartForAgent(agent, { requestId: 'e2e-worker-stop-b' as never, threadRef,
+  const second = await team.workerStartForAgent(memberAgent(scaffold!, workspaceId, runner.memberId), { requestId: 'e2e-worker-stop-b' as never, threadRef,
     task: '把第二条讨论收尾', cwd })
   expect(first.workerRef).not.toBe(second.workerRef)
   await expect.poll(() => team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs.length,
@@ -143,7 +144,8 @@ it('stops one of two live Worker runs from the edit-Agent dialog and leaves the 
   // The Host's own record agrees: one ending, one live run, and the Thread carries one terminal fact.
   const runs = team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs
   expect(runs.map(view => view.workerRef)).toEqual([second.workerRef])
-  const read = await team.readThreadForAgent(agent, { requestId: 'e2e-worker-stop-read' as never, workspaceId, threadRef })
+  const read = await team.readThreadForAgent(memberAgent(scaffold!, workspaceId, runner.memberId),
+    { requestId: 'e2e-worker-stop-read' as never, workspaceId, threadRef })
   expect(read.workerStates?.map(state => state.state).sort()).toEqual(['running', 'stopped'])
   const settled = read.facts.map(entry => entry.fact)
     .filter(fact => fact.kind === 'activity' && fact.activity.kind === 'worker_settled')
