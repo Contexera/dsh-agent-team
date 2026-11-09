@@ -287,7 +287,19 @@ Rules version 6 introduced both operations: an older build meeting a version-6 l
 
 The durable state of a bound run is derived, never stored twice. `threadWorkerStates` reads the execution records rather than the facts a page returned, so a long Thread reports the state of every run bound to it even when that run's facts sit outside the window.
 
-A record still marked `running` with no live handle in this Host — the signature of a Host replaced mid-run — reads as `unconfirmed`: the result cannot be confirmed, the run is not re-run, and nothing is retried automatically. `unconfirmed` mints no marker and wakes nobody; it is visible on the Thread. Unloading the bundle refuses new delegations and waits at most five seconds for each live engine to report its ending before letting go, after which the record stays `running` and reads as unconfirmed.
+A record still marked `running` with no live handle in this Host — the signature of a Host replaced mid-run — reads as `unconfirmed`: the result cannot be confirmed, the run is not re-run, and nothing is retried automatically. `unconfirmed` mints no marker and wakes nobody; it is visible on the Thread.
+
+One stop transaction covers both surfaces: the Member's `team_worker` call with `stop` and the Human's `stopWorker` Remote enter the same `WorkerRegistry.stop`. Authorization is the identity that opened the run — its `initiatedBy` Member, or the Human — and deliberately not the start conditions, so an ownership change, a transfer, or the settings switch being turned off never decides a stop.
+
+The transaction aborts the startup signal (the only cancellation channel before publication), disposes the published activation, and waits for the one terminal write the engine's own evidence decides. `stopping` is a derived, process-local view: the ledger keeps `running → terminal`, and the Thread read and the Human's list add the word while the stop is in flight.
+
+The engine's result decides the ending, not the request. A natural completion or failure that landed first keeps its real state and the stop answers with it. A cancelled run whose disposal rejected is `failed` with a diagnostic saying the cleanup is unconfirmed — never `stopped`, because a stop nobody confirmed would be a claim the Host cannot support. The partial output the run already produced rides that same result, so the one Inbox notice keeps the text and the caveat together.
+
+Unloading the bundle is the same transaction at Host scale, in order: refuse new delegations, cancel every start still opening — including one whose opening record is still being written, which is sealed instead of opening an engine — dispose what is published, and wait a bounded five seconds for each ending.
+
+Anything still unconfirmed at that boundary is sealed: the run keeps its `running` record and accepts no later ending, so closing storage cannot race a write into a ledger nobody reads. Pending terminal writes are awaited before the provider registrations are released.
+
+The Human's surface is the edit-Agent dialog, which lists that Member's live runs: `running`, `stopping`, then the ending the Host confirmed. Its `stopWorker` receipt is structured rather than a sentence to read: `ended` names the state the run really reached and the Host's diagnostic, `pending` says the cleanup is still in flight, and `unconfirmed` says this Host no longer holds the handle. A run a previous Host left behind appears as `unconfirmed` with an explanation and no stop control, and a call that never completed says only that, never deciding the run's state.
 
 ## Composer attachments (cache, not archive)
 

@@ -264,7 +264,15 @@ provider 还保留引擎的原生 session 身份与工作目录，供后续变�
 
 规则版本 6 引入这两个操作：旧 build 打开版本 6 的 ledger 会拒绝并要求更新版本；采纳版本 6 的 Host 会在下次启动时写入这次采纳。
 
-绑定执行的持久状态是派生的，从不存第二份。`threadWorkerStates` 读执行记录而不是某次分页返回的事实，所以长 Thread 上每个绑定的执行都有状态，即使它的事实落在窗口之外。仍标记 `running` 而在本 Host 里没有活跃句柄的记录——运行中被替换的 Host 的签名——读作 `unconfirmed`：结果无法确认，不重跑、不自动重试。`unconfirmed` 不写 marker、不唤醒任何人，只在 Thread 上可见。卸载插件会拒绝新的委派，并对每个仍在运行的引擎最多等五秒报出终态，之后记录留在 `running`，读作结果未确认。
+绑定执行的持久状态是派生的，从不存第二份。`threadWorkerStates` 读执行记录而不是某次分页返回的事实，所以长 Thread 上每个绑定的执行都有状态，即使它的事实落在窗口之外。仍标记 `running` 而在本 Host 里没有活跃句柄的记录——运行中被替换的 Host 的签名——读作 `unconfirmed`：结果无法确认，不重跑、不自动重试。`unconfirmed` 不写 marker、不唤醒任何人，只在 Thread 上可见。
+
+停止只有一条事务：成员的 `team_worker` 带 `stop`，与 Human 的 `stopWorker` Remote，进入同一个 `WorkerRegistry.stop`。授权只看打开这次执行的身份——它的 `initiatedBy` 成员，或 Human——刻意不重新套用启动条件，所以 owner 变更、Task 转移或关掉开关都不会左右一次停止。事务先 abort 启动信号（发布之前唯一的取消通道），再 dispose 已发布的 activation，然后等引擎自己的证据决定那一次终态写入。`stopping` 是派生的进程内视图：账本仍只有 `running → 终态`，Thread 读取与 Human 列表在停止进行时加这个词，不为它写任何持久内容。
+
+终态由引擎的结果决定，而不是由请求决定。先到的自然完成或失败保留真实状态，停止回答的就是它。被取消的执行若 dispose 被拒绝，记为 `failed` 并说明清理未确认——绝不报 `stopped`，因为没人确认的停止是 Host 支撑不了的断言。执行已经产出的部分输出随同一份结果走，所以那一次 Inbox 通知把文本与保留意见放在一起。
+
+卸载是同一事务在 Host 尺度的展开，顺序是：拒绝新委派；取消所有仍在启动的执行——包括还在写 started 记录的那一个，它被封口而不是去开引擎；dispose 已发布的；对每个终态最多等五秒；仍未确认的封口；等挂起的终态写入；最后才释放 provider 注册。被封口的执行保留 `running` 记录、不再接受任何迟到的终态，所以关闭存储不会与一次写入赛跑。
+
+Human 的入口是「编辑 Agent」弹窗，列出该成员仍在运行的执行：`running`、`stopping`，以及 Host 确认的终态。它的 `stopWorker` 回执是结构化事实而不是要解析的句子：`ended` 给出执行真正到达的状态与 Host 的诊断，`pending` 说明清理仍在进行，`unconfirmed` 说明本 Host 已不再持有句柄。上一个 Host 留下的执行显示为 `unconfirmed`，附说明且不给停止控件；请求本身没有完成的调用只说明这一点，绝不据此判定执行的状态。
 
 ## Composer attachments（cache，不是 archive）
 

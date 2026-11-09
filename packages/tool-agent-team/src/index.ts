@@ -1685,6 +1685,23 @@ function reminderResult(action: 'create' | 'list' | 'cancel', workspaceId: strin
 }
 
 /**
+ * What a stop call can honestly say about the run it addressed: only a
+ * confirmed stop reports cleanup, an ending the run already had is reported as
+ * that ending, and the Host's own diagnostic rides along when it has one.
+ */
+function stopReceipt(state: string, diagnostic: string | undefined): string {
+  const caveat = diagnostic === undefined ? [] : [diagnostic]
+  if (state === 'stopped') {
+    return ['The engine confirmed this run\'s cleanup, so it is no longer running. '
+      + 'Its ending appears in the Thread it reports into, if it has one.', ...caveat].join('\n')
+  }
+  if (state === 'completed' || state === 'failed') {
+    return [`The run ended as ${state}; this stop did not change its ending.`, ...caveat].join('\n')
+  }
+  return [`The run is ${state}.`, ...caveat].join('\n')
+}
+
+/**
  * The one delegation entry. A run bound to a Thread reports into it and wakes
  * this Member through the Inbox; an unbound Project delegation keeps the direct
  * result in this session. Neither creates a Task or a Main stream post, and the
@@ -1692,12 +1709,13 @@ function reminderResult(action: 'create' | 'list' | 'cancel', workspaceId: strin
  */
 const teamWorker = defineTool({
   name: 'team_worker',
-  description: `Delegate one self-contained piece of work to a local Worker engine (Codex or Claude Code) that runs with its own tools, login, and settings. Use it for work you can hand over completely: investigation, a scoped change in a prepared working directory, or a check that needs another engine. The Worker does not see this conversation, holds no Team identity, and cannot claim, accept, or answer for you, so the task text must carry the goal, the background, the scope, and what evidence to bring back. Name the Thread or Task the work belongs to and everything about the run is published there: the Thread shows when it started and how it ended, and its answer arrives in your Inbox — the other participants never see the raw output. Name only a Project and the result comes back to this session alone, published nowhere. The call returns as soon as the execution is accepted; keep working and do not poll. A Worker affects Project responsibility in no way: if you delegate work on a Task, the Claim stays yours and you still verify the result yourself, and a finished run never accepts a Task. Delegation needs the Team setting "allow Project owners to delegate Workers", your ownership of the Project the target belongs to, and an enabled engine; a refusal names which condition failed.`,
+  description: `Delegate one self-contained piece of work to a local Worker engine (Codex or Claude Code) that runs with its own tools, login, and settings, or stop a Worker this session delegated. Use it for work you can hand over completely: investigation, a scoped change in a prepared working directory, or a check that needs another engine. The Worker does not see this conversation, holds no Team identity, and cannot claim, accept, or answer for you, so the task text must carry the goal, the background, the scope, and what evidence to bring back. Name the Thread or Task the work belongs to and everything about the run is published there: the Thread shows when it started and how it ended, and its answer arrives in your Inbox — the other participants never see the raw output. Name only a Project and the result comes back to this session alone, published nowhere. The call returns as soon as the execution is accepted; keep working and do not poll. A Worker affects Project responsibility in no way: if you delegate work on a Task, the Claim stays yours and you still verify the result yourself, and a finished run never accepts a Task. Delegation needs the Team setting "allow Project owners to delegate Workers", your ownership of the Project the target belongs to, and an enabled engine; a refusal names which condition failed. To stop one execution, pass only its worker ref as stop; the call returns once the engine confirmed its cleanup, and a run that ended first answers with the state it really ended in. Another Member's run cannot be stopped this way.`,
   parameters: {
     threadRef: { type: 'string', description: 'The Thread this work reports into, as a thread: ref. The run\'s start, ending, and Inbox wake all point at it. Its Project authorizes the delegation.' },
     taskRef: { type: 'string', description: 'The Task this work is for, as a task: ref. It fixes the Thread as well; naming a Thread and a Task together is accepted only when the Task is in that Thread.' },
     projectRef: { type: 'string', description: 'The Project to delegate into, as a project: ref from team_view. Omit whenever threadRef or taskRef already names it; with none of the three there is no target to authorize.' },
-    task: { type: 'string', required: true, description: 'The complete task for the Worker: goal, background it needs, working scope, and the evidence to return. It cannot ask you follow-up questions.' },
+    task: { type: 'string', description: 'The complete task for the Worker: goal, background it needs, working scope, and the evidence to return. It cannot ask you follow-up questions. Required unless stop names a run to end.' },
+    stop: { type: 'string', description: 'A worker: ref this session delegated. With this the call stops that execution instead of starting one: pass it alone, with no task, target, engine, directory, or request id.' },
     engine: { type: 'string', enum: ['codex', 'claude'], description: 'Engine to run. Omit for the Project default the Host settings name.' },
     cwd: { type: 'string', description: 'Absolute working directory the Worker runs in. Omit to use this session\'s own directory.' },
     requestId: { type: 'string', description: 'Optional idempotency key: resending the same value returns the execution the first call started instead of starting another, even when both calls arrive at once. A resend from another Member, or one that changes the task, engine, or target, is refused rather than answered with a run it did not ask for.' },
@@ -1705,22 +1723,25 @@ const teamWorker = defineTool({
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
-      workerRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
-      engine: { type: 'string', required: true }, state: { type: 'string', required: true },
-      cwd: { type: 'string', required: true }, startedAt: { type: 'string', required: true },
-      threadRef: { type: 'string' },
+      workerRef: { type: 'string', required: true }, state: { type: 'string', required: true },
+      projectRef: { type: 'string' }, engine: { type: 'string' },
+      cwd: { type: 'string' }, startedAt: { type: 'string' }, settledAt: { type: 'string' },
+      threadRef: { type: 'string' }, diagnostic: { type: 'string' },
     } },
     render: (_args, value) => [{
       type: 'text',
       text: [
-        `Worker ${value.workerRef} · ${value.engine} · ${value.state}`,
-        `Project: ${value.projectRef}`,
+        `Worker ${value.workerRef} · ${value.engine ?? 'Worker'} · ${value.state}`,
+        ...(value.projectRef === undefined ? [] : [`Project: ${value.projectRef}`]),
         ...(value.threadRef === undefined ? [] : [`Thread: ${value.threadRef} — the run's start, ending, and answer report there`]),
-        `Working directory: ${value.cwd}`,
-        `Started at: ${formatTeamTimestamp(value.startedAt)}`,
-        value.threadRef === undefined
-          ? 'The execution runs in the background and reports back to this session when it ends. Keep working; there is nothing to poll.'
-          : 'The execution runs in the background. Its ending appears in that Thread and its answer reaches your Inbox; keep working, there is nothing to poll.',
+        ...(value.cwd === undefined ? [] : [`Working directory: ${value.cwd}`]),
+        ...(value.startedAt === undefined ? [] : [`Started at: ${formatTeamTimestamp(value.startedAt)}`]),
+        ...(value.settledAt === undefined ? [] : [`Ended at: ${formatTeamTimestamp(value.settledAt)}`]),
+        value.startedAt === undefined
+          ? stopReceipt(value.state, value.diagnostic)
+          : value.threadRef === undefined
+            ? 'The execution runs in the background and reports back to this session when it ends. Keep working; there is nothing to poll.'
+            : 'The execution runs in the background. Its ending appears in that Thread and its answer reaches your Inbox; keep working, there is nothing to poll.',
       ].join('\n'),
     }],
   },
@@ -1729,6 +1750,26 @@ const teamWorker = defineTool({
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_worker requires an Agent session')
     const host = service(agent)
+    if (args.stop !== undefined) {
+      // Starting and stopping are different calls: a stop names one run and
+      // nothing else, so a half-filled start can never be read as a stop.
+      if (args.task !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
+        || args.projectRef !== undefined || args.engine !== undefined || args.cwd !== undefined
+        || args.requestId !== undefined) {
+        throw new Error('team_worker takes either a task to start or a stop ref, not both: pass stop alone.')
+      }
+      const stopped = await host.workerStopForAgent(agent, { workerRef: args.stop as Parameters<typeof host.workerStopForAgent>[1]['workerRef'] })
+      return {
+        workerRef: stopped.workerRef, state: stopped.state, engine: stopped.engine,
+        ...(stopped.settledAt === undefined ? {} : { settledAt: stopped.settledAt }),
+        // The Host's own sentence about a failure rides the receipt: a state
+        // alone would drop the cleanup warning the model has to act on.
+        ...(stopped.diagnostic === undefined ? {} : { diagnostic: stopped.diagnostic }),
+      }
+    }
+    if (args.task === undefined || args.task.trim() === '') {
+      throw new Error('team_worker needs a task to start a Worker, or a stop ref to end one.')
+    }
     const request = {
       requestId: (args.requestId ?? requestId(agent.id, exec.callId)) as Parameters<typeof host.workerStartForAgent>[1]['requestId'],
       task: args.task,

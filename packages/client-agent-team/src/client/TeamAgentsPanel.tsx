@@ -33,6 +33,9 @@ interface TeamAgentsPanelProps {  readonly workspaceId: WorkspaceId
   /** Member detail's reminder surface: read the Member's own reminders, withdraw one on its behalf. */
   readonly loadMemberReminders: TeamSidebarProps['loadMemberReminders']
   readonly cancelMemberReminder: TeamSidebarProps['cancelMemberReminder']
+  /** Member detail's Worker surface: the Member's runs and the Human's stop of one. */
+  readonly loadWorkerRuns: TeamSidebarProps['loadWorkerRuns']
+  readonly stopWorker: TeamSidebarProps['stopWorker']
   readonly memberSessionId?: AgentTeamClientMemberStatus['member']['sessionId']
   readonly openMemberSession: TeamSidebarProps['openMemberSession']
   readonly onCreatingChange: (request: AgentTeamAddMemberRequest, creating: boolean) => void
@@ -89,7 +92,7 @@ function useMemberSessionFollow(
   }, [])
 }
 
-export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, addMember, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, loadMemberReminders, cancelMemberReminder, memberSessionId, openMemberSession, onCreatingChange, t }: TeamAgentsPanelProps) {
+export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, addMember, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, loadMemberReminders, cancelMemberReminder, loadWorkerRuns, stopWorker, memberSessionId, openMemberSession, onCreatingChange, t }: TeamAgentsPanelProps) {
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
@@ -264,7 +267,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
         <div className={css.agentList}>
           {orderedMembers.map(status => (
             <SortableRow key={status.member.memberId} drag={drag} orderKey={status.member.memberId}>
-              <AgentRow workspaceId={workspaceId} leaveWorkspace={leaveWorkspace} status={status} {...(memberSessionId === undefined ? {} : { current: status.member.sessionId === memberSessionId })} updateMember={updateMember} recoverMember={recoverMember} archiveMember={archiveMember} loadModels={loadModels} loadMemberReminders={loadMemberReminders} cancelMemberReminder={cancelMemberReminder} openMemberSession={openMemberSession} onUpdated={refresh} t={t} />
+              <AgentRow workspaceId={workspaceId} leaveWorkspace={leaveWorkspace} status={status} {...(memberSessionId === undefined ? {} : { current: status.member.sessionId === memberSessionId })} updateMember={updateMember} recoverMember={recoverMember} archiveMember={archiveMember} loadModels={loadModels} loadMemberReminders={loadMemberReminders} cancelMemberReminder={cancelMemberReminder} loadWorkerRuns={loadWorkerRuns} stopWorker={stopWorker} openMemberSession={openMemberSession} onUpdated={refresh} t={t} />
             </SortableRow>
           ))}
         </div>
@@ -279,7 +282,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
   )
 }
 
-function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, recoverMember, archiveMember, loadModels, loadMemberReminders, cancelMemberReminder, openMemberSession, onUpdated, t }: {
+function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, recoverMember, archiveMember, loadModels, loadMemberReminders, cancelMemberReminder, loadWorkerRuns, stopWorker, openMemberSession, onUpdated, t }: {
   readonly workspaceId: WorkspaceId
   readonly leaveWorkspace: TeamSidebarProps['leaveWorkspace']
   readonly status: AgentTeamClientMemberStatus
@@ -291,6 +294,8 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
   readonly loadModels: TeamSidebarProps['loadModels']
   readonly loadMemberReminders: TeamSidebarProps['loadMemberReminders']
   readonly cancelMemberReminder: TeamSidebarProps['cancelMemberReminder']
+  readonly loadWorkerRuns: TeamSidebarProps['loadWorkerRuns']
+  readonly stopWorker: TeamSidebarProps['stopWorker']
   readonly openMemberSession: TeamSidebarProps['openMemberSession']
   readonly onUpdated: () => Promise<void> | void
   readonly t: TeamSidebarProps['t']
@@ -400,6 +405,8 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
           loadModels={loadModels}
           loadMemberReminders={loadMemberReminders}
           cancelMemberReminder={cancelMemberReminder}
+          loadWorkerRuns={loadWorkerRuns}
+          stopWorker={stopWorker}
           onCommitted={onUpdated}
           onClose={() => { setEditing(false) }}
           t={t}

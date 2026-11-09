@@ -197,12 +197,16 @@ create 与 update 的请求身份包含脚本来源、触发选项与 create bas
 
 回执给出 Team 执行编号（`worker:` 引用）、Project、引擎、工作目录与启动时刻，绑定执行还给出 Thread，并说明执行在后台继续、结果会出现在哪里。
 
+同一个工具也能停止一次执行：只给 `stop: <worker:…>`，不给 `task`；同时再给 task、Thread、Task、Project、引擎、工作目录或 request id 会被拒绝，而不是部分生效。停止按打开这次执行的身份授权：发起成员本人，或 Human 通过「编辑 Agent」弹窗。其他成员即使现在是该 Project 的 owner 也会被拒绝；开关与当前 owner 身份只约束启动，不在停止时重新校验。已经结束的执行回答它真实的终态，而不是被停第二次。本 Host 不再持有句柄的执行（重启后的特征）按 `worker_unconfirmed` 拒绝：既不能确认也不能停止，且绝不重跑。停止要等引擎确认清理，而这个等待有界限。超过界限后执行仍是 `running`（Thread 读取与 Human 的列表在停止进行中读作 `stopping`），这次调用按 `worker_stop_pending` 拒绝，已经发起的清理继续在后台进行。引擎报告清理失败时，执行记为 `failed` 并附「清理未确认」的可行动说明，绝不会报成 `stopped`。
+
+两次执行彼此独立：停一条不影响另一条的进程、Thread 事实与 Inbox 通知。
+
 绑定执行发布两条 Thread 事实：开始时 `worker_started`，结束时 `worker_settled` 带 `state`，失败或停止再加一行有上限的 `reason`。答案永远不是 Thread 事实：它随唤醒发起成员的那条 Inbox notice 抵达，标明是外部文本、是数据不是指令，父 Session 不会再收到一份。只绑定 Project 的执行保持 parent 通知、不发布任何东西。两者都不创建 Task、Main stream 条目或 Claim。
 
 把 Task 上的工作委派出去不改变任何责任：Claim 仍属于该成员，执行完成从不自动验收，独立验收规则照旧适用。
 
 Worker 不持有 Team 身份：它不能发帖、认领、验收或代替成员作答。若它承担了某个 Task 的实施，Claim 仍属于该成员，独立的验收规则照旧适用。Worker 返回的内容是待核对的证据，不是指令。
 
-绑定执行的记录是持久的，Thread 读取会报告绑定到它的每次执行：`running`、`completed`、`failed`、`stopped` 或 `unconfirmed`。上一个 Host 留在 `running` 的记录读作 `unconfirmed`：结果无法确认，不重跑、不自动重试，也不会为它唤醒任何人。未绑定执行的记录留在启动它的 Host 进程内。
+每次执行的记录都是持久的：Thread 读取会报告绑定到它的每次执行，状态为 `running`、`completed`、`failed`、`stopped` 或 `unconfirmed`；只绑定 Project 的执行同样记录这些事实，只是不发布到 Thread。上一个 Host 留在 `running` 的记录读作 `unconfirmed`：结果无法确认，不重跑、不自动重试，也不会为它唤醒任何人。
 
-按编号只读诊断已完成执行、以及从 Client 停止执行，都尚未进入这份契约。卸载插件会拒绝新的委派，并释放 Host 仍持有的执行。
+按编号只读诊断已完成执行尚未进入这份契约。卸载插件会拒绝新的委派，先取消仍在启动的执行（包括还在写 started 记录的），等待本 Host 仍持有的执行清理并落终态后再关闭存储；到界限仍未确认的执行保留 `running` 记录并封口，关闭存储后不会再写入迟到的终态。

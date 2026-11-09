@@ -55,7 +55,7 @@ import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentT
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
-import { WorkerRefusal, WorkerRegistry, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
+import { WorkerRefusal, WorkerRegistry, workerTaskPreview, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
 import { coldInboxOf } from './cold-inbox.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
@@ -80,7 +80,14 @@ import type {
   AgentTeamChangeScope,
   AgentTeamDelegationTarget,
   AgentTeamWorkerAnswer,
+  AgentTeamWorkerRef,
+  AgentTeamWorkerRunListRequest,
+  AgentTeamWorkerRunListResult,
+  AgentTeamWorkerRunView,
+  AgentTeamWorkerState,
   AgentTeamWorkerStateView,
+  AgentTeamWorkerStopRequest,
+  AgentTeamWorkerStopResult,
   AgentTeamChangesRequest,
   AgentTeamChangesResult,
   AgentTeamActivityRef,
@@ -2312,11 +2319,15 @@ export default class AgentTeam extends TypertRemoteService {
   private withWorkerStates<T extends { readonly thread: AgentTeamThread }>(read: T): T {
     const states = this.requireLedger().threadWorkerStates(read.thread.threadRef)
     if (states.length === 0) return read
-    const workerStates: readonly AgentTeamWorkerStateView[] = Object.freeze(states.map(entry => Object.freeze({
-      ...entry,
+    const workerStates: readonly AgentTeamWorkerStateView[] = Object.freeze(states.map(entry => {
       // A live run of this Host is the only thing that makes `running` truthful.
-      unconfirmed: entry.state === 'running' && !this.workerRegistry.isLive(entry.workerRef),
-    })))
+      const live = this.workerRegistry.liveState(entry.workerRef)
+      return Object.freeze({
+        ...entry,
+        unconfirmed: entry.state === 'running' && live === undefined,
+        ...(live === 'stopping' ? { stopping: true } : {}),
+      })
+    }))
     return Object.freeze({ ...read, workerStates })
   }
 
@@ -3664,6 +3675,128 @@ export default class AgentTeam extends TypertRemoteService {
   workerRunsForAgent(agent: Agent): readonly AgentTeamWorkerRun[] {
     this.memberActor(agent)
     return this.workerRegistry.list()
+  }
+
+  /**
+   * Stop one Worker this Host holds. Only the Member who delegated the run may
+   * stop it through the tool; the start conditions — the settings switch, current
+   * ownership, an enabled engine — are deliberately not re-applied, so a run
+   * stays stoppable after any of them changes.
+   */
+  async workerStopForAgent(agent: Agent, request: { readonly workerRef: AgentTeamWorkerRef }): Promise<AgentTeamWorkerRun> {
+    const actor = this.memberActor(agent)
+    const ledger = this.requireLedger()
+    const execution = ledger.workerExecution(request.workerRef)
+    if (execution === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${request.workerRef}' was started by this Team.`)
+    if (execution.initiatedBy !== actor.memberId) {
+      throw new WorkerRefusal('worker_stop_forbidden', `Only the Member who delegated Worker '${request.workerRef}' or the Human may stop it.`)
+    }
+    if (this.workerRegistry.get(request.workerRef) === undefined) {
+      if (execution.state === 'running') {
+        throw new WorkerRefusal('worker_unconfirmed', `Worker '${request.workerRef}' was started by a Host that no longer `
+          + 'holds its handle, so this Host cannot confirm or stop it; its result stays unconfirmed.')
+      }
+      throw new WorkerRefusal('worker_already_ended', `Worker '${request.workerRef}' already ended: ${execution.state}.`)
+    }
+    return this.workerRegistry.stop(request.workerRef, actor)
+  }
+
+  /** One run's shape for the Human's list, whichever record of it is being read. */
+  private workerRunViewOf(run: { readonly workerRef: AgentTeamWorkerRef; readonly projectRef: AgentTeamProjectRef
+    readonly engine: import('./worker-settings.ts').WorkerEngine; readonly task: string; readonly startedAt: string
+    readonly threadRef?: AgentTeamThreadRef | undefined; readonly taskRef?: AgentTeamTaskRef | undefined },
+  state: AgentTeamWorkerRunView['state']): AgentTeamWorkerRunView {
+    return Object.freeze({ workerRef: run.workerRef, projectRef: run.projectRef, engine: run.engine, state,
+      task: workerTaskPreview(run.task), startedAt: run.startedAt,
+      ...(run.threadRef === undefined ? {} : { threadRef: run.threadRef }),
+      ...(run.taskRef === undefined ? {} : { taskRef: run.taskRef }) })
+  }
+
+  /**
+   * One Member's Worker runs for the Human's edit surface: what this Host still
+   * holds (running or stopping) and the records a previous Host left running,
+   * which are listed as unconfirmed and offer no stop control.
+   */
+  @Remote('workerRuns')
+  workerRunsForClient(request: AgentTeamWorkerRunListRequest): AgentTeamWorkerRunListResult {
+    this.requireWorkspace(request.workspaceId)
+    const ledger = this.requireLedger()
+    const runs: AgentTeamWorkerRunView[] = []
+    const seen = new Set<AgentTeamWorkerRef>()
+    for (const run of this.workerRegistry.runsOf(request.memberId)) {
+      // A run that already ended stays in the registry as its own record; the
+      // Human's list offers only what can still be stopped.
+      const live = this.workerRegistry.liveState(run.workerRef)
+      if (live === undefined) continue
+      const execution = ledger.workerExecution(run.workerRef)
+      if (execution === undefined || ledger.getProject(execution.projectRef)?.workspaceId !== request.workspaceId) continue
+      seen.add(run.workerRef)
+      runs.push(this.workerRunViewOf(execution, live))
+    }
+    for (const execution of ledger.workerExecutionsOfMember(request.memberId)) {
+      if (execution.state !== 'running' || seen.has(execution.workerRef)) continue
+      if (ledger.getProject(execution.projectRef)?.workspaceId !== request.workspaceId) continue
+      runs.push(this.workerRunViewOf(execution, 'unconfirmed'))
+    }
+    return Object.freeze({ runs: Object.freeze(runs) })
+  }
+
+  /**
+   * The Human's stop of one execution from a Member's edit surface. It runs the
+   * same Host stop transaction as the Member's tool, but answers with structured
+   * facts instead of a refusal the Client would have to read a sentence out of:
+   * an ending the engine decided, a cleanup still in flight, or a handle this
+   * Host no longer holds. Authorization and an unknown run stay refusals.
+   */
+  @Remote('stopWorker')
+  async stopWorkerForClient(request: AgentTeamWorkerStopRequest): Promise<AgentTeamWorkerStopResult> {
+    this.requireWorkspace(request.workspaceId)
+    const ledger = this.requireLedger()
+    const execution = ledger.workerExecution(request.workerRef)
+    if (execution === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${request.workerRef}' was started by this Team.`)
+    if (execution.initiatedBy !== request.memberId) {
+      throw new WorkerRefusal('worker_stop_forbidden', `Worker '${request.workerRef}' was delegated by another Member; `
+        + 'this surface lists only that Member\'s runs.')
+    }
+    if (ledger.getProject(execution.projectRef)?.workspaceId !== request.workspaceId) {
+      throw new WorkerRefusal('worker_stop_forbidden', `Worker '${request.workerRef}' does not belong to a Project of this Workspace.`)
+    }
+    const ended = (state: Exclude<AgentTeamWorkerState, 'running'>, settled?: {
+      readonly settledAt?: string | undefined
+      readonly diagnostic?: string | undefined
+    }): AgentTeamWorkerStopResult => Object.freeze({ kind: 'ended', workerRef: request.workerRef, state,
+      ...(settled?.settledAt === undefined ? {} : { settledAt: settled.settledAt }),
+      ...(settled?.diagnostic === undefined ? {} : { diagnostic: settled.diagnostic }) })
+    if (this.workerRegistry.get(request.workerRef) === undefined) {
+      if (execution.state === 'running') {
+        return Object.freeze({ kind: 'unconfirmed', workerRef: request.workerRef,
+          message: `Worker '${request.workerRef}' was started by a Host that no longer holds its handle, `
+            + 'so it cannot be confirmed or stopped; its result stays unconfirmed.' })
+      }
+      return ended(execution.state, execution)
+    }
+    try {
+      const stopped = await this.workerRegistry.stop(request.workerRef, agentTeamHumanActor())
+      if (stopped.state === 'running' || stopped.state === 'unconfirmed') {
+        return Object.freeze({ kind: 'pending', workerRef: request.workerRef,
+          message: `Worker '${request.workerRef}' is still stopping; the engine has not confirmed its cleanup yet.` })
+      }
+      return ended(stopped.state, stopped)
+    } catch (error: unknown) {
+      if (!(error instanceof WorkerRefusal)) throw error
+      // Both of these are endings the Host already recorded, so the receipt
+      // carries the state and the sentence rather than a bare refusal.
+      if (error.code === 'worker_stop_unconfirmed' || error.code === 'worker_already_ended') {
+        const recorded = this.requireLedger().workerExecution(request.workerRef)
+        if (recorded !== undefined && recorded.state !== 'running') {
+          return ended(recorded.state, recorded)
+        }
+      }
+      if (error.code === 'worker_stop_pending') {
+        return Object.freeze({ kind: 'pending', workerRef: request.workerRef, message: error.message })
+      }
+      throw error
+    }
   }
 
   /** One run as the caller may read it: the summary always, the output only an owner. */

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import type { AgentTeamClientMemberStatus, AgentTeamMemberReminderView, AgentTeamModelSelection, AgentTeamReminderSchedule } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamClientMemberStatus, AgentTeamMemberReminderView, AgentTeamModelSelection, AgentTeamReminderSchedule, AgentTeamWorkerRunView, AgentTeamWorkerStopResult } from '@contexera/dsh-agent-team/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { TeamModelCatalog, TeamModelEffortOption, TeamModelProviderGroup, TeamSidebarProps } from './slots.ts'
 import type { TeamKey } from './locales.ts'
 import { formatAbsoluteTime } from './team-formatters.ts'
+import { workerEngineName } from './worker-copy.ts'
 import { Button, IconChevronDownOutlineRegular, Input, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { mintRequestId } from './requests.ts'
@@ -372,12 +373,193 @@ function reminderScheduleText(schedule: AgentTeamReminderSchedule, t: TeamSideba
   return t('memberReminderCron', { expression: schedule.expression })
 }
 
-export function AgentEditorDialog({ status, updateMember, loadModels, loadMemberReminders, cancelMemberReminder, onCommitted, onClose, t }: {
+
+/** Every label one row can show: what the Host reports, plus the endings a stop receipt names. */
+type WorkerRunRowState = AgentTeamWorkerRunView['state'] | Extract<AgentTeamWorkerStopResult, { kind: 'ended' }>['state']
+
+const WORKER_RUN_STATE_KEYS = {
+  running: 'memberWorkerRunRunning',
+  stopping: 'memberWorkerRunStopping',
+  stopped: 'memberWorkerRunStopped',
+  completed: 'memberWorkerRunCompleted',
+  failed: 'memberWorkerRunFailed',
+  unconfirmed: 'memberWorkerRunUnconfirmed',
+} as const satisfies Record<WorkerRunRowState, TeamKey>
+
+/** What the run reports into, in the words the Thread faces already use. */
+function workerRunTargetText(run: AgentTeamWorkerRunView, t: TeamSidebarProps['t']): string {
+  if (run.taskRef !== undefined) return t('memberWorkerTargetTask')
+  if (run.threadRef !== undefined) return t('memberWorkerTargetThread')
+  return t('memberWorkerTargetProject')
+}
+
+/**
+ * What this surface knows about one row beyond its first read, in two separate
+ * fields: the state a Host receipt confirmed, and the sentence of the latest
+ * request. A request that never completed writes the sentence alone, so it can
+ * explain itself without ever taking back a state the Host already confirmed.
+ */
+interface WorkerRunOutcome {
+  readonly run: AgentTeamWorkerRunView
+  /** Written only by a receipt that carries an execution fact. */
+  readonly hostState?: WorkerRunRowState | undefined
+  /** Written by any request: a diagnostic, an in-flight word, or a refusal. */
+  readonly notice?: string | undefined
+}
+
+/**
+ * One Member's running Worker executions, read from the Host that owns them.
+ * Read-only by construction: the Human sees what this Host holds and may ask it
+ * to stop one, but a stop is only reported as done when the engine confirmed its
+ * cleanup. A failed stop keeps its row and its sentence across refreshes rather
+ * than disappearing into a shorter list.
+ */
+export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns, stopWorker, disabled, t }: {
+  readonly workspaceId: WorkspaceId
+  readonly memberId: AgentTeamClientMemberStatus['member']['memberId']
+  readonly loadWorkerRuns: TeamSidebarProps['loadWorkerRuns']
+  readonly stopWorker: TeamSidebarProps['stopWorker']
+  readonly disabled: boolean
+  readonly t: TeamSidebarProps['t']
+}) {
+  const [runs, setRuns] = useState<readonly AgentTeamWorkerRunView[]>()
+  const [error, setError] = useState<string>()
+  const [reloadToken, setReloadToken] = useState(0)
+  const [stopping, setStopping] = useState<string>()
+  const [outcomes, setOutcomes] = useState<ReadonlyMap<string, WorkerRunOutcome>>(() => new Map())
+  useEffect(() => {
+    let mounted = true
+    let pending: Promise<RemoteResult<{ readonly runs: readonly AgentTeamWorkerRunView[] }>>
+    try {
+      pending = loadWorkerRuns({ workspaceId, memberId })
+    } catch (cause) {
+      // A synchronously refused read (an undeclared remote, a dead scope) is the same retryable failure.
+      setError(cause instanceof Error ? cause.message : String(cause))
+      return
+    }
+    void pending.then(
+      (result) => {
+        if (!mounted) return
+        if (result.ok) {
+          setRuns(result.value.runs)
+          setError(undefined)
+        } else {
+          setError(result.error.message)
+        }
+      },
+      (cause: unknown) => {
+        if (!mounted) return
+        setError(cause instanceof Error ? cause.message : String(cause))
+      },
+    )
+    return () => { mounted = false }
+  }, [loadWorkerRuns, workspaceId, memberId, reloadToken])
+
+  /**
+   * Record a request that carried no execution fact: the sentence changes, and
+   * whatever the Host last confirmed for this row stays exactly as it was.
+   */
+  const recordNotice = (run: AgentTeamWorkerRunView, notice: string): void => {
+    setOutcomes(current => {
+      const previous = current.get(run.workerRef)
+      return new Map(current).set(run.workerRef, { run,
+        ...(previous?.hostState === undefined ? {} : { hostState: previous.hostState }), notice })
+    })
+  }
+
+  const stop = async (run: AgentTeamWorkerRunView): Promise<void> => {
+    if (stopping !== undefined) return
+    setStopping(run.workerRef)
+    try {
+      const result = await stopWorker({ workspaceId, memberId, workerRef: run.workerRef })
+      if (!result.ok) {
+        // A refused call says the request did not complete. It carries no
+        // execution fact, so it may not take back a state the Host confirmed.
+        recordNotice(run, result.error.message)
+        return
+      }
+      const value = result.value
+      // The Host's receipt is structured: an ending it decided, a cleanup still
+      // in flight, or a handle it no longer holds. None of them is guessed here.
+      setOutcomes(current => new Map(current).set(run.workerRef, value.kind === 'ended'
+        ? { run, hostState: value.state, ...(value.diagnostic === undefined ? {} : { notice: value.diagnostic }) }
+        : { run, hostState: value.kind === 'pending' ? 'stopping' : 'unconfirmed', notice: value.message }))
+    } catch (cause) {
+      // The row stays, and so does whatever the Host last confirmed: a request
+      // that never completed is an explanation, not an execution fact.
+      recordNotice(run, cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setStopping(undefined)
+    }
+  }
+
+  const rows: Array<{ readonly run: AgentTeamWorkerRunView; readonly outcome: WorkerRunOutcome | undefined }> =
+    (runs ?? []).map(run => ({ run, outcome: outcomes.get(run.workerRef) }))
+  for (const outcome of outcomes.values()) {
+    if (!(runs ?? []).some(run => run.workerRef === outcome.run.workerRef)) rows.push({ run: outcome.run, outcome })
+  }
+  return (
+    <div className={createCss.remindersSection} role="group" aria-label={t('memberWorkerRuns')} data-team-member-workers>
+      <span className={createCss.sectionLabel}>{t('memberWorkerRuns')}</span>
+      {runs === undefined && error === undefined && <small className={css.editHint}>{t('memberWorkerRunsLoading')}</small>}
+      {runs !== undefined && rows.length === 0 && <small className={css.editHint}>{t('memberWorkerRunsEmpty')}</small>}
+      {rows.length > 0 && (
+        <ul className={createCss.reminderList}>
+          {rows.map(({ run, outcome }) => {
+            // The Host's live word wins over a snapshot; a receipt's ending wins
+            // over both, because a run that ended is no longer listed.
+            const listed = (runs ?? []).find(candidate => candidate.workerRef === run.workerRef)
+            const state: WorkerRunRowState = outcome?.hostState ?? listed?.state ?? run.state
+            return (
+              <li key={run.workerRef} className={createCss.reminderRow} data-worker-run={run.workerRef} data-worker-state={state}>
+                <div className={createCss.reminderBody}>
+                  <span className={createCss.reminderNote}>{`${workerEngineName(t, run.engine)} · ${run.task}`}</span>
+                  <div className={createCss.reminderFooter}>
+                    <p className={createCss.reminderFacts}>
+                      <span>{`${t(WORKER_RUN_STATE_KEYS[state])} · ${workerRunTargetText(run, t)}`}</span>
+                      <span>{t('memberWorkerStarted', { time: formatAbsoluteTime(run.startedAt) })}</span>
+                    </p>
+                    {(state === 'running' || state === 'stopping') && (
+                      <Button
+                        className={createCss.reminderCancel!}
+                        size="sm"
+                        variant="ghost"
+                        aria-label={t('memberWorkerStopAction', { task: run.task })}
+                        disabled={disabled || stopping !== undefined}
+                        onClick={() => { void stop(run) }}
+                      >
+                        {stopping === run.workerRef || state === 'stopping' ? t('memberWorkerRunStopping') : t('memberWorkerStop')}
+                      </Button>
+                    )}
+                  </div>
+                  {outcome?.notice !== undefined && <p className={createCss.error} role="alert">{outcome.notice}</p>}
+                  {state === 'unconfirmed' && <small className={css.editHint}>{t('memberWorkerStopUnconfirmedHint')}</small>}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {error !== undefined && (
+        <p className={createCss.failure} role="alert">
+          <span>{t('memberWorkerRunsFailed', { message: error })}</span>
+          <Button size="sm" variant="outline" disabled={disabled} onClick={() => { setError(undefined); setReloadToken(token => token + 1) }}>
+            {t('retry')}
+          </Button>
+        </p>
+      )}
+    </div>
+  )
+}
+
+export function AgentEditorDialog({ status, updateMember, loadModels, loadMemberReminders, cancelMemberReminder, loadWorkerRuns, stopWorker, onCommitted, onClose, t }: {
   readonly status: AgentTeamClientMemberStatus
   readonly updateMember: TeamSidebarProps['updateMember']
   readonly loadModels: TeamSidebarProps['loadModels']
   readonly loadMemberReminders: TeamSidebarProps['loadMemberReminders']
   readonly cancelMemberReminder: TeamSidebarProps['cancelMemberReminder']
+  readonly loadWorkerRuns: TeamSidebarProps['loadWorkerRuns']
+  readonly stopWorker: TeamSidebarProps['stopWorker']
   readonly onCommitted: () => Promise<void> | void
   readonly onClose: () => void
   readonly t: TeamSidebarProps['t']
@@ -442,6 +624,14 @@ export function AgentEditorDialog({ status, updateMember, loadModels, loadMember
         memberId={memberId}
         loadMemberReminders={loadMemberReminders}
         cancelMemberReminder={cancelMemberReminder}
+        disabled={saving}
+        t={t}
+      />
+      <MemberWorkerRunsSection
+        workspaceId={status.member.workspaceId}
+        memberId={memberId}
+        loadWorkerRuns={loadWorkerRuns}
+        stopWorker={stopWorker}
         disabled={saving}
         t={t}
       />

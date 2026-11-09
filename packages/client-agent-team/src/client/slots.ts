@@ -25,6 +25,10 @@ import type {
   AgentTeamPutAttachmentResult,
   AgentTeamMemberResult,
   AgentTeamAddMemberResult,
+  AgentTeamWorkerRunListRequest,
+  AgentTeamWorkerRunListResult,
+  AgentTeamWorkerStopRequest,
+  AgentTeamWorkerStopResult,
   AgentTeamRecoverMemberRequest,
   AgentTeamRecoverMemberResult,
   AgentTeamMembersRequest,
@@ -148,6 +152,10 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     loadMemberReminders: (request: AgentTeamMemberReminderListRequest) => Promise<RemoteResult<readonly AgentTeamMemberReminderView[]>>
     /** Human withdrawal of one reminder from Member detail; only the Member's own reminders are listed to withdraw. */
     cancelMemberReminder: (request: Omit<AgentTeamMemberReminderCancelRequest, 'actor'>) => Promise<RemoteResult<AgentTeamMemberReminderCancelResult>>
+    /** One Member's Worker runs: what this Host holds (running/stopping) and the records it cannot confirm. */
+    loadWorkerRuns: (request: AgentTeamWorkerRunListRequest) => Promise<RemoteResult<AgentTeamWorkerRunListResult>>
+    /** The Human's stop of one of that Member's runs; the answer is the state the engine's own cleanup confirmed. */
+    stopWorker: (request: AgentTeamWorkerStopRequest) => Promise<RemoteResult<AgentTeamWorkerStopResult>>
     recoverMember: (request: AgentTeamRecoverMemberRequest) => Promise<RemoteResult<AgentTeamRecoverMemberResult>>
     archiveMember: (request: AgentTeamArchiveMemberRequest) => Promise<RemoteResult<AgentTeamArchiveMemberResult>>
     joinWorkspace: (request: AgentTeamJoinWorkspaceRequest) => Promise<RemoteResult<AgentTeamJoinWorkspaceResult>>

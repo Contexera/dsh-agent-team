@@ -1072,7 +1072,68 @@ export interface AgentTeamWorkerStateView {
   readonly workerRef: AgentTeamWorkerRef
   readonly state: AgentTeamWorkerState
   readonly unconfirmed: boolean
+  /** The Host that started the run has been asked to stop it and has not confirmed cleanup yet. Derived, never stored. */
+  readonly stopping?: boolean | undefined
 }
+
+/**
+ * How a running Worker stands in the Human's own run list. `stopping` is the
+ * live request this Host has not confirmed yet; `unconfirmed` is a record a
+ * previous Host left running, which this Host cannot stop or take over.
+ */
+export type AgentTeamWorkerRunViewState = 'running' | 'stopping' | 'unconfirmed'
+
+/** One live or unconfirmed Worker run, as the Human's edit-Agent surface lists it. */
+export interface AgentTeamWorkerRunView {
+  readonly workerRef: AgentTeamWorkerRef
+  readonly projectRef: AgentTeamProjectRef
+  readonly engine: import('../worker-settings.ts').WorkerEngine
+  readonly state: AgentTeamWorkerRunViewState
+  /** A bounded preview of the task the Worker was given; the full text stays in the private execution record. */
+  readonly task: string
+  readonly startedAt: string
+  /** The Thread the run reports into; absent on a Project-only delegation. */
+  readonly threadRef?: AgentTeamThreadRef | undefined
+  readonly taskRef?: AgentTeamTaskRef | undefined
+}
+
+/** The Human's read of one Member's Worker runs. */
+export interface AgentTeamWorkerRunListRequest {
+  readonly workspaceId: WorkspaceId
+  readonly memberId: AgentTeamMemberId
+}
+
+export interface AgentTeamWorkerRunListResult {
+  readonly runs: readonly AgentTeamWorkerRunView[]
+}
+
+/** The Human's stop request for one execution, addressed by its Team-owned ref. */
+export interface AgentTeamWorkerStopRequest {
+  readonly workspaceId: WorkspaceId
+  readonly workerRef: AgentTeamWorkerRef
+  /** The Member whose edit surface asked; the Host stops only a run that Member initiated. */
+  readonly memberId: AgentTeamMemberId
+}
+
+/**
+ * What the Human's stop surface learns about one execution, as structured facts
+ * rather than a sentence to parse. `ended` carries the state the run really
+ * reached — a run that finished first is not a stopped run, and a cleanup the
+ * engine never confirmed is `failed` with the Host's own `diagnostic`. `pending`
+ * means the stop was requested and the cleanup is still in flight, and
+ * `unconfirmed` means this Host no longer holds the handle, so it can neither
+ * confirm nor stop the run. Neither of the last two is an ending.
+ */
+export type AgentTeamWorkerStopResult =
+  | {
+    readonly kind: 'ended'
+    readonly workerRef: AgentTeamWorkerRef
+    readonly state: Exclude<AgentTeamWorkerState, 'running'>
+    readonly settledAt?: string | undefined
+    readonly diagnostic?: string | undefined
+  }
+  | { readonly kind: 'pending'; readonly workerRef: AgentTeamWorkerRef; readonly message: string }
+  | { readonly kind: 'unconfirmed'; readonly workerRef: AgentTeamWorkerRef; readonly message: string }
 
 /**
  * What a delegation target names, as the Host resolves it before it writes

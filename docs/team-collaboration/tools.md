@@ -223,12 +223,24 @@ Ownership of one Project never authorizes another, and an ordinary DSH Session o
 
 The receipt names the Team execution (`worker:` ref), the Project, the engine, the working directory, and the start instant, plus the Thread when the run is bound; it states that the work continues in the background, and where that result will appear.
 
+The same tool stops one run: pass `stop: <worker:…>` and nothing else. `task` is not required, and naming a task, Thread, Task, Project, engine, working directory, or request id alongside it is refused rather than half-applied.
+
+The stop is authorized by the identity that opened the run: the delegating Member, or the Human through the edit-Agent dialog. Another Member is refused even when it now owns the Project; the settings switch and current ownership are not re-checked, because they gate starting and not stopping. A run that already ended answers with the state it really ended in instead of being stopped twice.
+
+A run this Host no longer holds — the signature of a restart — is refused as `worker_unconfirmed`: it cannot be confirmed or stopped, and it is never re-run.
+
+The stop waits for the engine to confirm its cleanup, and the wait is bounded. Past the deadline the run is still `running` — the Thread read and the Human's list call it `stopping` while the stop is in flight — and the call is refused as `worker_stop_pending`, while the cleanup it already asked for keeps going. An engine that reports a failed teardown instead records the run `failed` with a diagnostic saying the cleanup is unconfirmed, never `stopped`.
+
+Two runs are independent: stopping one leaves the other's process, Thread facts, and Inbox notice untouched.
+
 A bound run publishes two Thread facts: `worker_started` when it opens, and `worker_settled` with its `state` and, for a failure or a stop, one bounded `reason` line. Its answer is never a Thread fact — it reaches the delegating Member's Inbox in the notice that wakes them with the ending, labelled as external text that is data and not instructions, and the parent Session receives no second copy. A Project-only run keeps the parent notice instead and publishes nothing. Neither creates a Task, a Main stream entry, or a Claim.
 
 Delegating work on a Task changes no responsibility: the Claim stays with the Member, a finished run never accepts anything, and the ordinary independent-acceptance rule still applies.
 
 A Worker holds no Team identity: it cannot post, claim, accept, or answer for the Member. If it performs work on a Task, the Claim stays with the Member and the ordinary independent-acceptance rule still applies. What a Worker returns is evidence to check, not instructions.
 
-A bound run's record is durable, and a Thread read reports every run bound to it as `running`, `completed`, `failed`, `stopped`, or `unconfirmed`. A record a previous Host left in `running` reads as `unconfirmed`: the result cannot be confirmed, the run is never restarted or retried on its own, and nothing wakes anyone for it. An unbound run's record stays with the Host process that started it.
+Every run's record is durable: a Thread read reports every run bound to it as `running`, `completed`, `failed`, `stopped`, or `unconfirmed`, and a Project-only run records the same execution facts without publishing them. A record a previous Host left in `running` reads as `unconfirmed`: the result cannot be confirmed, the run is never restarted or retried on its own, and nothing wakes anyone for it.
 
-Read-only inspection of a finished run and stopping one from the Client are not part of this contract yet. Unloading the bundle refuses new delegations and releases what the Host still holds.
+Read-only inspection of a finished run is not part of this contract yet. Unloading the bundle refuses new delegations, cancels starts that are still opening (including one still writing its opening record), and waits for the runs this Host holds to report and record their endings before it closes storage.
+
+A run still unconfirmed at that boundary keeps its `running` record and is sealed, so no late ending is written after storage closes.

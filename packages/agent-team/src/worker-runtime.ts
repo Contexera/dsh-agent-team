@@ -55,6 +55,14 @@ export class WorkerFailure extends Error {
   }
 }
 
+/**
+ * The one diagnostic a Worker hands the Harness when the engine could not
+ * confirm its own disposal. The Harness waits for teardown but keeps the result
+ * it captured for the parent, so this text has to ride that result: Team reads
+ * it back to report the stop as unconfirmed instead of as stopped.
+ */
+export const WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC = new WorkerFailure('dispose', 'unknown').message
+
 export interface WorkerRunSpec {
   readonly engine: WorkerEngine
   /** Native model id; omitted to keep the engine's own setting. */
@@ -170,7 +178,7 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     // A native handled receipt is not a turn end: keep waiting for the turn it belongs to.
     return completedTurn(outcome.kind === 'handled' ? await awaitTurnEnd(session, outcome.seq) : outcome, collectOutput())
   }
-  const result = settleRunResult({
+  const settled = settleRunResult({
     attempt: async () => {
       if (phase !== 'running') return stopped.promise
       try {
@@ -190,6 +198,18 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     unsubscribe()
     if (phase === 'running') phase = 'settled'
   })
+  // The Harness hands the parent the result it captured here, and a teardown
+  // failure never edits it. So a cancelled run settles only after disposal had
+  // its say: a failed cleanup rides this one result, keeping the output so far.
+  const result = settled.then(async (outcome) => {
+    if (outcome.stopReason !== 'aborted') return outcome
+    try {
+      await dispose()
+      return outcome
+    } catch {
+      return { output: outcome.output, stopReason: 'error' as const, diagnostic: WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC }
+    }
+  })
   return subprocessRunHandle({
     // The external child's id is the engine's own session identity: the execution
     // record reports it, and a later read-only diagnostic can reopen that history.
@@ -200,7 +220,7 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     requestCancel: onAbort,
     teardown: async () => {
       await dispose()
-      await result
+      await settled
     },
   })
 }

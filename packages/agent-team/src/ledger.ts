@@ -1175,6 +1175,21 @@ export class AgentTeamLedger {
     return this.state.workerExecutions.get(workerRef)?.state
   }
 
+  /** One run's whole durable record, for the Host's stop authorization. */
+  workerExecution(workerRef: AgentTeamWorkerRef): AgentTeamWorkerExecution | undefined {
+    return this.state.workerExecutions.get(workerRef)
+  }
+
+  /** Every run one Member initiated, newest start first: the record keeps runs that no live execution backs any more. */
+  workerExecutionsOfMember(memberId: AgentTeamMemberId): readonly AgentTeamWorkerExecution[] {
+    const executions: AgentTeamWorkerExecution[] = []
+    for (const execution of this.state.workerExecutions.values()) {
+      if (execution.initiatedBy !== memberId) continue
+      executions.push(execution)
+    }
+    return Object.freeze(executions.sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)))
+  }
+
   /**
    * Every Worker run bound to one Thread with the durable state each ended in.
    * It reads the execution records, not the facts: a read answers for a window of

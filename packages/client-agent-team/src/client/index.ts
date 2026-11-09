@@ -44,6 +44,8 @@ import type {
   AgentTeamSubscriptionDeliveriesRequest,
   AgentTeamSubscriptionReplayRequest,
   AgentTeamViewRequest,
+  AgentTeamWorkerRunListRequest,
+  AgentTeamWorkerStopRequest,
 } from '@contexera/dsh-agent-team/types'
 import agentTeamRemote from '@contexera/dsh-agent-team/remote'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '@contexera/dsh-agent-team/human-settings'
@@ -251,6 +253,10 @@ function teamSharedRemotes(
     // the Member's own `team_reminder` tool uses, so a reminder is withdrawn exactly once.
     loadMemberReminders: (request: AgentTeamMemberReminderListRequest) => ctx.remote.agentTeam.memberReminders(request),
     cancelMemberReminder: (request: Omit<AgentTeamMemberReminderCancelRequest, 'actor'>) => ctx.remote.agentTeam.cancelMemberReminder(request),
+    // The Human's Worker controls: the same Host stop transaction a Member's tool
+    // uses, read by the Member the edit surface belongs to.
+    loadWorkerRuns: (request: AgentTeamWorkerRunListRequest) => ctx.remote.agentTeam.workerRuns(request),
+    stopWorker: (request: AgentTeamWorkerStopRequest) => ctx.remote.agentTeam.stopWorker(request),
     recoverMember: (request: AgentTeamRecoverMemberRequest) => ctx.remote.agentTeam.recoverMember(request),
     archiveMember: (request: AgentTeamArchiveMemberRequest) => ctx.remote.agentTeam.archiveMember(request),
     joinWorkspace: (request: AgentTeamJoinWorkspaceRequest) => ctx.remote.agentTeam.joinWorkspace(request),

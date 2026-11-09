@@ -1,10 +1,12 @@
 /**
- * Delegations the Host starts, tracks, and cancels: the Team side of one Worker run.
+ * Delegations the Host starts, tracks, and stops: the Team side of one Worker run.
  *
- * Team owns authorization, the execution record, and the result destination; the
- * Harness subagent service owns admission, capacity, and the parent notice. A
- * bound run writes its binding to the ledger before any process exists and keeps
- * its answer private; an unbound run stays the direct parent result it was.
+ * Team owns authorization, the execution record, the result destination, and the
+ * stop transaction; the Harness subagent service owns admission, capacity, the
+ * parent notice, and the engine handle. A bound run writes its binding to the
+ * ledger before any process exists and keeps its answer private; an unbound run
+ * stays the direct parent result it was. One run has exactly one terminal fact,
+ * and a stop only writes it after the engine confirmed its cleanup.
  * @module @contexera/dsh-agent-team/worker-service
  */
 
@@ -15,6 +17,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SubagentActivation, SubagentRuntime, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {
+  AgentTeamActor,
   AgentTeamMemberActor,
   AgentTeamMemberId,
   AgentTeamProjectRef,
@@ -29,9 +32,10 @@ import type {
 } from './types.ts'
 import { truncateToCharacters } from './text.ts'
 import { DEFAULT_WORKER_SANDBOX, WORKER_DIAGNOSTIC_MAX_CHARACTERS, WORKER_ENGINES, WORKER_OUTPUT_MAX_CHARACTERS,
-  type WorkerEngine } from './worker-settings.ts'
+  WORKER_TASK_PREVIEW_MAX_CHARACTERS, type WorkerEngine } from './worker-settings.ts'
 import {
   TeamWorkerProvider,
+  WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC,
   WORKER_PROVIDER_NAMES,
   WorkerFailure,
   type WorkerRunSpec,
@@ -78,7 +82,15 @@ export interface AgentTeamWorkerRun {
   readonly cwd: string
   /** A safe summary of a failure, never the native cause. */
   readonly diagnostic?: string | undefined
+  /** The Member whose delegation opened this run: the only Member who may stop it. */
+  readonly initiatedBy: AgentTeamMemberId
 }
+
+/**
+ * Whether this Host still holds a run, and whether a stop has been asked for
+ * but not confirmed. Derived from the live registry, never stored.
+ */
+export type WorkerLiveState = 'running' | 'stopping'
 
 export interface WorkerStartRequest {
   readonly requestId: AgentTeamRequestId
@@ -142,9 +154,22 @@ const nowIso = (): string => new Date().toISOString()
 /**
  * How long an unloading Host waits for an engine to report its ending before it
  * lets go. A run that outlasts it keeps its recorded start with no ending, which
- * the next read reports as unconfirmed rather than holding the Host open.
+ * the next read reports as unconfirmed rather than holding the Host open — and
+ * the run is sealed so a late ending is never written after storage closes.
  */
 const WORKER_SETTLE_DEADLINE_MS = 5_000
+
+/** How long one stop request waits for cleanup before it reports that the run is still stopping. */
+const WORKER_STOP_DEADLINE_MS = 10_000
+
+/** Resolve to `undefined` when `promise` has not settled within `ms`; the timer never holds the process open. */
+const within = <T>(promise: Promise<T>, ms: number): Promise<T | undefined> => Promise.race([
+  promise,
+  new Promise<undefined>(resolve => {
+    const timer = setTimeout(() => { resolve(undefined) }, ms)
+    timer.unref?.()
+  }),
+])
 
 /** The text of an engine's final answer; any other content block is not an answer to carry. */
 const answerTextOf = (output: readonly { readonly type: string; readonly text?: string | undefined }[]): string | undefined => {
@@ -196,8 +221,28 @@ interface RunEntry {
   readonly settleRequestId: AgentTeamRequestId
   /** The delegation this run answers, as {@link assertSameDelegation} compares a resend against it. */
   readonly delegation: DelegationShape
+  /** Cancels the startup window; aborted by a stop request or by the Host releasing the run. */
+  readonly startup: AbortController
+  /** Resolves once the run's one terminal write settled, failed, or the Host sealed the run. */
+  readonly terminated: PromiseWithResolvers<void>
+  /** A stop has been asked for and no terminal fact has landed yet. */
+  stopping: boolean
+  /** The terminal write, so a confirmed stop also proves its fact is durable. */
+  record?: Promise<void> | undefined
+  /** The cleanup a stop asked for; its rejection is the evidence the stop is unconfirmed. */
+  stopDisposal?: Promise<void> | undefined
+  /** One stop transaction per run, joined by repeated requests. */
+  stop?: Promise<void> | undefined
   activation?: SubagentActivation | undefined
-  settle?: Promise<void> | undefined
+  /** After the Host released a run it could not clean up, a late ending must not reach closed storage. */
+  sealed: boolean
+  /** The engine did not confirm the cleanup a stop asked for: the one ending is `failed`, never `stopped`. */
+  cleanupUnconfirmed: boolean
+}
+
+/** Whether this Host still holds the entry: a sealed run was released without a confirmed ending. */
+function held(entry: RunEntry): boolean {
+  return !entry.sealed
 }
 
 /** Executions this Host started, plus the request ids already admitted. */
@@ -220,16 +265,30 @@ export class WorkerRegistry {
   ) {}
 
   list(): readonly AgentTeamWorkerRun[] {
-    return [...this.runs.values()].map(entry => entry.run)
+    return [...this.runs.values()].filter(held).map(entry => entry.run)
+  }
+
+  /** Every run one Member started, in start order: the Member's own stop surface. */
+  runsOf(memberId: AgentTeamMemberId): readonly AgentTeamWorkerRun[] {
+    return [...this.runs.values()].filter(held).filter(entry => entry.run.initiatedBy === memberId).map(entry => entry.run)
   }
 
   get(workerRef: AgentTeamWorkerRef): AgentTeamWorkerRun | undefined {
-    return this.runs.get(workerRef)?.run
+    const entry = this.runs.get(workerRef)
+    return entry === undefined || !held(entry) ? undefined : entry.run
   }
 
   /** Whether this Host still holds the run: `running` with no live entry here is a previous Host's. */
   isLive(workerRef: AgentTeamWorkerRef): boolean {
-    return this.runs.get(workerRef)?.run.state === 'running'
+    const entry = this.runs.get(workerRef)
+    return entry !== undefined && held(entry) && entry.run.state === 'running'
+  }
+
+  /** How a run this Host holds stands right now, or `undefined` when it holds no live execution. */
+  liveState(workerRef: AgentTeamWorkerRef): WorkerLiveState | undefined {
+    const entry = this.runs.get(workerRef)
+    if (entry === undefined || !held(entry) || entry.run.state !== 'running') return undefined
+    return entry.stopping ? 'stopping' : 'running'
   }
 
   /**
@@ -309,75 +368,246 @@ export class WorkerRegistry {
     const entry: RunEntry = {
       settleRequestId: `${request.requestId}:settled` as AgentTeamRequestId,
       delegation: admitted.delegation,
+      startup: new AbortController(),
+      terminated: Promise.withResolvers<void>(),
+      stopping: false,
+      sealed: false,
+      cleanupUnconfirmed: false,
       run: Object.freeze({ workerRef, projectRef: started.projectRef, engine, state: 'running' as const,
-        startedAt: started.startedAt, cwd: started.cwd,
+        startedAt: started.startedAt, cwd: started.cwd, initiatedBy: started.initiatedBy,
         ...(started.threadRef === undefined ? {} : { threadRef: started.threadRef }),
         ...(started.taskRef === undefined ? {} : { taskRef: started.taskRef }) }),
     }
     this.runs.set(workerRef, entry)
     this.byRequest.set(request.requestId, workerRef)
+    if (this.stopped) {
+      // The Host began unloading while this run was writing its opening record:
+      // no engine opens, and the record stays running for a later read to report
+      // as unconfirmed instead of receiving an ending after storage closes.
+      this.seal(entry)
+      throw new WorkerRefusal('worker_unavailable', 'The Team released this Worker before it opened its engine.')
+    }
     try {
       const activation = await subagents.startActivation({
         provider,
         label: `${engine} worker`,
         request: { parent: caller.parent, prompt: [{ type: 'text', text: request.task }], cwd },
-        signal: new AbortController().signal,
+        // A stop asked for during startup cancels through this signal; once the
+        // activation is published, its own disposal is the channel.
+        signal: entry.startup.signal,
         // A bound run's result belongs to its Thread and its initiator's Inbox,
         // so the parent Session must not also receive a full copy of it.
         delivery: entry.run.threadRef === undefined ? 'parent' : 'caller',
       })
+      if (entry.sealed) {
+        // The Host released this run before its engine opened: clean the late
+        // handle up and never let it publish a start the Host no longer holds.
+        void activation.dispose().catch(() => {})
+        throw new WorkerRefusal('worker_unavailable', 'The Team released this Worker while it was still starting.')
+      }
       entry.activation = activation
+      if (entry.stopping) {
+        const disposal = activation.dispose()
+        entry.stopDisposal ??= disposal
+        void disposal.catch(() => {})
+      }
       // An external child's id is the engine's own session identity, which is what
       // the record reports and a later read-only diagnostic reopens.
       const nativeSessionId = String(activation.childId)
-      entry.settle = activation.result.then(
-        (result) => {
-          const completed = result.stopReason === 'completed'
-          // What the engine said before it stopped is still the answer it produced:
-          // a bound run suppresses the parent's copy, so dropping it would lose it.
-          const output = answerTextOf(result.output)
-          const diagnostic = !completed && typeof result.diagnostic === 'string' ? result.diagnostic : undefined
-          return this.settle(entry, completed ? 'completed' : result.stopReason === 'aborted' ? 'stopped' : 'failed', {
-            nativeSessionId,
-            ...(diagnostic === undefined ? {} : { diagnostic }),
-            ...(output === undefined ? {} : { output }),
-          })
-        },
-        (error: unknown) => this.settle(entry, 'failed', {
-          nativeSessionId,
-          diagnostic: error instanceof WorkerFailure ? error.message : 'The Worker ended with an unreported failure.',
-        }),
+      void activation.result.then(
+        (result) => this.finish(entry, result, nativeSessionId),
+        (error: unknown) => this.finish(entry, { output: [], stopReason: 'error',
+          diagnostic: error instanceof WorkerFailure ? error.message : 'The Worker ended with an unreported failure.' }, nativeSessionId),
       )
       return this.require(workerRef)
     } catch (error: unknown) {
-      const cancelled = error instanceof WorkerFailure && error.stage === 'startup' && error.category === 'cancelled'
-      // The refusal reaches the caller only after the ending is durable, so the
-      // Thread never shows a start that ended with nothing.
-      await this.settle(entry, cancelled ? 'stopped' : 'failed',
-        cancelled ? {} : { diagnostic: error instanceof Error ? error.message : 'The Worker could not start.' })
+      await this.finishFromStartFailure(entry, error)
+      // A start cancelled by its own stop answers with the run it recorded
+      // instead of an error: the caller asked for this ending and needs the ref.
+      if (entry.stopping && entry.run.state !== 'running') return entry.run
       throw error
     }
   }
 
-  async stop(workerRef: AgentTeamWorkerRef): Promise<AgentTeamWorkerRun> {
+  /**
+   * Stop one execution this Host holds. Only the Member who delegated it and the
+   * Human may ask; the settings switch and current ownership are start conditions
+   * and are deliberately not re-checked here. A run that already ended answers
+   * with its real terminal state instead of stopping it twice.
+   */
+  async stop(workerRef: AgentTeamWorkerRef, stopper: AgentTeamActor): Promise<AgentTeamWorkerRun> {
     const entry = this.runs.get(workerRef)
     if (entry === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${workerRef}' was started by this Host.`)
+    this.assertMayStop(entry, stopper)
     if (entry.run.state !== 'running') return entry.run
-    await entry.activation?.dispose()
-    await this.settledWithin(entry)
-    return this.require(workerRef)
+    const transaction = entry.stop ??= this.stopRun(entry)
+    // The transaction outlives this wait: a caller that gave up must not cancel
+    // the cleanup the engine is already carrying out.
+    const done = await within(transaction.then(() => true), WORKER_STOP_DEADLINE_MS)
+    if (done === undefined || entry.run.state === 'running') {
+      throw new WorkerRefusal('worker_stop_pending', `Worker '${workerRef}' was asked to stop, but the engine has not confirmed `
+        + `its cleanup within ${WORKER_STOP_DEADLINE_MS}ms; it is still stopping. Check the engine's process before starting another task.`)
+    }
+    if (entry.cleanupUnconfirmed) {
+      throw new WorkerRefusal('worker_stop_unconfirmed', `Worker '${workerRef}' was asked to stop, but the engine did not `
+        + 'confirm its cleanup, so it cannot be confirmed stopped. Check the engine\'s process before starting another task.')
+    }
+    try {
+      await entry.record
+    } catch {
+      throw new WorkerRefusal('worker_stop_unrecorded', `Worker '${workerRef}' stopped, but its ending could not be recorded; `
+        + 'the Thread reports the result as unconfirmed.')
+    }
+    return entry.run
   }
 
+  /**
+   * Release the Team: refuse new starts, cancel every start still opening, stop
+   * the runs this provider holds, wait for their endings, then release the
+   * providers. A run that cannot confirm its ending within the deadline stays
+   * `running` — which a later read reports as unconfirmed — and is sealed so no
+   * late ending is written after the Host closes its storage.
+   */
   async dispose(): Promise<void> {
     this.stopped = true
-    const live = [...this.runs.values()].filter(entry => entry.run.state === 'running')
-    for (const entry of live) {
-      await entry.activation?.dispose().catch(() => {})
-      await this.settledWithin(entry)
+    // A start still writing its opening record is not in `runs` yet, so the
+    // request is made twice: once now, and once after those writes land.
+    this.requestStops()
+    // Let starts that are already opening reach their own rollback first: a late
+    // handle must be disposed while the providers are still registered.
+    const opening = [...this.starting.values()].map(start => start.started)
+    await within(Promise.allSettled(opening), WORKER_SETTLE_DEADLINE_MS)
+    this.requestStops()
+    // A start that lands after this snapshot is sealed by `open` itself: it opens
+    // no engine, so it needs no disposal here.
+    const held = [...this.runs.values()]
+    for (const entry of held) {
+      if (entry.run.state !== 'running' || entry.sealed) continue
+      const activation = entry.activation
+      if (activation !== undefined) {
+        const disposal = activation.dispose()
+        entry.stopDisposal ??= disposal
+        void disposal.catch(() => {})
+      }
+      const ended = await within(entry.terminated.promise.then(() => true), WORKER_SETTLE_DEADLINE_MS)
+      if (ended === undefined && entry.run.state === 'running') this.seal(entry)
     }
-    await Promise.allSettled([...this.writes])
+    await Promise.allSettled(this.writes)
     for (const release of this.providers.values()) release()
     this.providers.clear()
+  }
+
+  /** Ask every run this Host still holds to stop; a sealed run already has its one ending decided. */
+  private requestStops(): void {
+    for (const entry of this.runs.values()) {
+      if (entry.run.state !== 'running' || entry.sealed) continue
+      entry.stopping = true
+      entry.startup.abort()
+    }
+  }
+
+  /** Refuse a stop by anyone but the Member who delegated the run and the Human. */
+  private assertMayStop(entry: RunEntry, stopper: AgentTeamActor): void {
+    if (stopper.kind === 'human') return
+    if (stopper.kind === 'member' && stopper.memberId === entry.run.initiatedBy) return
+    throw new WorkerRefusal('worker_stop_forbidden', `Only the Member who delegated Worker '${entry.run.workerRef}' `
+      + 'or the Human may stop it.')
+  }
+
+  /**
+   * The one stop transaction: cancel a startup that has not published, dispose a
+   * published activation, and wait for the settlement its own evidence decides.
+   */
+  private async stopRun(entry: RunEntry): Promise<void> {
+    entry.stopping = true
+    // Before publication the request signal is the only cancellation channel.
+    entry.startup.abort()
+    const activation = entry.activation
+    if (activation !== undefined) {
+      const disposal = activation.dispose()
+      entry.stopDisposal ??= disposal
+      // The result handler awaits this same promise for its verdict; a natural
+      // ending that landed first does not need to surface it a second time.
+      void disposal.catch(() => {})
+    }
+    await entry.terminated.promise
+  }
+
+  /** Seal a run the Host released without an ending: its start stays, and no later write may claim one. */
+  private seal(entry: RunEntry): void {
+    if (entry.sealed) return
+    entry.sealed = true
+    this.deps.warn(`worker (${entry.run.engine}) ${entry.run.workerRef} was released without a confirmed ending; `
+      + 'it stays unconfirmed and no late ending will be written after the Host closed its storage')
+    entry.terminated.resolve()
+  }
+
+  /**
+   * Decide one run's ending from the engine's own result. A stop that the engine
+   * did not confirm is not reported as stopped: an aborted result whose disposal
+   * rejected is the existing `failed` state with a reason that says what is
+   * unknown, and a natural completion or failure that landed first keeps its
+   * real state.
+   */
+  private async finish(entry: RunEntry, result: { readonly output: readonly { readonly type: string; readonly text?: string | undefined }[]
+    readonly stopReason: SubagentStopReason; readonly diagnostic?: string | undefined }, nativeSessionId: string): Promise<void> {
+    if (entry.sealed) {
+      entry.terminated.resolve()
+      return
+    }
+    const output = answerTextOf(result.output)
+    let state: 'completed' | 'failed' | 'stopped' = result.stopReason === 'completed'
+      ? 'completed' : result.stopReason === 'aborted' ? 'stopped' : 'failed'
+    let diagnostic = result.stopReason === 'completed' || typeof result.diagnostic !== 'string' ? undefined : result.diagnostic
+    if (diagnostic === WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC) entry.cleanupUnconfirmed = true
+    if (state === 'stopped' && entry.stopping && await this.disposalFailed(entry)) {
+      state = 'failed'
+      entry.cleanupUnconfirmed = true
+      diagnostic = 'The stop was requested, but the engine did not confirm its cleanup, so the run cannot be '
+        + 'confirmed stopped. Check the engine\'s process before starting another task.'
+        + (diagnostic === undefined ? '' : ` (${diagnostic})`)
+    }
+    await this.settle(entry, state, {
+      nativeSessionId,
+      ...(output === undefined ? {} : { output }),
+      ...(diagnostic === undefined ? {} : { diagnostic }),
+    })?.catch(() => {})
+  }
+
+  /** Decide the ending of a run whose engine never published: a cancelled start is a stop, everything else its real failure. */
+  private async finishFromStartFailure(entry: RunEntry, error: unknown): Promise<void> {
+    if (entry.sealed) {
+      entry.terminated.resolve()
+      return
+    }
+    const cancelled = error instanceof WorkerFailure && error.stage === 'startup' && error.category === 'cancelled'
+    const aborted = error instanceof Error && error.name === 'AbortError'
+    const diagnostic = error instanceof Error ? error.message : 'The Worker could not start.'
+    if (cancelled) {
+      await this.settle(entry, 'stopped', {})?.catch(() => {})
+      return
+    }
+    // The manager can reject with the abort reason after rolling back a start it
+    // owns; the engine may have opened, so a stop is not confirmed from that alone.
+    const uncertain = entry.stopping && aborted
+    await this.settle(entry, 'failed', {
+      diagnostic: uncertain
+        ? `${diagnostic} The stop was requested while the Worker was starting, but the Host could not confirm `
+          + 'the engine stopped. Check the engine\'s process before starting another task.'
+        : diagnostic,
+    })?.catch(() => {})
+  }
+
+  /** Whether the cleanup a stop asked for ended in a rejection: the one piece of evidence that a stop is unconfirmed. */
+  private async disposalFailed(entry: RunEntry): Promise<boolean> {
+    const disposal = entry.stopDisposal
+    if (disposal === undefined) return false
+    try {
+      await disposal
+      return false
+    } catch {
+      return true
+    }
   }
 
   /**
@@ -390,6 +620,10 @@ export class WorkerRegistry {
     readonly output?: string | undefined
     readonly diagnostic?: string | undefined
   }): Promise<void> | undefined {
+    if (entry.sealed) {
+      entry.terminated.resolve()
+      return undefined
+    }
     if (entry.run.state !== 'running') return undefined
     const settledAt = nowIso()
     // The record's own ceilings are what the schema admits; a failure summary the
@@ -405,27 +639,18 @@ export class WorkerRegistry {
       ...(facts.nativeSessionId === undefined ? {} : { nativeSessionId: facts.nativeSessionId }),
       ...(facts.output === undefined ? {} : { output: facts.output }),
       ...(diagnostic === undefined ? {} : { diagnostic }) })
-    const write = this.deps.recordSettled({ requestId: entry.settleRequestId, settlement }).catch((error: unknown) => {
+    const write = this.deps.recordSettled({ requestId: entry.settleRequestId, settlement })
+    entry.record = write
+    const guarded = write.catch((error: unknown) => {
       this.deps.warn(`worker (${entry.run.engine}) ${entry.run.workerRef} ended without a recorded result: `
         + `${error instanceof Error ? error.message : String(error)}; the Thread reports it as unconfirmed`)
     })
-    this.writes.add(write)
-    void write.finally(() => { this.writes.delete(write) })
+    this.writes.add(guarded)
+    void guarded.finally(() => {
+      this.writes.delete(guarded)
+      entry.terminated.resolve()
+    })
     return write
-  }
-
-  /** Wait for one run's ending, but never hold the Host open on an engine that will not end. */
-  private async settledWithin(entry: RunEntry): Promise<void> {
-    const pending = entry.settle
-    if (pending === undefined) return
-    await Promise.race([pending.catch(() => {}), new Promise<void>(resolve => {
-      const timer = setTimeout(resolve, WORKER_SETTLE_DEADLINE_MS)
-      timer.unref?.()
-    })])
-    if (entry.run.state === 'running') {
-      this.deps.warn(`worker (${entry.run.engine}) ${entry.run.workerRef} reported no ending within `
-        + `${WORKER_SETTLE_DEADLINE_MS}ms of the Host releasing it; its Thread will report the result as unconfirmed`)
-    }
   }
 
   private require(workerRef: AgentTeamWorkerRef): AgentTeamWorkerRun {
@@ -449,6 +674,11 @@ export class WorkerRegistry {
     }
     return name
   }
+}
+
+/** A single-line, bounded preview of a run's task for the Human's run list; the record keeps the full text. */
+export function workerTaskPreview(task: string): string {
+  return truncateToCharacters(task.replaceAll(/\s+/gu, ' ').trim(), WORKER_TASK_PREVIEW_MAX_CHARACTERS)
 }
 
 /** The run one delegation starts on an engine, read from the row as it stands at that open. */

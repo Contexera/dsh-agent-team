@@ -1,0 +1,114 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { renderText, teamTools } from './render-text.ts'
+
+/**
+ * Execution-level tests for `team_worker`'s two call shapes: one delegation and
+ * one stop share the tool but never a request. The stop is a ref alone, so a
+ * half-filled start can never be read as a stop, and the Host entry points stay
+ * distinct: a stop cannot smuggle a task, target, engine, or directory.
+ */
+
+const PROJECT = 'project:00000000-0000-4000-8000-000000000001'
+const WORKER = 'worker:00000000-0000-4000-8000-000000000002'
+const CWD = '/tmp/worker'
+
+function run(overrides: Record<string, unknown> = {}) {
+  return {
+    workerRef: WORKER, projectRef: PROJECT, engine: 'codex', state: 'running',
+    startedAt: '2026-11-09T07:00:00.000Z', cwd: CWD, initiatedBy: 'member:owner',
+    ...overrides,
+  }
+}
+
+function fakeHost() {
+  return {
+    workerStartForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => run()),
+    workerStopForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => run({
+      state: 'stopped', settledAt: '2026-11-09T07:10:00.000Z',
+    })),
+  }
+}
+
+async function call(tool: ToolDefinition, args: Record<string, unknown>, host: ReturnType<typeof fakeHost>, callId = 'call:1'): Promise<unknown> {
+  const agent = { id: 'agent:tool-test', ctx: { get: (name: string) => name === 'agentTeam' ? host : undefined } }
+  return tool.execute(args, { agent, callId, signal: new AbortController().signal } as never)
+}
+
+const tool = teamTools().get('team_worker')!
+
+describe('team_worker starts with a task', () => {
+  it('passes the delegation through and never invents a stop', async () => {
+    const host = fakeHost()
+    const result = await call(tool, { task: 'fix the parser', threadRef: 'thread:00000000-0000-4000-8000-000000000003', engine: 'claude', cwd: CWD }, host)
+    expect(host.workerStartForAgent).toHaveBeenCalledTimes(1)
+    expect(host.workerStopForAgent).not.toHaveBeenCalled()
+    expect(host.workerStartForAgent.mock.calls[0]![1]).toMatchObject({ task: 'fix the parser',
+      threadRef: 'thread:00000000-0000-4000-8000-000000000003', engine: 'claude', cwd: CWD })
+    expect(result).toMatchObject({ workerRef: WORKER, state: 'running', engine: 'codex', cwd: CWD })
+  })
+
+  it('refuses a start with no task instead of opening an empty run', async () => {
+    const host = fakeHost()
+    await expect(call(tool, { threadRef: 'thread:00000000-0000-4000-8000-000000000003' }, host))
+      .rejects.toThrow(/needs a task to start/)
+    expect(host.workerStartForAgent).not.toHaveBeenCalled()
+  })
+})
+
+describe('team_worker stops with a ref alone', () => {
+  it('calls only the stop entry with the ref, carrying no start fields', async () => {
+    const host = fakeHost()
+    const result = await call(tool, { stop: WORKER }, host)
+    expect(host.workerStartForAgent).not.toHaveBeenCalled()
+    expect(host.workerStopForAgent).toHaveBeenCalledTimes(1)
+    // The Host entry takes the ref and nothing else: a start parameter cannot ride a stop.
+    expect(host.workerStopForAgent.mock.calls[0]![1]).toEqual({ workerRef: WORKER })
+    expect(result).toEqual({ workerRef: WORKER, state: 'stopped', engine: 'codex', settledAt: '2026-11-09T07:10:00.000Z' })
+  })
+
+  it('refuses a call that mixes a ref with any start parameter', async () => {
+    for (const extra of [
+      { task: 'also do this' }, { threadRef: 'thread:00000000-0000-4000-8000-000000000003' },
+      { taskRef: 'task:00000000-0000-4000-8000-000000000004' }, { projectRef: PROJECT },
+      { engine: 'claude' }, { cwd: CWD }, { requestId: 'request:1' },
+    ]) {
+      const host = fakeHost()
+      await expect(call(tool, { stop: WORKER, ...extra }, host)).rejects.toThrow(/either a task to start or a stop ref/)
+      expect(host.workerStartForAgent).not.toHaveBeenCalled()
+      expect(host.workerStopForAgent).not.toHaveBeenCalled()
+    }
+  })
+
+  it('returns the state the engine confirmed, not a guessed stop', async () => {
+    const host = fakeHost()
+    host.workerStopForAgent.mockResolvedValueOnce(run({ state: 'completed', settledAt: '2026-11-09T07:05:00.000Z' }))
+    const result = await call(tool, { stop: WORKER }, host)
+    expect(result).toMatchObject({ workerRef: WORKER, state: 'completed' })
+  })
+
+  it('says cleanup only for a confirmed stop, and reports an earlier ending as it was', async () => {
+    const host = fakeHost()
+    const stopped = await call(tool, { stop: WORKER }, host)
+    const confirmed = renderText(tool, { stop: WORKER }, stopped)
+    expect(confirmed).toContain('confirmed this run\'s cleanup')
+    expect(confirmed).not.toContain('already ended')
+
+    host.workerStopForAgent.mockResolvedValueOnce(run({ state: 'failed', settledAt: '2026-11-09T07:05:00.000Z',
+      diagnostic: 'The engine may still be active; check it before starting another task.' }))
+    const ended = await call(tool, { stop: WORKER }, host)
+    // The receipt carries the Host's sentence, not just the state: a cleanup
+    // warning is the one thing the model has to act on.
+    expect(ended).toMatchObject({ state: 'failed', diagnostic: 'The engine may still be active; check it before starting another task.' })
+    const receipt = renderText(tool, { stop: WORKER }, ended)
+    expect(receipt).toContain('The run ended as failed; this stop did not change its ending.')
+    expect(receipt).toContain('The engine may still be active; check it before starting another task.')
+    expect(receipt).not.toContain('confirmed this run\'s cleanup')
+  })
+
+  it('passes the Host refusal through unchanged', async () => {
+    const host = fakeHost()
+    host.workerStopForAgent.mockRejectedValueOnce(new Error('Only the Member who delegated Worker or the Human may stop it.'))
+    await expect(call(tool, { stop: WORKER }, host)).rejects.toThrow(/Only the Member who delegated/)
+  })
+})

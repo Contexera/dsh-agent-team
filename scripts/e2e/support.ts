@@ -15,9 +15,9 @@
  * because vitest decides which scenario runs last and a late clear would delete
  * screenshots an earlier scenario already produced.
  */
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { expect } from 'vitest'
 import { chromium, type Browser, type Page } from 'playwright'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
@@ -134,6 +134,7 @@ export const SETTINGS_SHOTS = join(BROWSER_ARTIFACTS, 'settings-nav')
 export const MAIN_STREAM_SHOTS = join(BROWSER_ARTIFACTS, 'main-stream')
 export const SUBSCRIPTION_SHOTS = join(BROWSER_ARTIFACTS, 'subscriptions')
 export const WORKER_SHOTS = join(BROWSER_ARTIFACTS, 'worker-thread')
+export const WORKER_STOP_SHOTS = join(BROWSER_ARTIFACTS, 'worker-stop')
 /**
  * Wait until no finite animation is running: a screenshot taken mid-collapse
  * captures the expanded column clipped to the rail. Infinite animations
@@ -470,9 +471,18 @@ export async function installLocalBundle(): Promise<void> {
   const { dependencies } = JSON.parse(await readFile(join(TEAM_ROOT, 'package.json'), 'utf8')) as { dependencies: Record<string, string> }
   const bundleModules = join(scope, 'dsh-agent-team', 'node_modules')
   for (const name of Object.keys(dependencies)) {
+    const target = join(bundleModules, ...name.split('/'))
+    if (name === '@botiverse/oar') {
+      // The engine library reaches its own runtime packages through the store
+      // this profile does not have, and a copy would leave them unresolvable. A
+      // link keeps the real path, so its dependencies resolve as they do here.
+      await mkdir(dirname(target), { recursive: true })
+      await symlink(join(TEAM_ROOT, 'node_modules', name), target, 'junction')
+      continue
+    }
     // No filter: the source root itself lives under node_modules, and store
     // packages never nest their own node_modules.
-    await cp(join(TEAM_ROOT, 'node_modules', name), join(bundleModules, ...name.split('/')), {
+    await cp(join(TEAM_ROOT, 'node_modules', name), target, {
       recursive: true,
       dereference: true,
     })
@@ -491,4 +501,5 @@ export async function installLocalBundle(): Promise<void> {
   await mkdir(SETTINGS_SHOTS, { recursive: true })
   await mkdir(SUBSCRIPTION_SHOTS, { recursive: true })
   await mkdir(WORKER_SHOTS, { recursive: true })
+  await mkdir(WORKER_STOP_SHOTS, { recursive: true })
 }

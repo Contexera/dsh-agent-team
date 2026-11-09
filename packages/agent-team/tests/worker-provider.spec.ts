@@ -10,9 +10,12 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@botiverse/oar'
 import type { ResolvedSubagentStartRequest } from '@deepseek-ai/dsh-subagent'
-import { TeamWorkerProvider, type WorkerRunSpec } from '../src/worker-runtime.ts'
+import { TeamWorkerProvider, WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC, type WorkerRunSpec } from '../src/worker-runtime.ts'
 
 const KEY = 'OAR_CODEX_SANDBOX'
+
+/** What the fake engine does on the next open: its output, its turn, and its disposal verdict. */
+const control = { text: '', hangTurn: false, disposeFails: false }
 
 /** `hostSandbox` is what OAR 0.95.1 actually reads at open; `env` only reaches the child. */
 const sessions: Array<{ id: string; env: Readonly<Record<string, string | null>>; hostSandbox: string | undefined }> = []
@@ -21,12 +24,16 @@ vi.mock('@botiverse/oar', () => ({
   codexRuntime: {
     installation: async () => ({ kind: 'available', via: 'executable', command: '/fake/codex', version: 'x' }),
     session: async (_installation: unknown, options: { env: Readonly<Record<string, string | null>> }): Promise<Session> => {
+      const id = `native-${sessions.length + 1}`
       const session = {
-        id: `native-${sessions.length + 1}`,
-        events: () => () => {},
+        id,
+        events: (listener: (event: object) => void) => {
+          if (control.text !== '') listener({ sessionId: id, agentPath: [], kind: 'text_delta', text: control.text, messageId: 'message-1' })
+          return () => {}
+        },
         prompt: async () => ({ kind: 'accepted', seq: 1 }),
         abort: async () => {},
-        dispose: async () => {},
+        dispose: async () => { if (control.disposeFails) throw new Error('the engine process did not exit') },
       }
       sessions.push({ id: session.id, env: options.env, hostSandbox: process.env[KEY] })
       return session as unknown as Session
@@ -36,10 +43,10 @@ vi.mock('@botiverse/oar', () => ({
 }))
 
 vi.mock('@botiverse/oar/observe', () => ({
-  awaitTurnEnd: async () => ({ kind: 'completed' }),
+  awaitTurnEnd: async () => control.hangTurn ? new Promise(() => {}) : { kind: 'completed' },
 }))
 
-afterEach(() => { sessions.splice(0) })
+afterEach(() => { sessions.splice(0); control.text = ''; control.hangTurn = false; control.disposeFails = false })
 
 const request = (cwd: string): ResolvedSubagentStartRequest => ({
   parent: { id: 'session:parent' },
@@ -76,6 +83,37 @@ describe('the Worker provider', () => {
     } finally {
       if (operatorDefault === undefined) delete process.env[KEY]
       else process.env[KEY] = operatorDefault
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('publishes a stop with the cleanup verdict in the one result the parent is told', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'team-worker-provider-'))
+    const spec: WorkerRunSpec = { engine: 'codex', env: {}, launchArgs: [] }
+    const provider = new TeamWorkerProvider('team-worker-codex', () => spec)
+    try {
+      // A stop whose engine keeps producing output, then refuses to confirm its exit.
+      control.text = 'partial output'
+      control.hangTurn = true
+      control.disposeFails = true
+      const unconfirmed = new AbortController()
+      const stopped = await provider.start({ ...request(cwd), signal: unconfirmed.signal })
+      unconfirmed.abort()
+      // The Harness hands the parent this result before it awaits teardown, so the
+      // cleanup verdict and the output so far have to be in it.
+      expect(await stopped.result).toEqual({ output: [{ type: 'text', text: 'partial output' }], stopReason: 'error',
+        diagnostic: WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC })
+      // The engine's own teardown is the separate failure the Harness reports to the caller.
+      await expect(stopped.dispose()).rejects.toThrow(/dispose/)
+
+      // A stop the engine does confirm keeps the ordinary stopped result.
+      control.disposeFails = false
+      const confirmed = new AbortController()
+      const clean = await provider.start({ ...request(cwd), signal: confirmed.signal })
+      confirmed.abort()
+      expect(await clean.result).toEqual({ output: [{ type: 'text', text: 'partial output' }], stopReason: 'aborted' })
+      await clean.dispose()
+    } finally {
       await rm(cwd, { recursive: true, force: true })
     }
   })

@@ -428,6 +428,7 @@ export function formatActivity(activity: AgentTeamActivity, options: {
     const engine = workerEngineName(options.t, activity.engine)
     const run = options.workerStates?.get(activity.workerRef)
     if (run?.unconfirmed === true) return options.t('activityWorkerStartedUnconfirmed', { actor, engine })
+    if (run?.stopping === true) return options.t('activityWorkerStartedStopping', { actor, engine })
     return run?.state === 'running'
       ? options.t('activityWorkerStartedRunning', { actor, engine })
       : options.t('activityWorkerStarted', { actor, engine })

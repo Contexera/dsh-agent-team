@@ -65,7 +65,11 @@ function fakeSubagents(): FakeService {
       return {
         childId: 'session:child',
         result: result.promise,
-        dispose: async () => { (state as { disposals: number }).disposals += 1 },
+        // Closing an activation settles its engine: the real service's disposal does the same.
+        dispose: async () => {
+          ;(state as { disposals: number }).disposals += 1
+          result.resolve({ output: [], stopReason: 'aborted' })
+        },
       } as unknown as SubagentActivation
     },
   }
@@ -226,11 +230,10 @@ describe('Worker delegation runs', () => {
   it('stops one execution and refuses an unknown number', async () => {
     const { registry, service } = registryFor({ config: enabled() })
     const run = await registry.start(caller(), request())
-    service.settle?.({ output: [], stopReason: 'aborted' })
-    const stopped = await registry.stop(run.workerRef)
+    const stopped = await registry.stop(run.workerRef, caller().actor)
     expect(stopped.state).toBe('stopped')
     expect(service.disposals).toBe(1)
-    await expect(registry.stop('worker:none' as AgentTeamWorkerRef)).rejects.toThrow(/No Worker/)
+    await expect(registry.stop('worker:none' as AgentTeamWorkerRef, caller().actor)).rejects.toThrow(/No Worker/)
   })
 
   it('refuses new work after unload and releases live executions', async () => {

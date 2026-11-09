@@ -32,3 +32,6 @@ export const WORKER_DIAGNOSTIC_MAX_CHARACTERS = 4 * 1024
 
 /** How much of a failure or stop reason a public Thread fact carries, in code points. */
 export const WORKER_REASON_MAX_CHARACTERS = 2000
+
+/** How much of a run's task the Human's run list previews; the full text stays in the private execution record. */
+export const WORKER_TASK_PREVIEW_MAX_CHARACTERS = 240

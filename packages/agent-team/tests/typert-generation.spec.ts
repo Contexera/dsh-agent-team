@@ -59,6 +59,7 @@ const EXPECTED_REMOTE_METHODS = [
   'setSidebarOrder',
   'sidebarOrder',
   'startThread',
+  'stopWorker',
   'subscriptionDeliveries',
   'subscriptionLogs',
   'subscriptions',
@@ -72,6 +73,7 @@ const EXPECTED_REMOTE_METHODS = [
   'updateProject',
   'updateSubscription',
   'view',
+  'workerRuns',
 ]
 
 describe('Agent Team generated Typert boundary', () => {
