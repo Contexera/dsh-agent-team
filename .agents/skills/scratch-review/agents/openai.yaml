@@ -1,5 +1,5 @@
 interface:
   display_name: "scratch-review"
-  short_description: "Review a .scratch work item against its spec and save the report"
+  short_description: "Refine a converged .scratch design or review its implementation"
 policy:
   allow_implicit_invocation: false
