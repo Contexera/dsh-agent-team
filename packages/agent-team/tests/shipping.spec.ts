@@ -42,8 +42,11 @@ async function shippedHarnessName(): Promise<string> {
 // improvement squeezed into the last few characters. The 2026-10-29 naming
 // rule moved it up again on the operator's instruction: a Member named in
 // prose is not a mention, because a stray `@` inside an example or a roster
-// delivers that Message and interrupts Members who need not act on it.
-const PERSONA_CHARACTER_BUDGET = 15400
+// delivers that Message and interrupts Members who need not act on it. The
+// 2026-11-09 unfollow guidance moved it up again on the operator's instruction,
+// to 20000: the text had been squeezed to seven characters of headroom, so the
+// next wording change would have been a budget decision rather than an edit.
+const PERSONA_CHARACTER_BUDGET = 20000
 
 /** Every shipped row id, whatever its role, carries the published scope prefix; the rename this guards left none behind. */
 const ROW_ID_PREFIX = 'contexera-agent-team-'
@@ -574,6 +577,8 @@ describe('Agent Team Member persona', () => {
     for (const rule of [
       // The Team tool family, named in prose so a Member knows the surface exists.
       'team_view', 'team_inbox', 'team_thread', 'team_message', 'team_task',
+      // Attention is the one control a Member holds over its own wake cost.
+      'team_attention',
       // Branded refs are written with exactly one colon.
       'never a double colon',
       // Work on a Task is announced with a Claimed direction before it starts.
