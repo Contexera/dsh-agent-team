@@ -37,4 +37,40 @@ describe('Team agent session open failures', () => {
     expect(b.view.queryByRole('alert')).toBeNull()
     await b.runtime.dispose()
   })
+
+  it('pulls the Host catalog once before reporting a Session it has not listed yet', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
+    await b.view.findByText('builder')
+    // The Host swapped the Member's generation in after this page's last pull:
+    // the first open misses the Client catalog, the pull that follows finds it.
+    b.openSession.mockImplementationOnce(() => {
+      throw new Error('sessions.retain: unknown session session:member:builder')
+    })
+    await b.runtime.sessions.add({ id: 'session:member:builder', summary: { title: 'builder', cwd: '/work/alpha' } } as never)
+    fireEvent.click(b.view.getByRole('button', { name: '打开 builder 的会话' }))
+    await waitFor(() => {
+      expect(b.view.getByRole('button', { name: '打开 builder 的会话' }).getAttribute('aria-current')).toBe('page')
+    })
+    expect(b.runtime.sessions.calls.filter(call => call.method === 'refresh')).toHaveLength(1)
+    expect(b.view.queryByRole('alert')).toBeNull()
+    await b.runtime.dispose()
+  })
+
+  it('clears an earlier message once a later click opens the Session', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
+    await b.view.findByText('builder')
+    b.openSession.mockImplementationOnce(() => {
+      throw new Error('sessions.retain: unknown session session:member:builder')
+    })
+    fireEvent.click(b.view.getByRole('button', { name: '打开 builder 的会话' }))
+    // Both attempts miss, so the message stands until the Session is catalogued.
+    await b.view.findByRole('alert')
+    await b.runtime.sessions.add({ id: 'session:member:builder', summary: { title: 'builder', cwd: '/work/alpha' } } as never)
+    fireEvent.click(b.view.getByRole('button', { name: '打开 builder 的会话' }))
+    await waitFor(() => {
+      expect(b.view.getByRole('button', { name: '打开 builder 的会话' }).getAttribute('aria-current')).toBe('page')
+    })
+    expect(b.view.queryByRole('alert')).toBeNull()
+    await b.runtime.dispose()
+  })
 })

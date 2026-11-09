@@ -160,17 +160,46 @@ function openMemberSessionImpl(
   openedMemberSessions.set(ctx, memberSessions)
   memberSessions.add(sessionId)
   const returnTo = snapshot.memberSessionId === undefined && current !== undefined && current !== sessionId && !memberSessions.has(current) ? current : undefined
-  navigation.actions().enterMemberSession(sessionId, returnTo)
-  ctx.layout.selectPanel(null)
+  const open = (): void => ctx.uiWorkspace.openSession(sessionId)
   // `openSession` is a synchronous void; a Session the catalog does not carry yet would fail silently,
   // so undo the navigation and let the caller report it.
-  try {
-    ctx.uiWorkspace.openSession(sessionId)
-  } catch (cause) {
+  const restore = (): void => {
     if (snapshot.memberSessionId !== undefined) navigation.actions().enterMemberSession(snapshot.memberSessionId, undefined)
     else navigation.actions().exitMemberSession()
+  }
+  const report = (cause: unknown): void => {
     reportFailure?.(cause instanceof Error ? cause.message : String(cause))
   }
+  navigation.actions().enterMemberSession(sessionId, returnTo)
+  ctx.layout.selectPanel(null)
+  try {
+    open()
+  } catch (cause) {
+    // The seat's refusal is the Client's reading of its own pull of the Host list, and a Member Session the Host
+    // swapped in (wake recycle, rollover) is newer than any pull this page has taken: the Host has the Session, this
+    // catalog has not asked for it yet. One pull is cheap, and a second refusal is the real answer.
+    if (!isUnknownToCatalog(cause)) {
+      restore()
+      report(cause)
+      return
+    }
+    void (async () => {
+      try {
+        await (ctx.sessions as unknown as ISessions).refresh()
+        // A click elsewhere while the pull was in flight owns the seat now; it is no longer this Session's to open.
+        if (navigation.getSnapshot().memberSessionId !== sessionId) return
+        open()
+      } catch (retryCause) {
+        if (navigation.getSnapshot().memberSessionId === sessionId) restore()
+        report(retryCause)
+      }
+    })()
+  }
+}
+
+/** `sessions.retain` refusing an identity means this Client never listed it, which a fresh pull may repair. */
+function isUnknownToCatalog(cause: unknown): boolean {
+  return cause instanceof Error && cause.message.startsWith('sessions.retain: unknown session ')
 }
 
 const ROSTER_SCOPE_KINDS = ['presence', 'workspace'] as const satisfies readonly WorkspaceScopeKind[]

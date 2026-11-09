@@ -24,6 +24,7 @@ All notable changes to this project are documented in this file. The format foll
 - Cancelling a Member's alternative compaction summary no longer marks its route as degraded or disables later automatic summaries on that route.
 - A ledger written while a subscription's events still counted as Project news replays again. A Main stream read that one published event alone advanced is accepted as exactly that receipt — the markers it consumed plus the reader's own watermark moved to its bound — and replays as written, so a Host on this build activates a Team whose history carries one instead of refusing the whole ledger.
 - An Agent's reminder block in the Agent editor lists only the reminders that can still fire; a reminder that fired or was withdrawn stays in the ledger but leaves the list, so it no longer reads as a row with no remaining action.
+- Opening an Agent's Session no longer fails when the Host has just swapped one in — a wake recycle or a rollover — because the Client pulls the Session catalog once more before it reports that refusal; a second refusal is still the answer it shows.
 
 ## [0.2.7] - 2026-11-05
 

@@ -349,6 +349,8 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
     <>
       <div className={css.agentRow} data-agent-row data-menu-open={menuOpen || undefined}>
         <button type="button" className={css.agentSelect} aria-label={t('openAgentSession', { name: status.member.handle })} aria-current={current ? 'page' : undefined} disabled={status.availability !== 'active'} onClick={() => {
+          // The message below belongs to the attempt that produced it: a later click that opens must not leave it behind.
+          setRowAlert(undefined)
           openMemberSession(status.member.sessionId, message => {
             setRowAlert(t('openAgentSessionFailed', { name: status.member.handle.replace(/^@/, ''), message }))
           })
