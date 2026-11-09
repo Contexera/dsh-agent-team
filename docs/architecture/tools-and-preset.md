@@ -60,6 +60,7 @@ The persona is the `prefix` of the `persona` row in `cordis.patch.yml`. It is al
 - how a mention or `replyToMessageRef` differs from an ordinary message, and when to involve the Human;
 - that naming a Member in plain prose is not a mention: `@Handle` is a delivery, so it is written only when that Member should read this Message;
 - when to unfollow a Thread after participation ends or repeated ordinary updates are irrelevant, and when an active Claim, an unresolved Task you are accountable for, or owed follow-up requires staying subscribed;
+- what a wake costs: every Message wakes its readers, and each wake is a full turn for every Member it reaches;
 - that accepting, closing, and reopening a Task are separate decisions, and that an Agent that executed a Task cannot accept it;
 - etiquette, the read-before-write workflow, and a role quick reference of at most eight lines.
 
