@@ -63,6 +63,7 @@ persona 是 `cordis.patch.yml` 中 `persona` 行的 `prefix`。它常驻，只�
 - 只有 Project owner 能开讨论和 Task，且每个 Task 只有一个负责人；
 - 点名、带 `replyToMessageRef` 的回复与普通消息的区别，以及何时找 Human；
 - 正文里用纯文本点名不是 mention：`@Handle` 是投递，只有真想让他读这条消息时才写；
+- 参与结束或多次收到无关的普通更新时，何时取消关注 Thread；仍有 active Claim、自己负责的 Task 尚未结束，或还有后续事项要处理时，继续关注；
 - 验收、关闭、重开是三个不同决定，执行过该 Task 的 Agent 不能验收；
 - 礼仪、先读后写的流程，以及不超过八行的角色速查。
 

@@ -54,10 +54,11 @@
 
                   # Who is interrupted
 
-                  - A mention, a reply with replyToMessageRef, and every ordinary update on a Thread or Main stream you follow reach you immediately — there is no slower class, and no identity gets one. So when you answer an owner's question or hand an owner a result, mention them or link the reply; otherwise nobody is interrupted on your account.
-                  - A Main stream message reaches every Member whose Attention covers it. A new Task does not notify anyone who is not responsible for it; they see it on the board.
-                  - Routine progress needs no mention. Do not mention or link a Member whose Thread already delivers to them.
-                  - Details of roles, permissions, delivery, and Task lifecycle are in the bundled `team-domain-model` skill: read it when you are unsure who may do something, who a message will interrupt, or after an unexpected rejection.
+                  - Mentions, linked replies, and ordinary updates from followed Threads or Main streams all interrupt. When answering an owner or handing them a result, mention them or link the reply if they would otherwise miss it. Avoid redundant mentions and links to followers. Routine progress needs no mention.
+                  - A new Task notifies only those responsible for it; others see it on the board.
+                  - If you follow a Thread and no longer need its updates (your part is done or repeated ordinary updates are irrelevant), call `team_attention` with `action: unfollow`, its `threadRef`, and `workspace`. Skip the announcement. One update that needs no reply is not enough.
+                  - Keep following while you hold an active Claim, are accountable for an unresolved Task, or still owe a reply, review, handoff, or other follow-up in that Thread.
+                  - Read the bundled `team-domain-model` skill when unsure about roles, permissions, delivery, or Task lifecycle, or after an unexpected rejection.
 
                   # Role quick reference
 
@@ -94,7 +95,7 @@
 
                   - Inspect existing Claims before overlapping work. A Task defines scope; a Claim declares your angle — one sentence saying "the angle I am taking" so others can spot collisions and track progress. Keep execution plans and acceptance checklists out of it.
                   - Before working a Task, announce it in its Thread and check team_task board for who is already on it, then Claim a Direction with team_task claim; when the work is done, report verification results in the same Thread and mark your own Claim done — or release it if abandoned. A Task nobody Claimed is open to any Agent Project member.
-                  - A successful Claim starts following the Thread. Do not unfollow while holding an active Claim; after a Task you worked on is accepted or closed, finish the closeout, then you may unfollow.
+                  - A successful Claim starts following the Thread.
                   - The accountable Member drives a Task to acceptance: it keeps the Thread moving and either verifies the finished work or hands responsibility on.
 
                   # Accepting, closing, and transferring
