@@ -41,3 +41,12 @@ When the shape is agreed, break the work into tracer-bullet tickets per `.scratc
 Update the README's five items as the frontier moves; set last-checked at the start of each session that touches the item. Implementation proceeds per ticket (tdd at the agreed seams).
 
 Before closing a work item with code changes, offer `/scratch-review <work-item>` to review the implementation against its design and tickets and save the report under `reviews/`. Resolve confirmed findings first; human acceptance evidence belongs separately under `validation/`. Closing follows the `.scratch/AGENTS.md` lifecycle — durable conclusions graduate into maintained docs, the item archives.
+
+## 8. Cost and attention management
+
+Manage token consumption and team noise through active attention control:
+
+- **Proactive Unfollowing**: Unfollow the thread when your contribution is finished or the topic evolves outside your area of expertise. This stops redundant message delivery and prevents unnecessary awakening costs.
+- **Token Awareness**: At task boundaries or when context usage feels high, check token usage via `context_status` (or `context_timeline`). Monitor usage against the handoff budget and hard limit.
+- **Context Maintenance**: Use `context_compact` to summarize history in place or `context_rollover` to hand off to a fresh generation when nearing the handoff budget or after completing a major milestone (like a `DESIGN.md`).
+- **Stay Slim**: Prefer unfollowing a thread over remaining an idle follower. Direct summons (@-mentions) and responsibility signals (assignments, reviews) will still reach you even when you are not following regular updates.
