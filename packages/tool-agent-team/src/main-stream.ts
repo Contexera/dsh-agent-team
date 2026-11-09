@@ -84,8 +84,8 @@ export function mainEntryView(entry: AgentTeamMainTimelineEntry): MainEntryView 
   }
   if (entry.kind === 'subscription-event') {
     const { event } = entry
-    return { ...flags, kind: 'subscription-event', subscriptionRef: event.subscriptionRef, subscriptionName: event.subscriptionName,
-      eventId: event.event.id, title: event.event.title,
+    return { ...flags, kind: 'subscription-event', projectRef: event.projectRef, subscriptionRef: event.subscriptionRef,
+      subscriptionName: event.subscriptionName, eventId: event.event.id, title: event.event.title,
       ...(event.event.url === undefined ? {} : { url: event.event.url }),
       ...(event.event.detail === undefined ? {} : { detail: event.event.detail }) }
   }
