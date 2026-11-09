@@ -668,4 +668,37 @@ describe('TeamMessage quote line and card actions', () => {
     await vi.waitFor(() => { expect(getByRole('button', { name: '复制这条消息' }).textContent).toBe('已复制') })
     delete (navigator as { clipboard?: unknown }).clipboard
   })
+
+  it('copies through the document when the host refuses the clipboard write', async () => {
+    const refuse = vi.fn<(text: string) => Promise<void>>().mockRejectedValue(new Error('denied'))
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: refuse } })
+    const exec = vi.fn(() => true)
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: exec })
+    const { getByRole } = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false}
+        body="正文" messageRef={'message:abc' as never} onReply={() => {}} t={t} />,
+    )
+    fireEvent.click(getByRole('button', { name: '复制这条消息' }))
+    await vi.waitFor(() => { expect(exec).toHaveBeenCalledWith('copy') })
+    await vi.waitFor(() => { expect(getByRole('button', { name: '复制这条消息' }).textContent).toBe('已复制') })
+    delete (navigator as { clipboard?: unknown }).clipboard
+    delete (document as { execCommand?: unknown }).execCommand
+  })
+
+  it('names a refused copy on the card instead of leaving the button untouched', async () => {
+    const refuse = vi.fn<(text: string) => Promise<void>>().mockRejectedValue(new Error('denied'))
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: refuse } })
+    const exec = vi.fn(() => false)
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: exec })
+    const { container, getByRole } = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false}
+        body="正文" messageRef={'message:abc' as never} onReply={() => {}} t={t} />,
+    )
+    fireEvent.click(getByRole('button', { name: '复制这条消息' }))
+    await vi.waitFor(() => { expect(getByRole('button', { name: '复制这条消息' }).textContent).toBe('复制失败') })
+    // The live region repeats it for a reader who never sees the button's word change.
+    expect(container.querySelector('[role="status"]')!.textContent).toBe('复制失败')
+    delete (navigator as { clipboard?: unknown }).clipboard
+    delete (document as { execCommand?: unknown }).execCommand
+  })
 })

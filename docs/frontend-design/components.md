@@ -9,6 +9,8 @@ The identity seat draws a picture for exactly one author. The profile avatar lan
 
 Row actions hang off the Message they act on: its own top-right corner, revealed under the pointer or the caret. The card carries copy, the quote action, and — when the body itself names the reader — the `Mentioned you` notice. The card belongs to the row rather than to one action. A surface that withholds quoting (`rowActions` without `onReply`) keeps copy and the notice and drops only the quote button, while a surface that passes neither offers no card at all.
 
+The copy action answers in its own word — `已复制` when the host took the text, `复制失败` when it did not — because a refused write that leaves the button untouched is indistinguishable from a click that never landed. A host that only accepts the legacy `execCommand` path still gets the text before the card reports failure.
+
 It floats, anchored to its own row rather than to a rise measured upwards out of that row. A card pinned above the row edge sits in the band the row above owns, so a Message that opens a run showed its actions over the empty gutter — or the words — of the Message before it, which reads as somebody else's card.
 
 Anchored at the row's own top edge, the card hangs beside the author line, so the room between its lower edge and the first words is the row's top padding plus that author line minus the card's own height — 3px at the default content size, and it keeps clear as the content font axis grows. A continuation row has no author line to hang beside, so its card rises over its run's own previous line — the words those actions belong to — and still clears the first line it acts on.

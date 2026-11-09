@@ -1,11 +1,12 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react'
-import { MarkdownText, Modal, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { AgentTeamProjectRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamMessageRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import type { TeamConversationProps } from './slots.ts'
 import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
+import { copyText } from './clipboard.ts'
 import { cachedResolvedTaskRef, resolveUnknownTaskRefs, useResolvedTaskRefVersion, type ResolvedTaskRef } from './refs.ts'
 import { cachedResolvedThreadRef, resolveUnknownThreadRefs, useResolvedThreadRefVersion, type ResolvedThreadRef } from './refs.ts'
 import { bodyMentionsHuman, formatAbsoluteTime, formatClockTime, formatMessageTime, identityInitial, isSingleBrandedRef, memberHue, plainGist, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, unshownMentionNames, type MentionHandle, type PlannedMessageBody } from './team-formatters.ts'
@@ -107,15 +108,16 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
     t,
   })
   const [expanded, setExpanded] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   useEffect(() => {
-    if (!copied) return
-    const timer = setTimeout(() => { setCopied(false) }, 1200)
+    if (copyState === 'idle') return
+    const timer = setTimeout(() => { setCopyState('idle') }, 1200)
     return () => { clearTimeout(timer) }
-  }, [copied])
-  // Copy the stored Markdown, not the rendered text.
+  }, [copyState])
+  // Copy the stored Markdown, not the rendered text. A refused write is reported on the card: silence would read as
+  // an untouched button, which is the one thing a reader cannot tell apart from a copy that never happened.
   const copyMessage = useCallback((): void => {
-    void writeClipboard(body).then(accepted => { if (accepted) setCopied(true) })
+    void copyText(body).then(copied => { setCopyState(copied ? 'copied' : 'failed') })
   }, [body])
   // A touch surface has no hover, so a tap opens the card; a press on the card itself never toggles it.
   const toggleCard = useCallback((event: MouseEvent<HTMLElement>): void => {
@@ -135,6 +137,10 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
     : plan.render === 'literal'
       ? <div className={css.messageText}>{onOpenRef === undefined ? displayBody : renderRefs(displayBody)}</div>
       : <div ref={markdownRef} className={css.messageMarkdown}><MarkdownText key={`${displayBody}:${onOpenRef === undefined ? 'literal' : 'refs'}`} text={displayBody} labels={markdownLabels} /></div>
+  // The action's own word is the outcome: copied, refused, or still offering the copy.
+  const copyLabel = copyState === 'copied'
+    ? (t?.('copiedMessage') ?? 'Copied')
+    : copyState === 'failed' ? (t?.('copyMessageFailed') ?? 'Copy failed') : (t?.('copyMessage') ?? 'Copy')
   return (
     <article className={css.messageRow} data-human={human || undefined} data-grouped={grouped || undefined} data-mentions-me={mentionedInBody || undefined} data-message-ref={messageRef} data-replying-to={replyTarget || undefined} data-reply-flash={replyFlash || undefined} data-card-open={cardOpen || undefined} onClick={onToggleCard === undefined ? undefined : toggleCard}>
       {identityImage.image.kind === 'initial'
@@ -197,13 +203,13 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
         {mentionedInBody && <span className={css.cardMention} data-mentions-you="">{t?.('mentionsMe') ?? 'Mentioned you'}</span>}
         <button type="button" className={css.cardAction} data-copy-message="" onClick={copyMessage}
           aria-label={t?.('copyMessageLabel') ?? 'Copy this message'}>
-          {copied ? (t?.('copiedMessage') ?? 'Copied') : (t?.('copyMessage') ?? 'Copy')}
+          {copyLabel}
         </button>
         {onReply !== undefined && <button type="button" className={css.cardAction} data-quote-message="" onClick={() => { if (messageRef !== undefined) onReply(messageRef) }}
           aria-label={t?.('replyToMessage') ?? 'Quote this message'}>
           {t?.('replyMessage') ?? 'Quote'}
         </button>}
-        <span className={css.cardStatus} role="status" aria-live="polite">{copied ? (t?.('copiedMessage') ?? 'Copied') : ''}</span>
+        <span className={css.cardStatus} role="status" aria-live="polite">{copyState === 'idle' ? '' : copyLabel}</span>
       </div>}
     </article>
   )
