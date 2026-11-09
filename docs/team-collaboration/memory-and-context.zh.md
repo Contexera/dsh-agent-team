@@ -72,7 +72,7 @@ Pending hints 按 Member 合并。Consumed 或 ignored 的 hint 不再触发 tur
 
 **验收边界。** 一次 Thread read 若 ack 了某个 Task 的验收，会给读者自己的边界，但只在这次验收结束的是读者自己名下的工作时才触发：只是关注该 Thread 的观察者同样会看到这条 unread accept，Host 不会打扰它。
 
-Host 追加一条 `<system-reminder>`，要求 Member 把持久结论写进 `memory.md` 索引及其指向的 note。实测 context 达到或超过 128000 token 时，同一边界还会在 Agent 空闲后压缩当前代：验收通常发生在 turn 中，而引擎只压缩空闲 Agent。
+Host 把一条 `<system-reminder>` steer 进发现这次验收的那个 turn，要求 Member 把持久结论写进 `memory.md` 索引及其指向的 note。实测 context 达到或超过 128000 token 时，同一边界还会在 Agent 空闲后压缩当前代：验收通常发生在 turn 中，而引擎只压缩空闲 Agent。
 
 边界不传递任何东西，既没有 handoff 也没有公告，所以提醒只在真会发生时陈述后果；preset 未挂载压缩引擎时，提醒不会声称会压缩。
 

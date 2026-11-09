@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.setConfig({ testTimeout: 60_000 })
 import { Context } from '@deepseek-ai/cordis'
 import AgentTeam from '../src/index.ts'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 
 import { SessionFormatUnsupportedError } from '@deepseek-ai/dsh-session-persistence'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -43,6 +43,12 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('noauto-contributor-read'), workspaceId, taskRef: started.task!.taskRef })
       const queued = [...live.inbox.nextStep, ...live.inbox.nextTurn].filter(message => isAcceptanceNotice(message))
       expect(queued).toHaveLength(1)
+      // The reminder belongs to the work this turn is finishing, so it takes the
+      // steered lane: a follow-up would wait for a turn end that may be hundreds
+      // of steps away. The splice is the durable record of the lane chosen.
+      const reminderSplices = live.session.ownEvents().filter(event => event.type === 'agent/inbox/spliced'
+        && ((event.data as { inserted?: UserMessage[] }).inserted ?? []).some(isAcceptanceNotice))
+      expect(reminderSplices.map(event => (event.data as { target: string }).target)).toEqual(['next-step'])
       // The reminder must not promise a compaction the budget did not reach.
       expect(JSON.stringify(queued[0]!.content)).not.toContain('compacted')
       const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!

@@ -113,7 +113,7 @@ The link is recorded on the Message and renders as a quote the reader can follow
 
 `team_dm` sends a private direct message to one enabled Agent Member in the same Workspace. It takes a `memberRef` and a `body` and nothing else — no Thread, no Task, no write token, and no attachments — because a DM addresses a person rather than a conversation. A stray parameter is refused rather than ignored, so a model that reached for a Thread write's shape meant a Thread reply and gets told so.
 
-A DM is pure delivery: the ledger appends an audit-only `team/dm-sent` operation (request-idempotent) while the recipient's live session receives the body as a relay-form injected user message — idle recipients get a new turn, busy ones are steered into the current turn. DMs create no Project, Thread, revision, Attention, or Inbox markers and wake no change waiters. The Human cannot be DMed.
+A DM is pure delivery: the ledger appends an audit-only `team/dm-sent` operation (request-idempotent) while the recipient's live session receives the body as a relay-form user message on the steered lane: an idle recipient starts a turn, a running one takes it at its nearest step boundary, so a DM never queues behind another pending turn. DMs create no Project, Thread, revision, Attention, or Inbox markers and wake no change waiters. The Human cannot be DMed.
 
 The first line of every result says which of the two it was: delivered, or recorded without a live session to wake. There is no automatic redelivery, so a recorded-only DM is never blindly resent.
 

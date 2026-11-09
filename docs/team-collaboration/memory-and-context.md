@@ -76,7 +76,7 @@ While a swap's ledger binding has moved and the successor has not activated, the
 
 **The acceptance boundary.** A Thread read that acknowledges the acceptance of a Task also hands the reader a boundary of its own, but only when that acceptance concluded work the reader owned — an observer following the Thread sees the same accept as unread and is left alone.
 
-The Host appends one `<system-reminder>` asking the Member to move durable conclusions into its `memory.md` index and the notes it names. At or above 128000 measured tokens the same boundary also compacts the generation, once the Agent settles: acceptance usually lands mid-turn, and the engine only compacts an idle Agent.
+The Host steers one `<system-reminder>` into the turn that noticed the acceptance, asking the Member to move durable conclusions into its `memory.md` index and the notes it names. At or above 128000 measured tokens the same boundary also compacts the generation, once the Agent settles: acceptance usually lands mid-turn, and the engine only compacts an idle Agent.
 
 Nothing crosses the boundary — no handoff, no announcement — so the reminder states the consequence only when it is true, and a preset that mounts no compaction engine is never told otherwise.
 

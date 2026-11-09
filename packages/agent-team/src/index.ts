@@ -2363,14 +2363,17 @@ export default class AgentTeam extends TypertRemoteService {
     const task = read.task
     if (task === undefined || task.resolution !== 'accepted' || task.status !== 'done') return
     if (!this.acceptedOwnWork(read, memberId)) return
-    // One boundary per turn: several accepted reads in one turn must not queue
-    // several identical reminders or race two compactions.
+    // One boundary per running episode: several accepted reads in one turn must
+    // not queue several identical reminders or race two compactions.
     if (this.acceptanceBoundaries.has(agent)) return
     this.acceptanceBoundaries.add(agent)
     const engine = this.compactionEngineFor(agent)
     const plan = planAcceptanceContext({ usageTokens: this.measureContext(agent), canCompact: engine !== undefined })
     try {
-      agent.followup(createAcceptanceReminder(plan.action))
+      // Steered, not followed up: the reminder is about the work this turn is
+      // finishing, so it belongs at the next step boundary. A follow-up would
+      // wait for a turn end that can be hundreds of steps away.
+      agent.steer(createAcceptanceReminder(plan.action))
     } catch (error) {
       this.ctx.logger.warn(`agent-team: could not deliver the acceptance reminder to ${this.memberScope(memberId, agent.id)}: ${failureDetail(error)}`)
       return
@@ -2463,10 +2466,11 @@ export default class AgentTeam extends TypertRemoteService {
       throw new AgentTeamDmDeliveryError(recipient.memberId, recipient.handle, `DM recorded but not delivered: ${gate?.message ?? 'the Member has no live session after changing generation'}`)
     }
     try {
-      // An idle recipient gets one ordinary turn; a busy one is steered into
-      // its current turn — the same wake split subagent continuations use.
-      if (recipientAgent.status === 'idle') recipientAgent.followup(message)
-      else recipientAgent.steer(message)
+      // Steering reaches the recipient soonest: it starts a turn when the
+      // driver is idle and is claimed at every step boundary otherwise, while
+      // the next-turn lane is a FIFO that admits one message per turn, so a
+      // follow-up queued behind another one waits for a whole extra turn.
+      recipientAgent.steer(message)
     } catch (error) {
       throw new AgentTeamDmDeliveryError(recipient.memberId, recipient.handle, `DM recorded but not delivered: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -5045,8 +5049,10 @@ export default class AgentTeam extends TypertRemoteService {
         const notice = createUserMessage({ content: [{ type: 'text', text }],
           source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Workspace participation changed' } })
         // Delivered from durable facts; a failed wake cannot roll back the
-        // committed participation — the next notice rederives it.
-        if (agent.status === 'idle' || agent.inbox.nextTurn.some(message => message.source.kind === 'user')) agent.followup(notice)
+        // committed participation — the next notice rederives it. A queued
+        // user message keeps its precedence: the notice must not take the step
+        // the Member's own input was waiting for.
+        if (agent.inbox.nextTurn.some(message => message.source.kind === 'user')) agent.followup(notice)
         else agent.steer(notice)
       })
     }

@@ -142,7 +142,7 @@ A restart-stable, typed identifier that callers cannot safely construct by conca
 
 ## Direct Message
 
-A private Member-to-Member message, not part of any Thread. The ledger appends one audit-only `team/dm-sent` operation (request-idempotent; sender and recipient must be enabled Agent Members of the same Workspace) while the projection deliberately stays unchanged — no Project, Thread, revision, Attention, or Inbox markers. Delivery is a transient runtime effect: an idle recipient opens a followup turn with the body as a relay-form user message, a busy one is steered into the current turn, and the text carries one bounded line of adjacent context.
+A private Member-to-Member message, not part of any Thread. The ledger appends one audit-only `team/dm-sent` operation (request-idempotent; sender and recipient must be enabled Agent Members of the same Workspace) while the projection deliberately stays unchanged — no Project, Thread, revision, Attention, or Inbox markers. Delivery is a transient runtime effect: the body arrives as a relay-form user message on the steered lane, so an idle recipient starts a turn and a running one takes it at its nearest step boundary, and the text carries one bounded line of adjacent context.
 
 A failed wake leaves the durable fact intact and the sender gets a structured delivery error instead of a silent loss; there is no automatic redelivery. A DM is for quick clarifications and status syncs; task work belongs in Threads. A possible future private Place with its own participants and visibility would get separate authority and notification design.
 
