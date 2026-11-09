@@ -1702,6 +1702,23 @@ function stopReceipt(state: string, diagnostic: string | undefined): string {
 }
 
 /**
+ * What a steer call can honestly say: the engine took the instruction into the
+ * turn it was running. That is not "the model read it" — a turn that ends first
+ * carries the instruction away — so the receipt never claims more, and it repeats
+ * the run's state when a stop or an ending landed while the answer was written.
+ */
+function steerReceipt(value: { readonly state: string; readonly turnId?: string | undefined
+  readonly runState?: string | undefined }): string {
+  return [
+    'The engine took the instruction into the turn it was already running: no new turn, no queue, and no second Worker.',
+    ...(value.turnId === undefined ? [] : [`Turn: ${value.turnId}`]),
+    'It is submitted, not confirmed read: a turn that ends before its next model request carries the instruction away with it.',
+    ...(value.runState === undefined || value.runState === 'running' ? []
+      : [`By the time this answer was written the run was ${value.runState}, so the instruction may never have been read.`]),
+  ].join('\n')
+}
+
+/**
  * One run's diagnostic as its initiator reads it: the summary the Thread already
  * carries, the native identities the Host recorded, and the bounded fragments the
  * engine's own record still answers — or the reason it cannot.
@@ -1751,7 +1768,7 @@ function inspectionReport(value: {
  */
 const teamWorker = defineTool({
   name: 'team_worker',
-  description: `Delegate one self-contained piece of work to a local Worker engine (Codex or Claude Code) that runs with its own tools, login, and settings, or stop a Worker this session delegated. Use it for work you can hand over completely: investigation, a scoped change in a prepared working directory, or a check that needs another engine. The Worker does not see this conversation, holds no Team identity, and cannot claim, accept, or answer for you, so the task text must carry the goal, the background, the scope, and what evidence to bring back. Name the Thread or Task the work belongs to and everything about the run is published there: the Thread shows when it started and how it ended, and its answer arrives in your Inbox — the other participants never see the raw output. Name only a Project and the result comes back to this session alone, published nowhere. The call returns as soon as the execution is accepted; keep working and do not poll. A Worker affects Project responsibility in no way: if you delegate work on a Task, the Claim stays yours and you still verify the result yourself, and a finished run never accepts a Task. Delegation needs the Team setting "allow Project owners to delegate Workers", your ownership of the Project the target belongs to, and an enabled engine; a refusal names which condition failed. To stop one execution, pass only its worker ref as stop; the call returns once the engine confirmed its cleanup, and a run that ended first answers with the state it really ended in. Another Member's run cannot be stopped this way. To read one execution's diagnostic, pass only its worker ref as inspect: the call answers with the same summary the Thread carries, the native identities the Host recorded, and whatever the engine's own record still answers after its process exited. The native record itself is never copied into the Team, and only the Member who delegated the run or the Human may read it.`,
+  description: `Delegate one self-contained piece of work to a local Worker engine (Codex or Claude Code) that runs with its own tools, login, and settings, or stop a Worker this session delegated. Use it for work you can hand over completely: investigation, a scoped change in a prepared working directory, or a check that needs another engine. The Worker does not see this conversation, holds no Team identity, and cannot claim, accept, or answer for you, so the task text must carry the goal, the background, the scope, and what evidence to bring back. Name the Thread or Task the work belongs to and everything about the run is published there: the Thread shows when it started and how it ended, and its answer arrives in your Inbox — the other participants never see the raw output. Name only a Project and the result comes back to this session alone, published nowhere. The call returns as soon as the execution is accepted; keep working and do not poll. A Worker affects Project responsibility in no way: if you delegate work on a Task, the Claim stays yours and you still verify the result yourself, and a finished run never accepts a Task. Delegation needs the Team setting "allow Project owners to delegate Workers", your ownership of the Project the target belongs to, and an enabled engine; a refusal names which condition failed. To stop one execution, pass only its worker ref as stop; the call returns once the engine confirmed its cleanup, and a run that ended first answers with the state it really ended in. Another Member's run cannot be stopped this way. To add one instruction to a run that is still executing, pass its worker ref as steer with the instruction: the engine takes it into the turn it is already running — no new turn, no queue, no second Worker — and the receipt says submitted, never that the model read it. A run that ended, is stopping, or runs on an engine without same-turn control answers with that state instead of sending anything, and the same instruction is submitted once per run. To read one execution's diagnostic, pass only its worker ref as inspect: the call answers with the same summary the Thread carries, the native identities the Host recorded, and whatever the engine's own record still answers after its process exited. The native record itself is never copied into the Team, and only the Member who delegated the run or the Human may read it.`,
   parameters: {
     threadRef: { type: 'string', description: 'The Thread this work reports into, as a thread: ref. The run\'s start, ending, and Inbox wake all point at it. Its Project authorizes the delegation.' },
     taskRef: { type: 'string', description: 'The Task this work is for, as a task: ref. It fixes the Thread as well; naming a Thread and a Task together is accepted only when the Task is in that Thread.' },
@@ -1759,6 +1776,8 @@ const teamWorker = defineTool({
     task: { type: 'string', description: 'The complete task for the Worker: goal, background it needs, working scope, and the evidence to return. It cannot ask you follow-up questions. Required unless stop names a run to end.' },
     stop: { type: 'string', description: 'A worker: ref this session delegated. With this the call stops that execution instead of starting one: pass it alone, with no task, target, engine, directory, or request id.' },
     inspect: { type: 'string', description: 'A worker: ref this session delegated. With this the call reads that execution\'s diagnostic instead of starting or stopping one: pass it alone, with no task, target, engine, directory, or request id. A run that has not ended answers with the summary alone.' },
+    steer: { type: 'string', description: 'A worker: ref this session delegated, still executing. With this the call adds instruction to the turn that run is already in: pass it with instruction, and with no task, target, engine, directory, stop, or inspect. The engine takes the instruction over for the current turn; nothing is queued for a later turn and no second Worker starts.' },
+    instruction: { type: 'string', description: 'The one instruction to add to the running turn, with steer. It is submitted once per run: sending the same text again answers with the first receipt instead of entering the turn twice.' },
     engine: { type: 'string', enum: ['codex', 'claude'], description: 'Engine to run. Omit for the Project default the Host settings name.' },
     cwd: { type: 'string', description: 'Absolute working directory the Worker runs in. Omit to use this session\'s own directory.' },
     requestId: { type: 'string', description: 'Optional idempotency key: resending the same value returns the execution the first call started instead of starting another, even when both calls arrive at once. A resend from another Member, or one that changes the task, engine, or target, is refused rather than answered with a run it did not ask for.' },
@@ -1774,13 +1793,15 @@ const teamWorker = defineTool({
       summary: { type: 'string' }, stage: { type: 'string' },
       nativeThreadId: { type: 'string' }, nativeTurnId: { type: 'string' }, nativeStorage: { type: 'string' },
       nativeRecord: { type: 'string' }, nativeReason: { type: 'string' },
+      turnId: { type: 'string' }, runState: { type: 'string' },
       nativeWithheld: { type: 'number' }, nativeTruncated: { type: 'boolean' },
       nativeFragments: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
         kind: { type: 'string', required: true }, text: { type: 'string', required: true } } } },
     } },
     render: (_args, value) => [{
       type: 'text',
-      text: value.mode === 'inspect' ? inspectionReport(value) : [
+      text: value.mode === 'inspect' ? inspectionReport(value)
+        : value.mode === 'steer' ? steerReceipt(value) : [
         `Worker ${value.workerRef} · ${value.engine ?? 'Worker'} · ${value.state}`,
         ...(value.projectRef === undefined ? [] : [`Project: ${value.projectRef}`]),
         ...(value.threadRef === undefined ? [] : [`Thread: ${value.threadRef} — the run's start, ending, and answer report there`]),
@@ -1803,12 +1824,15 @@ const teamWorker = defineTool({
     if (args.stop !== undefined && args.inspect !== undefined) {
       throw new Error('team_worker takes one worker ref at a time: pass stop or inspect, not both.')
     }
+    if (args.steer !== undefined && (args.stop !== undefined || args.inspect !== undefined)) {
+      throw new Error('team_worker takes one worker ref at a time: pass steer, stop, or inspect — never two of them.')
+    }
     if (args.inspect !== undefined) {
       // Reading a diagnostic is its own call: it names one run and nothing else,
       // so a half-filled start can never be read as a look-up.
       if (args.task !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
         || args.projectRef !== undefined || args.engine !== undefined || args.cwd !== undefined
-        || args.requestId !== undefined) {
+        || args.requestId !== undefined || args.steer !== undefined || args.instruction !== undefined) {
         throw new Error('team_worker takes either a task to start or an inspect ref, not both: pass inspect alone.')
       }
       const inspection = await host.workerInspectForAgent(agent, { workerRef: args.inspect as Parameters<typeof host.workerInspectForAgent>[1]['workerRef'] })
@@ -1832,12 +1856,37 @@ const teamWorker = defineTool({
         },
       }
     }
+    if (args.steer !== undefined) {
+      // A steer names one run and one instruction, and nothing else: a
+      // half-filled start must never be read as an instruction to a live turn.
+      if (args.task !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
+        || args.projectRef !== undefined || args.engine !== undefined || args.cwd !== undefined
+        || args.stop !== undefined || args.inspect !== undefined) {
+        throw new Error('team_worker takes either a task to start, a stop ref, an inspect ref, or a steer ref with its instruction: pass steer alone with instruction.')
+      }
+      if (args.instruction === undefined || args.instruction.trim() === '') {
+        throw new Error('team_worker needs the instruction to add when steer names a run: pass steer with instruction.')
+      }
+      const steered = await host.workerSteerForAgent(agent, {
+        workerRef: args.steer as Parameters<typeof host.workerSteerForAgent>[1]['workerRef'],
+        instruction: args.instruction,
+        requestId: (args.requestId ?? requestId(agent.id, exec.callId)) as Parameters<typeof host.workerSteerForAgent>[1]['requestId'],
+      })
+      return {
+        mode: 'steer', workerRef: steered.workerRef, state: steered.state, engine: steered.engine,
+        ...(steered.turnId === undefined ? {} : { turnId: steered.turnId }),
+        runState: steered.runState,
+      }
+    }
+    if (args.instruction !== undefined && args.steer === undefined) {
+      throw new Error('team_worker takes instruction only with steer: name the running Worker whose turn should take it.')
+    }
     if (args.stop !== undefined) {
       // Starting and stopping are different calls: a stop names one run and
       // nothing else, so a half-filled start can never be read as a stop.
       if (args.task !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
         || args.projectRef !== undefined || args.engine !== undefined || args.cwd !== undefined
-        || args.requestId !== undefined) {
+        || args.requestId !== undefined || args.steer !== undefined || args.instruction !== undefined) {
         throw new Error('team_worker takes either a task to start or a stop ref, not both: pass stop alone.')
       }
       const stopped = await host.workerStopForAgent(agent, { workerRef: args.stop as Parameters<typeof host.workerStopForAgent>[1]['workerRef'] })

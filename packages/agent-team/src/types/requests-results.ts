@@ -1208,6 +1208,34 @@ export interface AgentTeamWorkerInspectRequest {
 }
 
 /**
+ * One Member's instruction to a Worker run it delegated, added to the turn that
+ * run is already executing. The request id is the idempotency key: a resend with
+ * the same instruction answers with the first receipt, and the same id with a
+ * different instruction is refused rather than sent.
+ */
+export interface AgentTeamWorkerSteerRequest {
+  readonly workerRef: AgentTeamWorkerRef
+  readonly instruction: string
+  readonly requestId: AgentTeamRequestId
+}
+
+/**
+ * What the engine took over. `submitted` means the instruction entered the turn
+ * the engine is running — not that the model read it, not that it landed before
+ * the turn ended, and not that any outcome followed. `runState` is the execution's
+ * state when this answer was written, so a stop that landed meanwhile is visible
+ * instead of being reported as a clean success.
+ */
+export interface AgentTeamWorkerSteerResult {
+  readonly workerRef: AgentTeamWorkerRef
+  readonly engine: import('../worker-settings.ts').WorkerEngine
+  readonly state: 'submitted'
+  /** The turn the engine said it steered into, when its acknowledgement named one. */
+  readonly turnId?: string | undefined
+  readonly runState: AgentTeamWorkerState | 'unconfirmed' | 'stopping'
+}
+
+/**
  * What a delegation target names, as the Host resolves it before it writes
  * anything or starts a process. A Thread and a Task agree about each other or
  * the target is contradictory; the Project is derived from whichever target was

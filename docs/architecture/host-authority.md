@@ -319,6 +319,24 @@ The report is layered. The public Thread keeps the summary it already had; the d
 
 A run that has not ended answers with its summary and says its record is read once it does, and a run that ended before any session was recorded says exactly that instead of claiming the engine never opened one.
 
+### Adding an instruction to a running turn
+
+A steer is the engine's own same-turn input, not a Team invention. The Host forwards it through OAR's `session.steer`, which sends the runtime's `turn/steer` with the turn id OAR is currently driving, so the instruction enters the turn that is running: no second turn opens, nothing is queued for a later one, and no other run can receive it.
+
+The released CLI's contract — a steer submitted while a tool executes reaches the next model request of the same turn, and one submitted after the turn ended is refused — is proved by `artifacts/probe-05-steer.mjs` against the real binary and a loopback Responses endpoint.
+
+The live control belongs to the run registry. `WorkerRegistry` holds one entry per open engine session, and `TeamWorkerProvider` reports each session as it opens and closes through `WorkerSessionSink`; the entry is removed when that run's result settles and the whole table is cleared when the Host releases its runs. There is no module-level table and no second owner of that state: a session this Host does not hold has no control to reach, and a restart carries none forward.
+
+Authorization is the identity that opened the run — its `initiatedBy` Member. Another Member is refused as `worker_steer_forbidden`, and this version has no Human entry, so the Human reads a run's diagnostic but does not add to its turn. The durable record decides whether the run is still running; a record a previous Host left in `running` is refused as `worker_unconfirmed` rather than steered.
+
+Only Codex is opened in this version, because its control names the turn it is driving. An engine whose acceptance covers more than the current turn is refused as `worker_steer_unsupported` rather than borrowing that guarantee.
+
+The idempotency answer comes before every state check. `RunEntry.steers` keeps one receipt per request id, so a resend answers with the receipt the first call produced while the run is still going and after it ended, and never reaches the engine again; the same sentence under a fresh request id is answered the same way, and a changed instruction under a used id is refused as `worker_steer_conflict`. A run that ended, a run whose stop is in flight, and an engine session without same-turn control each answer with their own refusal instead of sending anything.
+
+The receipt is layered like the diagnostic. `submitted` is OAR's deliberately weak promise: the engine took the input over for the current turn, which is not a claim that the model read it, that it landed before the turn ended, or that any outcome followed. The answer carries the turn the engine's acknowledgement named and the run's state at the moment it was written, so a stop that landed meanwhile is visible.
+
+A steer writes no ledger operation: it is not a terminal fact, it does not survive a restart, and the run keeps the one ending and the one delivery it already had.
+
 ## Composer attachments (cache, not archive)
 
 Attachments live in the bounded cache `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/`, with a sanitized original name and `meta.json`; they are never ledger bytes or an archive. `putAttachment` enforces a 10 MB file cap and sanitizes names; `getAttachment` serves Client display. Messages record metadata while the stored body contains machine-facing `[attachment] <absolute path>` lines. The Client strips those lines and renders thumbnails/chips.

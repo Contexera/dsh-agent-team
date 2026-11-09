@@ -116,6 +116,51 @@ function carryWorkerAnchors(outcome: SubagentResult, anchors: WorkerAnchors | un
 }
 
 /**
+ * What one same-turn instruction came to. `submitted` is OAR's own deliberately
+ * weak promise: the engine took the input over for the turn it is running, which
+ * is not a claim that the model read it, that it landed before the turn ended, or
+ * that any outcome followed. `unavailable` carries why nothing was taken over.
+ */
+export type WorkerSteerOutcome =
+  | { readonly kind: 'submitted'; readonly turnId?: string | undefined }
+  | { readonly kind: 'unavailable'; readonly code: RejectionCode | 'error'; readonly reason: string }
+
+/** How long a native turn id may be before this Team refuses to carry it. */
+const WORKER_TURN_ID_MAX_CHARACTERS = 256
+
+/**
+ * The turn the engine said it steered into, taken from its own acknowledgement.
+ * An id this Team will not carry is dropped rather than shortened: a cut id names
+ * a turn that does not exist.
+ */
+function steeredTurnId(native: unknown): string | undefined {
+  if (native === null || typeof native !== 'object') return undefined
+  const turnId = (native as { readonly turnId?: unknown }).turnId
+  return typeof turnId === 'string' && turnId !== '' && turnId.length <= WORKER_TURN_ID_MAX_CHARACTERS ? turnId : undefined
+}
+
+/** One run's live control: add an instruction to the turn its engine is already running. */
+export type WorkerSteer = (instruction: string, inputId: string) => Promise<WorkerSteerOutcome>
+
+/** What a live session offers the Host: a steer channel, or a stated reason there is none. */
+export type WorkerSteerChannel =
+  | { readonly kind: 'session'; readonly steer: WorkerSteer }
+  | { readonly kind: 'unsupported' }
+
+/**
+ * The Team-private key one run's steer channel rides on, for the same reason the
+ * anchors do: the channel belongs to the run, so it travels on the object that
+ * run published instead of through a map keyed by a session that outlives it.
+ */
+const WORKER_STEER = Symbol('@contexera/dsh-agent-team/worker-steer')
+
+/** One run's steer channel, or nothing when the engine exposes no same-turn control. */
+export function workerSteerOf(run: object): WorkerSteer | undefined {
+  const carried = (run as { readonly [WORKER_STEER]?: unknown })[WORKER_STEER]
+  return typeof carried === 'function' ? carried as WorkerSteer : undefined
+}
+
+/**
  * The native record's own path, taken from the frame in which the engine
  * reported it. Codex states it on `thread/start` and repeats it on
  * `thread/started`; a runtime that names no path yields none, and the look-up
@@ -273,6 +318,28 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     void dispose().catch(() => {})
   }
   const onAbort = (): void => { interrupt('cancelled') }
+  /**
+   * The run's live same-turn control. It never opens a turn, never queues, and
+   * never reaches another session: the engine's own `steer` addresses the turn it
+   * is running right now, and a session that exposes none says so instead of
+   * falling back to a queue. A refusal keeps the engine's own code so the Host can
+   * tell "nothing is running" from "the engine would not take it".
+   */
+  const steer: WorkerSteer = async (instruction, inputId) => {
+    if (phase !== 'running') return { kind: 'unavailable', code: 'no_active_turn', reason: 'the run is no longer running' }
+    const control = session.steer
+    if (control === undefined) return { kind: 'unavailable', code: 'unsupported', reason: 'this engine session exposes no same-turn control' }
+    try {
+      const answer = await control.call(session, instruction, { inputId })
+      if (answer.kind === 'accepted') {
+        const turnId = steeredTurnId(answer.response.body.kind === 'accepted' ? answer.response.body.native : undefined)
+        return { kind: 'submitted', ...(turnId === undefined ? {} : { turnId }) }
+      }
+      return { kind: 'unavailable', code: answer.code, reason: answer.reason }
+    } catch (error: unknown) {
+      return { kind: 'unavailable', code: 'error', reason: error instanceof Error ? error.message : String(error) }
+    }
+  }
   const unsubscribe = session.events((event) => {
     if (event.sessionId !== session.id || event.agentPath.length !== 0 || event.kind !== 'text_delta') return
     streamedText += event.text
@@ -334,7 +401,7 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
       return { output: outcome.output, stopReason: 'error' as const, diagnostic: WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC }
     }
   })
-  return subprocessRunHandle({
+  const handle = subprocessRunHandle({
     // The external child's id is the engine's own session identity: the execution
     // record reports it, and a later read-only diagnostic can reopen that history.
     id: SessionId(session.id),
@@ -349,6 +416,11 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
       await settled
     },
   })
+  // The control belongs to this run and dies with it: the provider offers it only
+  // while the session is open, and the symbol keeps it off every ordinary view of
+  // the handle.
+  Object.defineProperty(handle, WORKER_STEER, { value: steer, enumerable: false })
+  return handle
 }
 
 /**
@@ -418,6 +490,19 @@ export async function startWorkerRun(request: ResolvedSubagentStartRequest, spec
   return publishRun(session, prompt, request, spec)
 }
 
+/**
+ * What the Host's live-run registry is told about a session as it opens and
+ * closes. The provider holds no table of its own: the registry that owns every
+ * live execution owns the control that belongs to them, so one unload, one
+ * ending, and one place to look are all the same place.
+ */
+export interface WorkerSessionSink {
+  /** The session opened, with the same-turn control it carries or nothing when it has none. */
+  opened(sessionId: SessionId, steer: WorkerSteer | undefined): void
+  /** The session is gone: its run ended, was released, or the provider closed it. */
+  closed(sessionId: SessionId): void
+}
+
 export class TeamWorkerProvider implements SubagentProvider {
   readonly capabilities = Object.freeze({ agentOptions: false, agentPreset: false, outputSchema: false, depthLimit: false })
   readonly inheritsParentContext = false
@@ -426,13 +511,20 @@ export class TeamWorkerProvider implements SubagentProvider {
    * @param name - the registry name the Host registered the provider under.
    * @param spec - reads the settings row as it stands when a session opens, so a
    * saved executable, engine switch, or policy reaches the next delegation.
+   * @param sink - the Host's live-run registry, told when a session opens and closes.
    */
   constructor(
     readonly name: string,
     private readonly spec: () => WorkerRunSpec,
+    private readonly sink: WorkerSessionSink,
   ) {}
 
-  start(request: ResolvedSubagentStartRequest): Promise<SubagentRun> {
-    return startWorkerRun(request, this.spec())
+  async start(request: ResolvedSubagentStartRequest): Promise<SubagentRun> {
+    const run = await startWorkerRun(request, this.spec())
+    // The control rides the run this provider just published; the registry holds
+    // it exactly as long as that run's session lives.
+    this.sink.opened(run.id, workerSteerOf(run))
+    void run.result.then(() => { this.sink.closed(run.id) }, () => { this.sink.closed(run.id) })
+    return run
   }
 }

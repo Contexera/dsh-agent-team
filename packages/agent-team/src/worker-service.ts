@@ -15,6 +15,7 @@ import { isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SubagentActivation, SubagentRuntime, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {
   AgentTeamActor,
@@ -29,6 +30,7 @@ import type {
   AgentTeamWorkerStage,
   AgentTeamWorkerStartRecord,
   AgentTeamWorkerStartWrite,
+  AgentTeamWorkerSteerResult,
   AgentTeamWorkerSettleWrite,
 } from './types.ts'
 import { truncateToCharacters } from './text.ts'
@@ -41,6 +43,7 @@ import {
   WorkerFailure,
   workerAnchorsOf,
   type WorkerRunSpec,
+  type WorkerSteer,
 } from './worker-runtime.ts'
 
 export interface WorkerEngineConfig {
@@ -153,6 +156,19 @@ export class WorkerRefusal extends Error {
 
 const nowIso = (): string => new Date().toISOString()
 
+/** How long an engine's own refusal sentence may be before this Team reports its own. */
+const WORKER_STEER_REASON_MAX_CHARACTERS = 300
+
+/**
+ * One engine refusal, bounded. The sentence is the engine's own words about a
+ * control it declined — never a native record — and a report may not carry an
+ * unbounded value into the Thread.
+ */
+function boundedSteerReason(reason: string): string {
+  const text = reason.trim()
+  return text === '' ? 'the engine gave no reason' : truncateToCharacters(text, WORKER_STEER_REASON_MAX_CHARACTERS)
+}
+
 /**
  * How long an unloading Host waits for an engine to report its ending before it
  * lets go. A run that outlasts it keeps its recorded start with no ending, which
@@ -235,6 +251,14 @@ interface RunEntry {
   stopDisposal?: Promise<void> | undefined
   /** One stop transaction per run, joined by repeated requests. */
   stop?: Promise<void> | undefined
+  /** The engine session this run opened, once the activation published one. */
+  sessionId?: SessionId | undefined
+  /**
+   * Instructions this run already took, by request id, so a resend answers with the
+   * first one's receipt instead of entering the turn twice.
+   */
+  readonly steers: Map<AgentTeamRequestId, { readonly instruction: string
+    readonly outcome: Promise<AgentTeamWorkerSteerResult> }>
   activation?: SubagentActivation | undefined
   /** After the Host released a run it could not clean up, a late ending must not reach closed storage. */
   sealed: boolean
@@ -256,7 +280,15 @@ export class WorkerRegistry {
   /** The start each request id is opening right now, so a concurrent resend joins it. */
   private readonly starting = new Map<AgentTeamRequestId, { readonly delegation: DelegationShape
     readonly started: Promise<AgentTeamWorkerRun> }>()
-  private readonly providers = new Map<WorkerEngine, () => void>()
+  private readonly providers = new Map<WorkerEngine, { readonly release: () => void
+    readonly provider: TeamWorkerProvider }>()
+  /**
+   * The same-turn control of every session this Host still holds, by the engine's
+   * own session id. This is live state, not a record: an entry exists only while
+   * its session does, it is removed when that run ends, and unloading clears what
+   * is left. Nothing outside this registry can reach an engine session.
+   */
+  private readonly sessions = new Map<SessionId, WorkerSteer | undefined>()
   /** Terminal writes still in flight, so unloading the Host waits for them. */
   private readonly writes = new Set<Promise<void>>()
   private stopped = false
@@ -353,7 +385,7 @@ export class WorkerRegistry {
     readonly workerRef: AgentTeamWorkerRef
     readonly engine: WorkerEngine
     readonly cwd: string
-    readonly provider: string
+    readonly provider: TeamWorkerProvider
     readonly subagents: SubagentRuntime
     readonly delegation: DelegationShape
   }): Promise<AgentTeamWorkerRun> {
@@ -375,6 +407,7 @@ export class WorkerRegistry {
       stopping: false,
       sealed: false,
       cleanupUnconfirmed: false,
+      steers: new Map(),
       run: Object.freeze({ workerRef, projectRef: started.projectRef, engine, state: 'running' as const,
         startedAt: started.startedAt, cwd: started.cwd, initiatedBy: started.initiatedBy,
         ...(started.threadRef === undefined ? {} : { threadRef: started.threadRef }),
@@ -391,7 +424,7 @@ export class WorkerRegistry {
     }
     try {
       const activation = await subagents.startActivation({
-        provider,
+        provider: provider.name,
         label: `${engine} worker`,
         request: { parent: caller.parent, prompt: [{ type: 'text', text: request.task }], cwd },
         // A stop asked for during startup cancels through this signal; once the
@@ -408,6 +441,9 @@ export class WorkerRegistry {
         throw new WorkerRefusal('worker_unavailable', 'The Team released this Worker while it was still starting.')
       }
       entry.activation = activation
+      // The engine's own session id is what its live control is keyed by; a run
+      // whose activation never published one has nothing to steer.
+      entry.sessionId = activation.childId
       if (entry.stopping) {
         const disposal = activation.dispose()
         entry.stopDisposal ??= disposal
@@ -464,6 +500,95 @@ export class WorkerRegistry {
   }
 
   /**
+   * Add one instruction to the turn a run is already executing. Only the Member
+   * who delegated the run may ask; nothing here opens a turn, queues an input, or
+   * reaches another run. A run that ended, is stopping, or has not opened its
+   * engine session answers with that state instead of sending anything, and a
+   * resent request id answers with the receipt the first call produced.
+   */
+  async steer(workerRef: AgentTeamWorkerRef, steerer: AgentTeamActor,
+    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string }): Promise<AgentTeamWorkerSteerResult> {
+    const entry = this.runs.get(workerRef)
+    if (entry === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${workerRef}' was started by this Host.`)
+    this.assertMaySteer(entry, steerer)
+    const instruction = request.instruction.trim()
+    if (instruction === '') throw new WorkerRefusal('worker_steer_required', 'A steer needs the instruction the Worker should take on.')
+    // The idempotency answer comes before the state checks: a resend answers with
+    // the receipt the first call produced whether the run is still going or has
+    // ended, and a changed instruction under that id is refused either way. Only a
+    // request this run has never seen can reach the engine.
+    const admitted = entry.steers.get(request.requestId)
+    if (admitted !== undefined) {
+      if (admitted.instruction !== instruction) {
+        throw new WorkerRefusal('worker_steer_conflict', `Request id '${request.requestId}' already carried another instruction `
+          + 'to this Worker; send a changed instruction under a new request id.')
+      }
+      return admitted.outcome
+    }
+    // The same sentence is one instruction: a retry that arrives under a fresh
+    // request id must not enter the live turn a second time.
+    for (const previous of entry.steers.values()) {
+      if (previous.instruction === instruction) return previous.outcome
+    }
+    if (entry.run.state !== 'running') {
+      throw new WorkerRefusal('worker_steer_ended', `Worker '${workerRef}' already ended: ${entry.run.state}; there is no turn to add to.`)
+    }
+    if (entry.stopping) {
+      throw new WorkerRefusal('worker_steer_stopping', `Worker '${workerRef}' is stopping, so nothing was sent: a turn that is ending `
+        + 'will not carry another instruction.')
+    }
+    const outcome = this.steerRun(entry, instruction, request.requestId)
+    entry.steers.set(request.requestId, { instruction, outcome })
+    return outcome
+  }
+
+  /**
+   * The one steer transaction: ask the control this Host holds for that session,
+   * then report what the engine took over and how the run stood at that moment.
+   */
+  private async steerRun(entry: RunEntry, instruction: string, requestId: AgentTeamRequestId): Promise<AgentTeamWorkerSteerResult> {
+    const { workerRef, engine } = entry.run
+    const sessionId = entry.sessionId
+    // This version opens same-turn steering for Codex only: its control carries
+    // the turn the engine is driving, which is what makes the receipt's turn id
+    // and the "current turn" claim checkable. Claude's control accepts while the
+    // turn is still open, and its input can still be scheduled as the next turn,
+    // so that path waits for its own ticket rather than borrowing this guarantee.
+    if (engine !== 'codex') {
+      throw new WorkerRefusal('worker_steer_unsupported', `Worker '${workerRef}' runs on an engine whose same-turn control `
+        + 'this Team does not open yet, so no instruction was sent.')
+    }
+    if (sessionId === undefined) {
+      throw new WorkerRefusal('worker_steer_not_ready', `Worker '${workerRef}' has not opened its engine session yet, so it has no `
+        + 'turn to add to; try again once it is running.')
+    }
+    if (!this.sessions.has(sessionId)) {
+      throw new WorkerRefusal('worker_steer_no_active_turn', `Worker '${workerRef}' holds no live engine session any more, so there is `
+        + 'no turn to add to.')
+    }
+    const steer = this.sessions.get(sessionId)
+    if (steer === undefined) {
+      throw new WorkerRefusal('worker_steer_unsupported', `Worker '${workerRef}' runs on an engine session that exposes no same-turn `
+        + 'control, so this Team cannot add an instruction to it.')
+    }
+    const outcome = await steer(instruction, requestId)
+    if (outcome.kind === 'unavailable') {
+      throw new WorkerRefusal('worker_steer_refused', `Worker '${workerRef}' did not take the instruction over (${outcome.code}): `
+        + boundedSteerReason(outcome.reason))
+    }
+    return Object.freeze({ workerRef, engine, state: 'submitted' as const,
+      ...(outcome.turnId === undefined ? {} : { turnId: outcome.turnId }),
+      runState: this.liveState(workerRef) ?? entry.run.state })
+  }
+
+  /** Refuse a steer by anyone but the Member who delegated the run. */
+  private assertMaySteer(entry: RunEntry, steerer: AgentTeamActor): void {
+    if (steerer.kind === 'member' && steerer.memberId === entry.run.initiatedBy) return
+    throw new WorkerRefusal('worker_steer_forbidden', `Only the Member who delegated Worker '${entry.run.workerRef}' may add an `
+      + 'instruction to it.')
+  }
+
+  /**
    * Release the Team: refuse new starts, cancel every start still opening, stop
    * the runs this provider holds, wait for their endings, then release the
    * providers. A run that cannot confirm its ending within the deadline stays
@@ -495,8 +620,10 @@ export class WorkerRegistry {
       if (ended === undefined && entry.run.state === 'running') this.seal(entry)
     }
     await Promise.allSettled(this.writes)
-    for (const release of this.providers.values()) release()
+    for (const { release } of this.providers.values()) release()
     this.providers.clear()
+    // Nothing this Host held can be steered after it releases its runs.
+    this.sessions.clear()
   }
 
   /** Ask every run this Host still holds to stop; a sealed run already has its one ending decided. */
@@ -691,16 +818,19 @@ export class WorkerRegistry {
     return this.ctx.get('subagents') as SubagentRuntime | undefined
   }
 
-  private providerFor(engine: WorkerEngine, subagents: SubagentRuntime): string {
-    const name = WORKER_PROVIDER_NAMES[engine]
-    if (!this.providers.has(engine)) {
-      // The row is read when a session opens, not when the provider registers: a
-      // saved executable, engine switch, or policy must reach the next delegation.
-      const provider = new TeamWorkerProvider(name, () => workerRunSpec(engine, this.deps.config(), this.deps.warn))
-      const release = subagents.registerProvider(provider)
-      this.providers.set(engine, release)
-    }
-    return name
+  private providerFor(engine: WorkerEngine, subagents: SubagentRuntime): TeamWorkerProvider {
+    const existing = this.providers.get(engine)
+    if (existing !== undefined) return existing.provider
+    // The row is read when a session opens, not when the provider registers: a
+    // saved executable, engine switch, or policy must reach the next delegation.
+    const provider = new TeamWorkerProvider(WORKER_PROVIDER_NAMES[engine],
+      () => workerRunSpec(engine, this.deps.config(), this.deps.warn), {
+        opened: (sessionId, steer) => { this.sessions.set(sessionId, steer) },
+        closed: (sessionId) => { this.sessions.delete(sessionId) },
+      })
+    const release = subagents.registerProvider(provider)
+    this.providers.set(engine, { release, provider })
+    return provider
   }
 }
 

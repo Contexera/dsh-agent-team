@@ -80,6 +80,9 @@ const request = (cwd: string): ResolvedSubagentStartRequest => ({
   signal: new AbortController().signal,
 }) as unknown as ResolvedSubagentStartRequest
 
+/** These cases read the run's own result, so the live-session sink has nothing to hold. */
+const NO_SESSIONS = { opened: () => {}, closed: () => {} }
+
 describe('the Worker provider', () => {
   it('reads the settings row at every open, so a saved change reaches the next delegation', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'team-worker-provider-'))
@@ -89,7 +92,7 @@ describe('the Worker provider', () => {
       let spec: WorkerRunSpec = {
         engine: 'codex', env: { OAR_CODEX_BIN: '/data/bin/codex', OAR_CODEX_SANDBOX: 'workspace-write' }, launchArgs: [],
       }
-      const provider = new TeamWorkerProvider('team-worker-codex', () => spec)
+      const provider = new TeamWorkerProvider('team-worker-codex', () => spec, NO_SESSIONS)
       await (await provider.start(request(cwd))).result
       spec = { engine: 'codex', env: { OAR_CODEX_BIN: '/data/bin/codex', OAR_CODEX_SANDBOX: 'read-only' }, launchArgs: [] }
       const second = await provider.start(request(cwd))
@@ -115,7 +118,7 @@ describe('the Worker provider', () => {
   it('publishes a stop with the cleanup verdict in the one result the parent is told', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'team-worker-provider-'))
     const spec: WorkerRunSpec = { engine: 'codex', env: {}, launchArgs: [] }
-    const provider = new TeamWorkerProvider('team-worker-codex', () => spec)
+    const provider = new TeamWorkerProvider('team-worker-codex', () => spec, NO_SESSIONS)
     try {
       // A stop whose engine keeps producing output, then refuses to confirm its exit.
       control.text = 'partial output'
@@ -146,7 +149,7 @@ describe('the Worker provider', () => {
   it('captures the anchors before a stop closes the record stream', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'team-worker-provider-'))
     const spec: WorkerRunSpec = { engine: 'codex', env: {}, launchArgs: [] }
-    const provider = new TeamWorkerProvider('team-worker-codex', () => spec)
+    const provider = new TeamWorkerProvider('team-worker-codex', () => spec, NO_SESSIONS)
     try {
       // The engine answers its record stream only while it is alive; a capture
       // taken after the abort or the cleanup would find nothing to read.
@@ -170,7 +173,7 @@ describe('the Worker provider', () => {
   it('reports no turn when the record holds more than one root turn', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'team-worker-provider-'))
     const spec: WorkerRunSpec = { engine: 'codex', env: {}, launchArgs: [] }
-    const provider = new TeamWorkerProvider('team-worker-codex', () => spec)
+    const provider = new TeamWorkerProvider('team-worker-codex', () => spec, NO_SESSIONS)
     try {
       // Another root turn in the same record cannot be tied to this run's input,
       // so the run reports no turn id rather than the last one it saw.

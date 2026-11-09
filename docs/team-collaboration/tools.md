@@ -253,6 +253,18 @@ Fragments are limited to a few safe fields of the run's own turn, each bounded, 
 
 The Human's edit-Agent dialog lists the runs this Host still holds, the records a previous Host left running as `unconfirmed`, and the newest 20 ended runs by ending time — a long run that started early and failed just now stays inside that window — each with the state it really ended in, and each offering its diagnostic. Every run stays readable by its `worker:` ref, so the list is a window, not the only door.
 
+The same tool adds one instruction to a run that is still executing: pass `steer: <worker:…>` with `instruction`, and nothing else.
+
+The instruction enters the turn the engine is already running. It opens no second turn, queues nothing for a later one, and reaches no other run. The receipt says submitted, never received: the engine took the input over for the current turn, and a turn that ends before its next model request carries the instruction away with it. When a stop or an ending landed while the answer was being written, the receipt names the state the run was in, so an accepted steer is never reported as a clean success.
+
+Only the Member who delegated the run may ask; another Member is refused as `worker_steer_forbidden`, and this version has no steer entry for the Human. A run that already ended answers with the state it ended in (`worker_steer_ended`), and a run whose stop is in flight refuses instead of sending into a turn that is ending (`worker_steer_stopping`).
+
+A run this Host no longer holds is refused as `worker_unconfirmed`. This version opens the path for Codex only, because its control names the turn the engine is driving; another engine — Claude Code, until its own ticket verifies what its acceptance covers — is refused as `worker_steer_unsupported`. An engine that will not take the input answers with its own code and bounded reason (`worker_steer_refused`) rather than a success.
+
+One instruction is sent once. A resend with the same request id answers with the receipt the first call produced — while the run is still going and after it ended — and never reaches the engine again; the same sentence under a fresh request id is answered the same way, and a different instruction under a used request id is refused as `worker_steer_conflict`.
+
+The live control belongs to this Host's run registry: it is created when the engine session opens, removed when that run ends, and cleared when the Host releases its runs, so nothing survives a restart and no native identity becomes a handle. A steer writes no Team fact — it changes no Thread record, no Task, and no Claim — and the run keeps the one ending and the one delivery it already had.
+
 Unloading the bundle refuses new delegations, cancels starts that are still opening (including one still writing its opening record), and waits for the runs this Host holds to report and record their endings before it closes storage.
 
 A run still unconfirmed at that boundary keeps its `running` record and is sealed, so no late ending is written after storage closes.

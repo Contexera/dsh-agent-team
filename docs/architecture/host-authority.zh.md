@@ -284,6 +284,18 @@ Human 的入口是「编辑 Agent」弹窗，列出该成员仍在运行的执�
 
 报告是分层的。公开 Thread 保持原有摘要；详细答案——失败发生的阶段、原生标识、有界片段，或记录无法回答的那一个原因（`missing`、`unreadable`、`unpersisted`、`unsupported`、`unmatched`）——只给发起成员与 Human。尚未结束的执行只回答摘要，并说明记录在结束后才读取；在记录会话之前就结束的执行如实说明这一点，而不会声称引擎从未打开会话。
 
+### 给正在执行的 turn 补一句指令
+
+补指令用的是引擎自己的同轮输入，不是 Team 发明的机制。Host 通过 OAR 的 `session.steer` 转发，它发出运行时的 `turn/steer`，带上 OAR 当前正在驱动的 turn id，因此指令进入的正是正在跑的那一个 turn：不开第二个 turn、不为下一轮排队、也不会到达别的执行。发布版 CLI 的契约——工具执行中提交的指令会进入同一 turn 的下一次模型请求，turn 结束后提交则被拒绝——由 `artifacts/probe-05-steer.mjs` 对着真实二进制与一个 loopback Responses 端点实证。
+
+这条活动控制归执行注册表所有。`WorkerRegistry` 为每个打开的引擎会话保留一个条目，`TeamWorkerProvider` 通过 `WorkerSessionSink` 在会话打开与关闭时上报；该执行的 result 结算时摘除该条目，Host 释放执行时整表清空。没有模块级表，也没有第二个状态所有者：本 Host 不再持有的会话没有可到达的控制，重启也不带任何条目过去。
+
+授权就是打开这次执行的身份——它的 `initiatedBy` 成员。其他成员按 `worker_steer_forbidden` 拒绝；这一版 Human 没有入口，所以 Human 能读一次执行的诊断，但不往它的 turn 里加东西。是否仍在运行由持久记录决定；上一个 Host 留在 `running` 的记录按 `worker_unconfirmed` 拒绝，而不是照发。这一版只对 Codex 开放：它的控制会指明正在驱动的那个 turn；「接受」覆盖范围超过当前 turn 的引擎按 `worker_steer_unsupported` 拒绝，而不是借用这条保证。
+
+幂等回答先于所有状态检查。`RunEntry.steers` 按 request id 保留一份回执，所以执行仍在跑时和结束后，重送都拿回第一次的回执，且不会再到达引擎；换一个新的 request id 重送同一句话同样如此；用已用过的 request id 送不同指令按 `worker_steer_conflict` 拒绝。已结束的执行、停止在途的执行，以及没有同轮控制能力的引擎会话，各自给出自己的拒绝，而不是发出任何东西。
+
+回执与诊断一样是分层的。`submitted` 是 OAR 有意做出的弱承诺：引擎把输入接管进了当前 turn，这不等于模型读过它、也不等于它在 turn 结束前落地、更不等于有任何结果。答案带上引擎确认过的那个 turn，以及写出答案这一刻执行的状态，所以期间落地的停止是可见的。补指令不写任何账本操作：它不是终态事实、不跨重启，这次执行仍只有原来那一个终态与那一次回传。
+
 ## Composer attachments（cache，不是 archive）
 
 Composer attachments 是有界 cache，不是 archive，也不是 ledger bytes。cache 目录是 `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/`，存经过清理的原始名称和 `meta.json` sidecar。

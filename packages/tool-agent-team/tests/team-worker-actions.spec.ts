@@ -3,11 +3,12 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { renderText, teamTools } from './render-text.ts'
 
 /**
- * Execution-level tests for `team_worker`'s three call shapes: one delegation, one
- * stop, and one diagnostic read share the tool but never a request. A stop and an
- * inspect are each a ref alone, so a half-filled start can never be read as
- * either, and the Host entry points stay distinct: neither can smuggle a task,
- * target, engine, or directory.
+ * Execution-level tests for `team_worker`'s four call shapes: one delegation, one
+ * stop, one diagnostic read, and one instruction to a running turn share the tool
+ * but never a request. A stop and an inspect are each a ref alone, and a steer is
+ * one ref plus its instruction, so a half-filled start can never be read as any of
+ * them, and the Host entry points stay distinct: none can smuggle a task, target,
+ * engine, or directory.
  */
 
 const PROJECT = 'project:00000000-0000-4000-8000-000000000001'
@@ -37,6 +38,10 @@ function inspection(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function steered(overrides: Record<string, unknown> = {}) {
+  return { workerRef: WORKER, engine: 'codex', state: 'submitted', turnId: 'native-turn', runState: 'running', ...overrides }
+}
+
 function fakeHost() {
   return {
     workerStartForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => run()),
@@ -44,6 +49,7 @@ function fakeHost() {
       state: 'stopped', settledAt: '2026-11-09T07:10:00.000Z',
     })),
     workerInspectForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => inspection()),
+    workerSteerForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => steered()),
   }
 }
 
@@ -187,5 +193,81 @@ describe('team_worker inspects with a ref alone', () => {
     const host = fakeHost()
     host.workerInspectForAgent.mockRejectedValueOnce(new Error('Only the Member who delegated Worker may read its diagnostic.'))
     await expect(call(tool, { inspect: WORKER }, host)).rejects.toThrow(/Only the Member who delegated/)
+  })
+})
+
+describe('team_worker steers a live run with one instruction', () => {
+  it('calls only the steer entry, with the ref and the instruction, and no start field', async () => {
+    const host = fakeHost()
+    const result = await call(tool, { steer: WORKER, instruction: 'also update the changelog' }, host)
+    expect(host.workerStartForAgent).not.toHaveBeenCalled()
+    expect(host.workerStopForAgent).not.toHaveBeenCalled()
+    expect(host.workerInspectForAgent).not.toHaveBeenCalled()
+    expect(host.workerSteerForAgent).toHaveBeenCalledTimes(1)
+    expect(host.workerSteerForAgent.mock.calls[0]![1]).toMatchObject({
+      workerRef: WORKER, instruction: 'also update the changelog' })
+    // The tool derives the Host's idempotency key from this call, never from the
+    // instruction text: a resend of the same call answers with the first receipt.
+    expect(host.workerSteerForAgent.mock.calls[0]![1]).toMatchObject({ requestId: 'agent-team:tool:agent:tool-test:call:1' })
+    expect(result).toMatchObject({ mode: 'steer', workerRef: WORKER, state: 'submitted', turnId: 'native-turn', runState: 'running' })
+  })
+
+  it('says submitted, never that the model read it, and names the turn it entered', async () => {
+    const host = fakeHost()
+    const receipt = renderText(tool, { steer: WORKER, instruction: 'also update the changelog' },
+      await call(tool, { steer: WORKER, instruction: 'also update the changelog' }, host))
+    expect(receipt).toContain('took the instruction into the turn it was already running')
+    expect(receipt).toContain('Turn: native-turn')
+    expect(receipt).toContain('submitted, not confirmed read')
+    expect(receipt).not.toContain('may never have been read')
+  })
+
+  it('repeats the run state when a stop landed while the answer was written', async () => {
+    const host = fakeHost()
+    host.workerSteerForAgent.mockResolvedValueOnce(steered({ runState: 'stopping', turnId: undefined }))
+    const receipt = renderText(tool, { steer: WORKER, instruction: 'hurry' },
+      await call(tool, { steer: WORKER, instruction: 'hurry' }, host))
+    expect(receipt).toContain('By the time this answer was written the run was stopping')
+    expect(receipt).not.toContain('Turn:')
+  })
+
+  it('refuses an instruction with no run, and a run with no instruction', async () => {
+    const host = fakeHost()
+    await expect(call(tool, { instruction: 'do more' }, host)).rejects.toThrow(/takes instruction only with steer/)
+    await expect(call(tool, { steer: WORKER }, host)).rejects.toThrow(/needs the instruction to add/)
+    await expect(call(tool, { steer: WORKER, instruction: '   ' }, host)).rejects.toThrow(/needs the instruction to add/)
+    expect(host.workerSteerForAgent).not.toHaveBeenCalled()
+  })
+
+  it('refuses a steer that mixes the ref with a start field', async () => {
+    for (const extra of [
+      { task: 'also do this' }, { threadRef: 'thread:00000000-0000-4000-8000-000000000003' },
+      { taskRef: 'task:00000000-0000-4000-8000-000000000004' }, { projectRef: PROJECT },
+      { engine: 'claude' }, { cwd: CWD },
+    ]) {
+      const host = fakeHost()
+      await expect(call(tool, { steer: WORKER, instruction: 'go on', ...extra }, host))
+        .rejects.toThrow(/pass steer alone with instruction/)
+      expect(host.workerSteerForAgent).not.toHaveBeenCalled()
+      expect(host.workerStartForAgent).not.toHaveBeenCalled()
+    }
+  })
+
+  it('refuses a call that names a steer beside a stop or an inspect', async () => {
+    for (const extra of [{ stop: WORKER }, { inspect: WORKER }]) {
+      const host = fakeHost()
+      await expect(call(tool, { steer: WORKER, instruction: 'go on', ...extra }, host))
+        .rejects.toThrow(/pass steer, stop, or inspect — never two of them/)
+      expect(host.workerSteerForAgent).not.toHaveBeenCalled()
+      expect(host.workerStopForAgent).not.toHaveBeenCalled()
+      expect(host.workerInspectForAgent).not.toHaveBeenCalled()
+    }
+  })
+
+  it('passes the Host refusal through unchanged', async () => {
+    const host = fakeHost()
+    host.workerSteerForAgent.mockRejectedValueOnce(new Error("Only the Member who delegated Worker may add an instruction to it."))
+    await expect(call(tool, { steer: WORKER, instruction: 'go on' }, host))
+      .rejects.toThrow(/Only the Member who delegated/)
   })
 })

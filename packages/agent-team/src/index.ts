@@ -84,6 +84,8 @@ import type {
   AgentTeamWorkerExecution,
   AgentTeamWorkerInspectRequest,
   AgentTeamWorkerInspection,
+  AgentTeamWorkerSteerRequest,
+  AgentTeamWorkerSteerResult,
   AgentTeamWorkerInspectionHistory,
   AgentTeamWorkerRef,
   AgentTeamWorkerRunListRequest,
@@ -3708,6 +3710,33 @@ export default class AgentTeam extends TypertRemoteService {
       throw new WorkerRefusal('worker_already_ended', `Worker '${request.workerRef}' already ended: ${execution.state}.`)
     }
     return this.workerRegistry.stop(request.workerRef, actor)
+  }
+
+  /**
+   * One Member's instruction to a run it delegated, added to the turn that run is
+   * already executing. The durable record decides whether the run is still
+   * running; the live registry decides whether this Host can still reach its
+   * engine session. Nothing is written: a steer is not a terminal fact, it does
+   * not survive a restart, and its receipt is the tool's own answer.
+   */
+  async workerSteerForAgent(agent: Agent, request: AgentTeamWorkerSteerRequest): Promise<AgentTeamWorkerSteerResult> {
+    const actor = this.memberActor(agent)
+    const execution = this.requireLedger().workerExecution(request.workerRef)
+    if (execution === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${request.workerRef}' was started by this Team.`)
+    if (execution.initiatedBy !== actor.memberId) {
+      throw new WorkerRefusal('worker_steer_forbidden', `Only the Member who delegated Worker '${request.workerRef}' may add an `
+        + 'instruction to it.')
+    }
+    if (this.workerRegistry.get(request.workerRef) === undefined) {
+      if (execution.state === 'running') {
+        throw new WorkerRefusal('worker_unconfirmed', `Worker '${request.workerRef}' was started by a Host that no longer holds its `
+          + 'handle, so this Host cannot reach its engine session; its result stays unconfirmed.')
+      }
+      throw new WorkerRefusal('worker_steer_ended', `Worker '${request.workerRef}' already ended: ${execution.state}; there is no turn `
+        + 'to add to.')
+    }
+    return this.workerRegistry.steer(request.workerRef, actor,
+      { requestId: request.requestId, instruction: request.instruction })
   }
 
   /** One run's shape for the Human's list, whichever record of it is being read. */
