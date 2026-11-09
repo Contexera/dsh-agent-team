@@ -4,7 +4,7 @@ This directory holds the repository's maintained engineering documentation. The 
 
 ## Routing
 
-A change that invalidates a documented fact updates the owning document in the same change:
+A change that adds or invalidates a documented fact updates the owning document in the same change:
 
 | Change touches | Update |
 | --- | --- |
