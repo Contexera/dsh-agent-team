@@ -1,79 +1,39 @@
 ---
 name: scratch-review
-description: Review the implementation of a .scratch work item or ticket, check it against its spec and repository standards, and save an evidence-based report in the work item.
+description: Review and refine a converged .scratch design, or review its implementation and save an evidence-based report.
 disable-model-invocation: true
 ---
 
 # scratch-review
 
-Review a change through the work item that explains why it exists. Check the implementation against its spec, correctness, repository standards, and unnecessary complexity; leave a report that a later session can act on.
-
-Do not modify implementation code, ticket status, or the work-item continuation README. A review produces evidence, not fixes.
+Review a work item at the stage the user asks about. Design review improves the existing design materials; implementation review examines a fixed code range and leaves a report. Both verify findings against evidence rather than preferences.
 
 ## 1. Resolve the target
 
-Accept a work-item directory or one of its `issues/NN-<slug>.md` files, optionally with `--base <ref>`:
+Accept a work-item directory or one of its `issues/NN-<slug>.md` files, optionally with a base ref for implementation review:
 
 ```text
 /scratch-review .scratch/active/<work>
 /scratch-review .scratch/active/<work>/issues/02-<slug>.md --base main
 ```
 
-Read the target's `README.md`, `DESIGN.md`, and selected ticket. For a work-item review, read all in-scope tickets and their status. Use their acceptance criteria as the spec; use the design for intent and boundaries. Do not infer a spec from a branch name. If the selected scope has neither a ticket nor explicit acceptance criteria, report the spec gap instead of inventing requirements.
+Read the target's `README.md`, its design snapshot (`spec.md`, or `DESIGN.md` in older archives), and the selected ticket. For a work-item review, read all in-scope tickets and their status. Also read the work area's rules and the repository guidance applicable to the requested stage. Do not infer requirements from a branch name.
 
-If the repository has no `.scratch` work area, or the user supplied only a diff or ref, perform a normal code review in the conversation. Do not initialize `.scratch` or manufacture a work item just to store a report.
+If the repository has no `.scratch` work area, or the user supplied only a diff or ref, perform the requested review in the conversation. Do not initialize `.scratch` or manufacture a work item just to store output.
 
-## 2. Pin the code range
+## 2. Choose the procedure
 
-The review must name the exact code it examined.
+The user's explicit request takes precedence over the work item's status. Otherwise, use the actual design and code state rather than relying on a status label alone.
 
-- With `--base <ref>`, verify the ref, use `git diff <ref>...HEAD`, and record `git log <ref>..HEAD --oneline`. Also inspect uncommitted changes and untracked files separately.
-- Without `--base`, review the working tree, including untracked files. If it is clean, ask which fixed point to compare against; do not silently choose a branch or commit.
-- For a single ticket, use the tickets, commit list, and design to exclude unrelated changes. Record anything that could not be separated.
-- Read the complete relevant diff and enough surrounding source to verify behavior. An empty or unresolvable range means an incomplete review, not a pass.
+- **Converged design before implementation:** follow [references/design-review.md](references/design-review.md). Review the chosen shape, evidence, risks, and tickets, then write confirmed improvements back into the existing design materials. Do not create a review report.
+- **Implementation or delivery:** follow [references/implementation-review.md](references/implementation-review.md). Check the implementation against its spec and repository standards, run relevant checks, and save a report in the work item.
 
-## 3. Review three axes
+If the user asks for both, refine the design first, then review the implementation against the revised spec. An ambiguous stage that would materially change the output requires a clarifying question.
 
-Run these as independent read-only sub-agent reviews in parallel when the harness supports it; otherwise perform them sequentially. Give each reviewer the exact range, relevant spec, and source locations. Aggregate and verify their candidates rather than pasting their reports together.
+Neither procedure modifies production code, checks off acceptance criteria, marks implementation work complete, or closes the work item.
 
-### Spec
+## 3. Delegate deliberately
 
-For every acceptance criterion, determine whether it is implemented, partial, missing, or not verifiable here. Report behavior outside the requested scope and requirements that appear implemented but behave incorrectly. Cite the ticket or design passage supporting each finding.
+Use subagents, a workflow, or worker/helper delegation when independent investigation or review axes would benefit from parallel work. Give each worker a bounded assignment, the exact target and source locations, and a requirement to return evidence rather than general impressions. Keep workers read-only.
 
-### Correctness
-
-Trace concrete inputs and states through the changed code. Look for behavioral regressions, boundary and error-handling mistakes, security problems, and missing tests for important behavior. Report a failure scenario, not a vague concern. Run relevant existing checks to confirm or reject candidates.
-
-### Standards and simplicity
-
-Read the repository's documented standards that apply to the change. Cite the rule behind a standards finding; the repository overrides general style preferences. Skip what tooling already enforces.
-
-Also look for code that can be removed without losing required behavior: hand-written standard-library functionality, unnecessary dependencies, unused flexibility, speculative abstractions, and avoidable duplication. State what replaces it, including "nothing" for dead code. Do not treat line count as a quality metric or suggest removing meaningful tests.
-
-## 4. Verify
-
-Run the repository's relevant existing tests and checks against real inputs where practical. Add targeted edge cases when needed, without modifying the implementation. Never claim a check passed without running it. Distinguish observed behavior from code inspection, and human-only acceptance from automated verification.
-
-A failed check is not automatically a defect in this change: establish whether it predates the range before attributing it. Record unrelated failures as limitations.
-
-## 5. Save the report
-
-From this skill directory, allocate the report with:
-
-```bash
-python3 scripts/start_review.py <work-item-or-ticket>
-```
-
-The script resolves a ticket to its work item and creates a new empty report under `reviews/`, numbered monotonically: `01-<scope>.md`, then `02-<scope>-recheck.md`, and so on. It refuses targets outside a `.scratch` work item and never overwrites an existing report.
-
-Fill that new file using [assets/review-template.md](assets/review-template.md). Use the repository's documentation language. Write only this report; never rewrite an earlier review to make history look clean.
-
-The conclusion is one of:
-
-- **Pass** — no confirmed finding requires a change. This does not erase listed unverified scope or residual risk.
-- **Changes needed** — at least one confirmed finding requires a change.
-- **Incomplete** — the spec, code range, or evidence needed for a meaningful review was unavailable.
-
-Order findings by severity. Each finding needs a location, concrete impact or failure scenario, supporting spec or standard where applicable, verification evidence, and the smallest appropriate fix. Do not create tickets, apply fixes, mark acceptance complete, or close the work item unless the user asks afterward.
-
-In the conversation, give the conclusion, material findings, checks actually run, and a link to the saved report.
+The lead reviewer verifies candidate findings, reconciles the results, and performs all permitted edits or writes the single report. Work sequentially when delegation is unavailable or the target is small; do not paste unverified worker reports together.
