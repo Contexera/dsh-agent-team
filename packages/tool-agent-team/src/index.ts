@@ -51,8 +51,14 @@ interface ActivityFactView {
   readonly activity: string
   readonly activityRef: string
   readonly actor: string
-  readonly taskRef: string
+  /** Absent on a Worker run bound to a discussion Thread, which holds no Task. */
+  readonly taskRef?: string
   readonly threadRef: string
+  readonly projectRef?: string
+  readonly workerRef?: string
+  readonly engine?: string
+  readonly state?: string
+  readonly reason?: string
   readonly occurredAt?: string
   readonly claimRef?: string
   readonly claimRefs?: string[]
@@ -114,8 +120,12 @@ function activityFactView(
 ): ActivityFactView {
   return {
     sequence: activity.sequence, kind: 'activity', activity: activity.kind, activityRef: activity.activityRef,
-    actor: activity.actor, taskRef: activity.taskRef, threadRef: activity.threadRef,
+    actor: activity.actor, threadRef: activity.threadRef,
+    ...(activity.taskRef === undefined ? {} : { taskRef: activity.taskRef }),
     ...(occurredAt === undefined ? {} : { occurredAt }),
+    ...('workerRef' in activity ? { workerRef: activity.workerRef, projectRef: activity.projectRef, engine: activity.engine } : {}),
+    ...('state' in activity ? { state: activity.state } : {}),
+    ...('reason' in activity && activity.reason !== undefined ? { reason: activity.reason } : {}),
     ...('claimRef' in activity ? { claimRef: activity.claimRef } : {}),
     ...('claimRefs' in activity ? { claimRefs: [...activity.claimRefs] } : {}),
     ...('completedClaimRefs' in activity && (activity.completedClaimRefs?.length ?? 0) > 0 ? { completedClaimRefs: [...activity.completedClaimRefs!] } : {}),
@@ -210,7 +220,7 @@ function factTimelineLines(facts: readonly FactView[], cards: readonly TaskCardV
 /** The one model-facing schema for a Thread fact, shared by the read result and by the facts a rejected write carries back. */
 const FACT_SCHEMA = {
   type: 'object', additionalProperties: false, properties: {
-    sequence: { type: 'number', required: true }, kind: { type: 'string', required: true }, messageRef: { type: 'string' }, body: { type: 'string' }, bodyOmitted: { type: 'boolean' }, sender: { type: 'string' }, occurredAt: { type: 'string' }, mentions: { type: 'array', items: { type: 'string' } }, replyToMessageRef: { type: 'string' }, replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } }, activity: { type: 'string' }, activityRef: { type: 'string' }, actor: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' }, claimRef: { type: 'string' }, claimRefs: { type: 'array', items: { type: 'string' } }, completedClaimRefs: { type: 'array', items: { type: 'string' } }, acceptedClaimRefs: { type: 'array', items: { type: 'string' } }, releasedClaimRefs: { type: 'array', items: { type: 'string' } }, from: { type: 'string' }, to: { type: 'string' }, refollowedMembers: { type: 'array', items: { type: 'string' } }, unread: { type: 'boolean' }, direct: { type: 'boolean' }, activityOmitted: { type: 'boolean' },
+    sequence: { type: 'number', required: true }, kind: { type: 'string', required: true }, messageRef: { type: 'string' }, body: { type: 'string' }, bodyOmitted: { type: 'boolean' }, sender: { type: 'string' }, occurredAt: { type: 'string' }, mentions: { type: 'array', items: { type: 'string' } }, replyToMessageRef: { type: 'string' }, replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } }, activity: { type: 'string' }, activityRef: { type: 'string' }, actor: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' }, projectRef: { type: 'string' }, workerRef: { type: 'string' }, engine: { type: 'string' }, state: { type: 'string' }, reason: { type: 'string' }, claimRef: { type: 'string' }, claimRefs: { type: 'array', items: { type: 'string' } }, completedClaimRefs: { type: 'array', items: { type: 'string' } }, acceptedClaimRefs: { type: 'array', items: { type: 'string' } }, releasedClaimRefs: { type: 'array', items: { type: 'string' } }, from: { type: 'string' }, to: { type: 'string' }, refollowedMembers: { type: 'array', items: { type: 'string' } }, unread: { type: 'boolean' }, direct: { type: 'boolean' }, activityOmitted: { type: 'boolean' },
   },
 } as const
 
@@ -1675,19 +1685,22 @@ function reminderResult(action: 'create' | 'list' | 'cancel', workspaceId: strin
 }
 
 /**
- * The one delegation entry: a Project-scoped Worker run whose result returns to
- * this Member's own session. It never creates a Thread, a Task, or a Main stream
- * post, and the Worker holds no Team identity of its own.
+ * The one delegation entry. A run bound to a Thread reports into it and wakes
+ * this Member through the Inbox; an unbound Project delegation keeps the direct
+ * result in this session. Neither creates a Task or a Main stream post, and the
+ * Worker holds no Team identity of its own.
  */
 const teamWorker = defineTool({
   name: 'team_worker',
-  description: `Delegate one self-contained piece of work to a local Worker engine (Codex or Claude Code) that runs with its own tools, login, and settings. Use it for work you can hand over completely: investigation, a scoped change in a prepared working directory, or a check that needs another engine. The Worker does not see this conversation, holds no Team identity, and cannot claim, accept, or answer for you, so the task text must carry the goal, the background, the scope, and what evidence to bring back. The call returns as soon as the execution is accepted; keep working and do not poll — its result arrives in this session when it finishes. A Worker affects Project responsibility in no way: if you delegate work on a Task, the Claim stays yours and you still verify the result yourself. Nothing is published to the Project: the result comes back to you alone, and a Human reads it through you. Delegation needs the Team setting "allow Project owners to delegate Workers" and an enabled engine; a refusal names which condition failed.`,
+  description: `Delegate one self-contained piece of work to a local Worker engine (Codex or Claude Code) that runs with its own tools, login, and settings. Use it for work you can hand over completely: investigation, a scoped change in a prepared working directory, or a check that needs another engine. The Worker does not see this conversation, holds no Team identity, and cannot claim, accept, or answer for you, so the task text must carry the goal, the background, the scope, and what evidence to bring back. Name the Thread or Task the work belongs to and everything about the run is published there: the Thread shows when it started and how it ended, and its answer arrives in your Inbox — the other participants never see the raw output. Name only a Project and the result comes back to this session alone, published nowhere. The call returns as soon as the execution is accepted; keep working and do not poll. A Worker affects Project responsibility in no way: if you delegate work on a Task, the Claim stays yours and you still verify the result yourself, and a finished run never accepts a Task. Delegation needs the Team setting "allow Project owners to delegate Workers", your ownership of the Project the target belongs to, and an enabled engine; a refusal names which condition failed.`,
   parameters: {
-    project: { type: 'string', required: true, description: 'The Project whose ownership authorizes this delegation, as a project: ref from team_view.' },
+    threadRef: { type: 'string', description: 'The Thread this work reports into, as a thread: ref. The run\'s start, ending, and Inbox wake all point at it. Its Project authorizes the delegation.' },
+    taskRef: { type: 'string', description: 'The Task this work is for, as a task: ref. It fixes the Thread as well; naming a Thread and a Task together is accepted only when the Task is in that Thread.' },
+    projectRef: { type: 'string', description: 'The Project to delegate into, as a project: ref from team_view. Omit whenever threadRef or taskRef already names it; with none of the three there is no target to authorize.' },
     task: { type: 'string', required: true, description: 'The complete task for the Worker: goal, background it needs, working scope, and the evidence to return. It cannot ask you follow-up questions.' },
     engine: { type: 'string', enum: ['codex', 'claude'], description: 'Engine to run. Omit for the Project default the Host settings name.' },
     cwd: { type: 'string', description: 'Absolute working directory the Worker runs in. Omit to use this session\'s own directory.' },
-    requestId: { type: 'string', description: 'Optional idempotency key: resending the same value returns the execution the first call started instead of starting another.' },
+    requestId: { type: 'string', description: 'Optional idempotency key: resending the same value returns the execution the first call started instead of starting another, even when both calls arrive at once. A resend from another Member, or one that changes the task, engine, or target, is refused rather than answered with a run it did not ask for.' },
     workspace: workspaceParam,
   },
   output: {
@@ -1695,15 +1708,19 @@ const teamWorker = defineTool({
       workerRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
       engine: { type: 'string', required: true }, state: { type: 'string', required: true },
       cwd: { type: 'string', required: true }, startedAt: { type: 'string', required: true },
+      threadRef: { type: 'string' },
     } },
     render: (_args, value) => [{
       type: 'text',
       text: [
         `Worker ${value.workerRef} · ${value.engine} · ${value.state}`,
         `Project: ${value.projectRef}`,
+        ...(value.threadRef === undefined ? [] : [`Thread: ${value.threadRef} — the run's start, ending, and answer report there`]),
         `Working directory: ${value.cwd}`,
         `Started at: ${formatTeamTimestamp(value.startedAt)}`,
-        'The execution runs in the background and reports back to this session when it ends. Keep working; there is nothing to poll.',
+        value.threadRef === undefined
+          ? 'The execution runs in the background and reports back to this session when it ends. Keep working; there is nothing to poll.'
+          : 'The execution runs in the background. Its ending appears in that Thread and its answer reaches your Inbox; keep working, there is nothing to poll.',
       ].join('\n'),
     }],
   },
@@ -1712,16 +1729,20 @@ const teamWorker = defineTool({
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_worker requires an Agent session')
     const host = service(agent)
-    const run = await host.workerStartForAgent(agent, {
+    const request = {
       requestId: (args.requestId ?? requestId(agent.id, exec.callId)) as Parameters<typeof host.workerStartForAgent>[1]['requestId'],
-      projectRef: projectRefOf(args.project) as Parameters<typeof host.workerStartForAgent>[1]['projectRef'],
       task: args.task,
+      ...(args.projectRef === undefined ? {} : { projectRef: projectRefOf(args.projectRef) as Parameters<typeof host.workerStartForAgent>[1]['projectRef'] }),
+      ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as NonNullable<Parameters<typeof host.workerStartForAgent>[1]['threadRef']> }),
+      ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as NonNullable<Parameters<typeof host.workerStartForAgent>[1]['taskRef']> }),
       ...(args.engine === undefined ? {} : { engine: args.engine as 'codex' | 'claude' }),
       ...(args.cwd === undefined ? {} : { cwd: args.cwd }),
-    })
+    }
+    const run = await host.workerStartForAgent(agent, request)
     return {
       workerRef: run.workerRef, projectRef: run.projectRef, engine: run.engine,
       state: run.state, cwd: run.cwd, startedAt: run.startedAt,
+      ...(run.threadRef === undefined ? {} : { threadRef: run.threadRef }),
     }
   },
 })

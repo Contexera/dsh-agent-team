@@ -4,6 +4,7 @@ import { AGENT_TEAM_HUMAN_HANDLE } from '@contexera/dsh-agent-team/host'
 import { MENTION_BODY_FIXTURE } from '../../agent-team/tests/fixtures/mention-bodies.ts'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
+import type { AgentTeamWorkerStateView } from '@contexera/dsh-agent-team/types'
 import { bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatInboxTime, formatMessageTime, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, identityInitial, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, plainGist, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
@@ -99,6 +100,35 @@ describe('Team presentation formatters', () => {
     const moved = formatActivity(activity({ kind: 'transfer', from: HUMAN_MEMBER_ID, to: HUMAN_MEMBER_ID }),
       { t, actorName: memberId => (memberId === HUMAN_MEMBER_ID ? 'human' : 'builder'), claims: [claim] })
     expect(moved).toBe('builder 把负责人从 human 转交给 human')
+  })
+
+  it('states a Worker run in one row each, taking the started row\u2019s word from the derived table', () => {
+    const render = (value: Record<string, unknown>, states?: readonly AgentTeamWorkerStateView[]): string => formatActivity(
+      activity(value),
+      { t, actorName: () => 'builder', claims: [], ...(states === undefined ? {} : { workerStates: new Map(states.map(view => [view.workerRef, view])) }) },
+    )
+    const started = { kind: 'worker_started', projectRef: 'project:1', workerRef: 'worker:1', engine: 'codex' }
+    const settled = { kind: 'worker_settled', projectRef: 'project:1', workerRef: 'worker:1', engine: 'codex' }
+    const view = (state: AgentTeamWorkerStateView['state'], unconfirmed = false): AgentTeamWorkerStateView =>
+      ({ workerRef: 'worker:1' as AgentTeamWorkerStateView['workerRef'], state, unconfirmed })
+    // The fact itself never carries a state word: with no table entry the row says only that it began.
+    expect(render(started)).toBe('builder 派出了 Codex Worker')
+    expect(render(started, [view('running')])).toBe('builder 派出了 Codex Worker（运行中）')
+    expect(render(started, [view('running', true)])).toBe('builder 派出了 Codex Worker（结果未确认）')
+    // The table is a run's whole durable state, so a settled fact sitting outside this window still
+    // reads as settled instead of falling back to "unconfirmed".
+    expect(render(started, [view('completed')])).toBe('builder 派出了 Codex Worker')
+    expect(render(started, [view('failed')])).toBe('builder 派出了 Codex Worker')
+    // A neighbouring run's entry never answers for this one.
+    expect(render(started, [{ workerRef: 'worker:2' as AgentTeamWorkerStateView['workerRef'], state: 'running', unconfirmed: true }]))
+      .toBe('builder 派出了 Codex Worker')
+    expect(render({ ...settled, state: 'completed' })).toBe('builder 的 Codex Worker 完成')
+    expect(render({ ...settled, state: 'failed' })).toBe('builder 的 Codex Worker 失败')
+    expect(render({ ...settled, state: 'failed', reason: 'codex 不在 PATH 里' })).toBe('builder 的 Codex Worker 失败：codex 不在 PATH 里')
+    expect(render({ ...settled, state: 'stopped' })).toBe('builder 的 Codex Worker 已停止')
+    expect(render({ ...settled, state: 'stopped', reason: 'Host 卸载' })).toBe('builder 的 Codex Worker 已停止：Host 卸载')
+    // One engine spelling for both faces: the activity row reads the same copy the settings page does.
+    expect(render({ ...settled, engine: 'claude', state: 'completed' })).toBe('builder 的 Claude Worker 完成')
   })
 
   it('renders message time as clock time today, date+time within the year, full date otherwise', () => {

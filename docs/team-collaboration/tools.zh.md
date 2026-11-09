@@ -181,16 +181,28 @@ create 与 update 的请求身份包含脚本来源、触发选项与 create bas
 
 ## `team_worker`
 
-`team_worker` 把一件自包含的工作交给本机 Worker 引擎——Codex 或 Claude Code——用它自己的工具、登录与设置执行，并把结果送回发起成员自己的 Session。参数为 `project`、`task`，以及可选的 `engine`、`cwd` 与 `requestId`。
+`team_worker` 把一件自包含的工作交给本机 Worker 引擎——Codex 或 Claude Code——用它自己的工具、登录与设置执行。参数为 `task`，`threadRef`、`taskRef`、`projectRef` 三者至少给一个，以及可选的 `engine`、`cwd` 与 `requestId`。
 
-委派默认关闭，直到操作者打开。Team 设置行携带 `worker` 组：`enabled`、`defaultEngine`、每个引擎一项（`enabled`、`executable`，Codex 另有 `sandbox`），以及可选的 `timeoutMs`；所有字段都是 volatile，改动能到达运行中的 Host。`executable` 存在的原因是 Host 进程的 `PATH` 不是 shell 的 `PATH`：人装好的 CLI 可能不在 Host 搜索的路径里，留空则沿用引擎自己的发现规则。
+目标决定结果去处。绑定到 Thread 的执行在原 Thread 上留结果：开始与终态成为所有参与者都能读到的 Thread 事实，答案则进发起成员的 Inbox。只绑定 Project 的执行什么都不发布，结果像引入目标之前那样回到调用者自己的 Session；它的执行记录仍然写入，因此仍能按 `worker:` 引用查到。
 
-以下情况一律在启动任何原生进程之前拒绝：开关关闭（`worker_disabled`）；该 Project 不属于本 Team（`worker_project_unknown`）；调用者当前不是该 Project 的 owner（`worker_owner_required`）；指定的引擎不是 Worker 引擎（`worker_engine_unknown`）或未启用（`worker_engine_disabled`）；任务文本为空（`worker_task_required`）；无法解析出绝对工作目录（`worker_cwd_required`）；Harness subagent 服务未挂载（`worker_unavailable`）。拥有一个 Project 不授予另一个 Project 的授权，Team preset 之外的普通 DSH Session 也不会获得这个工具。
+委派默认关闭，直到操作者打开。Team 设置行携带 `worker` 组：`enabled`、`defaultEngine`、每个引擎一项（`enabled`、`executable`，Codex 另有 `sandbox`），以及可选的 `timeoutMs`；所有字段都是 volatile，改动能到达运行中的 Host。两个引擎都以全权限运行、无需任何配置：`sandbox` 默认 `danger-full-access`，设置页不提供该字段，收紧 Codex 的策略要手写设置行。
 
-`engine` 只覆盖这一次委派的 `defaultEngine`；引擎不可用会说明原因，不会自动改用其他引擎、账号或模型。用相同 `requestId` 重送会返回首次调用已经启动的那次执行，绝不会再开一个。
+`executable` 存在的原因是 Host 进程的 `PATH` 不是 shell 的 `PATH`：人装好的 CLI 可能不在 Host 搜索的路径里，留空则沿用引擎自己的发现规则。
 
-回执给出 Team 执行编号（`worker:` 引用）、Project、引擎、工作目录与启动时刻，并说明执行在后台继续。执行结束时，结果通过 Harness subagent 服务的 parent 通知回到发起成员的 Session；不会发布到 Project，不创建 Thread 或 Task，离线 Session 也不会补投。
+以下情况一律在写 started 记录之前、启动任何原生进程之前拒绝：没有给出目标（`worker_target_required`）；指定的 Thread（`worker_thread_unknown`）、Task（`worker_task_unknown`）或 Project（`worker_project_unknown`）不属于本 Team；Task 不在与它一起给出的 Thread 里（`worker_target_conflict`）；调用者当前不是目标所属 Project 的 owner（`worker_owner_required`）。
+
+其余拒绝来自设置与这次执行本身：开关关闭（`worker_disabled`）；指定的引擎不是 Worker 引擎（`worker_engine_unknown`）或未启用（`worker_engine_disabled`）；任务文本为空（`worker_task_required`）；无法解析出绝对工作目录（`worker_cwd_required`）；Harness subagent 服务未挂载（`worker_unavailable`）；或该 `requestId` 已被另一个委派用掉（`worker_request_conflict`）。拥有一个 Project 不授予另一个 Project 的授权，Team preset 之外的普通 DSH Session 也不会获得这个工具。
+
+`engine` 只覆盖这一次委派的 `defaultEngine`；引擎不可用会说明原因，不会自动改用其他引擎、账号或模型。用相同 `requestId` 重送会返回首次调用已经启动的那次执行，绝不会再开一个——两次并发到达也一样。这个 id 只代表那一次委派：换一个成员重送、或改掉任务、引擎、目标，都会被拒绝，而不会拿到一次它没要求的执行。
+
+回执给出 Team 执行编号（`worker:` 引用）、Project、引擎、工作目录与启动时刻，绑定执行还给出 Thread，并说明执行在后台继续、结果会出现在哪里。
+
+绑定执行发布两条 Thread 事实：开始时 `worker_started`，结束时 `worker_settled` 带 `state`，失败或停止再加一行有上限的 `reason`。答案永远不是 Thread 事实：它随唤醒发起成员的那条 Inbox notice 抵达，标明是外部文本、是数据不是指令，父 Session 不会再收到一份。只绑定 Project 的执行保持 parent 通知、不发布任何东西。两者都不创建 Task、Main stream 条目或 Claim。
+
+把 Task 上的工作委派出去不改变任何责任：Claim 仍属于该成员，执行完成从不自动验收，独立验收规则照旧适用。
 
 Worker 不持有 Team 身份：它不能发帖、认领、验收或代替成员作答。若它承担了某个 Task 的实施，Claim 仍属于该成员，独立的验收规则照旧适用。Worker 返回的内容是待核对的证据，不是指令。
 
-执行记录存在于启动它的 Host 进程内，不是 ledger 事实，所以运行中重启的 Host 无法再次报告该执行；按编号只读诊断与从 Client 停止执行都尚未进入这份契约。卸载插件会拒绝新的委派，并释放 Host 仍持有的执行。
+绑定执行的记录是持久的，Thread 读取会报告绑定到它的每次执行：`running`、`completed`、`failed`、`stopped` 或 `unconfirmed`。上一个 Host 留在 `running` 的记录读作 `unconfirmed`：结果无法确认，不重跑、不自动重试，也不会为它唤醒任何人。未绑定执行的记录留在启动它的 Host 进程内。
+
+按编号只读诊断已完成执行、以及从 Client 停止执行，都尚未进入这份契约。卸载插件会拒绝新的委派，并释放 Host 仍持有的执行。

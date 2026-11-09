@@ -4,7 +4,7 @@ import { afterEach, expect, vi } from 'vitest'
 import { fireEvent, type RenderResult } from '@testing-library/react'
 import { useState } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import type { AgentTeamAddMemberRequest, AgentTeamCreateProjectRequest, AgentTeamMemberDiagnostic, AgentTeamReplyRequest, AgentTeamSubscriptionListEntry, AgentTeamSubscriptionLogEntry, AgentTeamTask } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamAddMemberRequest, AgentTeamCreateProjectRequest, AgentTeamMemberDiagnostic, AgentTeamReplyRequest, AgentTeamSubscriptionListEntry, AgentTeamSubscriptionLogEntry, AgentTeamTask, AgentTeamWorkerStateView } from '@contexera/dsh-agent-team/types'
 import { COMMON_NS, LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { en as commonEn, zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/index.ts'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -108,7 +108,7 @@ interface SeededMessage {
   readonly mentions?: readonly string[]
 }
 
-export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialProjects?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskless?: boolean; seedsAsMainMessages?: boolean; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; mainStreamEntries?: readonly MainStreamSeedEntry[]; mainStreamUnread?: number; environment?: EnvironmentSeed; environmentFailure?: string; subscriptions?: readonly AgentTeamSubscriptionListEntry[]; subscriptionFailure?: string; subscriptionRuns?: Readonly<Record<string, readonly AgentTeamSubscriptionLogEntry[]>>; subscriptionDraftFailure?: string }) {
+export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialProjects?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskless?: boolean; seedsAsMainMessages?: boolean; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; mainStreamEntries?: readonly MainStreamSeedEntry[]; mainStreamUnread?: number; environment?: EnvironmentSeed; environmentFailure?: string; subscriptions?: readonly AgentTeamSubscriptionListEntry[]; subscriptionFailure?: string; subscriptionRuns?: Readonly<Record<string, readonly AgentTeamSubscriptionLogEntry[]>>; subscriptionDraftFailure?: string; seededWorkerActivities?: readonly Record<string, unknown>[]; seededWorkerStates?: readonly AgentTeamWorkerStateView[] }) {
   if (options?.mode !== undefined) {
     localStorage.setItem('dsh.agent-team.navigation', JSON.stringify({ mode: options.mode, ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }) }))
   }
@@ -271,7 +271,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     lastActivityAt: seed.occurredAt,
   }))
   let viewClaims: Array<Record<string, unknown>> = []
-  let viewActivities: Array<Record<string, unknown>> = []
+  let viewActivities: Array<Record<string, unknown>> = [...(options?.seededWorkerActivities ?? [])]
   const viewProjects = vi.fn(async (request: { threadRef?: string; topLevelOnly?: boolean }) => ({ ok: true, value: {
     humanMemberId: 'member:human', projects, members: memberships, owners, rulesVersion: 2,
     tasks: viewItems.flatMap(item => item.task === undefined ? [] : [item.task]), threads: viewItems.length === 0 ? [] : [viewItems[0]!.thread],
@@ -560,6 +560,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
       receipt: {}, task: top.task, thread: top.thread, claims: viewClaims,
       anchor: top.message, anchorMentions: [], facts: [...viewItems.map(item => ({ fact: { kind: 'message' as const, sequence: (item.message as { sequence: number }).sequence, message: item.message, mentions: (item as { mentions?: string[] }).mentions ?? [] }, unread: false, direct: false })), ...viewActivities.map(activity => ({ fact: { kind: 'activity' as const, sequence: activity.sequence as number, activity }, unread: false, direct: false }))],
       readThroughSequence: (top.thread as { revision: number }).revision, remainingUnreadCount, consumedDirectMarkers: [], reminders: [],
+      ...(options?.seededWorkerStates === undefined ? {} : { workerStates: options.seededWorkerStates }),
     } }
   })
   const loadThreadHistory = vi.fn(async ({ taskRef, threadRef }: { taskRef?: string; threadRef?: string }) => {
@@ -567,7 +568,8 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
       || (taskRef !== undefined && (item.task as { taskRef?: string } | undefined)?.taskRef === taskRef)) ?? viewItems[0]
     if (threadHistoryFailure !== undefined) return { ok: false as const, error: { message: threadHistoryFailure } }
     if (top === undefined) return { ok: false as const, error: { message: 'thread missing' } }
-    return { ok: true as const, value: { task: top.task, thread: top.thread, anchor: top.message, anchorMentions: [], claims: viewClaims, facts: [], cursor: 0, hasMore: false } }
+    return { ok: true as const, value: { task: top.task, thread: top.thread, anchor: top.message, anchorMentions: [], claims: viewClaims, facts: [], cursor: 0, hasMore: false,
+      ...(options?.seededWorkerStates === undefined ? {} : { workerStates: options.seededWorkerStates }) } }
   })
   /** Sticky history-read failure: every read fails with this message until a spec clears it by passing undefined. */
   let threadHistoryFailure: string | undefined

@@ -7,6 +7,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { withCodexSandbox } from '../src/worker-runtime.ts'
+import { workerEnvironment, workerRunSpec } from '../src/worker-service.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA, type Config } from '../src/host-row-settings.ts'
 
 const row = (input: unknown): Config => TEAM_HOST_ROW_SETTINGS_SCHEMA(input as never) as unknown as Config
@@ -34,12 +35,24 @@ describe('the Codex sandbox policy a Worker carries', () => {
     expect(process.env[KEY]).toBeUndefined()
   })
 
-  it('resolves a stored row that never named the Codex policy to the bundle default', () => {
-    // A hand-written row reaches the settings form without running the Client's defaults.
+  it('resolves a stored row that never named the Codex policy to full access', () => {
+    // A Worker runs work the operator already delegated: the bundle adds no second
+    // permission gate, and narrowing one is the operator's explicit opt-in.
     const worker = row({ worker: { enabled: true, engines: { codex: { enabled: true } } } }).worker.get()
-    expect(worker.engines.codex.sandbox).toBe('workspace-write')
+    expect(worker.engines.codex.sandbox).toBe('danger-full-access')
     // Claude has no policy of its own, so an empty value stays the honest one.
     expect(worker.engines.claude.sandbox).toBe('')
+  })
+
+  it('gives both engines full permissions without a field to fill in', () => {
+    const worker = row({ worker: { enabled: true, engines: { codex: { enabled: true }, claude: { enabled: true } } } }).worker.get()
+    // Codex carries the default policy to OAR under OAR's own name.
+    expect(workerEnvironment('codex', worker.engines.codex)).toEqual({ OAR_CODEX_SANDBOX: 'danger-full-access' })
+    // Claude carries no permission flag at all: OAR adds --dangerously-skip-permissions itself.
+    expect(workerEnvironment('claude', worker.engines.claude)).toEqual({})
+    const claude = workerRunSpec('claude', worker, () => {})
+    expect(claude.launchArgs).toEqual([])
+    expect(JSON.stringify(claude)).not.toContain('permission-mode')
   })
 
   it('touches nothing when the engine is not Codex, or names no policy', async () => {

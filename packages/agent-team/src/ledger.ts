@@ -199,8 +199,24 @@ import type {
   AgentTeamSubscriptionRef,
   AgentTeamSubscriptionRequestIntent,
   AgentTeamSubscriptionScriptSource,
+  AgentTeamDelegationTarget,
   AgentTeamUpdateMemberRequest,
   AgentTeamView,
+  AgentTeamWorkerAnswer,
+  AgentTeamWorkerExecution,
+  AgentTeamWorkerRef,
+  AgentTeamWorkerSettledActivity,
+  AgentTeamWorkerSettledOperation,
+  AgentTeamWorkerSettledRecorded,
+  AgentTeamWorkerSettleWrite,
+  AgentTeamWorkerStartedActivity,
+  AgentTeamWorkerStartedOperation,
+  AgentTeamWorkerStartedRecorded,
+  AgentTeamWorkerStartRecord,
+  AgentTeamWorkerStartWrite,
+  AgentTeamWorkerState,
+  AgentTeamWorkerStateView,
+  AgentTeamWorkerSettlement,
   AgentTeamViewRequest,
 } from './types.ts'
 import { formatTeamTimestamp } from './time-format.ts'
@@ -222,6 +238,7 @@ import {
   type SubscriptionTriggers,
 } from './subscriptions.ts'
 import { mintWebhookToken, sameWebhookTokenHash, webhookTokenHash, type SubscriptionWebhookArm } from './subscription-webhook.ts'
+import { WORKER_REASON_MAX_CHARACTERS } from './worker-settings.ts'
 import { MAX_ACTIVE_REMINDERS_PER_MEMBER, MAX_REMINDER_NOTE_CHARACTERS, nextOccurrenceAt, nextReminderWakeAt, parseReminderNote, parseReminderSchedule, planMemberReminders, reminderRefIsStorable, reminderScheduleIsSound, sameReminderIntent } from './member-reminders.ts'
 import type { MemberReminderCandidate, MemberReminderPlanEntry } from './member-reminders.ts'
 import type { AgentTeamBodyMentionCandidate } from './mentions.ts'
@@ -261,8 +278,30 @@ export const TASK_BOARD_FINISHED_PER_PROJECT = 5
  * member, a Task's own accountable may verify it, and losing an owner grant returns responsibility only when
  * that grant was the Member's last Project participation. Version 4 lets a closed Task's Thread be followed:
  * closing ends every Attention row, so refusing the follow left a finished Task with no follower to hand it to.
+ * Version 5 addresses published subscription events to the members a subscription names. Version 6 adds the two
+ * delegated-Worker records: a build that implements them declares it, so an older build refuses such a ledger by name
+ * instead of failing on an unknown operation kind mid-replay.
  */
-export const AGENT_TEAM_RULES_VERSION = 5
+export const AGENT_TEAM_RULES_VERSION = 6
+
+/**
+ * The bounded, single-line reason a finished run gives its Thread. It is derived
+ * from the provider's own safe diagnostic — the Harness declares that text free of
+ * tool inputs, file contents, environment values and credentials, which is what
+ * makes it publishable — never from the private record's other fields. A run that
+ * ends without saying anything still owes the Thread a sentence, and the answer it
+ * produced is never part of this: the reason is public, the answer is not.
+ */
+function workerRunReasonOf(settlement: AgentTeamWorkerSettlement): string | undefined {
+  if (settlement.state === 'completed') return undefined
+  const said = settlement.diagnostic?.replaceAll(/\s+/gu, ' ').trim() ?? ''
+  const fallback = settlement.state === 'stopped'
+    ? 'The run was stopped before it reported a result.'
+    : 'The Worker ended with an unreported failure.'
+  const text = said === '' ? fallback : said
+  return characterLength(text) <= WORKER_REASON_MAX_CHARACTERS
+    ? text : `${truncateToCharacters(text, WORKER_REASON_MAX_CHARACTERS - 1)}…`
+}
 
 function freezeActor(actor: AgentTeamActor): AgentTeamActor {
   if (actor.kind === 'host') return Object.freeze({ kind: 'host', handle: actor.handle })
@@ -699,12 +738,17 @@ interface Projection {
    * not in here never existed.
    */
   readonly subscriptionScriptHistory: Map<AgentTeamSubscriptionRef, Map<number, string>>
+  /** Delegated Worker runs by ref: the private execution records, materialized from their two durable writes. */
+  readonly workerExecutions: Map<AgentTeamWorkerRef, AgentTeamWorkerExecution>
 }
 
 /** Kinds a rules-version-1 segment rejects (owner operations carry their own check), and the one kind version 2 stops writing. */
 const V2_ONLY_KINDS: readonly string[] = ['team/main-message-posted', 'team/main-stream-read', 'team/thread-started', 'team/task-accountable-changed', 'team/reminder-raised',
   'team/member-reminder-created', 'team/member-reminder-raised', 'team/member-reminder-consumed', 'team/member-reminder-cancelled']
 const REPLACED_AT_V2_KINDS: readonly string[] = ['team/message-sent']
+
+/** Kinds only a rules-version-6 segment may carry: a build that never adopted version 6 cannot write them. */
+const V6_ONLY_KINDS: readonly string[] = ['team/worker-started', 'team/worker-settled']
 
 /** One entry of a reader's unread Main stream: why it is unread (ordinary owner unread, a marker, or both). */
 interface MainUnreadItem {
@@ -775,7 +819,7 @@ function emptyProjection(): Projection {
     directMarkersByMember: new Map(), activityMarkersByMember: new Map(), reminderMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map(),
     mainSourcesByProject: new Map(), mainSourceByRef: new Map(), mainMarkers: new Map(), mainMarkersByMember: new Map(), mainAttention: new Map(), humanMainWatermarks: new Map(),
     subscriptions: new Map(), subscriptionsByProject: new Map(), subscriptionBaselines: new Map(), subscriptionEvents: new Map(), acceptedEventsBySequence: new Map(),
-    subscriptionScriptHistory: new Map() }
+    subscriptionScriptHistory: new Map(), workerExecutions: new Map() }
 }
 
 /** Exhaustiveness guard for the closed operation union: adding a kind must update every dispatch. */
@@ -1047,6 +1091,225 @@ export class AgentTeamLedger {
     })
   }
 
+
+  // ── Delegated Worker runs ─────────────────────────────────────────────────
+
+  /**
+   * Record one delegated Worker run as started, before any native process exists.
+   * This write is the run's whole binding: nothing later recomputes which Thread
+   * its result belongs to. The record is private; only a bound target has a fact.
+   */
+  recordWorkerStarted(request: AgentTeamWorkerStartWrite): Promise<AgentTeamLedgerResult<AgentTeamWorkerStartedRecorded>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameWorkerStart(existing, request)
+        return this.resolved(this.workerStartedRecorded(existing))
+      }
+      const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
+      if (actor.kind !== 'member') throw new Error('a delegated Worker run belongs to a Member')
+      const project = this.requireActiveProject(request.workspaceId, request.execution.projectRef)
+      if (!this.isProjectOwnerFrom(this.state, project.projectRef, actor.memberId)) {
+        throw new Error(`only a current owner of ${project.projectRef} may delegate a Worker`)
+      }
+      if (request.execution.initiatedBy !== actor.memberId) throw new Error('a delegated Worker run belongs to the Member that recorded it')
+      if (this.state.workerExecutions.has(request.execution.workerRef)) {
+        throw new Error(`Worker '${request.execution.workerRef}' is already recorded`)
+      }
+      this.assertWorkerBindingFrom(this.state, project.projectRef, request.execution)
+      const base = this.operationBase({ requestId: request.requestId, actor }, this.nextSequence())
+      const execution: AgentTeamWorkerStartRecord = Object.freeze({ ...request.execution, startedAt: base.occurredAt })
+      const activity = this.workerStartedActivityFor(execution, base.sequence)
+      const operation: AgentTeamWorkerStartedOperation = Object.freeze({
+        ...base, kind: 'team/worker-started',
+        data: Object.freeze({ workspaceId: project.workspaceId, execution,
+          ...(activity === undefined ? {} : { activity }) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.workerStartedRecorded(operation))
+    })
+  }
+
+  /**
+   * Record the one terminal fact of a delegated Worker run: at most once, with a
+   * marker naming the fact it wrote in the same operation. A Project-only run
+   * projects nothing public.
+   */
+  recordWorkerSettled(request: AgentTeamWorkerSettleWrite): Promise<AgentTeamLedgerResult<AgentTeamWorkerSettledRecorded>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameWorkerSettle(existing, request)
+        return this.resolved(this.workerSettledRecorded(existing))
+      }
+      const prior = this.state.workerExecutions.get(request.settlement.workerRef)
+      if (prior === undefined) throw new Error(`Worker '${request.settlement.workerRef}' was never recorded by this Team`)
+      if (prior.state !== 'running') throw new Error(`Worker '${prior.workerRef}' already ended: ${prior.state}`)
+      // The Workspace is the one the run's own Project holds, never a caller's
+      // restatement: the binding written at start already fixed it.
+      const project = this.state.projects.get(prior.projectRef)
+      if (project === undefined) throw new Error(`Worker '${prior.workerRef}' belongs to no Project this Team holds`)
+      const base = this.operationBase({ requestId: request.requestId, actor: HOST_ACTOR }, this.nextSequence())
+      const execution: AgentTeamWorkerSettlement = Object.freeze({ ...request.settlement, settledAt: base.occurredAt })
+      const activity = this.workerSettledActivityFor(prior, execution, base.sequence)
+      // A departed initiator keeps the Thread fact but gets no wake: their Inbox
+      // can no longer reach a Project they left.
+      const marker = activity === undefined || !this.isProjectMemberFrom(this.state, prior.projectRef, prior.initiatedBy)
+        ? undefined
+        : Object.freeze({ memberId: prior.initiatedBy, threadRef: activity.threadRef, activityRef: activity.activityRef, sequence: base.sequence })
+      const operation: AgentTeamWorkerSettledOperation = Object.freeze({
+        ...base, kind: 'team/worker-settled',
+        data: Object.freeze({ workspaceId: project.workspaceId, execution,
+          ...(activity === undefined ? {} : { activity }),
+          inbox: this.inboxDelta([], [], [], [], marker === undefined ? [] : [marker], []) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.workerSettledRecorded(operation))
+    })
+  }
+
+  /** Whether this Host recorded the run and has not recorded its ending. */
+  workerRunState(workerRef: AgentTeamWorkerRef): AgentTeamWorkerState | undefined {
+    return this.state.workerExecutions.get(workerRef)?.state
+  }
+
+  /**
+   * Every Worker run bound to one Thread with the durable state each ended in.
+   * It reads the execution records, not the facts: a read answers for a window of
+   * a long Thread, and a run whose facts fall outside it still stands as recorded.
+   * `running` here means a start with no ending, which is what a restart finds.
+   */
+  threadWorkerStates(threadRef: AgentTeamThreadRef): readonly Pick<AgentTeamWorkerStateView, 'state' | 'workerRef'>[] {
+    const states: Pick<AgentTeamWorkerStateView, 'state' | 'workerRef'>[] = []
+    for (const execution of this.state.workerExecutions.values()) {
+      if (execution.threadRef !== threadRef) continue
+      states.push(Object.freeze({ workerRef: execution.workerRef, state: execution.state }))
+    }
+    return Object.freeze(states)
+  }
+
+  /**
+   * What a delegation target names, for the Host to bind and authorize before it
+   * writes or starts anything. Existence only: the start write re-derives the
+   * binding, so a target that changed in between is refused, not misrecorded.
+   */
+  delegationTarget(request: {
+    readonly projectRef?: AgentTeamProjectRef | undefined
+    readonly threadRef?: AgentTeamThreadRef | undefined
+    readonly taskRef?: AgentTeamTaskRef | undefined
+  }): AgentTeamDelegationTarget {
+    const { projectRef, threadRef, taskRef } = request
+    // An archived Project takes no new work, so its Threads and Tasks name no
+    // delegation target either.
+    const liveProject = (ref: AgentTeamProjectRef): AgentTeamProject | undefined => {
+      const project = this.state.projects.get(ref)
+      return project === undefined || project.state === 'archived' ? undefined : project
+    }
+    const projectOfThread = (ref: AgentTeamThreadRef): AgentTeamProject | undefined => {
+      const projectRefOfThread = this.projectRefForThreadFrom(this.state, ref)
+      return projectRefOfThread === undefined ? undefined : liveProject(projectRefOfThread)
+    }
+    /** The Thread a Task names, or nothing when the Task is not this Team's. */
+    const threadOfTask = (ref: AgentTeamTaskRef): AgentTeamThread | undefined => {
+      const task = this.state.tasks.get(ref)
+      return task === undefined ? undefined : this.state.threads.get(task.threadRef)
+    }
+    if (taskRef !== undefined) {
+      const thread = threadOfTask(taskRef)
+      const project = thread === undefined ? undefined : projectOfThread(thread.threadRef)
+      if (thread === undefined || project === undefined) return Object.freeze({ kind: 'task-unknown' as const, taskRef })
+      if (threadRef !== undefined && threadRef !== thread.threadRef) {
+        return Object.freeze({ kind: 'target-conflict' as const, taskRef, threadRef })
+      }
+      return Object.freeze({ kind: 'thread' as const, workspaceId: project.workspaceId, projectRef: project.projectRef,
+        threadRef: thread.threadRef, taskRef })
+    }
+    if (threadRef !== undefined) {
+      const thread = this.state.threads.get(threadRef)
+      const project = projectOfThread(threadRef)
+      if (thread === undefined || project === undefined) return Object.freeze({ kind: 'thread-unknown' as const, threadRef })
+      return Object.freeze({ kind: 'thread' as const, workspaceId: project.workspaceId, projectRef: project.projectRef,
+        threadRef, ...(thread.taskRef === undefined ? {} : { taskRef: thread.taskRef }) })
+    }
+    if (projectRef === undefined) return Object.freeze({ kind: 'target-required' as const })
+    const project = liveProject(projectRef)
+    if (project === undefined) return Object.freeze({ kind: 'project-unknown' as const, projectRef })
+    return Object.freeze({ kind: 'project' as const, workspaceId: project.workspaceId, projectRef: project.projectRef })
+  }
+
+  /**
+   * What one Worker run handed back, for the Member who delegated it or the Human:
+   * the only reader of a record's private half, which never projects into a Thread.
+   */
+  workerAnswerFor(memberId: AgentTeamMemberId, workerRef: AgentTeamWorkerRef): AgentTeamWorkerAnswer | undefined {
+    const execution = this.state.workerExecutions.get(workerRef)
+    if (execution === undefined || (execution.initiatedBy !== memberId && memberId !== AGENT_TEAM_HUMAN_MEMBER_ID)) return undefined
+    return Object.freeze({ workerRef, ...(execution.output === undefined ? {} : { output: execution.output }),
+      ...(execution.diagnostic === undefined ? {} : { diagnostic: execution.diagnostic }) })
+  }
+
+  /** The public fact a run's start contributes to its Thread, or nothing on a Project-only run. */
+  private workerStartedActivityFor(execution: AgentTeamWorkerStartRecord, sequence: number): AgentTeamWorkerStartedActivity | undefined {
+    if (execution.threadRef === undefined) return undefined
+    return Object.freeze({ activityRef: this.ref('activity'), threadRef: execution.threadRef, actor: execution.initiatedBy, sequence,
+      kind: 'worker_started', projectRef: execution.projectRef, workerRef: execution.workerRef, engine: execution.engine,
+      ...(execution.taskRef === undefined ? {} : { taskRef: execution.taskRef }) })
+  }
+
+  /** The public fact a run's ending contributes to its Thread; the reason is what a participant needs and the answer never is. */
+  private workerSettledActivityFor(prior: AgentTeamWorkerExecution, settlement: AgentTeamWorkerSettlement, sequence: number): AgentTeamWorkerSettledActivity | undefined {
+    if (prior.threadRef === undefined) return undefined
+    const reason = workerRunReasonOf(settlement)
+    return Object.freeze({ activityRef: this.ref('activity'), threadRef: prior.threadRef, actor: prior.initiatedBy, sequence,
+      kind: 'worker_settled', projectRef: prior.projectRef, workerRef: prior.workerRef, engine: prior.engine,
+      ...(prior.taskRef === undefined ? {} : { taskRef: prior.taskRef }),
+      state: settlement.state, ...(reason === undefined ? {} : { reason }) })
+  }
+
+  /** A run's target exists, belongs to the Project it names, and its Thread and Task agree about each other. */
+  private assertWorkerBindingFrom(projection: Projection, projectRef: AgentTeamProjectRef,
+    binding: Pick<AgentTeamWorkerStartRecord, 'threadRef' | 'taskRef'>): void {
+    if (binding.threadRef === undefined) {
+      if (binding.taskRef !== undefined) throw new Error("a Worker run bound to a Task is bound to that Task's Thread")
+      return
+    }
+    const thread = projection.threads.get(binding.threadRef)
+    if (thread === undefined || this.projectRefForThreadFrom(projection, binding.threadRef) !== projectRef) {
+      throw new Error(`Thread '${binding.threadRef}' is not in Project '${projectRef}'`)
+    }
+    if (thread.taskRef !== binding.taskRef) {
+      throw new Error(`Task '${binding.taskRef ?? 'none'}' does not belong to Thread '${binding.threadRef}'`)
+    }
+  }
+
+  private workerStartedRecorded(operation: AgentTeamOperation): AgentTeamWorkerStartedRecorded {
+    if (operation.kind !== 'team/worker-started') throw new Error('not a Worker start record')
+    return Object.freeze({ receipt: this.receipt(operation), execution: operation.data.execution,
+      ...(operation.data.activity === undefined ? {} : { activity: operation.data.activity }) })
+  }
+
+  private workerSettledRecorded(operation: AgentTeamOperation): AgentTeamWorkerSettledRecorded {
+    if (operation.kind !== 'team/worker-settled') throw new Error('not a Worker settlement record')
+    const { workerRef, state, settledAt } = operation.data.execution
+    return Object.freeze({ receipt: this.receipt(operation), workerRef, state, settledAt,
+      ...(operation.data.activity === undefined ? {} : { activity: operation.data.activity }) })
+  }
+
+  private assertSameWorkerStart(existing: AgentTeamOperation, request: AgentTeamWorkerStartWrite): void {
+    const expected = { ...request.execution, startedAt: existing.occurredAt }
+    if (existing.kind !== 'team/worker-started' || !isDeepStrictEqual(existing.data.execution, expected)) {
+      this.throwRequestCollision(request.requestId)
+    }
+  }
+
+  private assertSameWorkerSettle(existing: AgentTeamOperation, request: AgentTeamWorkerSettleWrite): void {
+    const expected = { ...request.settlement, settledAt: existing.occurredAt }
+    if (existing.kind !== 'team/worker-settled' || !isDeepStrictEqual(existing.data.execution, expected)) {
+      this.throwRequestCollision(request.requestId)
+    }
+  }
 
   // ── Project subscriptions ─────────────────────────────────────────────────
 
@@ -3425,9 +3688,26 @@ export class AgentTeamLedger {
     readonly threads: ReturnType<AgentTeamLedger['notificationFacts']>
     readonly main: ReturnType<AgentTeamLedger['mainNotificationFacts']>
     readonly memberReminders: readonly AgentTeamUnreadMemberReminder[]
+    readonly workers: readonly AgentTeamWorkerAnswer[]
   } {
-    return this.withNotificationReadSet(memberId, () => ({ threads: this.notificationFacts(memberId),
-      main: this.mainNotificationFacts(memberId), memberReminders: this.unreadMemberRemindersFor(memberId) }))
+    return this.withNotificationReadSet(memberId, () => {
+      const threads = this.notificationFacts(memberId)
+      // The answers behind the Worker facts this wake names. A notice carries
+      // what the Worker said, which the Thread never holds, so the reader's own
+      // run is the one thing the wake has to look up out of band.
+      const workerRefs = new Set<AgentTeamWorkerRef>()
+      for (const thread of threads) {
+        for (const entry of thread.facts) {
+          const activity = entry.fact.kind === 'activity' ? entry.fact.activity : undefined
+          if (entry.direct && activity?.kind === 'worker_settled') workerRefs.add(activity.workerRef)
+        }
+      }
+      const workers = [...workerRefs].flatMap(workerRef => {
+        const answer = this.workerAnswerFor(memberId, workerRef)
+        return answer === undefined ? [] : [answer]
+      })
+      return { threads, main: this.mainNotificationFacts(memberId), memberReminders: this.unreadMemberRemindersFor(memberId), workers }
+    })
   }
 
   private withNotificationReadSet<T>(memberId: AgentTeamMemberId, read: () => T): T {
@@ -4024,7 +4304,8 @@ export class AgentTeamLedger {
     const projectByTask = new Map(tasks.map(task => [task.taskRef, task.projectRef]))
     for (const activity of activities) {
       scopes.push({ kind: 'thread', threadRef: activity.threadRef })
-      const projectRef = projectByTask.get(activity.taskRef)
+      // A Worker run on a discussion Thread has no Task to look a Project up by.
+      const projectRef = activity.taskRef === undefined ? undefined : projectByTask.get(activity.taskRef)
       if (projectRef !== undefined && !scopes.some(scope => scope.kind === 'project' && scope.projectRef === projectRef)) {
         scopes.push({ kind: 'project', projectRef })
       }
@@ -4145,6 +4426,13 @@ export class AgentTeamLedger {
       case 'team/rules-version-adopted':
         // Later records validate differently; no projection anybody reads changes.
         return []
+      case 'team/worker-started':
+      case 'team/worker-settled':
+        // A Thread-bound run writes one public fact into that Thread, so an open
+        // Thread and its Project refetch. A Project-only run projects nothing:
+        // its result reaches the initiator's own session and no shared view.
+        return operation.data.activity === undefined ? []
+          : [{ kind: 'project', projectRef: operation.data.activity.projectRef }, { kind: 'thread', threadRef: operation.data.activity.threadRef }]
       case 'team/project-owner-added':
         // Ownership shows on the Project rows and widens who sees the Project.
         return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
@@ -4248,6 +4536,9 @@ export class AgentTeamLedger {
         return [operation.data.thread.threadRef]
       case 'team/main-attention-changed':
         return []
+      case 'team/worker-started':
+      case 'team/worker-settled':
+        return operation.data.activity === undefined ? [] : [operation.data.activity.threadRef]
       case 'team/project-member-removed':
       case 'team/project-archived':
       case 'team/member-removed':
@@ -4353,6 +4644,9 @@ export class AgentTeamLedger {
     }
     if (V2_ONLY_KINDS.includes(operation.kind) && projection.rulesVersion < 2) {
       throw new Error(`agent-team operation ${operation.sequence} (${operation.kind}) needs rules version 2; its segment runs version ${projection.rulesVersion}`)
+    }
+    if (V6_ONLY_KINDS.includes(operation.kind) && projection.rulesVersion < 6) {
+      throw new Error(`agent-team operation ${operation.sequence} (${operation.kind}) needs rules version 6; its segment runs version ${projection.rulesVersion}`)
     }
     if (operation.kind === 'team/project-created') {
       assertHuman()
@@ -5003,6 +5297,56 @@ export class AgentTeamLedger {
         throw new Error('invalid Member reminder cancellation')
       }
       this.validateInboxDelta(inbox, projection, refs)
+      return
+    }
+    if (operation.kind === 'team/worker-started') {
+      const actor = assertMember()
+      const { execution, activity } = operation.data
+      const project = projection.projects.get(execution.projectRef)
+      if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
+        || execution.initiatedBy !== actor.memberId || !this.isProjectOwnerFrom(projection, project.projectRef, actor.memberId)
+        || execution.startedAt !== operation.occurredAt || projection.workerExecutions.has(execution.workerRef)
+        || execution.task.trim() === '' || execution.cwd.trim() === '') throw new Error('invalid Worker start')
+      this.assertWorkerBindingFrom(projection, project.projectRef, execution)
+      this.addRef(refs, execution.workerRef)
+      if (execution.threadRef === undefined) {
+        if (activity !== undefined) throw new Error('invalid Worker start activity')
+        return
+      }
+      if (activity === undefined || activity.kind !== 'worker_started' || activity.threadRef !== execution.threadRef
+        || activity.projectRef !== execution.projectRef || activity.workerRef !== execution.workerRef
+        || activity.engine !== execution.engine || activity.actor !== execution.initiatedBy
+        || activity.taskRef !== execution.taskRef || activity.sequence !== operation.sequence) {
+        throw new Error('invalid Worker start activity')
+      }
+      this.addRef(refs, activity.activityRef)
+      return
+    }
+    if (operation.kind === 'team/worker-settled') {
+      if (operation.actor.kind !== 'host' || operation.actor.handle !== HOST_ACTOR.handle) throw new Error('invalid Worker settlement authority')
+      const { execution: settlement, activity, inbox } = operation.data
+      const prior = projection.workerExecutions.get(settlement.workerRef)
+      const project = prior === undefined ? undefined : projection.projects.get(prior.projectRef)
+      if (prior === undefined || prior.state !== 'running' || project === undefined
+        || project.workspaceId !== operation.data.workspaceId || settlement.settledAt !== operation.occurredAt
+        || settlement.workerRef !== prior.workerRef) throw new Error('invalid Worker settlement')
+      if (prior.threadRef === undefined) {
+        if (activity !== undefined || inbox.activityMarkers.added.length > 0
+          || inbox.activityMarkers.removed.length > 0) throw new Error('invalid Worker settlement projection')
+      } else {
+        const reason = workerRunReasonOf(settlement)
+        if (activity === undefined || activity.kind !== 'worker_settled' || activity.threadRef !== prior.threadRef
+          || activity.projectRef !== prior.projectRef || activity.workerRef !== prior.workerRef || activity.engine !== prior.engine
+          || activity.actor !== prior.initiatedBy || activity.taskRef !== prior.taskRef || activity.sequence !== operation.sequence
+          || activity.state !== settlement.state || activity.reason !== reason) throw new Error('invalid Worker settlement activity')
+        this.addRef(refs, activity.activityRef)
+        const marker = this.isProjectMemberFrom(projection, prior.projectRef, prior.initiatedBy)
+          ? Object.freeze({ memberId: prior.initiatedBy, threadRef: activity.threadRef, activityRef: activity.activityRef, sequence: operation.sequence })
+          : undefined
+        const expected = this.inboxDelta([], [], [], [], marker === undefined ? [] : [marker], [])
+        if (!isDeepStrictEqual(inbox, expected)) throw new Error('invalid Worker settlement inbox projection')
+      }
+      this.validateInboxDelta(inbox, projection, refs, [], [], activity === undefined ? [] : [activity])
       return
     }
     if (operation.kind === 'team/dm-sent') {
@@ -5895,6 +6239,24 @@ export class AgentTeamLedger {
         target.acceptedEventsBySequence.set(`${operation.sequence}|${event.id}`, { subscriptionRef: operation.data.subscriptionRef, event: entry })
       }
       target.subscriptionEvents.set(operation.data.subscriptionRef, accepted)
+      return
+    }
+    if (operation.kind === 'team/worker-started') {
+      target.workerExecutions.set(operation.data.execution.workerRef,
+        Object.freeze({ ...operation.data.execution, state: 'running' }))
+      if (operation.data.activity !== undefined) this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
+      return
+    }
+    if (operation.kind === 'team/worker-settled') {
+      const prior = target.workerExecutions.get(operation.data.execution.workerRef)
+      if (prior === undefined) throw new Error('agent-team replay settled a Worker run it never recorded')
+      const { state, settledAt, nativeSessionId, output, diagnostic } = operation.data.execution
+      target.workerExecutions.set(prior.workerRef, Object.freeze({ ...prior, state, settledAt,
+        ...(nativeSessionId === undefined ? {} : { nativeSessionId }),
+        ...(output === undefined ? {} : { output }),
+        ...(diagnostic === undefined ? {} : { diagnostic }) }))
+      if (operation.data.activity !== undefined) this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
+      this.applyInboxDelta(target, operation.data.inbox)
       return
     }
     if (operation.kind === 'team/subscription-event-published') {

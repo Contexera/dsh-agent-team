@@ -24,6 +24,11 @@ import type {
   AgentTeamThread,
   AgentTeamThreadAttention,
   AgentTeamThreadRef,
+  AgentTeamWorkerRef,
+  AgentTeamWorkerSettledActivity,
+  AgentTeamWorkerStartedActivity,
+  AgentTeamWorkerStartRecord,
+  AgentTeamWorkerSettlement,
   AgentTeamSubscription,
   AgentTeamSubscriptionActivity,
   AgentTeamSubscriptionRef,
@@ -526,6 +531,40 @@ export interface AgentTeamDmSentOperation extends AgentTeamOperationBase {
   }
 }
 
+/**
+ * Durable start of one delegated Worker run, recorded before a native process
+ * exists. `threadRef`/`taskRef` are the target binding fixed for the whole run:
+ * a later page, directory, Membership change, or Task transfer never moves it.
+ * `activity` is present exactly when the binding names a Thread, and is the
+ * public fact that Thread holds; the rest of the record is private to the
+ * initiating Member and the Human.
+ */
+export interface AgentTeamWorkerStartedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/worker-started'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly execution: AgentTeamWorkerStartRecord
+    readonly activity?: AgentTeamWorkerStartedActivity | undefined
+  }
+}
+
+/**
+ * The one terminal record of a delegated Worker run. It commits at most once
+ * per run: the write is keyed on the run, so a repeated callback resolves the
+ * same record instead of writing a second ending. `activity` is the Thread's
+ * public fact when the run is Thread-bound, and `inbox` holds the initiator's
+ * marker pointing at exactly that fact — never the whole Thread's unread.
+ */
+export interface AgentTeamWorkerSettledOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/worker-settled'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly execution: AgentTeamWorkerSettlement
+    readonly activity?: AgentTeamWorkerSettledActivity | undefined
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
 /** Durable creation of one Project subscription, with the Main stream line that announces it. */
 export interface AgentTeamSubscriptionCreatedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/subscription-created'
@@ -701,6 +740,8 @@ export type AgentTeamOperation =
   | AgentTeamMemberReminderCancelledOperation
   | AgentTeamMemberRemovedOperation
   | AgentTeamDmSentOperation
+  | AgentTeamWorkerStartedOperation
+  | AgentTeamWorkerSettledOperation
   | AgentTeamSubscriptionCreatedOperation
   | AgentTeamSubscriptionUpdatedOperation
   | AgentTeamSubscriptionPausedOperation

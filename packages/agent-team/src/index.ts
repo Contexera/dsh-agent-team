@@ -55,7 +55,7 @@ import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentT
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
-import { WorkerRegistry, type AgentTeamWorkerRun, type WorkerStartRequest } from './worker-service.ts'
+import { WorkerRefusal, WorkerRegistry, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
 import { coldInboxOf } from './cold-inbox.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
@@ -78,6 +78,9 @@ import type {
   AgentTeamArchiveMemberRequest,
   AgentTeamArchiveMemberResult,
   AgentTeamChangeScope,
+  AgentTeamDelegationTarget,
+  AgentTeamWorkerAnswer,
+  AgentTeamWorkerStateView,
   AgentTeamChangesRequest,
   AgentTeamChangesResult,
   AgentTeamActivityRef,
@@ -202,6 +205,7 @@ import type {
   AgentTeamThreadHistory,
   AgentTeamThreadHistoryRequest,
   AgentTeamThreadReadRequest,
+  AgentTeamThread,
   AgentTeamThreadReadResult,
   AgentTeamMemberDiagnostic,
   AgentTeamThreadObservations,
@@ -506,6 +510,17 @@ export default class AgentTeam extends TypertRemoteService {
     config: () => this.config.worker.get(),
     projectExists: projectRef => this.requireLedger().hasProject(projectRef),
     projectOwners: projectRef => this.requireLedger().projectOwnerIds(projectRef),
+    recordStarted: async write => {
+      const result = await this.requireLedger().recordWorkerStarted(write)
+      if (result.committed) this.emitCommitted(result.value.receipt)
+      return result.value.execution
+    },
+    // A bound run's ending is the fact that wakes its initiator, so the commit
+    // that made it durable is what publishes it.
+    recordSettled: async write => {
+      const result = await this.requireLedger().recordWorkerSettled(write)
+      if (result.committed) this.emitCommitted(result.value.receipt)
+    },
     warn: message => { this.ctx.logger.warn(`agent-team: ${message}`) },
   })
   /** Team notice ids waiting for a turn boundary, keyed by the live Agent message id. */
@@ -1642,7 +1657,8 @@ export default class AgentTeam extends TypertRemoteService {
     // instruction carries it too: otherwise the reminder would be answered by a
     // notice that never mentioned it, and a one-shot would never fire again.
     const notice = notifications.length === 0 && mainNotifications.length === 0 && memberReminders.length === 0 ? undefined
-      : this.notificationText(handle.agent, notifications, member.memberId, mainNotifications, undefined, text, memberReminders)
+      : this.notificationText(handle.agent, notifications, member.memberId, mainNotifications, undefined, text, memberReminders,
+        material.workers)
     const body = notice === undefined ? text : `${text}\n\n${notice.text}`
     const hint = createUserMessage({
       content: [{ type: 'text', text: body }],
@@ -2070,7 +2086,7 @@ export default class AgentTeam extends TypertRemoteService {
     // A read that made no progress commits no operation and carries no receipt.
     const receipt = result.committed ? result.value.receipt : undefined
     if (receipt !== undefined) this.emitCommitted(receipt)
-    return result.value
+    return this.withWorkerStates(result.value)
   }
 
   /** Human-only durable Attention observations for one Thread. */
@@ -2084,7 +2100,7 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('threadHistory')
   threadHistory(request: AgentTeamThreadHistoryRequest): AgentTeamThreadHistory {
     this.requireWorkspace(request.workspaceId)
-    return this.requireLedger().threadHistory(agentTeamHumanActor(), request)
+    return this.withWorkerStates(this.requireLedger().threadHistory(agentTeamHumanActor(), request))
   }
 
   /** Return the existing bounded public Workspace discovery projection. */
@@ -2282,9 +2298,26 @@ export default class AgentTeam extends TypertRemoteService {
       : preview => select(this.threadReadContext(agent, actor, request, preview)))
     const receipt = result.committed ? result.value.receipt : undefined
     if (receipt !== undefined) this.emitCommitted(receipt)
-    const read = this.threadReadContext(agent, actor, request, result.committed ? result.value : { ...result.value, reminders: [] })
+    const read = this.withWorkerStates(this.threadReadContext(agent, actor, request,
+      result.committed ? result.value : { ...result.value, reminders: [] }))
     if (receipt !== undefined) this.afterAcceptanceRead(agent, actor.memberId, read)
     return read
+  }
+
+  /**
+   * Attach the durable state of every Worker run bound to this Thread. The states
+   * come from the execution records, never from the facts this window returned: a
+   * run outside a long Thread's page still stands where its record says.
+   */
+  private withWorkerStates<T extends { readonly thread: AgentTeamThread }>(read: T): T {
+    const states = this.requireLedger().threadWorkerStates(read.thread.threadRef)
+    if (states.length === 0) return read
+    const workerStates: readonly AgentTeamWorkerStateView[] = Object.freeze(states.map(entry => Object.freeze({
+      ...entry,
+      // A live run of this Host is the only thing that makes `running` truthful.
+      unconfirmed: entry.state === 'running' && !this.workerRegistry.isLive(entry.workerRef),
+    })))
+    return Object.freeze({ ...read, workerStates })
   }
 
   private threadReadContext(agent: Agent, actor: AgentTeamMemberActor, request: AgentTeamThreadReadRequest, snapshot: AgentTeamThreadReadResult) {
@@ -2441,7 +2474,7 @@ export default class AgentTeam extends TypertRemoteService {
   threadHistoryForAgent(agent: Agent, request: AgentTeamThreadHistoryRequest): AgentTeamThreadHistory {
     const actor = this.memberActor(agent)
     this.requireAgentWorkspace(actor, request.workspaceId)
-    const history = this.requireLedger().threadHistory(actor, request)
+    const history = this.withWorkerStates(this.requireLedger().threadHistory(actor, request))
     // Paging back to answer something is exactly when the target may sit
     // outside the window, so a history page carries the same context a read does.
     const contexts = this.replyContextsFor(history.facts, request.workspaceId)
@@ -3582,15 +3615,49 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Start one Worker for the calling Member. The Project authorization and the
-   * experimental switch are checked before any native process exists; the result
-   * reaches this Member's own session through the subagent service's parent notice.
+   * Start one Worker for the calling Member. The target is resolved and ownership
+   * of its Project checked before anything is written or started, and that binding
+   * is what the run's result follows from then on: a bound run reports in its
+   * Thread and wakes this Member through the Inbox, an unbound one keeps the
+   * direct parent result. It reads only the handle's identity, `ctx.get(
+   * 'workingDirectory')` and the `session` passed to it, which is the stub surface
+   * a lane without a real Session needs; `worker-host-thread.spec.ts` pins it.
    */
-  async workerStartForAgent(agent: Agent, request: WorkerStartRequest): Promise<AgentTeamWorkerRun> {
+  async workerStartForAgent(agent: Agent, request: WorkerDelegationRequest): Promise<AgentTeamWorkerRun> {
     const actor = this.memberActor(agent)
+    const target = this.workerDelegationTarget(request)
     const workingDirectory = agent.ctx.get('workingDirectory') as { get(session: Agent['session']): string } | undefined
     const cwd = request.cwd ?? workingDirectory?.get(agent.session)
-    return this.workerRegistry.start(actor.memberId, agent, cwd === undefined ? request : { ...request, cwd })
+    return this.workerRegistry.start({ actor, parent: agent }, {
+      requestId: request.requestId,
+      workspaceId: target.workspaceId,
+      projectRef: target.projectRef,
+      ...(target.kind === 'thread' ? { threadRef: target.threadRef } : {}),
+      ...(target.kind === 'thread' && target.taskRef !== undefined ? { taskRef: target.taskRef } : {}),
+      ...(request.engine === undefined ? {} : { engine: request.engine }),
+      task: request.task,
+      ...(cwd === undefined ? {} : { cwd }),
+    })
+  }
+
+  /** The Project a delegation belongs to, taken from its target; every refusal precedes any write. */
+  private workerDelegationTarget(request: WorkerDelegationRequest): Extract<AgentTeamDelegationTarget, { kind: 'project' | 'thread' }> {
+    const target = this.requireLedger().delegationTarget({ projectRef: request.projectRef,
+      threadRef: request.threadRef, taskRef: request.taskRef })
+    switch (target.kind) {
+      case 'project':
+      case 'thread': return target
+      case 'target-required':
+        throw new WorkerRefusal('worker_target_required', 'A delegation names the Thread, Task, or Project it works on.')
+      case 'project-unknown':
+        throw new WorkerRefusal('worker_project_unknown', `${target.projectRef} is not a Project in this Team.`)
+      case 'thread-unknown':
+        throw new WorkerRefusal('worker_thread_unknown', `${target.threadRef} is not a Thread in this Team.`)
+      case 'task-unknown':
+        throw new WorkerRefusal('worker_task_unknown', `${target.taskRef} is not a Task in this Team.`)
+      case 'target-conflict':
+        throw new WorkerRefusal('worker_target_conflict', `Task ${target.taskRef} is not in Thread ${target.threadRef}.`)
+    }
   }
 
   /** Every Worker this Host started, for the caller's own inspection. */
@@ -5100,7 +5167,7 @@ export default class AgentTeam extends TypertRemoteService {
     }
     const existingInboxHint = pending.find(message => this.isInboxNotice(message))
     if (existingInboxHint !== undefined) this.removeExpectedTeamWake(agent, existingInboxHint)
-    const notice = this.notificationText(agent, notifications, member.memberId, mainNotifications, plan, '', memberReminders)
+    const notice = this.notificationText(agent, notifications, member.memberId, mainNotifications, plan, '', memberReminders, material.workers)
     const hint = createUserMessage({
       content: [{ type: 'text', text: notice.text }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY, teamFacts: teamMessageSurface(notice.text, notice.messages, notice.activities) },
@@ -5218,9 +5285,9 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_RECOVERY_NOTICE_SUMMARY
   }
 
-  private notificationText(agent: Agent, notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [], deliveryPlan?: InboxDeliveryPlan, prefix = '', memberReminders: readonly AgentTeamUnreadMemberReminder[] = []): RenderedInboxNotice {
+  private notificationText(agent: Agent, notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [], deliveryPlan?: InboxDeliveryPlan, prefix = '', memberReminders: readonly AgentTeamUnreadMemberReminder[] = [], workers: readonly AgentTeamWorkerAnswer[] = []): RenderedInboxNotice {
     const plan = deliveryPlan ?? (readerId === undefined ? undefined : this.inboxDeliveryPlan({ notifications, main }))
-    return renderInboxNotice({ notifications, main, memberReminders, readerId, deliveryPlan: plan, prefix,
+    return renderInboxNotice({ notifications, main, memberReminders, workers, readerId, deliveryPlan: plan, prefix,
       surface: visibleTeamSurface(agent), lookup: {
         printableSender: memberId => this.printableSender(memberId),
         isProjectOwner: (reader, projectRef) => this.requireLedger().projectOwnerIds(projectRef).includes(reader),

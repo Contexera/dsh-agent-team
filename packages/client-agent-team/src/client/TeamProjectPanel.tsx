@@ -110,7 +110,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
   })
 
   const {
-    projection, task, thread,
+    projection, task, thread, workerStates,
     currentFacts, readFacts, olderFacts, taskCards, followerIds, historyHasMore, loading, error, pending, autoReadExhausted,
     replyTarget, replyTo, pendingFiles, draftKey, flashedMessage, timelineRef,
     readCurrent, loadOlder, retryAutoRead, onTimelineScroll, setReplyTarget, setPendingFiles, clearSendState, sendReply, commit,
@@ -203,7 +203,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
         {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
       />
     }
-    return <p className={threadCss.activityRow} key={factKey(fact)}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{formatActivity(fact.activity, { t, actorName: memberName, claims: projection?.claims ?? [] })}</span></p>
+    return <p className={threadCss.activityRow} key={factKey(fact)}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{formatActivity(fact.activity, { t, actorName: memberName, claims: projection?.claims ?? [], workerStates })}</span></p>
   }
 
   const humanIdentity: TeamAvatarHuman | undefined = humanMemberId === undefined

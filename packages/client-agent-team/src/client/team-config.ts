@@ -178,7 +178,6 @@ export interface WorkerConfigValues {
   defaultEngine?: string | undefined
   codexEnabled?: boolean | undefined
   codexExecutable?: string | undefined
-  codexSandbox?: string | undefined
   claudeEnabled?: boolean | undefined
   claudeExecutable?: string | undefined
 }
@@ -192,7 +191,6 @@ const WORKER_PATHS: Readonly<Record<WorkerField, readonly string[]>> = {
   defaultEngine: ['worker', 'defaultEngine'],
   codexEnabled: ['worker', 'engines', 'codex', 'enabled'],
   codexExecutable: ['worker', 'engines', 'codex', 'executable'],
-  codexSandbox: ['worker', 'engines', 'codex', 'sandbox'],
   claudeEnabled: ['worker', 'engines', 'claude', 'enabled'],
   claudeExecutable: ['worker', 'engines', 'claude', 'executable'],
 }
@@ -215,7 +213,6 @@ function workerValuesOf(layer: unknown): WorkerConfigValues {
     defaultEngine: stringOf(leafAt(layer, WORKER_PATHS.defaultEngine)),
     codexEnabled: booleanOf(leafAt(layer, WORKER_PATHS.codexEnabled)),
     codexExecutable: stringOf(leafAt(layer, WORKER_PATHS.codexExecutable)),
-    codexSandbox: stringOf(leafAt(layer, WORKER_PATHS.codexSandbox)),
     claudeEnabled: booleanOf(leafAt(layer, WORKER_PATHS.claudeEnabled)),
     claudeExecutable: stringOf(leafAt(layer, WORKER_PATHS.claudeExecutable)),
   }
@@ -283,22 +280,6 @@ function choiceField(field: WorkerField, choices: readonly string[], fallback: s
   }
 }
 
-/**
- * The Codex sandbox policy: a policy the row already stores stays visible and
- * stages back unchanged, so the control never rewrites a value it did not offer.
- * An explicitly stored empty policy is shown as empty rather than as the mode
- * this page would pick: the Host passes no mode then, and Codex's own default
- * applies.
- */
-const SANDBOX_FIELD: SettingsFieldSpec = {
-  field: 'codexSandbox',
-  format: value => typeof value === 'string' ? value.trim() : '',
-  parse: (text) => {
-    const trimmed = text.trim()
-    return trimmed === '' ? { kind: 'clear' } : { kind: 'set', value: trimmed }
-  },
-}
-
 /** An executable path staged as typed; a blank draft clears it so the engine falls back to its own discovery. */
 function pathField(field: WorkerField): SettingsFieldSpec {
   return {
@@ -317,7 +298,6 @@ export interface WorkerConfigState extends SettingsFormShell {
   defaultEngine: SettingsFieldState
   codexEnabled: SettingsFieldState
   codexExecutable: SettingsFieldState
-  codexSandbox: SettingsFieldState
   claudeEnabled: SettingsFieldState
   claudeExecutable: SettingsFieldState
 }
@@ -346,7 +326,6 @@ export class WorkerConfigController implements WorkerConfigFace {
       choiceField('defaultEngine', WORKER_ENGINES, WORKER_ENGINES[0]),
       switchField('codexEnabled'),
       pathField('codexExecutable'),
-      SANDBOX_FIELD,
       switchField('claudeEnabled'),
       pathField('claudeExecutable'),
     ])
@@ -357,7 +336,6 @@ export class WorkerConfigController implements WorkerConfigFace {
       defaultEngine: this.form.field('defaultEngine'),
       codexEnabled: this.form.field('codexEnabled'),
       codexExecutable: this.form.field('codexExecutable'),
-      codexSandbox: this.form.field('codexSandbox'),
       claudeEnabled: this.form.field('claudeEnabled'),
       claudeExecutable: this.form.field('claudeExecutable'),
     }))

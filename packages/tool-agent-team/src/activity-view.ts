@@ -10,6 +10,11 @@ export interface ActivityViewFields {
   readonly actor?: string
   readonly threadRef?: string
   readonly taskRef?: string
+  readonly projectRef?: string
+  readonly workerRef?: string
+  readonly engine?: string
+  readonly state?: string
+  readonly reason?: string
   readonly memberId?: string
   readonly claimRef?: string
   readonly claimRefs?: readonly string[]
@@ -29,7 +34,18 @@ export function activityFromView(value: ActivityViewFields, projectRef?: string)
     if (value.memberId === undefined || (value.activity !== 'owner-added' && value.activity !== 'owner-removed')) return undefined
     return activityFact({ ...base, kind: value.activity, memberId: value.memberId, projectRef } as AgentTeamMainActivity)
   }
-  if (value.threadRef === undefined || value.taskRef === undefined) return undefined
+  if (value.threadRef === undefined) return undefined
+  if (value.activity === 'worker_started' || value.activity === 'worker_settled') {
+    if (value.workerRef === undefined || value.projectRef === undefined || value.engine === undefined) return undefined
+    const worker = { ...base, threadRef: value.threadRef, projectRef: value.projectRef, workerRef: value.workerRef,
+      engine: value.engine, ...(value.taskRef === undefined ? {} : { taskRef: value.taskRef }) }
+    if (value.activity === 'worker_started') return activityFact({ ...worker, kind: 'worker_started' } as unknown as AgentTeamActivity)
+    if (value.state === undefined) return undefined
+    return activityFact({ ...worker, kind: 'worker_settled', state: value.state,
+      ...(value.reason === undefined ? {} : { reason: value.reason }) } as unknown as AgentTeamActivity)
+  }
+  // Every remaining kind is Task progress, so its Task ref is part of its identity.
+  if (value.taskRef === undefined) return undefined
   const thread = { ...base, taskRef: value.taskRef, threadRef: value.threadRef }
   switch (value.activity) {
     case 'claim':

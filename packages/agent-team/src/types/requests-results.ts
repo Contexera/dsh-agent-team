@@ -37,6 +37,12 @@ import type {
   AgentTeamThreadFact,
   AgentTeamThreadReadFact,
   AgentTeamThreadRef,
+  AgentTeamWorkerRef,
+  AgentTeamWorkerSettledActivity,
+  AgentTeamWorkerStartedActivity,
+  AgentTeamWorkerStartRecord,
+  AgentTeamWorkerState,
+  AgentTeamWorkerSettlement,
   AgentTeamSubscription,
   AgentTeamSubscriptionActivity,
   AgentTeamSubscriptionEventAccepted,
@@ -954,6 +960,14 @@ export interface AgentTeamThreadReadResult {
   readonly attention?: AgentTeamThreadAttention
   readonly consumedDirectMarkers: readonly AgentTeamDirectMarker[]
   readonly reminders: readonly AgentTeamInboxReminder[]
+  /**
+   * How every Worker run the returned facts mention stands, keyed by
+   * `workerRef`. Present only when those facts carry a Worker run. An entry
+   * reports the run's whole durable state, never just what this window shows:
+   * a start whose terminal fact sits in a page not yet loaded is running or
+   * unconfirmed, never silently assumed to have failed.
+   */
+  readonly workerStates?: readonly AgentTeamWorkerStateView[] | undefined
 }
 
 /** Non-mutating Thread history request. */
@@ -993,7 +1007,94 @@ export interface AgentTeamThreadHistory {
   readonly taskCards?: readonly AgentTeamThreadTaskCard[]
   readonly cursor: number
   readonly hasMore: boolean
+  /** How every Worker run the returned facts mention stands; the same derivation a Thread read carries. */
+  readonly workerStates?: readonly AgentTeamWorkerStateView[] | undefined
 }
+
+/** The private half of one delegated Worker run, as the notice that wakes its initiator carries it. */
+export interface AgentTeamWorkerAnswer {
+  readonly workerRef: AgentTeamWorkerRef
+  /** The Worker's final answer, text only, bounded when it was stored; absent when it produced none. */
+  readonly output?: string | undefined
+  /** Safe failure summary, never a native cause. */
+  readonly diagnostic?: string | undefined
+}
+
+/**
+ * Host-internal write that opens a delegated Worker run. The Host has already
+ * resolved the target and authorized the caller; the ledger re-derives both, so
+ * a replayed record can only exist for a binding that was legal when it was
+ * written. The opening instant is the operation's own, never a caller's clock.
+ */
+export interface AgentTeamWorkerStartWrite {
+  readonly requestId: AgentTeamRequestId
+  readonly actor: AgentTeamMemberActor
+  readonly workspaceId: WorkspaceId
+  readonly execution: Omit<AgentTeamWorkerStartRecord, 'startedAt'>
+}
+
+/** One recorded opening of a delegated Worker run, as a resend resolves it. */
+export interface AgentTeamWorkerStartedRecorded {
+  readonly receipt: AgentTeamOperationReceipt
+  /** The binding the record fixed; the run itself is `running` by definition here. */
+  readonly execution: AgentTeamWorkerStartRecord
+  readonly activity?: AgentTeamWorkerStartedActivity | undefined
+}
+
+/**
+ * Host-internal write that closes a delegated Worker run. The Host makes it
+ * once, when the execution ends: the run is keyed on its own ref, so a repeated
+ * callback resolves the record it already wrote instead of ending it twice.
+ */
+export interface AgentTeamWorkerSettleWrite {
+  readonly requestId: AgentTeamRequestId
+  readonly settlement: Omit<AgentTeamWorkerSettlement, 'settledAt'>
+}
+
+/** One recorded ending of a delegated Worker run. */
+export interface AgentTeamWorkerSettledRecorded {
+  readonly receipt: AgentTeamOperationReceipt
+  readonly workerRef: AgentTeamWorkerRef
+  readonly state: AgentTeamWorkerSettledActivity['state']
+  readonly settledAt: string
+  readonly activity?: AgentTeamWorkerSettledActivity | undefined
+}
+
+/**
+ * How one delegated Worker run stands, as a Thread read derives it. `state` is
+ * the execution record's own durable state; `unconfirmed` marks a record left
+ * in `running` with no live execution behind it in this Host, which happens
+ * when the Host that started the run no longer holds its handle. Such a run is
+ * never re-run and never automatically retried, so the only honest thing to
+ * report is that its result cannot be confirmed.
+ */
+export interface AgentTeamWorkerStateView {
+  readonly workerRef: AgentTeamWorkerRef
+  readonly state: AgentTeamWorkerState
+  readonly unconfirmed: boolean
+}
+
+/**
+ * What a delegation target names, as the Host resolves it before it writes
+ * anything or starts a process. A Thread and a Task agree about each other or
+ * the target is contradictory; the Project is derived from whichever target was
+ * named, so a delegation cannot pick a Project its target does not belong to.
+ */
+export type AgentTeamDelegationTarget =
+  | {
+    readonly kind: 'thread'
+    readonly workspaceId: WorkspaceId
+    readonly projectRef: AgentTeamProjectRef
+    readonly threadRef: AgentTeamThreadRef
+    /** The Thread's own Task; a run bound to a taskful Thread carries it too. */
+    readonly taskRef?: AgentTeamTaskRef | undefined
+  }
+  | { readonly kind: 'project'; readonly workspaceId: WorkspaceId; readonly projectRef: AgentTeamProjectRef }
+  | { readonly kind: 'target-required' }
+  | { readonly kind: 'project-unknown'; readonly projectRef: AgentTeamProjectRef }
+  | { readonly kind: 'thread-unknown'; readonly threadRef: AgentTeamThreadRef }
+  | { readonly kind: 'task-unknown'; readonly taskRef: AgentTeamTaskRef }
+  | { readonly kind: 'target-conflict'; readonly threadRef: AgentTeamThreadRef; readonly taskRef: AgentTeamTaskRef }
 
 /** Human-only observation of a durable personal Attention change. */
 export interface AgentTeamThreadAttentionObservation {

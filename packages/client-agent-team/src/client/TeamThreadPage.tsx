@@ -154,7 +154,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const {
     projection: activeProjection, task, thread,
-    currentFacts, readFacts, olderFacts, taskCards, followerIds, historyHasMore, loading, error, pending,
+    currentFacts, readFacts, olderFacts, taskCards, workerStates, followerIds, historyHasMore, loading, error, pending,
     autoReadExhausted, newFactsCount, replyTarget, replyTo, pendingFiles, draftKey, flashedMessage, timelineRef,
     readCurrent, loadOlder, refreshAfterFence, refreshPassiveFacts, retryAutoRead, onTimelineScroll, jumpToNewest,
     flashMessage, setReplyTarget, setPendingFiles, clearSendState, sendReply, commit, applyTaskCommit,
@@ -341,7 +341,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
       />
     }
-    return <p className={threadCss.activityRow} key={factKey(fact)}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{formatActivity(fact.activity, { t, actorName: memberName, claims: taskClaims })}</span></p>
+    return <p className={threadCss.activityRow} key={factKey(fact)}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{formatActivity(fact.activity, { t, actorName: memberName, claims: taskClaims, workerStates })}</span></p>
   }
 
   /**

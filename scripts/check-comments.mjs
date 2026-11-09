@@ -142,8 +142,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // deep — the leaf paths it writes, the presence it reads along them, and why a stored sandbox
 // policy stays selectable — and gave the Host one dependency-free module the Client may import.
 // Client 1305 audited → 1344; agent-team 4502 audited → 4637.
+// 2026-11-09: a delegated Worker run became a Thread fact and an Inbox wake — the ordering
+// the code cannot show (binding written before the process, the ending written before the
+// refusal reaches the caller), the answer that is deliberately never projected into the
+// Thread, and the state a long Thread must report from the records rather than its window.
+// 4722 audited after condensing the four blocks that restated their own code → 4864.
 const COMMENT_BUDGETS = {
-  'packages/agent-team/src': 4637,
+  'packages/agent-team/src': 4864,
   'packages/client-agent-team/src': 1344,
   'packages/tool-agent-team/src': 242,
   'scripts': 1730,

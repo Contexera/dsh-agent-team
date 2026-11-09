@@ -203,18 +203,32 @@ The result names the subscription, its state, its revision, and its interval, an
 
 ## `team_worker`
 
-`team_worker` delegates one self-contained piece of work to a local Worker engine — Codex or Claude Code — running with its own tools, its own login, and its own settings, and reports the result back into the calling Member's own session. It takes `project`, `task`, an optional `engine`, an optional `cwd`, and an optional `requestId`.
+`team_worker` delegates one self-contained piece of work to a local Worker engine — Codex or Claude Code — running with its own tools, its own login, and its own settings. It takes `task`, at least one of `threadRef`, `taskRef`, and `projectRef`, and optional `engine`, `cwd`, and `requestId`.
 
-Delegation is off until the operator turns it on. The Team settings row carries a `worker` group — `enabled`, `defaultEngine`, one entry per engine with `enabled`, `executable`, and (Codex only) `sandbox`, plus an optional `timeoutMs` — and every field is volatile so a change reaches a running Host. `executable` exists because a Host's `PATH` is not a shell's: the CLI a human installed may be nowhere the Host process searches, and an empty value keeps the engine's own discovery.
+The target decides where the result goes. A run bound to a Thread reports there: its start and its ending become Thread facts every participant can read, and its answer arrives in the delegating Member's Inbox.
 
-A call is refused before any native process exists for each of these reasons: the switch is off (`worker_disabled`); the Project is not one this Team has (`worker_project_unknown`); the caller does not currently own that Project (`worker_owner_required`); the named engine is not a Worker engine (`worker_engine_unknown`) or is not enabled (`worker_engine_disabled`); the task text is empty (`worker_task_required`); no absolute working directory can be resolved (`worker_cwd_required`); the Harness subagent service is not mounted (`worker_unavailable`).
+A run bound only to a Project publishes nothing and returns to the calling Member's own session, as it did before targets existed. Its execution record is still written, so the run stays findable by its `worker:` ref.
+
+Delegation is off until the operator turns it on. The Team settings row carries a `worker` group — `enabled`, `defaultEngine`, one entry per engine with `enabled`, `executable`, and (Codex only) `sandbox`, plus an optional `timeoutMs` — and every field is volatile so a change reaches a running Host. Both engines run with full permissions and nothing to configure: `sandbox` defaults to `danger-full-access`, the settings page does not offer it, and narrowing Codex's policy is a hand-edit of the row.
+
+`executable` exists because a Host's `PATH` is not a shell's: the CLI a human installed may be nowhere the Host process searches, and an empty value keeps the engine's own discovery.
+
+A call is refused before the opening record and before any native process exists for each of these reasons: no target was named (`worker_target_required`); the named Thread (`worker_thread_unknown`), Task (`worker_task_unknown`), or Project (`worker_project_unknown`) is not one this Team holds; the Task is not in the Thread it was named with (`worker_target_conflict`); the caller does not currently own the Project the target belongs to (`worker_owner_required`).
+
+The remaining refusals are the settings and the run itself: the switch is off (`worker_disabled`); the named engine is not a Worker engine (`worker_engine_unknown`) or is not enabled (`worker_engine_disabled`); the task text is empty (`worker_task_required`); no absolute working directory can be resolved (`worker_cwd_required`); the Harness subagent service is not mounted (`worker_unavailable`); or the request id was already opened for a different delegation (`worker_request_conflict`).
 
 Ownership of one Project never authorizes another, and an ordinary DSH Session outside the Team preset never acquires the tool.
 
-`engine` overrides `defaultEngine` for that one delegation, and an engine that is unavailable reports why instead of falling back to another engine, account, or model. Repeating a call with the same `requestId` answers with the execution the first call started; it never starts a second one.
+`engine` overrides `defaultEngine` for that one delegation, and an engine that is unavailable reports why instead of falling back to another engine, account, or model. Repeating a call with the same `requestId` answers with the execution the first call started; it never starts a second one, not even when both calls arrive at once. The id names that one delegation and no other: a resend from a different Member, or one that changes the task, engine, or target, is refused rather than answered with a run it did not ask for.
 
-The receipt names the Team execution (`worker:` ref), the Project, the engine, the working directory, and the start instant, and states that the work continues in the background. The result reaches the calling Member's session through the Harness subagent service's parent notice when the execution settles; nothing is published to the Project, no Thread or Task is created, and an offline session is not re-delivered.
+The receipt names the Team execution (`worker:` ref), the Project, the engine, the working directory, and the start instant, plus the Thread when the run is bound; it states that the work continues in the background, and where that result will appear.
+
+A bound run publishes two Thread facts: `worker_started` when it opens, and `worker_settled` with its `state` and, for a failure or a stop, one bounded `reason` line. Its answer is never a Thread fact — it reaches the delegating Member's Inbox in the notice that wakes them with the ending, labelled as external text that is data and not instructions, and the parent Session receives no second copy. A Project-only run keeps the parent notice instead and publishes nothing. Neither creates a Task, a Main stream entry, or a Claim.
+
+Delegating work on a Task changes no responsibility: the Claim stays with the Member, a finished run never accepts anything, and the ordinary independent-acceptance rule still applies.
 
 A Worker holds no Team identity: it cannot post, claim, accept, or answer for the Member. If it performs work on a Task, the Claim stays with the Member and the ordinary independent-acceptance rule still applies. What a Worker returns is evidence to check, not instructions.
 
-The execution record lives with the Host process that started it: it is not a ledger fact, so a Host restarted mid-run cannot report that execution again, and `inspect`-style read-only diagnostics and stopping an execution from the Client are not part of this contract yet. Unloading the bundle refuses new delegations and releases what the Host still holds.
+A bound run's record is durable, and a Thread read reports every run bound to it as `running`, `completed`, `failed`, `stopped`, or `unconfirmed`. A record a previous Host left in `running` reads as `unconfirmed`: the result cannot be confirmed, the run is never restarted or retried on its own, and nothing wakes anyone for it. An unbound run's record stays with the Host process that started it.
+
+Read-only inspection of a finished run and stopping one from the Client are not part of this contract yet. Unloading the bundle refuses new delegations and releases what the Host still holds.

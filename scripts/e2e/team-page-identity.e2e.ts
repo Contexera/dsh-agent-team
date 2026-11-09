@@ -157,7 +157,7 @@ it('configures the Team page identity from Settings in real Web', async () => {
   // same profile and needs a picture.
   await panel.locator('input[type="file"]').setInputFiles(avatarPath)
   await expect.poll(async () => await panel.locator('img').count()).toBe(1)
-  await panel.getByRole('button', { name: '关闭' }).click()
+  await panel.getByRole('button', { name: '关闭', exact: true }).click()
 
   // The rename is not page-local: the Team timeline names the Human by it.
   await page.getByRole('button', { name: '团队', exact: true }).click()

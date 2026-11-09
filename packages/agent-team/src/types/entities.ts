@@ -512,20 +512,25 @@ export interface AgentTeamClaim {
   readonly state: 'active' | 'done' | 'released'
 }
 
+/**
+ * What every Thread Activity has: its own identity, the Thread it belongs to,
+ * and the Member whose action it records.
+ */
 interface AgentTeamActivityBase {
   readonly activityRef: AgentTeamActivityRef
-  readonly taskRef: AgentTeamTaskRef
   readonly threadRef: AgentTeamThreadRef
   readonly actor: AgentTeamMemberId
   readonly sequence: number
 }
 
 export interface AgentTeamClaimActivity extends AgentTeamActivityBase {
+  readonly taskRef: AgentTeamTaskRef
   readonly kind: 'claim' | 'done' | 'release'
   readonly claimRef: AgentTeamClaimRef
 }
 
 export interface AgentTeamTaskActivity extends AgentTeamActivityBase {
+  readonly taskRef: AgentTeamTaskRef
   readonly kind: 'promote' | 'accept' | 'close' | 'reopen' | 'transfer'
   readonly from?: AgentTeamMemberId
   readonly to?: AgentTeamMemberId
@@ -541,12 +546,98 @@ export interface AgentTeamTaskActivity extends AgentTeamActivityBase {
 
 /** One automatic, public release summary caused by a membership lifecycle action. */
 export interface AgentTeamClaimsReleasedActivity extends AgentTeamActivityBase {
+  readonly taskRef: AgentTeamTaskRef
   readonly kind: 'claims_released'
   readonly claimRefs: readonly AgentTeamClaimRef[]
 }
 
+/**
+ * How one delegated Worker run stands. `running` is the execution record's own
+ * state until a terminal fact exists; a read derives `unconfirmed` from a
+ * running record no live execution backs any more, and never stores it.
+ */
+export type AgentTeamWorkerState = 'running' | 'completed' | 'failed' | 'stopped'
+
+/** The immutable part of one delegated Worker run, written once when it starts. */
+export interface AgentTeamWorkerStartRecord {
+  readonly workerRef: AgentTeamWorkerRef
+  readonly projectRef: AgentTeamProjectRef
+  /** The Thread the run reports into; absent on a Project-only delegation. */
+  readonly threadRef?: AgentTeamThreadRef | undefined
+  readonly taskRef?: AgentTeamTaskRef | undefined
+  readonly initiatedBy: AgentTeamMemberId
+  readonly engine: import('../worker-settings.ts').WorkerEngine
+  /** The task text the Worker was given; the Worker never sees the Member's conversation. */
+  readonly task: string
+  readonly cwd: string
+  readonly startedAt: string
+}
+
+/**
+ * One delegated Worker run's whole durable record: what was asked, where it
+ * ran, and how it ended. It is private to the initiating Member and the Human —
+ * no tool or Remote read exposes it — and the Thread holds only the public
+ * activity facts that name the run by `workerRef`.
+ */
+export interface AgentTeamWorkerExecution extends AgentTeamWorkerStartRecord {
+  /** `running` until the terminal write lands; a read after a restart derives `unconfirmed` from it without storing it. */
+  readonly state: AgentTeamWorkerState
+  readonly settledAt?: string | undefined
+  /** The engine's own session identity, once one opened. */
+  readonly nativeSessionId?: string | undefined
+  /** The Worker's final answer, text only, bounded when stored; absent when it produced none. */
+  readonly output?: string | undefined
+  /** Safe failure summary, never a native cause. */
+  readonly diagnostic?: string | undefined
+}
+
+/** What the terminal write adds to a run's record. */
+export interface AgentTeamWorkerSettlement {
+  readonly workerRef: AgentTeamWorkerRef
+  readonly state: Exclude<AgentTeamWorkerState, 'running'>
+  readonly settledAt: string
+  /** The engine's own session identity, once one opened. */
+  readonly nativeSessionId?: string | undefined
+  /** The Worker's final answer, text only, bounded when stored; absent when it produced none. */
+  readonly output?: string | undefined
+  /** Safe failure summary, never a native cause. */
+  readonly diagnostic?: string | undefined
+}
+
+/**
+ * One delegated Worker run that began, as the Thread it belongs to holds it.
+ * It carries no state word of its own: "started" is its whole durable meaning,
+ * and whether the run is still alive or was left behind by a previous Host is
+ * derived when the Thread is read. `taskRef` is absent when the target is a
+ * discussion Thread that never had a Task.
+ */
+export interface AgentTeamWorkerStartedActivity extends AgentTeamActivityBase {
+  readonly kind: 'worker_started'
+  readonly projectRef: AgentTeamProjectRef
+  readonly workerRef: AgentTeamWorkerRef
+  readonly engine: import('../worker-settings.ts').WorkerEngine
+  readonly taskRef?: AgentTeamTaskRef | undefined
+}
+
+/**
+ * The terminal fact of one delegated Worker run. What the Worker answered is
+ * never public: it stays with the initiator, and this fact says only how the
+ * run ended and, for a failure or a stop, a bounded reason.
+ */
+export interface AgentTeamWorkerSettledActivity extends AgentTeamActivityBase {
+  readonly kind: 'worker_settled'
+  readonly projectRef: AgentTeamProjectRef
+  readonly workerRef: AgentTeamWorkerRef
+  readonly engine: import('../worker-settings.ts').WorkerEngine
+  readonly taskRef?: AgentTeamTaskRef | undefined
+  readonly state: Exclude<AgentTeamWorkerState, 'running'>
+  /** Bounded single-line reason a failed or stopped run gives; absent on completion and when the engine gave none. */
+  readonly reason?: string | undefined
+}
+
 /** One ordered public Thread Activity. */
 export type AgentTeamActivity = AgentTeamClaimActivity | AgentTeamTaskActivity | AgentTeamClaimsReleasedActivity
+  | AgentTeamWorkerStartedActivity | AgentTeamWorkerSettledActivity
 
 /** One public, revisioned fact in a Thread timeline. */
 export type AgentTeamThreadFact =

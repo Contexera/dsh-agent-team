@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamHumanProfileResult } from '@contexera/dsh-agent-team/types'
-import { WORKER_ENGINES, WORKER_SANDBOX_MODES } from '@contexera/dsh-agent-team/worker-settings'
+import { DEFAULT_WORKER_SANDBOX, WORKER_ENGINES } from '@contexera/dsh-agent-team/worker-settings'
 import { TeamHumanIdentity } from '../src/client/human-identity.ts'
 import { zh } from '../src/client/locales.ts'
 import { WorkerConfigController, workerConfigScope, type TeamConfigSection } from '../src/client/team-config.ts'
@@ -35,7 +35,7 @@ const WORKER_DEFAULTS = {
   enabled: false,
   defaultEngine: 'codex',
   engines: {
-    codex: { enabled: false, executable: '', sandbox: WORKER_SANDBOX_MODES[0] },
+    codex: { enabled: false, executable: '', sandbox: DEFAULT_WORKER_SANDBOX },
     claude: { enabled: false, executable: '', sandbox: '' },
   },
   timeoutMs: 0,
@@ -84,7 +84,11 @@ function renderSection(row = hostRow()) {
 
 /** The worker group's own region: the identity rows above it carry no switch. */
 async function group() {
-  return await screen.findByRole('region', { name: zh.workerTitle })
+  const region = await screen.findByRole('region', { name: zh.workerTitle })
+  // The group is a disclosure and opens closed, so every case starts by opening it.
+  const toggle = within(region).getByRole('button', { name: new RegExp(zh.workerTitle) })
+  if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle)
+  return region
 }
 
 /** The name one engine's path answers to: the visible label plus the engine. */
@@ -120,6 +124,29 @@ describe('Team settings page: the Worker delegation group', () => {
       expect((within(block).getByLabelText(pathName(engine)) as HTMLInputElement).disabled).toBe(true)
     }
     expect((within(region).getByLabelText(zh.workerDefaultEngine) as HTMLSelectElement).disabled).toBe(true)
+  })
+
+  it('opens closed on a one-phrase summary, and shows its controls only once opened', async () => {
+    renderSection()
+    const region = await screen.findByRole('region', { name: zh.workerTitle })
+    const toggle = within(region).getByRole('button', { name: new RegExp(zh.workerTitle) })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    // Closed, the group costs one line: its title and what it is set to.
+    expect(toggle.textContent).toContain(zh.workerCollapsedOff)
+    expect(within(region).queryByRole('switch', { name: zh.workerEnabled })).toBeNull()
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(await within(region).findByRole('switch', { name: zh.workerEnabled })).toBeTruthy()
+  })
+
+  it('names the engines an already-on group runs, so the closed row is not just “on”', async () => {
+    const row = hostRow({ worker: { ...WORKER_DEFAULTS, enabled: true,
+      engines: { ...WORKER_DEFAULTS.engines, codex: { ...WORKER_DEFAULTS.engines.codex, enabled: true } } } })
+    renderSection(row)
+    const region = await screen.findByRole('region', { name: zh.workerTitle })
+    const summary = within(region).getByRole('button', { name: new RegExp(zh.workerTitle) }).textContent ?? ''
+    expect(summary).toContain(zh.workerCollapsedOnEngines.replace('{engines}', zh.workerEngineCodex))
+    expect(summary).not.toContain(zh.workerEngineClaude)
   })
 
   it('stages the group switch at its own leaf, never at the group', async () => {
@@ -167,64 +194,6 @@ describe('Team settings page: the Worker delegation group', () => {
     })
   })
 
-  it('offers Codex’s own sandbox modes and stages the chosen one', async () => {
-    const { row } = renderSection()
-    const region = await group()
-    fireEvent.click(masterSwitch(region))
-    const codex = engineBlock(region, 'codex')
-    fireEvent.click(within(codex).getByRole('switch', { name: zh.workerEngineSwitch.replace('{engine}', 'Codex') }))
-    const sandbox = within(codex).getByLabelText(zh.workerSandbox)
-    expect(within(sandbox).getAllByRole('option').map(option => (option as HTMLOptionElement).value)).toEqual([...WORKER_SANDBOX_MODES])
-    fireEvent.change(sandbox, { target: { value: 'read-only' } })
-    fireEvent.click(within(region).getByRole('button', { name: zh.save }))
-    await waitFor(() => {
-      expect(row.mutate).toHaveBeenCalledWith([
-        { op: 'set', path: ['worker', 'enabled'], value: true },
-        { op: 'set', path: ['worker', 'engines', 'codex', 'enabled'], value: true },
-        { op: 'set', path: ['worker', 'engines', 'codex', 'sandbox'], value: 'read-only' },
-      ], 1)
-    })
-  })
-
-  it('keeps a stored policy the list does not offer visible, and stages nothing for it', async () => {
-    const row = hostRow({
-      worker: { ...WORKER_DEFAULTS, engines: { ...WORKER_DEFAULTS.engines, codex: { ...WORKER_DEFAULTS.engines.codex, sandbox: 'custom-policy' } } },
-      userWorker: { engines: { codex: { sandbox: 'custom-policy' } } },
-    })
-    renderSection(row)
-    const region = await group()
-    const sandbox = within(engineBlock(region, 'codex')).getByLabelText(zh.workerSandbox) as HTMLSelectElement
-    expect(sandbox.value).toBe('custom-policy')
-    expect(within(sandbox).getAllByRole('option').map(option => (option as HTMLOptionElement).value)).toContain('custom-policy')
-    expect((within(region).getByRole('button', { name: zh.save }) as HTMLButtonElement).disabled).toBe(true)
-  })
-
-  it('names an empty stored policy for what it runs instead of as a mode it would not use', async () => {
-    const row = hostRow({
-      worker: { ...WORKER_DEFAULTS, engines: { ...WORKER_DEFAULTS.engines, codex: { ...WORKER_DEFAULTS.engines.codex, sandbox: '' } } },
-      userWorker: { engines: { codex: { sandbox: '' } } },
-    })
-    renderSection(row)
-    const region = await group()
-    const sandbox = within(engineBlock(region, 'codex')).getByLabelText(zh.workerSandbox) as HTMLSelectElement
-    // The Host passes no mode then, so the page must not show the mode it would
-    // have picked itself as if that were the policy in force.
-    expect(sandbox.value).toBe('')
-    const selected = sandbox.selectedOptions[0] as HTMLOptionElement
-    expect(selected.textContent).toBe(zh.workerSandboxUnset)
-    expect(selected.textContent).toContain('danger-full-access')
-    expect((within(region).getByRole('button', { name: zh.save }) as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(masterSwitch(region))
-    fireEvent.change(sandbox, { target: { value: 'read-only' } })
-    fireEvent.click(within(region).getByRole('button', { name: zh.save }))
-    await waitFor(() => {
-      expect(row.mutate).toHaveBeenCalledWith([
-        { op: 'set', path: ['worker', 'enabled'], value: true },
-        { op: 'set', path: ['worker', 'engines', 'codex', 'sandbox'], value: 'read-only' },
-      ], 1)
-    })
-  })
-
   it('names each engine’s path after its engine, so two of them are told apart', async () => {
     renderSection()
     const region = await group()
@@ -235,13 +204,6 @@ describe('Team settings page: the Worker delegation group', () => {
     // the name is a superset of it, never a different word for the same field.
     expect(pathName('codex')).toContain(zh.workerExecutable)
     expect(within(engineBlock(region, 'codex')).getByLabelText(zh.workerExecutable)).toBe(codexPath)
-  })
-
-  it('keeps the Codex-only sandbox off the Claude block', async () => {
-    renderSection()
-    const region = await group()
-    expect(within(engineBlock(region, 'codex')).getByLabelText(zh.workerSandbox)).not.toBeNull()
-    expect(within(engineBlock(region, 'claude')).queryByLabelText(zh.workerSandbox)).toBeNull()
   })
 
   it('says so when the default engine is the one that is off', async () => {

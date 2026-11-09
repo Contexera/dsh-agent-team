@@ -169,25 +169,132 @@
   margin: 0;
 }
 
+/* The group is a disclosure: closed it is one line, open it holds the switch and
+ * one nested surface for the engines. The nesting is drawn by that surface's fill
+ * and its padding, so nothing inside the group needs a rule to say what it
+ * belongs to — the page's own group separators stay the only lines here. */
+.workerToggle {
+  align-items: baseline;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 8px;
+  padding: 0;
+  text-align: start;
+  width: 100%;
+}
+
+.workerToggleSummary {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  align-self: center;
+  color: var(--dsw-alias-label-tertiary);
+  display: inline-flex;
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.workerBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The UA stylesheet's `[hidden] { display: none }` loses to the `display` above,
+ * so the collapsed body has to say it itself; jsdom loads no stylesheet and
+ * would have called the closed group hidden either way. */
+.workerBody[hidden] {
+  display: none;
+}
+
 .workerFields {
   display: flex;
   flex-direction: column;
+  gap: 12px;
 }
 
-.workerFields > * + *,
-.workerFields .engine > * + * {
-  border-top: 1px solid var(--dsw-alias-border-l2);
-}
-
-/* The identity rows close on a hairline; inside this group the next block opens
- * on one instead, so a switch row never draws two lines in a row. */
+/* The identity rows close on a hairline; this group's rows carry none, because
+ * the panel below them already says where the group's own level ends. */
 .workerFields .row {
   border-bottom: none;
+  padding: 0;
+}
+
+/* Second level: the engines, one surface. The fill — not a rule — says the switch
+ * above ends here, and it spans the group's own column, so every field inside
+ * keeps the page's one label column. */
+.enginePanel {
+  background: var(--dsw-alias-bg-layer-2);
+  border-radius: var(--dsw-radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* Vertical only: the fill marks the group, and every field keeps the page's
+     single label column instead of stepping 16px inward. */
+  padding: 14px 0 16px;
+}
+
+.defaultEngine {
+  align-items: center;
+  display: flex;
+  /* The note owns the line below; unwrapped it stays on this one and squeezes the
+   * label until a CJK word breaks a character at a time. */
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.defaultEngine .fieldLabel {
+  flex: none;
+}
+
+.defaultEngine .select {
+  margin-inline-start: auto;
+}
+
+.defaultEngineNote {
+  color: var(--dsw-alias-state-warn-primary, var(--dsw-alias-label-tertiary));
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
 }
 
 .engine {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+}
+
+.engineHead {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.engineName {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.engineHead > :last-child {
+  margin-inline-start: auto;
 }
 
 /* One field: the shipped settings field's rhythm, for the controls it does not
@@ -196,7 +303,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 12px 0;
 }
 
 .fieldLabel {
@@ -218,7 +324,9 @@
  * compaction field above as equals rather than as a second input language. */
 .control {
   background: var(--dsw-alias-bg-layer-3);
-  border: 0.5px solid var(--dsw-alias-border-l4);
+  /* 1px, not the shipped declaration's 0.5px: Chromium rounds a border-width up, so this is
+   * the pixel the shipped field actually renders and the only value the parity audit accepts. */
+  border: 1px solid var(--dsw-alias-border-l4);
   border-radius: var(--dsw-radius-md);
   /* The shipped field is 34px of content over a hairline. Stated as one
    * border-box height because the platform sizes a select's border-box and an

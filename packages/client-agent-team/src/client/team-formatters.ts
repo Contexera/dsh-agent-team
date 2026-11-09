@@ -1,9 +1,10 @@
-import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamInboxActor, AgentTeamMemberDiagnosticClass, AgentTeamMemberId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamInboxActor, AgentTeamMemberDiagnosticClass, AgentTeamMemberId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadRef, AgentTeamWorkerRef, AgentTeamWorkerStateView } from '@contexera/dsh-agent-team/types'
 import { resolveBodyMentions, scanBodyHandles } from '@contexera/dsh-agent-team/mentions'
 import { extractMarkdownPlainText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamKey } from './locales.ts'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamStateDotState } from './TeamStateDot.tsx'
+import { workerEngineName } from './worker-copy.ts'
 
 export function formatTaskStatus(status: AgentTeamTask['status'], t: TeamConversationProps['t']): string {
   return t(({
@@ -412,12 +413,38 @@ export function formatInboxTime(occurredAt: string, t: TeamConversationProps['t'
   return formatMessageTime(occurredAt, now)
 }
 
+/**
+ * One Activity row's sentence. A Worker start carries no state of its own, so
+ * its word comes from the read's `workerStates`, never from the fact.
+ */
 export function formatActivity(activity: AgentTeamActivity, options: {
   readonly t: TeamConversationProps['t']
   readonly actorName: (memberId: AgentTeamMemberId) => string
   readonly claims: readonly AgentTeamClaim[]
+  readonly workerStates?: ReadonlyMap<AgentTeamWorkerRef, AgentTeamWorkerStateView> | undefined
 }): string {
   const actor = options.actorName(activity.actor)
+  if (activity.kind === 'worker_started') {
+    const engine = workerEngineName(options.t, activity.engine)
+    const run = options.workerStates?.get(activity.workerRef)
+    if (run?.unconfirmed === true) return options.t('activityWorkerStartedUnconfirmed', { actor, engine })
+    return run?.state === 'running'
+      ? options.t('activityWorkerStartedRunning', { actor, engine })
+      : options.t('activityWorkerStarted', { actor, engine })
+  }
+  if (activity.kind === 'worker_settled') {
+    const engine = workerEngineName(options.t, activity.engine)
+    const reason = activity.reason
+    if (activity.state === 'completed') return options.t('activityWorkerSettledCompleted', { actor, engine })
+    if (activity.state === 'stopped') {
+      return reason === undefined
+        ? options.t('activityWorkerSettledStopped', { actor, engine })
+        : options.t('activityWorkerSettledStoppedWithReason', { actor, engine, reason })
+    }
+    return reason === undefined
+      ? options.t('activityWorkerSettledFailed', { actor, engine })
+      : options.t('activityWorkerSettledFailedWithReason', { actor, engine, reason })
+  }
   if (activity.kind === 'accept') {
     return activity.completedClaimRefs !== undefined && activity.completedClaimRefs.length > 0
       ? options.t('activityAcceptedWithClaims', { actor, count: activity.completedClaimRefs.length })

@@ -3,6 +3,8 @@ import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { AgentTeamMemberCapabilities, AgentTeamModelSelection } from './types.ts'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { MEMBER_REMINDER_REF_PATTERN } from './member-reminders.ts'
+import { WORKER_DIAGNOSTIC_MAX_CHARACTERS, WORKER_ENGINES, WORKER_OUTPUT_MAX_CHARACTERS,
+  WORKER_REASON_MAX_CHARACTERS } from './worker-settings.ts'
 import type { SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {
@@ -19,6 +21,9 @@ import type {
   AgentTeamRequestId,
   AgentTeamTaskRef,
   AgentTeamThreadRef,
+  AgentTeamWorkerExecution,
+  AgentTeamWorkerRef,
+  AgentTeamWorkerStartRecord,
   AgentTeamSubscriptionEventRef,
   AgentTeamSubscriptionRef,
 } from './types.ts'
@@ -38,6 +43,8 @@ const threadRefSchema = z.string().regex(/^thread:[^:]+$/).transform(value => va
 const claimRefSchema = z.string().regex(/^claim:[^:]+$/).transform(value => value as AgentTeamClaimRef)
 const activityRefSchema = z.string().regex(/^activity:[^:]+$/).transform(value => value as AgentTeamActivityRef)
 const attachmentIdSchema = z.string().min(1).transform(value => value as AgentTeamAttachmentId)
+const workerRefSchema = z.string().regex(/^worker:[^:]+$/).transform(value => value as AgentTeamWorkerRef)
+const workerEngineSchema = z.enum(WORKER_ENGINES)
 
 const actorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('human'), memberId: memberIdSchema, handle: z.string().min(1) }).strict(),
@@ -397,9 +404,31 @@ const claimSchema = z.object({
   state: z.union([z.literal('active'), z.literal('done'), z.literal('released')]),
 }).strict()
 
+const workerStartRecordSchema = z.object({
+  workerRef: workerRefSchema,
+  projectRef: projectRefSchema,
+  threadRef: threadRefSchema.optional(),
+  taskRef: taskRefSchema.optional(),
+  initiatedBy: memberIdSchema,
+  engine: workerEngineSchema,
+  task: z.string().min(1),
+  cwd: z.string().min(1),
+  startedAt: z.string().datetime(),
+}).strict()
+
+// The Host cuts these to code points; the bound here is the UTF-16 length that
+// many code points can occupy, so a record the Host wrote is never refused.
+const workerSettlementSchema = z.object({
+  workerRef: workerRefSchema,
+  state: z.union([z.literal('completed'), z.literal('failed'), z.literal('stopped')]),
+  settledAt: z.string().datetime(),
+  nativeSessionId: z.string().min(1).optional(),
+  output: z.string().min(1).max(WORKER_OUTPUT_MAX_CHARACTERS * 2).optional(),
+  diagnostic: z.string().min(1).max(WORKER_DIAGNOSTIC_MAX_CHARACTERS * 2).optional(),
+}).strict()
+
 const activityBase = {
   activityRef: activityRefSchema,
-  taskRef: taskRefSchema,
   threadRef: threadRefSchema,
   actor: memberIdSchema,
   sequence: z.number().int().positive(),
@@ -407,12 +436,14 @@ const activityBase = {
 
 const claimActivitySchema = z.object({
   ...activityBase,
+  taskRef: taskRefSchema,
   kind: z.union([z.literal('claim'), z.literal('done'), z.literal('release')]),
   claimRef: claimRefSchema,
 }).strict()
 
 const taskActivitySchema = z.object({
   ...activityBase,
+  taskRef: taskRefSchema,
   kind: z.union([z.literal('promote'), z.literal('accept'), z.literal('close'), z.literal('reopen'), z.literal('transfer')]),
   from: memberIdSchema.optional(),
   to: memberIdSchema.optional(),
@@ -424,11 +455,33 @@ const taskActivitySchema = z.object({
 
 const claimsReleasedActivitySchema = z.object({
   ...activityBase,
+  taskRef: taskRefSchema,
   kind: z.literal('claims_released'),
   claimRefs: z.array(claimRefSchema).min(1),
 }).strict()
 
-const activitySchema = z.discriminatedUnion('kind', [claimActivitySchema, taskActivitySchema, claimsReleasedActivitySchema])
+const workerStartedActivitySchema = z.object({
+  ...activityBase,
+  taskRef: taskRefSchema.optional(),
+  kind: z.literal('worker_started'),
+  projectRef: projectRefSchema,
+  workerRef: workerRefSchema,
+  engine: workerEngineSchema,
+}).strict()
+
+const workerSettledActivitySchema = z.object({
+  ...activityBase,
+  taskRef: taskRefSchema.optional(),
+  kind: z.literal('worker_settled'),
+  projectRef: projectRefSchema,
+  workerRef: workerRefSchema,
+  engine: workerEngineSchema,
+  state: z.union([z.literal('completed'), z.literal('failed'), z.literal('stopped')]),
+  reason: z.string().min(1).max(WORKER_REASON_MAX_CHARACTERS * 2).optional(),
+}).strict()
+
+const activitySchema = z.discriminatedUnion('kind', [claimActivitySchema, taskActivitySchema, claimsReleasedActivitySchema,
+  workerStartedActivitySchema, workerSettledActivitySchema])
 
 const threadFactSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('message'), sequence: z.number().int().positive(), message: messageSchema,
@@ -942,6 +995,27 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       senderMemberId: memberIdSchema,
       recipientMemberId: memberIdSchema,
       body: z.string().min(1),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/worker-started'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      execution: workerStartRecordSchema,
+      activity: workerStartedActivitySchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/worker-settled'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      execution: workerSettlementSchema,
+      activity: workerSettledActivitySchema.optional(),
+      inbox: inboxDeltaSchema,
     }).strict(),
   }).strict(),
 ])

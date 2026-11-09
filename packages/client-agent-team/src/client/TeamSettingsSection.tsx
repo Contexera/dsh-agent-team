@@ -1,16 +1,17 @@
 import { useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { Button, Input, SettingsForm, SettingsValueField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronDownOutlineRegular, Input, SettingsForm, SettingsValueField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { HUMAN_AVATAR_MAX_BYTES } from '@contexera/dsh-agent-team/human-settings'
 import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
 import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'
 import { formLabels } from './locales.ts'
-import { WORKER_ENGINES, WORKER_SANDBOX_MODES } from '@contexera/dsh-agent-team/worker-settings'
+import { WORKER_ENGINES } from '@contexera/dsh-agent-team/worker-settings'
 import { useTeamConfig, useWorkerConfig, type TeamConfigFace, type WorkerConfigFace } from './team-config.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import { identityInitial } from './team-formatters.ts'
+import { WORKER_ENGINE_COPY, workerEngineName } from './worker-copy.ts'
 import css from './team-settings.module.css'
 
 /** The Team's settings page: identity, the Host row's two configuration groups, the local environment check, and the version footnote. It owns no durable fact and no copy of one — identity writes through the Team Remote, both groups through the shared configuration form — and a failed write keeps the typed value and reports the Host's reason. */
@@ -111,131 +112,115 @@ function Field(props: {
   </div>
 }
 
-/** Each engine's copy and the command its path falls back to. */
-const ENGINE_COPY = {
-  codex: { name: 'workerEngineCodex', hint: 'workerEngineCodexHint', command: 'codex' },
-  claude: { name: 'workerEngineClaude', hint: 'workerEngineClaudeHint', command: 'claude' },
-} as const
-
 /**
- * The Host row's Worker group, staged by its own settings form for the same
- * reason the context group is. Its intro states what the switch turns on — a
- * local CLI under its own native permissions — and the engines stay disabled
- * until it is on, so the group reads top-down as what is allowed, then how.
+ * The Host row's Worker group. It is a disclosure rather than an open block: the
+ * group is opt-in, so a closed row states what it is set to in one phrase and
+ * costs one line of the page. Open, the hierarchy is the panel inside it — the
+ * switch, then the engines as one nested surface — so no rule is needed to
+ * separate a level from the level it contains.
  * @param props - the page's locale reader and the Worker group's face.
- * @returns the group's heading, its switches and fields, and its save.
+ * @returns the group's summary row and, open, its switches and fields.
  */
 function WorkerSettings(props: { t: TeamSettingsProps['t']; face: WorkerConfigFace }) {
   const { t, face } = props
   const state = useWorkerConfig(face)
   const headingId = useId()
+  const bodyId = useId()
   const prefix = useId()
+  const [open, setOpen] = useState(false)
   const on = state.enabled.text === 'true'
   const locked = !state.writable || state.saving
   const engineLocked = locked || !on
   const defaultEngine = state.defaultEngine.text
   // A row whose default engine is off refuses every delegation that names none.
   const defaultEngineOff = (defaultEngine === 'codex' ? state.codexEnabled : state.claudeEnabled).text !== 'true'
-  const sandbox = state.codexSandbox.text
-  // A stored policy stays selectable; the modes are Codex's own spellings. An
-  // explicitly stored empty policy — which this page never writes — is named for
-  // what it runs instead of being shown as a mode it would not use.
-  const sandboxModes: readonly string[] = (WORKER_SANDBOX_MODES as readonly string[]).includes(sandbox)
-    ? WORKER_SANDBOX_MODES
-    : [...WORKER_SANDBOX_MODES, sandbox]
+  const enabled = WORKER_ENGINES.filter(engine => (engine === 'codex' ? state.codexEnabled : state.claudeEnabled).text === 'true')
+  const summary = !on
+    ? t('workerCollapsedOff')
+    : enabled.length === 0
+      ? t('workerCollapsedOnNoEngine')
+      : t('workerCollapsedOnEngines', { engines: enabled.map(engine => workerEngineName(t, engine)).join(' · ') })
   return <section className={css.worker} aria-labelledby={headingId} data-worker-settings>
-    <h3 className={css.groupHeading} id={headingId}>{t('workerTitle')}</h3>
-    <p className={css.groupIntro}>{t('workerIntro')}</p>
-    <SettingsForm labels={formLabels(t)} state={state} onSave={face.save} onDiscard={face.discard}>
-      <div className={css.workerFields}>
-        <div className={css.row}>
-          <div className={css.rowText}>
-            <div className={css.title}>{t('workerEnabled')}</div>
-            <div className={css.desc}>{t('workerEnabledHint')}</div>
+    <button type="button" className={css.workerToggle} aria-expanded={open} aria-controls={bodyId}
+      onClick={() => { setOpen(value => !value) }}>
+      <span className={css.groupHeading} id={headingId}>{t('workerTitle')}</span>
+      <span className={css.workerToggleSummary}>{summary}</span>
+      <span className={`${css.chevron} ${open ? css.chevronOpen : ''}`} aria-hidden><IconChevronDownOutlineRegular /></span>
+    </button>
+    <div id={bodyId} hidden={!open} className={css.workerBody}>
+      <p className={css.groupIntro}>{t('workerIntro')}</p>
+      <SettingsForm labels={formLabels(t)} state={state} onSave={face.save} onDiscard={face.discard}>
+        <div className={css.workerFields}>
+          <div className={css.row}>
+            <div className={css.rowText}>
+              <div className={css.title}>{t('workerEnabled')}</div>
+              <div className={css.desc}>{t('workerEnabledHint')}</div>
+            </div>
+            <div className={css.controls}>
+              <Switch
+                checked={on}
+                label={t('workerEnabled')}
+                disabled={locked}
+                onChange={(next) => { face.setSwitch('enabled', next) }}
+              />
+            </div>
           </div>
-          <div className={css.controls}>
-            <Switch
-              checked={on}
-              label={t('workerEnabled')}
-              disabled={locked}
-              onChange={(next) => { face.setSwitch('enabled', next) }}
-            />
-          </div>
-        </div>
-        <Field
-          id={`${prefix}-default-engine`}
-          label={t('workerDefaultEngine')}
-          hint={defaultEngineOff
-            ? <>{t('workerDefaultEngineHint')} {t('workerDefaultEngineUnavailable')}</>
-            : t('workerDefaultEngineHint')}
-          render={describedBy => <select
-            id={`${prefix}-default-engine`}
-            className={`${css.control} ${css.select}`}
-            value={defaultEngine}
-            aria-describedby={describedBy}
-            disabled={engineLocked}
-            onChange={(event) => { face.edit('defaultEngine', event.target.value) }}
-          >
-            {WORKER_ENGINES.map(engine => <option key={engine} value={engine}>{t(ENGINE_COPY[engine].name)}</option>)}
-          </select>}
-        />
-        {WORKER_ENGINES.map((engine) => {
-          const name = t(ENGINE_COPY[engine].name)
-          const pathId = `${prefix}-${engine}-path`
-          const isCodex = engine === 'codex'
-          return <div className={css.engine} key={engine} data-worker-engine={engine}>
-            <div className={css.row}>
-              <div className={css.rowText}>
-                <div className={css.title}>{name}</div>
-                <div className={css.desc}>{t(ENGINE_COPY[engine].hint)}</div>
-              </div>
-              <div className={css.controls}>
-                <Switch
-                  checked={(isCodex ? state.codexEnabled : state.claudeEnabled).text === 'true'}
-                  label={t('workerEngineSwitch', { engine: name })}
-                  disabled={engineLocked}
-                  onChange={(next) => { face.setSwitch(isCodex ? 'codexEnabled' : 'claudeEnabled', next) }}
+          <div className={css.enginePanel}>
+            <div className={css.defaultEngine}>
+              <label className={css.fieldLabel} htmlFor={`${prefix}-default-engine`}>{t('workerDefaultEngine')}</label>
+              <select
+                id={`${prefix}-default-engine`}
+                className={`${css.control} ${css.select}`}
+                value={defaultEngine}
+                aria-describedby={defaultEngineOff ? `${prefix}-default-engine-note` : undefined}
+                disabled={engineLocked}
+                onChange={(event) => { face.edit('defaultEngine', event.target.value) }}
+              >
+                {WORKER_ENGINES.map(engine => <option key={engine} value={engine}>{workerEngineName(t, engine)}</option>)}
+              </select>
+              {!defaultEngineOff ? null : <p className={css.defaultEngineNote} id={`${prefix}-default-engine-note`}>
+                {t('workerDefaultEngineUnavailable')}
+              </p>}
+            </div>
+            {WORKER_ENGINES.map((engine) => {
+              const name = workerEngineName(t, engine)
+              const pathId = `${prefix}-${engine}-path`
+              const isCodex = engine === 'codex'
+              return <div className={css.engine} key={engine} data-worker-engine={engine}>
+                <div className={css.engineHead}>
+                  <span className={css.engineName}>{name}</span>
+                  <Switch
+                    checked={(isCodex ? state.codexEnabled : state.claudeEnabled).text === 'true'}
+                    label={t('workerEngineSwitch', { engine: name })}
+                    disabled={engineLocked}
+                    onChange={(next) => { face.setSwitch(isCodex ? 'codexEnabled' : 'claudeEnabled', next) }}
+                  />
+                </div>
+                <Field
+                  id={pathId}
+                  label={t('workerExecutable')}
+                  hint={t('workerExecutableHint', { command: WORKER_ENGINE_COPY[engine].command })}
+                  render={describedBy => <input
+                    id={pathId}
+                    className={css.control}
+                    value={(isCodex ? state.codexExecutable : state.claudeExecutable).text}
+                    // Both engines label this field the same way, so the engine is
+                    // what tells a screen reader which path it is on.
+                    aria-label={t('workerExecutableFor', { engine: name })}
+                    aria-describedby={describedBy}
+                    placeholder={t('workerExecutablePlaceholder', { command: WORKER_ENGINE_COPY[engine].command })}
+                    spellCheck={false}
+                    autoComplete="off"
+                    disabled={engineLocked}
+                    onChange={(event) => { face.edit(isCodex ? 'codexExecutable' : 'claudeExecutable', event.target.value) }}
+                  />}
                 />
               </div>
-            </div>
-            <Field
-              id={pathId}
-              label={t('workerExecutable')}
-              hint={t('workerExecutableHint', { command: ENGINE_COPY[engine].command })}
-              render={describedBy => <input
-                id={pathId}
-                className={css.control}
-                value={(isCodex ? state.codexExecutable : state.claudeExecutable).text}
-                // Both engines label this field the same way, so the engine is
-                // what tells a screen reader which path it is on.
-                aria-label={t('workerExecutableFor', { engine: name })}
-                aria-describedby={describedBy}
-                placeholder={t('workerExecutablePlaceholder', { command: ENGINE_COPY[engine].command })}
-                spellCheck={false}
-                autoComplete="off"
-                disabled={engineLocked}
-                onChange={(event) => { face.edit(isCodex ? 'codexExecutable' : 'claudeExecutable', event.target.value) }}
-              />}
-            />
-            {!isCodex ? null : <Field
-              id={`${prefix}-codex-sandbox`}
-              label={t('workerSandbox')}
-              hint={t('workerSandboxHint')}
-              render={describedBy => <select
-                id={`${prefix}-codex-sandbox`}
-                className={`${css.control} ${css.select}`}
-                value={sandbox}
-                aria-describedby={describedBy}
-                disabled={engineLocked}
-                onChange={(event) => { face.edit('codexSandbox', event.target.value) }}
-              >
-                {sandboxModes.map(mode => <option key={mode} value={mode}>{mode === '' ? t('workerSandboxUnset') : mode}</option>)}
-              </select>}
-            />}
+            })}
           </div>
-        })}
-      </div>
-    </SettingsForm>
+        </div>
+      </SettingsForm>
+    </div>
   </section>
 }
 

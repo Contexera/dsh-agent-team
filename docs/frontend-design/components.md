@@ -86,17 +86,23 @@ The group sits between the identity rows and the environment check, under its ow
 
 A blank field stages an `unset` so the group re-inherits the composition layer and its 256000 default. Only that one child path is written, so the sibling `enabled` switch the page never shows survives every save.
 
-The Worker group is the row's second settings group, staged by its own `SettingsForm` for the same reason the context group has one: one save is one settings-document write, so the two cannot share a button. It opens on the page's hairline under its own 13px/600 heading and states the fact its switch turns on *before* the switch: a local CLI runs under its own native permissions, and Team decides only who may delegate, into which Project, and where the result goes.
+The Worker group is the row's second settings group, staged by its own `SettingsForm` for the same reason the context group has one: one save is one settings-document write, so the two cannot share a button.
 
-Three switch rows reuse the identity rows' geometry — a 14px/22px title over a 12px/18px tertiary description, 16px of padding, the control flush to the group's right edge. The separators belong to the group rather than the rows: every block after the first opens on a 1px hairline, so a switch row never closes on one and opens another.
+It is a disclosure, not an open block. The row is opt-in, so closed it costs one line — its 13px/600 title and a one-phrase summary derived from the stored row (`Off`, `On · Codex`) — and opening it is what reveals the switch.
 
-A field keeps the shipped settings field's rhythm — 12px of padding, a 13px/500 label, a 12px/18px hint — and both its input and its two pickers carry that field's own geometry (36px with the hairline, 13px type, layer-3 fill), measured against the compaction field above.
+Open, it states the fact the switch turns on *before* the switch: two local CLIs that run with full permissions, and Team deciding only who may delegate, into which Project, and where the result goes.
+
+The switch row reuses the identity rows' geometry — a 14px/22px title over a 12px/18px tertiary description, the control flush to the group's right edge — and carries no hairline: the nesting below it is drawn by a layer-2 panel rather than by rules, so no line has to say which level a row belongs to. The only hairlines left in the group are the controls' own, and the page's group separators stay its only lines between blocks.
+
+A field keeps the shipped settings field's rhythm — a 13px/500 label over a 12px/18px hint — and its control carries that field's own geometry (36px with the hairline, 13px type, layer-3 fill), measured against the compaction field above.
 
 Both engines label their path with the same words, so each input's accessible name carries its engine (`Codex executable path`) while the visible label stays the short one it is.
 
-The engines and their fields stay disabled until the group's switch is on, so the group reads top-down as what is allowed, then how. Each engine carries a switch, the executable path that keeps a Host process from inheriting a shell's `PATH`, and — Codex only — the sandbox policy, offered as Codex's own modes. A policy the row already stores stays visible and stages back unchanged, so a picker never rewrites a value it did not offer; an explicitly stored empty string is named for the mode the run actually falls back to.
+The engines and their fields stay disabled until the group's switch is on, so the group reads top-down as what is allowed, then how. Each engine is one nested row — its name, its switch — over the executable path that keeps a Host process from inheriting a shell's `PATH`.
 
-The default engine is a picker of its own, and when the engine it names is off its hint says so, because a delegation that names no engine is refused. The turn deadline stays a row field this page does not render.
+There is no sandbox control. Both engines run with full permissions by default, so the page asks nothing about it; narrowing one stays an explicit row an operator writes.
+
+The default engine is a picker inside the same panel, and when the engine it names is off a one-line note says so, because a delegation that names no engine is refused. The turn deadline stays a row field this page does not render.
 
 Only a save writes, and it writes leaf paths (`worker.engines.codex.executable`, never the group object), so the row's other groups and each group's unturned switches survive. A control staged back to the value it already showed stages nothing, which is why toggling a switch on and off again leaves the row clean.
 
@@ -321,3 +327,11 @@ One line keeps a long opener and a two-character one at the same band height (me
 A stacked band — Inbox, the Task board, a Thread page — states its own height: a 28px title line, the 3px step and a 20px description line, a 51px floor. Its description line renders in every state: the counts while there is a queue, a sentence naming the face while there is not. A band with data and one without therefore measure the same to the pixel.
 
 The Project page is the other shape — description on the title's baseline, tab strip below — and keeps its own 10px top inset and 30px identity row, the shipped session header's rhythm.
+
+## Worker runs in a Thread
+
+A Worker run appears as activity rows in the Thread it was bound to, and each row is the same centred 11px tertiary line every other activity row is. The start every run has is one row; the terminal it may get is another, because the two are separate facts and a long Thread may scroll the first away before the second lands.
+
+The start row carries no state word of its own. "Running" or "result unconfirmed" comes from the run's whole durable state in the same read that returned the facts, never from whether the terminal fact sits in the loaded page: a run whose end has paged out reads as a plain start, not a guess. The terminal row names the engine and, for a failure or a stop, a bounded reason. What the Worker answered never enters the Thread — it reaches the initiator, and the Human through them.
+
+The engine's name comes from the same copy the settings page uses, so a Thread holding runs of both engines cannot spell one of them two ways.

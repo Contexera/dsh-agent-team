@@ -68,6 +68,10 @@ import type {
   AgentTeamThread,
   AgentTeamThreadReadReceipt,
   AgentTeamThreadRef,
+  AgentTeamWorkerRef,
+  AgentTeamWorkerSettledActivity,
+  AgentTeamWorkerStartedActivity,
+  AgentTeamWorkerStartRecord,
 } from '../src/types.ts'
 import { snapshotScript } from '../src/subscriptions.ts'
 
@@ -605,6 +609,39 @@ const threadStarted: Op<'team/thread-started'> = {
       sender: human.memberId, body: 'protocol fixture started thread', topLevel: true, sequence: 34, occurredAt: instant },
     thread: { threadRef: 'thread:protocol-started' as AgentTeamThreadRef, revision: 34 },
     inbox: emptyInbox,
+  },
+}
+
+const workerRef = 'worker:protocol-1' as AgentTeamWorkerRef
+const workerExecution: AgentTeamWorkerStartRecord = {
+  workerRef, projectRef, threadRef: humanThread, initiatedBy: memberId, engine: 'codex',
+  task: 'protocol fixture worker task', cwd: '/tmp/protocol-worker', startedAt: instant,
+}
+const workerStartedActivity: AgentTeamWorkerStartedActivity = {
+  activityRef: 'activity:protocol-worker-started' as AgentTeamActivityRef, threadRef: humanThread,
+  actor: memberId, sequence: 44, kind: 'worker_started', projectRef, workerRef, engine: 'codex',
+}
+const workerStarted: Op<'team/worker-started'> = {
+  ...opBase('operation:protocol-worker-started', 'request:protocol-worker-started', 44, memberActor),
+  previousOperationId,
+  kind: 'team/worker-started',
+  data: { workspaceId: alpha, execution: workerExecution, activity: workerStartedActivity },
+}
+const workerSettledActivity: AgentTeamWorkerSettledActivity = {
+  activityRef: 'activity:protocol-worker-settled' as AgentTeamActivityRef, threadRef: humanThread,
+  actor: memberId, sequence: 45, kind: 'worker_settled', projectRef, workerRef, engine: 'codex',
+  state: 'failed', reason: 'the engine exited before answering',
+}
+const workerSettled: Op<'team/worker-settled'> = {
+  ...opBase('operation:protocol-worker-settled', 'request:protocol-worker-settled', 45, hostActor),
+  previousOperationId,
+  kind: 'team/worker-settled',
+  data: {
+    workspaceId: alpha,
+    execution: { workerRef, state: 'failed', settledAt: instant, diagnostic: 'the engine exited before answering' },
+    activity: workerSettledActivity,
+    inbox: { ...emptyInbox, activityMarkers: { added: [{ memberId, threadRef: humanThread,
+      activityRef: workerSettledActivity.activityRef, sequence: 45 }], removed: [] } },
   },
 }
 
@@ -1598,6 +1635,52 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'no-op', inbox: 'none' },
+  },
+  'team/worker-started': {
+    stored: workerStarted,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.recordWorkerStarted({
+          requestId: workerStarted.requestId,
+          actor: memberActor,
+          workspaceId: alpha,
+          execution: workerExecution,
+        })
+        expect(out.value.execution.workerRef, 'the start mapper answers with the stored binding').toBe(workerRef)
+        expect(out.value.activity?.activityRef, 'the start mapper answers with the stored Thread fact').toBe(workerStartedActivity.activityRef)
+        return out
+      },
+      changed: () => ledger.recordWorkerStarted({
+        requestId: workerStarted.requestId,
+        actor: memberActor,
+        workspaceId: alpha,
+        execution: { ...workerExecution, task: 'a different delegation' },
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/worker-settled': {
+    stored: workerSettled,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.recordWorkerSettled({
+          requestId: workerSettled.requestId,
+          settlement: { workerRef, state: 'failed', diagnostic: 'the engine exited before answering' },
+        })
+        expect(out.value.state, 'the settlement mapper answers with the stored ending').toBe('failed')
+        expect(out.value.activity?.activityRef, 'the settlement mapper answers with the stored Thread fact').toBe(workerSettledActivity.activityRef)
+        return out
+      },
+      changed: () => ledger.recordWorkerSettled({
+        requestId: workerSettled.requestId,
+        settlement: { workerRef, state: 'completed' },
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
   },
   'team/subscription-created': {
     stored: subscriptionCreated,

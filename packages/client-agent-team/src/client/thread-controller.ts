@@ -18,6 +18,8 @@ import type {
   AgentTeamThreadRef,
   AgentTeamThreadTaskCard,
   AgentTeamUnreadRequired,
+  AgentTeamWorkerRef,
+  AgentTeamWorkerStateView,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { TeamConversationProps } from './slots.ts'
@@ -84,6 +86,8 @@ export interface TeamThreadController {
   readonly readFacts: readonly AgentTeamThreadReadFact[]
   readonly olderFacts: readonly AgentTeamThreadFact[]
   readonly taskCards: readonly AgentTeamThreadTaskCard[]
+  /** How each Worker run these facts name stands, merged across every read and page, so a window never decides a run's state. */
+  readonly workerStates: ReadonlyMap<AgentTeamWorkerRef, AgentTeamWorkerStateView>
   readonly followerIds: ReadonlySet<AgentTeamMemberId>
   readonly historyHasMore: boolean
   readonly loading: boolean
@@ -139,6 +143,7 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   const [taskCards, setTaskCards] = useState<readonly AgentTeamThreadTaskCard[]>([])
   const [olderFacts, setOlderFacts] = useState<readonly AgentTeamThreadFact[]>([])
   const [readFacts, setReadFacts] = useState<readonly AgentTeamThreadReadFact[]>([])
+  const [workerStates, setWorkerStates] = useState<ReadonlyMap<AgentTeamWorkerRef, AgentTeamWorkerStateView>>(() => new Map())
   const [historyCursor, setHistoryCursor] = useState<number>()
   const [historyHasMore, setHistoryHasMore] = useState(false)
   const [autoReadExhausted, setAutoReadExhausted] = useState(false)
@@ -172,10 +177,18 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   // opening jump depends on it without re-running on every render.
   const timelineOnScroll = timeline.onScroll
 
+  // Every read and history page carries the runs its own facts name; merging keeps a run's
+  // state after a later page stops mentioning it — what "unconfirmed" must not depend on.
+  const mergeWorkerStates = (next: readonly AgentTeamWorkerStateView[] | undefined): void => {
+    if (next === undefined) return
+    setWorkerStates(current => new Map([...current, ...next.map(view => [view.workerRef, view] as const)]))
+  }
+
   const updateProjection = (next: AgentTeamThreadReadResult): void => {
     projectionRef.current = next
     setProjection(next)
     setReadFacts(next.facts)
+    mergeWorkerStates(next.workerStates)
     const anchor = messageFact(next.anchor, next.anchorMentions)
     const batch = [anchor, ...next.facts.map(fact => fact.fact)]
     setCurrentFacts(current => {
@@ -277,6 +290,7 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
     currentFactsRef.current = []
     setOlderFacts([])
     setReadFacts([])
+    setWorkerStates(new Map())
     setHistoryCursor(undefined)
     setHistoryHasMore(false)
     setAutoReadExhausted(false)
@@ -354,6 +368,7 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
       if (!mountedRef.current) return
       if (!result.ok) { setError(result.error.message); return }
       setOlderFacts(current => mergeFacts(current, result.value.facts))
+      mergeWorkerStates(result.value.workerStates)
       setHistoryCursor(result.value.cursor)
       setHistoryHasMore(result.value.hasMore)
       setError(undefined)
@@ -535,6 +550,7 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
     readFacts,
     olderFacts,
     taskCards,
+    workerStates,
     followerIds,
     historyHasMore,
     loading,

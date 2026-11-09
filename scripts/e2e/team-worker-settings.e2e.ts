@@ -1,5 +1,5 @@
 import { afterEach, it, expect } from 'vitest'
-import type { Page } from 'playwright'
+import type { Locator, Page } from 'playwright'
 import { UI09_SHOTS, acknowledgeReloadConnectionLoss, closeScenario, maxHorizontalScroll, openSettings, openTeamPage, settleLayout } from './__external-agent-team-support.ts'
 import { join } from 'node:path'
 
@@ -20,45 +20,78 @@ async function openWorkerGroup(page: Page) {
   return { panel, group }
 }
 
+/** The group's disclosure, whose name carries the title and the summary after it. */
+function disclosure(group: Locator): Locator {
+  return group.getByRole('button', { name: /Worker 委派/ })
+}
+
+/** Open the group; closed, it is one summary line and none of its controls. */
+async function expand(group: Locator): Promise<void> {
+  const toggle = disclosure(group)
+  if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
+  await expect.poll(async () => await toggle.getAttribute('aria-expanded')).toBe('true')
+}
+
 it('configures the Worker delegation group on the Team settings page', async () => {
   const { page, consoleWatch } = await openTeamPage({ stayInOrdinaryMode: true })
 
   const { panel, group } = await openWorkerGroup(page)
+  // Closed, the group costs one line and says what it is set to.
+  const summary = disclosure(group)
+  expect(await summary.getAttribute('aria-expanded')).toBe('false')
+  expect(await summary.textContent()).toContain('已关闭')
+  expect(await group.getByRole('switch', { name: MASTER }).count()).toBe(0)
+  await settleLayout(page)
+  await page.screenshot({ path: join(UI09_SHOTS, 'worker-settings-collapsed.png') })
+
+  await expand(group)
   const master = group.getByRole('switch', { name: MASTER })
   await expect.poll(async () => await master.getAttribute('aria-checked')).toBe('false')
-  // The one fact the switch turns on is on the page before the switch: a local
-  // CLI running under its own native permissions, off until the operator says so.
+  // The one fact the switch turns on stands before the switch: two local CLIs with full permissions, off by default.
   const copy = await group.textContent()
-  expect(copy).toContain('按下面配置的原生权限执行')
+  expect(copy).toContain('完整权限运行')
   expect(copy).toContain('默认关闭')
 
-  // A group that is off cannot be configured; the engines read as locked rather
-  // than as switches that would write a config nothing honours.
+  // The picker's label stays one line; its note takes the line under the control.
+  const picker = await page.evaluate(() => {
+    const select = document.querySelector('[data-worker-settings] select') as HTMLSelectElement
+    const row = select.parentElement as HTMLElement
+    const label = row.querySelector('label') as HTMLElement
+    const note = row.querySelector('p') as HTMLElement | null
+    return {
+      labelHeight: label.getBoundingClientRect().height,
+      labelLines: label.getClientRects().length,
+      noteTop: note?.getBoundingClientRect().top ?? null,
+      selectBottom: select.getBoundingClientRect().bottom,
+    }
+  })
+  expect(picker.labelLines).toBe(1)
+  expect(picker.labelHeight).toBeLessThanOrEqual(24)
+  expect(picker.noteTop).not.toBeNull()
+  expect(picker.noteTop!).toBeGreaterThanOrEqual(picker.selectBottom - 1)
+
+  // A group that is off cannot be configured: its engines read as locked, not as switches nothing honours.
   const codex = group.locator('[data-worker-engine="codex"]')
   const codexSwitch = codex.getByRole('switch')
   expect(await codexSwitch.isDisabled()).toBe(true)
   expect(await codex.getByLabel('Codex 的可执行路径').isDisabled()).toBe(true)
-  expect(await codex.getByLabel('沙箱策略').isDisabled()).toBe(true)
+  // Full permissions are the default and no longer a field: narrowing stays a row the operator writes.
+  expect(await group.getByLabel('沙箱策略').count()).toBe(0)
 
   await master.click()
   await expect.poll(async () => await codexSwitch.isDisabled()).toBe(false)
   await codexSwitch.click()
   await expect.poll(async () => await codexSwitch.getAttribute('aria-checked')).toBe('true')
-  // This deployment's codex is installed outside the Host's PATH, which is why
-  // the path is a setting at all; the sandbox is the one flag Codex exposes.
+  // This deployment's codex sits outside the Host's PATH, which is why the path is a setting.
   await codex.getByLabel('Codex 的可执行路径').fill('/data/bin/codex')
-  await codex.getByLabel('沙箱策略').selectOption('read-only')
 
   const save = group.getByRole('button', { name: SAVE })
   await save.click()
-  // The form goes clean only when the Host accepted the write and the readback
-  // carries it; a refusal leaves the drafts staged and the button live.
+  // The form goes clean only when the Host accepted the write and the readback carries it.
   await expect.poll(async () => await save.isDisabled(), { timeout: 20_000 }).toBe(true)
   await settleLayout(page)
-  // Read the geometry the way the eye would judge it: the path and both pickers
-  // at the shipped field's own height, that field's 13px/500 label, the identity
-  // rows' 14px/22px title, and one hairline between blocks (never under the
-  // group's own switch row).
+  // The hierarchy is drawn, not ruled: a fill under the switch, no hairline inside the group.
+  // Controls keep the shipped field's height, type, fill and left edge.
   const geometry = await page.evaluate(() => {
     const group = document.querySelector('[data-worker-settings]') as HTMLElement
     const codex = group.querySelector('[data-worker-engine="codex"]') as HTMLElement
@@ -66,12 +99,16 @@ it('configures the Worker delegation group on the Team settings page', async () 
     const row = master.parentElement!.parentElement as HTMLElement
     const title = row.children[0].children[0] as HTMLElement
     const path = codex.querySelector('input') as HTMLElement
-    const select = codex.querySelector('select') as HTMLSelectElement
+    const select = group.querySelector('select') as HTMLSelectElement
     const label = codex.querySelector('label') as HTMLElement
-    const blocks = [...codex.children] as HTMLElement[]
-    // The compaction field above this group is the shipped field this page
-    // already draws; both of this group's controls have to match it.
+    const panel = codex.parentElement as HTMLElement
     const shipped = document.querySelector('#plugin-config-team-member-compaction-tokens') as HTMLElement
+    // A separator spans the width (top or bottom set, sides unset); a control's own hairline has all four sides.
+    const separators = [...group.querySelectorAll('*')].filter((node) => {
+      const style = getComputedStyle(node)
+      const across = Number.parseFloat(style.borderTopWidth) > 0 || Number.parseFloat(style.borderBottomWidth) > 0
+      return across && Number.parseFloat(style.borderLeftWidth) === 0 && Number.parseFloat(style.borderRightWidth) === 0
+    }).map(node => node.className)
     return {
       titleFont: getComputedStyle(title).fontSize,
       titleLine: getComputedStyle(title).lineHeight,
@@ -88,10 +125,10 @@ it('configures the Worker delegation group on the Team settings page', async () 
       shippedLabelLeft: (document.querySelector('label[for="plugin-config-team-member-compaction-tokens"]') as HTMLElement).getBoundingClientRect().left,
       controlsRight: master.getBoundingClientRect().right,
       groupRight: group.getBoundingClientRect().right,
-      rowBottom: getComputedStyle(blocks[0]!).borderBottomWidth,
-      separators: blocks.map(block => getComputedStyle(block).borderTopWidth),
-      headingLeft: (group.querySelector('h3') as HTMLElement).getBoundingClientRect().left,
-      groupLeft: group.getBoundingClientRect().left,
+      panelFill: getComputedStyle(panel).backgroundColor,
+      groupFill: getComputedStyle(group).backgroundColor,
+      panelIndent: panel.getBoundingClientRect().left - group.getBoundingClientRect().left,
+      separators,
     }
   })
   expect(geometry.titleFont).toBe('14px')
@@ -102,40 +139,36 @@ it('configures the Worker delegation group on the Team settings page', async () 
   expect(geometry.selectHeight).toBe(geometry.shippedHeight)
   expect(geometry.pathFont).toBe(geometry.shippedFont)
   expect(geometry.pathFill).toBe(geometry.shippedFill)
-  expect(geometry.rowBottom).toBe('0px')
-  expect(geometry.separators).toEqual(['0px', '1px', '1px'])
-  expect(geometry.headingLeft).toBe(geometry.groupLeft)
-  // One column: this group's labels start where the shipped field's does, and
-  // the switch ends on the group's own right edge.
+  // No rule inside the group at any depth: the panel's fill says what the switch contains.
+  expect(geometry.separators).toEqual([])
+  expect(geometry.panelFill).not.toBe(geometry.groupFill)
+  expect(geometry.panelIndent).toBe(0)
+  // The group's labels start where the shipped field's does; the switch ends on the group's right edge.
   expect(geometry.labelLeft).toBe(geometry.shippedLabelLeft)
   expect(Math.abs(geometry.controlsRight - geometry.groupRight)).toBeLessThanOrEqual(1)
-  // The dialog scrolls internally, so a viewport shot is what a reviewer can
-  // actually see; put the group's heading at the top of that scroller, or the
-  // sentence the switch turns on is above the frame.
+  // The dialog scrolls internally, so a viewport shot is the evidence; scroll the summary to its top.
   await group.evaluate(element => { element.scrollIntoView({ block: 'start' }) })
   await settleLayout(page)
   await page.screenshot({ path: join(UI09_SHOTS, 'worker-settings-desktop.png') })
 
-  // A reload is the only evidence that the row, not this page, holds the switch:
-  // the section stages nothing across a mount.
+  // A reload is the only evidence that the row, not this page, holds the switch; the closed summary is a projection.
   let warningStart = consoleWatch.warnings.length
   await page.reload()
   await settleLayout(page)
   acknowledgeReloadConnectionLoss(consoleWatch, warningStart)
   const reopened = await openWorkerGroup(page)
   const stored = reopened.group
+  expect(await disclosure(stored).textContent()).toContain('已开启 · Codex')
+  await expand(stored)
   const storedCodex = stored.locator('[data-worker-engine="codex"]')
   await expect.poll(async () => await stored.getByRole('switch', { name: MASTER }).getAttribute('aria-checked')).toBe('true')
   expect(await storedCodex.getByRole('switch').getAttribute('aria-checked')).toBe('true')
   expect(await storedCodex.getByLabel('Codex 的可执行路径').inputValue()).toBe('/data/bin/codex')
-  expect(await storedCodex.getByLabel('沙箱策略').inputValue()).toBe('read-only')
 
-  // 390×844: the settings shell keeps its 188px rail, so the group gets a narrow
-  // column. Nothing may overflow it.
+  // 390×844: the shell keeps its 188px rail, so the group gets a narrow column that may not overflow.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
-  // A ~106px column: the shipped narrow rule stacks each row's copy over its
-  // control instead of squeezing them side by side.
+  // A ~106px column: the shipped narrow rule stacks each row's copy over its control.
   const stacked = await page.evaluate(() => {
     const group = document.querySelector('[data-worker-settings]') as HTMLElement
     const master = group.querySelector('button[role="switch"]') as HTMLElement
@@ -150,9 +183,7 @@ it('configures the Worker delegation group on the Team settings page', async () 
   })
   expect(stacked.switchTop).toBeGreaterThanOrEqual(stacked.titleBottom - 1)
   expect(stacked.switchRight).toBeLessThanOrEqual(stacked.groupRight + 1)
-  // A ~106px column leaves the pickers ~60px of text room. The widest spelling a
-  // picker can show has to fit there, or the chosen value is unreadable at the
-  // one width the release gate promises.
+  // The one picker left has to keep its chosen value readable in that column.
   const legible = await page.evaluate(() => {
     const selects = [...document.querySelectorAll('[data-worker-settings] select')] as HTMLSelectElement[]
     const canvas = document.createElement('canvas').getContext('2d')!
@@ -164,7 +195,7 @@ it('configures the Worker delegation group on the Team settings page', async () 
       return { widest, available }
     })
   })
-  expect(legible.length).toBe(2)
+  expect(legible.length).toBe(1)
   for (const picker of legible) expect(picker.widest).toBeLessThanOrEqual(picker.available)
   await stored.scrollIntoViewIfNeeded()
   await settleLayout(page)
@@ -178,10 +209,8 @@ it('configures the Worker delegation group on the Team settings page', async () 
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
 
-  // Every lane after this one shares the run's profile, so put the row back and
-  // prove the revert reached the Host too.
+  // Later lanes share this profile, so put the row back and prove the revert reached the Host.
   await storedCodex.getByLabel('Codex 的可执行路径').fill('')
-  await storedCodex.getByLabel('沙箱策略').selectOption('workspace-write')
   await storedCodex.getByRole('switch').click()
   await stored.getByRole('switch', { name: MASTER }).click()
   await stored.getByRole('button', { name: SAVE }).click()
@@ -191,7 +220,8 @@ it('configures the Worker delegation group on the Team settings page', async () 
   await settleLayout(page)
   acknowledgeReloadConnectionLoss(consoleWatch, warningStart)
   const reverted = await openWorkerGroup(page)
-  await expect.poll(async () => await reverted.group.getByRole('switch', { name: MASTER }).getAttribute('aria-checked')).toBe('false')
+  await expect.poll(async () => await disclosure(reverted.group).textContent()).toContain('已关闭')
+  await expand(reverted.group)
   const revertedCodex = reverted.group.locator('[data-worker-engine="codex"]')
   expect(await revertedCodex.getByRole('switch').getAttribute('aria-checked')).toBe('false')
   expect(await revertedCodex.getByLabel('Codex 的可执行路径').inputValue()).toBe('')

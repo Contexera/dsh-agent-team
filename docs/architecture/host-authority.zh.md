@@ -241,13 +241,29 @@ credential 值每次运行前经 `ctx.credentials` 解析，并在执行器自�
 
 subagent 服务跟随 Host，而不是跟随 Member：Team 组合的是一处 `@deepseek-ai/dsh-subagent` 挂载加每个已启用引擎一行 provider，Member 的工具调用从它自己的 Agent context 抵达该服务，并把该 live Agent 作为激活的 `parent` 传入。按 Member 各挂一份 provider 会让同一个 projection 在每位 Member 处重复注册，并给每人一棵独立激活树，因此不是本设计。
 
-授权在调用时从 ledger 判定，不看当前页面或目录：指定的 `project:` 引用必须存在，调用者必须是它当前的 Agent owner 之一，并且 Host 设置行的 `worker` 组里开关与该引擎都已打开。Human 拥有每个 Project 但不调用 Team 工具，所以不存在 Human 入口。任何拒绝都发生在原生进程启动之前；已接纳的 `requestId` 返回它自己的那次执行。
+授权在调用时从 ledger 判定，不看当前页面或目录：目标必须存在且自身一致，调用者必须是它所属 Project 当前的 Agent owner 之一，并且 Host 设置行的 `worker` 组里开关与该引擎都已打开。Human 拥有每个 Project 但不调用 Team 工具，所以不存在 Human 入口。任何拒绝都发生在原生进程启动之前；已接纳的 `requestId` 只对开启它的成员与那次委派返回它自己的执行。
 
-provider 为每次委派打开一个 OAR 会话，使用操作者显式给出的引擎设置，并把设置行里的 Codex 权限模式带进那次打开：精确 pin 的 OAR 0.95.1 从 Host 进程自己的 `OAR_CODEX_SANDBOX` 读取它——会话的 `env` 只到子进程，库也没有逐会话的选项——所以这个值只在打开调用期间设置，到 app-server 握手返回后恢复——这是本 Host 里另一个 Codex 会话打开时可能看到它的唯一窗口。从未存过该策略的设置行解析为 `workspace-write`。
+那个答案只属于开启该 id 的成员与那次委派：同一个 id 的两次并发调用只开一个引擎，换成员、换任务、换引擎或换目标复用该 id 会被拒绝，而不是被应答。
+
+provider 为每次委派打开一个 OAR 会话，使用操作者显式给出的引擎设置，并把设置行里的 Codex 权限模式带进那次打开：精确 pin 的 OAR 0.95.1 从 Host 进程自己的 `OAR_CODEX_SANDBOX` 读取它——会话的 `env` 只到子进程，库也没有逐会话的选项——所以这个值只在打开调用期间设置，到 app-server 握手返回后恢复——这是本 Host 里另一个 Codex 会话打开时可能看到它的唯一窗口。
+
+从未存过该策略的设置行解析为 `danger-full-access`；Claude 不需要自己的策略：两个引擎在嵌入式用法里都无门槛运行——没人值守的批准提示是卡死而不是安全——所以本 bundle 不会给操作者已经委派出去的工作再加一道权限闸。收紧某个 Worker 是操作者的显式选择，这个字段只为它存在：设置页只展示开关与引擎，不展示该策略，所以更窄的 Worker 是手写设置行，而不是页面上的字段。
 
 provider 还保留引擎的原生 session 身份与工作目录，供后续变更加入的只读诊断使用。它直接使用精确 pin 的 `@botiverse/oar`，而不是 Harness 的 OAR provider：Worker 必须暴露该原生身份，且执行记录必须归 Team；该库按需导入，所以没有它的 Host 依然能启动，普通 Session 也不受影响。
 
-结果按 parent delivery 返回：通知到达发起成员自己的 Session，不写 ledger、Thread、Task 或 Main stream。因此执行记录是进程内的——运行中重启的 Host 无法再次报告该执行——Team 侧的停止、Client 检查与持久执行事实都是延后工作，不是当前行为。卸载插件会拒绝新的委派，并等待本 Host 仍持有的执行完成清理。
+委派在写任何东西之前先绑定目标：`taskRef` 定住它的 Thread，只给 `threadRef` 时定住该 Thread 以及它自己的 Task，只给 `projectRef` 则是纯 Project 委派。Thread 或 Task 决定 owner 校验所针对的 Project，把 Task 与不属于它的 Thread 一起给出按矛盾拒绝。所有拒绝都发生在写 started 记录之前、原生进程启动之前。绑定写定后即冻结：之后的页面、目录、成员关系变化或 Task 转派都不会移动一次执行的结果。
+
+绑定带来两种记录形态。
+
+**绑定**的执行写两条 ledger 操作——`team/worker-started` 与 `team/worker-settled`——Thread 上对应 `worker_started` 与 `worker_settled` 两条公开事实。started 事实说明一次执行开始并给出引擎；终态事实再加 `state`，失败或停止时加一行不超过 2000 码点的 `reason`。Worker 的答案永远不公开：它留在终态操作的私有载荷里，与任务正文、工作目录、原生 session 身份和完整 diagnostic 一起，只通过同一次提交唤醒发起者的 Inbox notice 抵达他本人——notice 标明它是外部文本，是数据不是指令。于是任何参与者都能看到执行发生过、怎么结束的，而只有发起该委派的 Member（或 Human）读到它说了什么。激活使用 caller delivery，父 Session 不会收到第二份。
+
+也正因如此，这段文本只存在于记录里：失败或被停止的运行会保留它已经产生的部分——终态说明走到哪里为止，状态词不代替它。
+
+**未绑定**的执行在公开面上保持原样：parent delivery、没有 Thread 事实、不向 Project 发布任何东西。执行记录照样写入——本 Host 启动的每次执行都有 `team/worker-started` 与 `team/worker-settled`——这正是纯 Project 执行之后仍能按 `worker:` 引用查到的原因。
+
+规则版本 6 引入这两个操作：旧 build 打开版本 6 的 ledger 会拒绝并要求更新版本；采纳版本 6 的 Host 会在下次启动时写入这次采纳。
+
+绑定执行的持久状态是派生的，从不存第二份。`threadWorkerStates` 读执行记录而不是某次分页返回的事实，所以长 Thread 上每个绑定的执行都有状态，即使它的事实落在窗口之外。仍标记 `running` 而在本 Host 里没有活跃句柄的记录——运行中被替换的 Host 的签名——读作 `unconfirmed`：结果无法确认，不重跑、不自动重试。`unconfirmed` 不写 marker、不唤醒任何人，只在 Thread 上可见。卸载插件会拒绝新的委派，并对每个仍在运行的引擎最多等五秒报出终态，之后记录留在 `running`，读作结果未确认。
 
 ## Composer attachments（cache，不是 archive）
 

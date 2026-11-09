@@ -316,7 +316,7 @@ describe('post-commit delivery', () => {
       projectRef: project.project.projectRef, body: `@${member.handle} main update` })
     const snapshot = ledger.notificationSnapshot(member.memberId)
     expect(snapshot).toEqual({ threads: ledger.notificationFacts(member.memberId), main: ledger.mainNotificationFacts(member.memberId),
-      memberReminders: ledger.unreadMemberRemindersFor(member.memberId) })
+      memberReminders: ledger.unreadMemberRemindersFor(member.memberId), workers: [] })
     expect(ledger['notificationReadSet']).toBeUndefined()
     const plan = team['inboxDeliveryPlan']({ notifications: snapshot.threads, main: snapshot.main })
     const delivery = structuredClone(team['inboxNoticeDeliveries'].get(member.memberId))
@@ -334,7 +334,7 @@ describe('post-commit delivery', () => {
     const next = ledger.notificationSnapshot(member.memberId)
     expect(next.main).not.toEqual(snapshot.main)
     expect(next).toEqual({ threads: ledger.notificationFacts(member.memberId), main: ledger.mainNotificationFacts(member.memberId),
-      memberReminders: ledger.unreadMemberRemindersFor(member.memberId) })
+      memberReminders: ledger.unreadMemberRemindersFor(member.memberId), workers: [] })
   })
 
   it('preserves notice text, coverage, attempts and wake routing through failures and generation replacement', async () => {
