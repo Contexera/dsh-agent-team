@@ -2368,7 +2368,12 @@ export class AgentTeamLedger {
       const grantedMainAttention = kind === 'team/project-owner-added'
         && this.mainAttentionForFrom(this.state, request.memberId, request.projectRef) === undefined
         ? [this.startMainAttention(request.memberId, request.projectRef, sequence, 'project-owner')] : []
-      const inbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention)
+      // The withdrawal ends the row the grant itself started, so a Member removed
+      // as owner stops receiving ordinary updates. A row the Member started on its
+      // own is not the grant's to end: that following and its read progress stay.
+      const endedMainAttention = kind === 'team/project-owner-removed'
+        ? this.grantedMainAttentionEnds(this.state, request.memberId, request.projectRef) : []
+      const inbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention, endedMainAttention)
       const data = Object.freeze({ ...base, activity, inbox,
         ...(kind === 'team/project-owner-removed' ? { transfers: returned.transfers, tasks: returned.tasks, threads: returned.threads } : {}) })
       const operation: AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation = Object.freeze({
@@ -4727,9 +4732,15 @@ export class AgentTeamLedger {
         && this.mainAttentionForFrom(projection, operation.data.memberId, operation.data.projectRef) !== undefined
       const grantedMainAttention = operation.kind === 'team/project-owner-added' && !alreadyFollowing
         ? [this.startMainAttention(operation.data.memberId, operation.data.projectRef, operation.sequence, 'project-owner')] : []
-      const expectedInbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention)
+      const endedMainAttention = operation.kind === 'team/project-owner-removed'
+        ? this.grantedMainAttentionEnds(projection, operation.data.memberId, operation.data.projectRef) : []
+      const expectedInbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention, endedMainAttention)
+      // A withdrawal written before it ended the grant's own Attention replays as
+      // the row it stored, so that shape stays valid beside the current one.
+      const legacyInbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention)
       const transfers = operation.kind === 'team/project-owner-removed' ? operation.data.transfers : []
-      if (!this.sameInboxDelta(operation.data.inbox, expectedInbox, transfers)) throw new Error('invalid Project owner inbox projection')
+      if (!this.sameInboxDelta(operation.data.inbox, expectedInbox, transfers)
+        && !this.sameInboxDelta(operation.data.inbox, legacyInbox, transfers)) throw new Error('invalid Project owner inbox projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], transfers, [], [activity])
       if (operation.kind === 'team/project-owner-removed') {
         this.validateAccountabilityReturns(operation.data, returned, projection, refs)
@@ -7050,6 +7061,18 @@ export class AgentTeamLedger {
     return memberId === AGENT_TEAM_HUMAN_MEMBER_ID
       ? this.humanMainAttentionFrom(projection, projectRef)
       : projection.mainAttention.get(mainAttentionKey(memberId, projectRef))
+  }
+
+  /**
+   * The Main stream Attention row a withdrawn ownership grant created, or nothing.
+   * Only `project-owner` rows end with the grant: a Member that followed on its
+   * own holds a `self` row, and that following — with its read progress — is not
+   * the grant's to end. The Human's derived row is never stored, and the Human is
+   * never removed as owner.
+   */
+  private grantedMainAttentionEnds(projection: Projection, memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef): readonly AgentTeamMainAttentionKey[] {
+    const stored = projection.mainAttention.get(mainAttentionKey(memberId, projectRef))
+    return stored?.source === 'project-owner' ? [Object.freeze({ memberId, projectRef })] : []
   }
 
   private isFollowingMainFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {

@@ -525,20 +525,36 @@ describe('owner changes in the Main stream', () => {
     expect(standing.markers).toMatchObject([{ activityRef: expect.stringMatching(/^activity:/) }])
   })
 
-  it('keeps ordinary unread when ownership ends, because the Attention is now the Member own', async () => {
+  it('ends the Attention the grant started when ownership is withdrawn', async () => {
     const team = await seed(2)
     await post(team, human, 'ordinary')
     expect(page(team, team.owner.actor).standing.unreadCount).toBe(2)
     await team.ledger.removeProjectOwner({ requestId: requestId('owner'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: team.owner.memberId })
     const standing = page(team, team.owner.actor).standing
-    // Withdrawing ownership is not an unfollow: the Member keeps the Main stream
-    // Attention it was granted, so the ordinary unread stands until it reads or
-    // unfollows. Only the owner privilege is gone. The withdrawal itself is one
-    // more ordinary entry, since the Member still follows the stream.
-    expect(standing).toMatchObject({ following: true, unreadCount: 3, directCount: 2 })
+    // The grant started this row, so the withdrawal ends it: the ordinary post stops
+    // reaching the Member, and only the two owner Activities stay as direct markers.
+    // A Member that wants the stream back follows it again from the tail.
+    expect(standing).toMatchObject({ following: false, unreadCount: 2, directCount: 2 })
     expect(standing.markers).toHaveLength(2)
-    expect((await readMain(team, team.owner.actor)).committed).toBe(true)
-    expect(page(team, team.owner.actor).standing.unreadCount).toBe(0)
+    const followed = await team.ledger.changeAttention({ requestId: requestId('follow'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, action: 'follow' })
+    expect(followed.committed).toBe(true)
+    expect(page(team, team.owner.actor).standing).toMatchObject({ following: true, unreadCount: 2, directCount: 2 })
+  })
+
+  it('keeps a Member that followed on its own after ownership is withdrawn', async () => {
+    const team = await seed(2)
+    await team.ledger.changeAttention({ requestId: requestId('follow'), actor: team.writer.actor, workspaceId: alpha,
+      projectRef: team.projectRef, action: 'follow' })
+    await team.ledger.addProjectOwner({ requestId: requestId('owner'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: team.writer.memberId })
+    await team.ledger.removeProjectOwner({ requestId: requestId('owner'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: team.writer.memberId })
+    // The grant found a row the Member had started, so it never owned that row and
+    // the withdrawal leaves it alone: following, with the read progress it chose.
+    expect(page(team, team.writer.actor).standing).toMatchObject({ following: true })
+    await post(team, human, 'after the withdrawal')
+    // The two owner Activities stay as direct markers, and the new post is ordinary
+    // unread because the Member's own follow is still in force.
+    expect(page(team, team.writer.actor).standing).toMatchObject({ following: true, unreadCount: 3, directCount: 2 })
   })
 })
 
@@ -583,5 +599,28 @@ describe('earlier-version Threads and replay', () => {
     expect(fresh.mainNotificationFacts(team.writer.memberId)).toEqual([])
     expect(fresh.mainStreamHistory(human, { workspaceId: alpha, projectRef: team.projectRef }).entries.map(entry => entry.kind))
       .toEqual(team.ledger.mainStreamHistory(human, { workspaceId: alpha, projectRef: team.projectRef }).entries.map(entry => entry.kind))
+  })
+
+  it('replays a withdrawal both as this build writes it and as an earlier build stored it', async () => {
+    const team = await seed(2)
+    await post(team, human, 'ordinary')
+    await team.ledger.removeProjectOwner({ requestId: requestId('owner'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: team.owner.memberId })
+    const standing = () => page(team, team.owner.actor).standing
+    // This build's record ends the grant's row, and replaying it reproduces that.
+    expect(new AgentTeamLedger(team.table, { rulesVersion: 2 }).mainStreamHistory(team.owner.actor, { workspaceId: alpha, projectRef: team.projectRef }).standing)
+      .toEqual(standing())
+    // An earlier build recorded the same withdrawal without ending the row. The
+    // record replays as the shape it stored, so that ledger keeps following.
+    const stored = team.pool.media.get('agent_team')!.tables.get('operations')!
+    for (const [key, record] of stored) {
+      const operation = record as AgentTeamOperation
+      if (operation.kind !== 'team/project-owner-removed') continue
+      const { mainAttention: _ended, ...legacyInbox } = operation.data.inbox
+      stored.set(key, { ...operation, data: { ...operation.data, inbox: legacyInbox } } as AgentTeamOperation)
+    }
+    // The medium is reopened so the rewritten record is what the replay reads.
+    const reopened = await openTable(team.pool)
+    expect(new AgentTeamLedger(reopened, { rulesVersion: 2 }).mainStreamHistory(team.owner.actor, { workspaceId: alpha, projectRef: team.projectRef }).standing)
+      .toMatchObject({ following: true })
   })
 })

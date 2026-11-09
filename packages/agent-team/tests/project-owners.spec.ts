@@ -86,7 +86,7 @@ describe('default Attention from an ownership change', () => {
     expect(standing.unreadCount).toBeGreaterThan(0)
   })
 
-  it('keeps the withdrawn owner Main stream Attention, because withdrawing ownership is not an unfollow', async () => {
+  it('ends the withdrawn owner Main stream Attention the grant started', async () => {
     const { ledger, owner, projectRef, change } = await seed(2)
     await ledger.addProjectOwner(change(owner))
     await ledger.postMainMessage({ requestId: requestId('post'), actor: human, workspaceId: alpha, projectRef, body: 'Ordinary update' })
@@ -95,19 +95,11 @@ describe('default Attention from an ownership change', () => {
 
     await ledger.removeProjectOwner(change(owner))
 
+    // The grant started this row, so the withdrawal ends it: the ordinary update
+    // stops reaching the Member and only the two ownership Activities stay.
     const after = ledger.mainStreamHistory({ kind: 'member', memberId: owner, handle: 'owner' }, { workspaceId: alpha, projectRef }).standing
-    // The row stands, so the ordinary unread stands with it: only the owner
-    // privilege is gone, and an explicit unfollow is the only thing that ends it.
-    expect(after).toMatchObject({ following: true, unreadCount: 3 })
-    expect(ledger['state'].mainAttention.has(`${owner}|${projectRef}`)).toBe(true)
-
-    await ledger.changeAttention({ requestId: requestId('unfollow-main'), actor: { kind: 'member', memberId: owner, handle: 'owner' },
-      workspaceId: alpha, projectRef, action: 'unfollow' })
+    expect(after).toMatchObject({ following: false, unreadCount: 2, directCount: 2 })
     expect(ledger['state'].mainAttention.has(`${owner}|${projectRef}`)).toBe(false)
-    // The ordinary unread is gone; the two ownership Activities still address
-    // this Member, so their markers remain — exactly as on a Thread unfollow.
-    const standing = ledger.mainStreamHistory({ kind: 'member', memberId: owner, handle: 'owner' }, { workspaceId: alpha, projectRef }).standing
-    expect(standing).toMatchObject({ following: false, unreadCount: 2, directCount: 2 })
   })
 
   it('ends the Main stream Attention when the Member is archived or removed', async () => {

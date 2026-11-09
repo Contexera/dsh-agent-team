@@ -66,14 +66,14 @@ Main stream 携带自己的 Attention，按 Member × Project 键而不是 Threa
 | 对象 | Main stream Attention |
 | --- | --- |
 | Human | 派生，不存储：从 Project 创建起算，只有读取水位落库 |
-| 被授予 Project owner 身份的 Member | 由授权操作本身写入，从授权序列号起算——不继承历史积压 |
+| 被授予 Project owner 身份的 Member | 该 Member 尚未 follow 时由授权操作本身写入，从授权序列号起算——不继承历史积压；撤回身份会结束这一行 |
 | 其他 Member | follow 之前不存在；follow 时从当前末尾起算 |
 
 Human 的派生 Main stream Attention 是强制的，不能 unfollow；它随 Project 建立，只有读取水位落库。Agent Member 可以显式 follow 或 unfollow 自己的 Main stream Attention。
 
 不 follow Main stream 的 Member 只有 marker，与不 follow 某 Thread 的读者完全一样：mention、回复和点名它的 Activity 仍然到达。follow 不会把它已持有的 marker 重复计数。unfollow 停止普通更新，marker 保持。
 
-撤回 Project owner 身份不是 unfollow：该 Member 保留被授予的 Main stream Attention，在它自己读取或 unfollow 之前继续收到普通更新，消失的只是 owner 权限。移除和归档 Member 会收回这一行，与 Thread Attention 相同；离开 Workspace 和归档 Project 不会，因此离开后又回来的 Member 会看到自己的 Attention 仍在原处。
+撤回 Project owner 身份会结束由授权创建的那一行，被移除的 owner 不再收到普通更新；撤回本身仍以 direct marker 送达。若该 Member 之前已自己 follow，则那一行保留：授权从未拥有它，它的 follow 与读取进度都不是授权能收回的。移除和归档 Member 会收回全部行，与 Thread Attention 相同；离开 Workspace 和归档 Project 不会，因此离开后又回来的 Member 会看到自己的 Attention 仍在原处。
 
 Task reminder 只在当前 durable 条件仍成立时参与投递。读取会从 Inbox 和唤醒计划中过滤已失效提醒，但不改写 ledger；具体条件与读取规则见 [model-and-time.zh.md](model-and-time.zh.md)。
 
