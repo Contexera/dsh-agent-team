@@ -76,7 +76,7 @@ const BLOCK_CHARACTER_CEILINGS = {
   'frontend-design/sidebar-browser.md': [556, 366],
   'frontend-design/thread-and-composer.md': [573, 548],
   'harness-navigation.md': [425, 322],
-  'release-runbook.md': [547, 244],
+  'release-runbook.md': [534, 243],
   'team-collaboration/README.md': [259, 161],
   'team-collaboration/attention-and-messaging.md': [590, 565],
   'team-collaboration/boundaries.md': [604, 560],

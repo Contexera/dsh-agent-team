@@ -41,7 +41,11 @@ Run in this order; a failure stops the release, and a fix re-runs from the faile
 
 ## 4. Release material
 
-**`CHANGELOG.md`** gets a `## [X.Y.Z] - YYYY-MM-DD` section at the top, one theme per bullet, in the same words as the English half of the Release body. An `## [Unreleased]` section written by implementers is a completeness checklist, not draft prose: rewrite it into the release section, then **delete the whole `## [Unreleased]` section it came from**, leaving exactly one such section in the file — the empty one the next change writes into. A second `## [Unreleased]` left behind reads as a duplicate release, which is what happened at 0.2.3.
+**`CHANGELOG.md`** gets a `## [X.Y.Z] - YYYY-MM-DD` section at the top, one theme per bullet, in the same words as the English half of the Release body.
+
+An `## [Unreleased]` section written by implementers is a completeness checklist, not draft prose: rewrite it into the release section, then **delete the whole `## [Unreleased]` section it came from**, leaving exactly one such section in the file — the empty one the next change writes into. A second `## [Unreleased]` left behind reads as a duplicate release, which is what happened at 0.2.3.
+
+A bullet states the behavior of the commit that wrote it, so a later fix in the same window can leave it false. Nothing gates this file, so re-derive every claim from the code at `HEAD` rather than trusting the bullet's own commit.
 
 **The GitHub Release body** ships both languages: Chinese first, English below, with a language switcher at the top and the sections 新增功能 / 体验优化 / 问题修复 / 其他变更 mirrored in English.
 
