@@ -1702,6 +1702,48 @@ function stopReceipt(state: string, diagnostic: string | undefined): string {
 }
 
 /**
+ * One run's diagnostic as its initiator reads it: the summary the Thread already
+ * carries, the native identities the Host recorded, and the bounded fragments the
+ * engine's own record still answers — or the reason it cannot.
+ */
+function inspectionReport(value: {
+  readonly workerRef: string; readonly state: string; readonly engine?: string | undefined
+  readonly projectRef?: string | undefined; readonly threadRef?: string | undefined
+  readonly startedAt?: string | undefined; readonly settledAt?: string | undefined
+  readonly summary?: string | undefined; readonly stage?: string | undefined
+  readonly nativeThreadId?: string | undefined; readonly nativeTurnId?: string | undefined
+  readonly nativeStorage?: string | undefined; readonly nativeRecord?: string | undefined
+  readonly nativeReason?: string | undefined; readonly nativeWithheld?: number | undefined
+  readonly nativeTruncated?: boolean | undefined
+  readonly nativeFragments?: readonly { readonly kind: string; readonly text: string }[] | undefined
+}): string {
+  const lines = [
+    `Worker ${value.workerRef} · ${value.engine ?? 'Worker'} · ${value.state}`,
+    ...(value.projectRef === undefined ? [] : [`Project: ${value.projectRef}`]),
+    ...(value.threadRef === undefined ? [] : [`Thread: ${value.threadRef}`]),
+    ...(value.startedAt === undefined ? [] : [`Started at: ${formatTeamTimestamp(value.startedAt)}`]),
+    ...(value.settledAt === undefined ? [] : [`Ended at: ${formatTeamTimestamp(value.settledAt)}`]),
+    `Summary: ${value.summary ?? 'none recorded'}`,
+    ...(value.stage === undefined ? [] : [`Failed at: ${value.stage}`]),
+    ...(value.nativeThreadId === undefined ? [] : [`Native thread: ${value.nativeThreadId}`]),
+    ...(value.nativeTurnId === undefined ? [] : [`Native turn: ${value.nativeTurnId}`]),
+    ...(value.nativeStorage === undefined ? [] : [`Native record: ${value.nativeStorage}`]),
+  ]
+  if (value.nativeRecord !== 'read') {
+    lines.push(`No native fragment to show: ${value.nativeReason ?? 'the engine named no record this Team reads.'}`)
+    return lines.join('\n')
+  }
+  const fragments = value.nativeFragments ?? []
+  lines.push(fragments.length === 0
+    ? 'The engine\'s record holds nothing this Team reads for that turn.'
+    : 'The engine\'s own record:')
+  for (const fragment of fragments) lines.push(`- ${fragment.kind}: ${fragment.text}`)
+  if (value.nativeWithheld !== undefined) lines.push(`(${value.nativeWithheld} fragment(s) withheld: their text looks like a credential.)`)
+  if (value.nativeTruncated === true) lines.push('(The record was longer than this read, so later records were not read.)')
+  return lines.join('\n')
+}
+
+/**
  * The one delegation entry. A run bound to a Thread reports into it and wakes
  * this Member through the Inbox; an unbound Project delegation keeps the direct
  * result in this session. Neither creates a Task or a Main stream post, and the
@@ -1709,13 +1751,14 @@ function stopReceipt(state: string, diagnostic: string | undefined): string {
  */
 const teamWorker = defineTool({
   name: 'team_worker',
-  description: `Delegate one self-contained piece of work to a local Worker engine (Codex or Claude Code) that runs with its own tools, login, and settings, or stop a Worker this session delegated. Use it for work you can hand over completely: investigation, a scoped change in a prepared working directory, or a check that needs another engine. The Worker does not see this conversation, holds no Team identity, and cannot claim, accept, or answer for you, so the task text must carry the goal, the background, the scope, and what evidence to bring back. Name the Thread or Task the work belongs to and everything about the run is published there: the Thread shows when it started and how it ended, and its answer arrives in your Inbox — the other participants never see the raw output. Name only a Project and the result comes back to this session alone, published nowhere. The call returns as soon as the execution is accepted; keep working and do not poll. A Worker affects Project responsibility in no way: if you delegate work on a Task, the Claim stays yours and you still verify the result yourself, and a finished run never accepts a Task. Delegation needs the Team setting "allow Project owners to delegate Workers", your ownership of the Project the target belongs to, and an enabled engine; a refusal names which condition failed. To stop one execution, pass only its worker ref as stop; the call returns once the engine confirmed its cleanup, and a run that ended first answers with the state it really ended in. Another Member's run cannot be stopped this way.`,
+  description: `Delegate one self-contained piece of work to a local Worker engine (Codex or Claude Code) that runs with its own tools, login, and settings, or stop a Worker this session delegated. Use it for work you can hand over completely: investigation, a scoped change in a prepared working directory, or a check that needs another engine. The Worker does not see this conversation, holds no Team identity, and cannot claim, accept, or answer for you, so the task text must carry the goal, the background, the scope, and what evidence to bring back. Name the Thread or Task the work belongs to and everything about the run is published there: the Thread shows when it started and how it ended, and its answer arrives in your Inbox — the other participants never see the raw output. Name only a Project and the result comes back to this session alone, published nowhere. The call returns as soon as the execution is accepted; keep working and do not poll. A Worker affects Project responsibility in no way: if you delegate work on a Task, the Claim stays yours and you still verify the result yourself, and a finished run never accepts a Task. Delegation needs the Team setting "allow Project owners to delegate Workers", your ownership of the Project the target belongs to, and an enabled engine; a refusal names which condition failed. To stop one execution, pass only its worker ref as stop; the call returns once the engine confirmed its cleanup, and a run that ended first answers with the state it really ended in. Another Member's run cannot be stopped this way. To read one execution's diagnostic, pass only its worker ref as inspect: the call answers with the same summary the Thread carries, the native identities the Host recorded, and whatever the engine's own record still answers after its process exited. The native record itself is never copied into the Team, and only the Member who delegated the run or the Human may read it.`,
   parameters: {
     threadRef: { type: 'string', description: 'The Thread this work reports into, as a thread: ref. The run\'s start, ending, and Inbox wake all point at it. Its Project authorizes the delegation.' },
     taskRef: { type: 'string', description: 'The Task this work is for, as a task: ref. It fixes the Thread as well; naming a Thread and a Task together is accepted only when the Task is in that Thread.' },
     projectRef: { type: 'string', description: 'The Project to delegate into, as a project: ref from team_view. Omit whenever threadRef or taskRef already names it; with none of the three there is no target to authorize.' },
     task: { type: 'string', description: 'The complete task for the Worker: goal, background it needs, working scope, and the evidence to return. It cannot ask you follow-up questions. Required unless stop names a run to end.' },
     stop: { type: 'string', description: 'A worker: ref this session delegated. With this the call stops that execution instead of starting one: pass it alone, with no task, target, engine, directory, or request id.' },
+    inspect: { type: 'string', description: 'A worker: ref this session delegated. With this the call reads that execution\'s diagnostic instead of starting or stopping one: pass it alone, with no task, target, engine, directory, or request id. A run that has not ended answers with the summary alone.' },
     engine: { type: 'string', enum: ['codex', 'claude'], description: 'Engine to run. Omit for the Project default the Host settings name.' },
     cwd: { type: 'string', description: 'Absolute working directory the Worker runs in. Omit to use this session\'s own directory.' },
     requestId: { type: 'string', description: 'Optional idempotency key: resending the same value returns the execution the first call started instead of starting another, even when both calls arrive at once. A resend from another Member, or one that changes the task, engine, or target, is refused rather than answered with a run it did not ask for.' },
@@ -1724,13 +1767,20 @@ const teamWorker = defineTool({
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
       workerRef: { type: 'string', required: true }, state: { type: 'string', required: true },
+      mode: { type: 'string' },
       projectRef: { type: 'string' }, engine: { type: 'string' },
       cwd: { type: 'string' }, startedAt: { type: 'string' }, settledAt: { type: 'string' },
       threadRef: { type: 'string' }, diagnostic: { type: 'string' },
+      summary: { type: 'string' }, stage: { type: 'string' },
+      nativeThreadId: { type: 'string' }, nativeTurnId: { type: 'string' }, nativeStorage: { type: 'string' },
+      nativeRecord: { type: 'string' }, nativeReason: { type: 'string' },
+      nativeWithheld: { type: 'number' }, nativeTruncated: { type: 'boolean' },
+      nativeFragments: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+        kind: { type: 'string', required: true }, text: { type: 'string', required: true } } } },
     } },
     render: (_args, value) => [{
       type: 'text',
-      text: [
+      text: value.mode === 'inspect' ? inspectionReport(value) : [
         `Worker ${value.workerRef} · ${value.engine ?? 'Worker'} · ${value.state}`,
         ...(value.projectRef === undefined ? [] : [`Project: ${value.projectRef}`]),
         ...(value.threadRef === undefined ? [] : [`Thread: ${value.threadRef} — the run's start, ending, and answer report there`]),
@@ -1750,6 +1800,38 @@ const teamWorker = defineTool({
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_worker requires an Agent session')
     const host = service(agent)
+    if (args.stop !== undefined && args.inspect !== undefined) {
+      throw new Error('team_worker takes one worker ref at a time: pass stop or inspect, not both.')
+    }
+    if (args.inspect !== undefined) {
+      // Reading a diagnostic is its own call: it names one run and nothing else,
+      // so a half-filled start can never be read as a look-up.
+      if (args.task !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
+        || args.projectRef !== undefined || args.engine !== undefined || args.cwd !== undefined
+        || args.requestId !== undefined) {
+        throw new Error('team_worker takes either a task to start or an inspect ref, not both: pass inspect alone.')
+      }
+      const inspection = await host.workerInspectForAgent(agent, { workerRef: args.inspect as Parameters<typeof host.workerInspectForAgent>[1]['workerRef'] })
+      return {
+        mode: 'inspect', workerRef: inspection.workerRef, state: inspection.state, engine: inspection.engine,
+        projectRef: inspection.projectRef,
+        ...(inspection.threadRef === undefined ? {} : { threadRef: inspection.threadRef }),
+        ...(inspection.startedAt === undefined ? {} : { startedAt: inspection.startedAt }),
+        ...(inspection.settledAt === undefined ? {} : { settledAt: inspection.settledAt }),
+        summary: inspection.summary,
+        ...(inspection.stage === undefined ? {} : { stage: inspection.stage }),
+        ...(inspection.native.threadId === undefined ? {} : { nativeThreadId: inspection.native.threadId }),
+        ...(inspection.native.turnId === undefined ? {} : { nativeTurnId: inspection.native.turnId }),
+        ...(inspection.native.storage === undefined ? {} : { nativeStorage: inspection.native.storage }),
+        nativeRecord: inspection.history.kind,
+        ...inspection.history.kind !== 'read' ? { nativeReason: inspection.history.reason } : {
+          ...(inspection.history.fragments.length === 0 ? {} : {
+            nativeFragments: inspection.history.fragments.map(fragment => ({ kind: fragment.kind, text: fragment.text })) }),
+          ...(inspection.history.withheld === 0 ? {} : { nativeWithheld: inspection.history.withheld }),
+          ...(inspection.history.truncated ? { nativeTruncated: true } : {}),
+        },
+      }
+    }
     if (args.stop !== undefined) {
       // Starting and stopping are different calls: a stop names one run and
       // nothing else, so a half-filled start can never be read as a stop.

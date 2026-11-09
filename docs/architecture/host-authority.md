@@ -269,7 +269,7 @@ The provider opens one OAR session per delegation with the operator's explicit e
 
 A row that never stored the policy resolves to `danger-full-access`, and Claude needs no policy of its own: both engines run gate-free in embedded use, where an approval prompt nobody sits at is a hang rather than safety, so the bundle adds no second permission gate to work the operator already delegated. Narrowing a Worker is the operator's explicit opt-in, and the field exists only for that: the settings page shows the switch and the engines, not the policy, so a narrower Worker is a hand-edit of the row rather than a form field.
 
-The provider keeps the engine's native session identity and working directory for the read-only diagnostic a later change adds. It uses the pinned `@botiverse/oar` package directly rather than the Harness OAR provider, because a Worker must expose that native identity and Team must own the execution record; the library is imported on demand, so a Host without it still boots and every ordinary Session is unaffected.
+The provider keeps the engine's native session identity and working directory, and captures the anchors a read-only diagnostic needs — the native turn and the absolute path the engine reported for its record — on the result object itself. It uses the pinned `@botiverse/oar` package directly rather than the Harness OAR provider, because a Worker must expose that native identity and Team must own the execution record; the library is imported on demand, so a Host without it still boots and every ordinary Session is unaffected.
 
 A delegation is bound to a target before anything is written: `taskRef` fixes its Thread, `threadRef` alone fixes the Thread and that Thread's own Task, and `projectRef` alone is a Project-only delegation. The Thread or Task decides the Project the ownership check runs against, and a Task named against a Thread that is not its own is refused as contradictory. Every refusal happens before the opening record and before any native process. What the binding wrote is frozen: a later page, directory, Membership change, or Task transfer does not move a run's result.
 
@@ -299,7 +299,25 @@ Unloading the bundle is the same transaction at Host scale, in order: refuse new
 
 Anything still unconfirmed at that boundary is sealed: the run keeps its `running` record and accepts no later ending, so closing storage cannot race a write into a ledger nobody reads. Pending terminal writes are awaited before the provider registrations are released.
 
-The Human's surface is the edit-Agent dialog, which lists that Member's live runs: `running`, `stopping`, then the ending the Host confirmed. Its `stopWorker` receipt is structured rather than a sentence to read: `ended` names the state the run really reached and the Host's diagnostic, `pending` says the cleanup is still in flight, and `unconfirmed` says this Host no longer holds the handle. A run a previous Host left behind appears as `unconfirmed` with an explanation and no stop control, and a call that never completed says only that, never deciding the run's state.
+The Human's surface is the edit-Agent dialog, which lists that Member's live runs (`running`, `stopping`), the records a previous Host left running as `unconfirmed`, and the newest twenty ended runs by ending time — a long run that started early and failed just now stays inside that window — each with the ending the Host confirmed and its own diagnostic door.
+
+Its `stopWorker` receipt is structured rather than a sentence to read: `ended` names the state the run really reached and the Host's diagnostic, `pending` says the cleanup is still in flight, and `unconfirmed` says this Host no longer holds the handle. A run a previous Host left behind appears as `unconfirmed` with an explanation and no stop control, and a call that never completed says only that, never deciding the run's state.
+
+### Reading one run's diagnostic
+
+The anchors a look-up needs are written with the run's ending, never collected afterwards. The provider captures the engine's own session, the turn the run drove, and the absolute path the engine reported for its record, and carries them on the result object itself — a non-enumerable property on the object the Harness hands back unchanged, not a module-level map. A sealed run, or one whose ending lands late, therefore leaves nothing behind to collect.
+
+The capture happens while the session is still open: before an abort or a cleanup begins, and at the turn's own end. An engine closes its record stream as it tears down, so a capture taken afterwards would find nothing left to read. The turn is bound to the input this run submitted — a record that also holds another root turn cannot be tied to this run, and then reports no turn id rather than the last one it saw.
+
+A capture that fails changes no outcome: the ending keeps the state, diagnostic, and output the engine reported, and the record simply has no anchor.
+
+`readWorkerHistory` (`packages/agent-team/src/worker-inspection.ts`) is the only reader. It refuses a recorded location that is not an absolute `.jsonl` path under a `sessions` directory, and refuses an oversized value whole rather than cutting it into a path nobody recorded. It resolves the real path, compares the identity of the file it opened with the one the location named, checks that identity again after the read, and requires the first record to name the recorded session. Its 8 MiB budget is spent on the read itself, so an oversized line is never parsed.
+
+It returns records of the run's own turn only, bounded per fragment, and withholds a fragment whole when its text matches a credential shape — quoted JSON pairs included. Every reason it gives is one bounded sentence that names the fact and never echoes a native value. Nothing it reads is written back into the Team.
+
+The report is layered. The public Thread keeps the summary it already had; the detailed answer — the stage a failure came apart in, the native identities, the bounded fragments, or the one reason the record could not answer (`missing`, `unreadable`, `unpersisted`, `unsupported`, `unmatched`) — reaches only the initiating Member and the Human.
+
+A run that has not ended answers with its summary and says its record is read once it does, and a run that ended before any session was recorded says exactly that instead of claiming the engine never opened one.
 
 ## Composer attachments (cache, not archive)
 

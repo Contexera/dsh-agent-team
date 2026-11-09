@@ -558,6 +558,23 @@ export interface AgentTeamClaimsReleasedActivity extends AgentTeamActivityBase {
  */
 export type AgentTeamWorkerState = 'running' | 'completed' | 'failed' | 'stopped'
 
+/** What one bounded piece of an engine's own record is, so a surface can label it without parsing its text. */
+export type AgentTeamWorkerFragmentKind = 'session' | 'turn' | 'failure'
+
+/**
+ * Where a Worker run that failed came apart, in the Team's own vocabulary. It is
+ * recorded only when the ending was a failure the Host itself classified, and it
+ * is what lets a read say "it failed before a native session existed" instead of
+ * parsing that claim back out of a sentence.
+ */
+export type AgentTeamWorkerStage =
+  | 'engine-unavailable' // the OAR library is not installed
+  | 'installation' // the engine is missing or unauthenticated
+  | 'startup' // the engine refused to open a session
+  | 'turn' // the session opened and the turn failed
+  | 'abort' // interruption was not accepted
+  | 'dispose' // the engine did not confirm cleanup
+
 /** The immutable part of one delegated Worker run, written once when it starts. */
 export interface AgentTeamWorkerStartRecord {
   readonly workerRef: AgentTeamWorkerRef
@@ -585,6 +602,12 @@ export interface AgentTeamWorkerExecution extends AgentTeamWorkerStartRecord {
   readonly settledAt?: string | undefined
   /** The engine's own session identity, once one opened. */
   readonly nativeSessionId?: string | undefined
+  /** The engine's own identity for the turn this run drove, once one started. */
+  readonly nativeTurnId?: string | undefined
+  /** The absolute path of the engine's own record for that session, as the engine reported it. */
+  readonly nativeStorage?: string | undefined
+  /** Where a failed run came apart; absent when it did not fail. */
+  readonly stage?: AgentTeamWorkerStage | undefined
   /** The Worker's final answer, text only, bounded when stored; absent when it produced none. */
   readonly output?: string | undefined
   /** Safe failure summary, never a native cause. */
@@ -598,6 +621,12 @@ export interface AgentTeamWorkerSettlement {
   readonly settledAt: string
   /** The engine's own session identity, once one opened. */
   readonly nativeSessionId?: string | undefined
+  /** The engine's own identity for the turn this run drove, once one started. */
+  readonly nativeTurnId?: string | undefined
+  /** The absolute path of the engine's own record for that session, as the engine reported it. */
+  readonly nativeStorage?: string | undefined
+  /** Where a failed run came apart; absent when it did not fail. */
+  readonly stage?: AgentTeamWorkerStage | undefined
   /** The Worker's final answer, text only, bounded when stored; absent when it produced none. */
   readonly output?: string | undefined
   /** Safe failure summary, never a native cause. */

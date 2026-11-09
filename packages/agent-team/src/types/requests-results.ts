@@ -37,10 +37,12 @@ import type {
   AgentTeamThreadFact,
   AgentTeamThreadReadFact,
   AgentTeamThreadRef,
+  AgentTeamWorkerFragmentKind,
   AgentTeamWorkerRef,
   AgentTeamWorkerSettledActivity,
   AgentTeamWorkerStartedActivity,
   AgentTeamWorkerStartRecord,
+  AgentTeamWorkerStage,
   AgentTeamWorkerState,
   AgentTeamWorkerSettlement,
   AgentTeamSubscription,
@@ -1077,13 +1079,16 @@ export interface AgentTeamWorkerStateView {
 }
 
 /**
- * How a running Worker stands in the Human's own run list. `stopping` is the
- * live request this Host has not confirmed yet; `unconfirmed` is a record a
- * previous Host left running, which this Host cannot stop or take over.
+ * How one Worker run stands in the Human's own run list. `stopping` is the live
+ * request this Host has not confirmed yet; `unconfirmed` is a record a previous
+ * Host left running, which this Host cannot stop or take over. The three terminal
+ * states are a run's own durable ending, listed so the Human can read its
+ * diagnostic after the process exited — never as if it were still live.
  */
 export type AgentTeamWorkerRunViewState = 'running' | 'stopping' | 'unconfirmed'
+  | Exclude<AgentTeamWorkerState, 'running'>
 
-/** One live or unconfirmed Worker run, as the Human's edit-Agent surface lists it. */
+/** One Worker run, live or ended, as the Human's edit-Agent surface lists it. */
 export interface AgentTeamWorkerRunView {
   readonly workerRef: AgentTeamWorkerRef
   readonly projectRef: AgentTeamProjectRef
@@ -1134,6 +1139,73 @@ export type AgentTeamWorkerStopResult =
   }
   | { readonly kind: 'pending'; readonly workerRef: AgentTeamWorkerRef; readonly message: string }
   | { readonly kind: 'unconfirmed'; readonly workerRef: AgentTeamWorkerRef; readonly message: string }
+
+/** One bounded piece of a run's native record, as the diagnostic read returns it. */
+export interface AgentTeamWorkerInspectionFragment {
+  readonly kind: AgentTeamWorkerFragmentKind
+  readonly text: string
+}
+
+/**
+ * What a look-up could take from the engine's own record. `read` carries the
+ * bounded fragments; every other kind keeps the Team's summary and names the one
+ * reason the native record could not answer — a missing file, an unreadable one,
+ * nothing ever written, a shape this Team does not read, or a record that holds
+ * no turn with the recorded id. A surface never has to guess whether an empty
+ * list means "nothing happened" or "nothing could be read".
+ */
+export type AgentTeamWorkerInspectionHistory =
+  | {
+    readonly kind: 'read'
+    readonly fragments: readonly AgentTeamWorkerInspectionFragment[]
+    /** Fragments withheld because their text looked like a credential. */
+    readonly withheld: number
+    /** The record outran the reader's bound, so later records were not read. */
+    readonly truncated: boolean
+  }
+  | { readonly kind: 'missing'; readonly reason: string }
+  | { readonly kind: 'unreadable'; readonly reason: string }
+  | { readonly kind: 'unpersisted'; readonly reason: string }
+  | { readonly kind: 'unsupported'; readonly reason: string }
+  | { readonly kind: 'unmatched'; readonly reason: string }
+
+/**
+ * One delegated Worker run as its initiator or the Human may read it by number:
+ * the same summary the Thread carries, the native identities the settlement
+ * recorded, and whatever the engine's own record still answers. It is built on
+ * demand and never stored — the ledger keeps the anchors, not the record.
+ */
+export interface AgentTeamWorkerInspection {
+  readonly workerRef: AgentTeamWorkerRef
+  readonly projectRef: AgentTeamProjectRef
+  readonly engine: import('../worker-settings.ts').WorkerEngine
+  readonly state: AgentTeamWorkerState
+  /** No live execution backs this record any more, so its ending cannot be confirmed. */
+  readonly unconfirmed: boolean
+  readonly startedAt: string
+  readonly settledAt?: string | undefined
+  readonly threadRef?: AgentTeamThreadRef | undefined
+  readonly taskRef?: AgentTeamTaskRef | undefined
+  /** The public layer: the sentence the Thread already carries. */
+  readonly summary: string
+  /** Where a failed run came apart; absent when it did not fail. */
+  readonly stage?: AgentTeamWorkerStage | undefined
+  /** The engine's own identities, as recorded; a missing one says the run never reached it. */
+  readonly native: {
+    readonly threadId?: string | undefined
+    readonly turnId?: string | undefined
+    readonly storage?: string | undefined
+  }
+  readonly history: AgentTeamWorkerInspectionHistory
+}
+
+/** The Human's read of one execution's diagnostic, addressed by its Team-owned ref. */
+export interface AgentTeamWorkerInspectRequest {
+  readonly workspaceId: WorkspaceId
+  readonly workerRef: AgentTeamWorkerRef
+  /** The Member whose edit surface asked; only a run that Member initiated is answered. */
+  readonly memberId: AgentTeamMemberId
+}
 
 /**
  * What a delegation target names, as the Host resolves it before it writes

@@ -55,7 +55,8 @@ import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentT
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
-import { WorkerRefusal, WorkerRegistry, workerTaskPreview, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
+import { newestEndedRuns, WorkerRefusal, WorkerRegistry, workerTaskPreview, WORKER_RUN_HISTORY_LIMIT, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
+import { readWorkerHistory } from './worker-inspection.ts'
 import { coldInboxOf } from './cold-inbox.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
@@ -80,6 +81,10 @@ import type {
   AgentTeamChangeScope,
   AgentTeamDelegationTarget,
   AgentTeamWorkerAnswer,
+  AgentTeamWorkerExecution,
+  AgentTeamWorkerInspectRequest,
+  AgentTeamWorkerInspection,
+  AgentTeamWorkerInspectionHistory,
   AgentTeamWorkerRef,
   AgentTeamWorkerRunListRequest,
   AgentTeamWorkerRunListResult,
@@ -3718,8 +3723,10 @@ export default class AgentTeam extends TypertRemoteService {
 
   /**
    * One Member's Worker runs for the Human's edit surface: what this Host still
-   * holds (running or stopping) and the records a previous Host left running,
-   * which are listed as unconfirmed and offer no stop control.
+   * holds (running or stopping), the records a previous Host left running, which
+   * are listed as unconfirmed and offer no stop control, and the newest ended
+   * runs, each with the state it really ended in. A failed run has to stay
+   * reachable after its process exited, or the diagnostic behind it has no door.
    */
   @Remote('workerRuns')
   workerRunsForClient(request: AgentTeamWorkerRunListRequest): AgentTeamWorkerRunListResult {
@@ -3737,10 +3744,20 @@ export default class AgentTeam extends TypertRemoteService {
       seen.add(run.workerRef)
       runs.push(this.workerRunViewOf(execution, live))
     }
+    // The Workspace and Member filters run before the bound, so a Member's twenty
+    // newest ended runs are their own, not whatever survived another filter.
+    const ended: AgentTeamWorkerExecution[] = []
     for (const execution of ledger.workerExecutionsOfMember(request.memberId)) {
-      if (execution.state !== 'running' || seen.has(execution.workerRef)) continue
+      if (seen.has(execution.workerRef)) continue
       if (ledger.getProject(execution.projectRef)?.workspaceId !== request.workspaceId) continue
-      runs.push(this.workerRunViewOf(execution, 'unconfirmed'))
+      if (execution.state === 'running') {
+        runs.push(this.workerRunViewOf(execution, 'unconfirmed'))
+        continue
+      }
+      ended.push(execution)
+    }
+    for (const execution of newestEndedRuns(ended, WORKER_RUN_HISTORY_LIMIT)) {
+      runs.push(this.workerRunViewOf(execution, execution.state))
     }
     return Object.freeze({ runs: Object.freeze(runs) })
   }
@@ -3801,6 +3818,85 @@ export default class AgentTeam extends TypertRemoteService {
       }
       throw error
     }
+  }
+
+  /**
+   * One run's diagnostic for the Member who delegated it, read by its Team-owned
+   * ref. The summary is the sentence the Thread already carries; the rest is what
+   * the engine's own record still answers, read on demand and never stored. Only
+   * the initiating Member and the Human may ask — everyone else is refused, so a
+   * Project's other Members keep seeing exactly what the Thread published.
+   */
+  async workerInspectForAgent(agent: Agent, request: { readonly workerRef: AgentTeamWorkerRef }): Promise<AgentTeamWorkerInspection> {
+    const actor = this.memberActor(agent)
+    const execution = this.requireLedger().workerExecution(request.workerRef)
+    if (execution === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${request.workerRef}' was started by this Team.`)
+    if (execution.initiatedBy !== actor.memberId) {
+      throw new WorkerRefusal('worker_inspect_forbidden', `Only the Member who delegated Worker '${request.workerRef}' `
+        + 'or the Human may read its diagnostic.')
+    }
+    return this.workerInspectionOf(execution)
+  }
+
+  /**
+   * The Human's read of one execution's diagnostic from a Member's edit surface.
+   * It runs the same look-up as the Member's tool, but the surface names the
+   * Member it is showing, so a run that Member did not initiate is refused here
+   * rather than answered from a list the Human never asked about.
+   */
+  @Remote('inspectWorker')
+  async inspectWorkerForClient(request: AgentTeamWorkerInspectRequest): Promise<AgentTeamWorkerInspection> {
+    this.requireWorkspace(request.workspaceId)
+    const ledger = this.requireLedger()
+    const execution = ledger.workerExecution(request.workerRef)
+    if (execution === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${request.workerRef}' was started by this Team.`)
+    if (execution.initiatedBy !== request.memberId) {
+      throw new WorkerRefusal('worker_inspect_forbidden', `Worker '${request.workerRef}' was delegated by another Member; `
+        + 'this surface reads only that Member\'s runs.')
+    }
+    if (ledger.getProject(execution.projectRef)?.workspaceId !== request.workspaceId) {
+      throw new WorkerRefusal('worker_inspect_forbidden', `Worker '${request.workerRef}' does not belong to a Project of this Workspace.`)
+    }
+    return this.workerInspectionOf(execution)
+  }
+
+  /**
+   * Build one run's report. A run that has not ended has no anchors yet — they are
+   * written with its ending — so the report says that instead of asking the engine
+   * for a record the Team has not been told how to find.
+   */
+  private async workerInspectionOf(execution: AgentTeamWorkerExecution): Promise<AgentTeamWorkerInspection> {
+    const live = this.workerRegistry.liveState(execution.workerRef)
+    const unconfirmed = execution.state === 'running' && live === undefined
+    const history: AgentTeamWorkerInspectionHistory = execution.state === 'running'
+      ? { kind: 'unpersisted', reason: unconfirmed
+        ? 'The Host that started this run no longer holds its handle, so its ending was never recorded and there is no native record to look up.'
+        : 'The run has not ended yet; its native record is read once it does.' }
+      : await readWorkerHistory(execution)
+    const summary = execution.state === 'running'
+      ? unconfirmed
+        ? 'This Host no longer holds the run\'s handle, so its result cannot be confirmed.'
+        : 'The run is still going.'
+      : execution.diagnostic ?? `The run ended as ${execution.state}.`
+    return Object.freeze({
+      workerRef: execution.workerRef,
+      projectRef: execution.projectRef,
+      engine: execution.engine,
+      state: execution.state,
+      unconfirmed,
+      startedAt: execution.startedAt,
+      ...(execution.settledAt === undefined ? {} : { settledAt: execution.settledAt }),
+      ...(execution.threadRef === undefined ? {} : { threadRef: execution.threadRef }),
+      ...(execution.taskRef === undefined ? {} : { taskRef: execution.taskRef }),
+      summary,
+      ...(execution.stage === undefined ? {} : { stage: execution.stage }),
+      native: Object.freeze({
+        ...(execution.nativeSessionId === undefined ? {} : { threadId: execution.nativeSessionId }),
+        ...(execution.nativeTurnId === undefined ? {} : { turnId: execution.nativeTurnId }),
+        ...(execution.nativeStorage === undefined ? {} : { storage: execution.nativeStorage }),
+      }),
+      history,
+    })
   }
 
   /** One run as the caller may read it: the summary always, the output only an owner. */

@@ -32,6 +32,7 @@ const EXPECTED_REMOTE_METHODS = [
   'getHumanAvatar',
   'humanProfile',
   'inbox',
+  'inspectWorker',
   'joinWorkspace',
   'leaveWorkspace',
   'mainStreamHistory',

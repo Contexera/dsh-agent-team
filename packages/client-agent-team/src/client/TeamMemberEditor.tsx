@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { AgentTeamClientMemberStatus, AgentTeamMemberReminderView, AgentTeamModelSelection, AgentTeamReminderSchedule, AgentTeamWorkerRunView, AgentTeamWorkerStopResult } from '@contexera/dsh-agent-team/types'
+import { useEffect, useRef, useState } from 'react'
+import type { AgentTeamClientMemberStatus, AgentTeamMemberReminderView, AgentTeamModelSelection, AgentTeamReminderSchedule, AgentTeamWorkerInspection, AgentTeamWorkerRef, AgentTeamWorkerRunView, AgentTeamWorkerStopResult } from '@contexera/dsh-agent-team/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { TeamModelCatalog, TeamModelEffortOption, TeamModelProviderGroup, TeamSidebarProps } from './slots.ts'
@@ -414,11 +414,12 @@ interface WorkerRunOutcome {
  * cleanup. A failed stop keeps its row and its sentence across refreshes rather
  * than disappearing into a shorter list.
  */
-export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns, stopWorker, disabled, t }: {
+export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns, stopWorker, inspectWorker, disabled, t }: {
   readonly workspaceId: WorkspaceId
   readonly memberId: AgentTeamClientMemberStatus['member']['memberId']
   readonly loadWorkerRuns: TeamSidebarProps['loadWorkerRuns']
   readonly stopWorker: TeamSidebarProps['stopWorker']
+  readonly inspectWorker: TeamSidebarProps['inspectWorker']
   readonly disabled: boolean
   readonly t: TeamSidebarProps['t']
 }) {
@@ -427,6 +428,18 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
   const [reloadToken, setReloadToken] = useState(0)
   const [stopping, setStopping] = useState<string>()
   const [outcomes, setOutcomes] = useState<ReadonlyMap<string, WorkerRunOutcome>>(() => new Map())
+  // A row's report and the by-number answer are separate seats: opening another
+  // row closes the previous row's report instead of stacking them, while the
+  // by-number door keeps its own answer under the form.
+  const [report, setReport] = useState<WorkerReportState>()
+  // The by-number door answers in its own seat under the form: a run outside the
+  // list's window is read once and never inserted into the list.
+  const [lookup, setLookup] = useState<WorkerReportState>()
+  const [lookupRef, setLookupRef] = useState('')
+  // A read that answers after the surface moved on is not the answer to show:
+  // each open bumps its generation, and only the current one lands.
+  const reportGeneration = useRef(0)
+  const lookupGeneration = useRef(0)
   useEffect(() => {
     let mounted = true
     let pending: Promise<RemoteResult<{ readonly runs: readonly AgentTeamWorkerRunView[] }>>
@@ -493,6 +506,52 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
     }
   }
 
+  /**
+   * Read one run's diagnostic by its Team-owned number. The Host answers the
+   * summary, the native identities it recorded, and whatever the engine's own
+   * record still holds; this surface only renders what it is given. The same
+   * control folds the report away, including while its read is still in flight.
+   */
+  const inspect = async (workerRef: AgentTeamWorkerRef): Promise<void> => {
+    if (report?.workerRef === workerRef) {
+      reportGeneration.current += 1
+      setReport(undefined)
+      return
+    }
+    const current = ++reportGeneration.current
+    setReport({ workerRef })
+    try {
+      const result = await inspectWorker({ workspaceId, memberId, workerRef })
+      if (current !== reportGeneration.current) return
+      setReport(result.ok ? { workerRef, value: result.value } : { workerRef, error: result.error.message })
+    } catch (cause) {
+      if (current !== reportGeneration.current) return
+      setReport({ workerRef, error: cause instanceof Error ? cause.message : String(cause) })
+    }
+  }
+
+  /**
+   * Read one diagnostic by the number the Human typed. The ref is the Human's
+   * input, so the Host decides whether it names a run this Member initiated in
+   * this Workspace; a refusal is shown where the form is, and neither the list
+   * nor an open row report changes.
+   */
+  const readByNumber = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    const workerRef = lookupRef.trim()
+    if (workerRef === '') return
+    const current = ++lookupGeneration.current
+    setLookup({ workerRef })
+    try {
+      const result = await inspectWorker({ workspaceId, memberId, workerRef: workerRef as AgentTeamWorkerRef })
+      if (current !== lookupGeneration.current) return
+      setLookup(result.ok ? { workerRef, value: result.value } : { workerRef, error: result.error.message })
+    } catch (cause) {
+      if (current !== lookupGeneration.current) return
+      setLookup({ workerRef, error: cause instanceof Error ? cause.message : String(cause) })
+    }
+  }
+
   const rows: Array<{ readonly run: AgentTeamWorkerRunView; readonly outcome: WorkerRunOutcome | undefined }> =
     (runs ?? []).map(run => ({ run, outcome: outcomes.get(run.workerRef) }))
   for (const outcome of outcomes.values()) {
@@ -510,6 +569,10 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
             // over both, because a run that ended is no longer listed.
             const listed = (runs ?? []).find(candidate => candidate.workerRef === run.workerRef)
             const state: WorkerRunRowState = outcome?.hostState ?? listed?.state ?? run.state
+            // One flag drives the visible word, the accessible name, the expanded
+            // state, and the click: a control whose name says "view" while it folds
+            // the report away tells a screen reader a different story than the page.
+            const open = report?.workerRef === run.workerRef
             return (
               <li key={run.workerRef} className={createCss.reminderRow} data-worker-run={run.workerRef} data-worker-state={state}>
                 <div className={createCss.reminderBody}>
@@ -519,26 +582,70 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
                       <span>{`${t(WORKER_RUN_STATE_KEYS[state])} · ${workerRunTargetText(run, t)}`}</span>
                       <span>{t('memberWorkerStarted', { time: formatAbsoluteTime(run.startedAt) })}</span>
                     </p>
-                    {(state === 'running' || state === 'stopping') && (
+                    <div className={createCss.reminderActions}>
+                      {(state === 'running' || state === 'stopping') && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={t('memberWorkerStopAction', { task: run.task })}
+                          disabled={disabled || stopping !== undefined}
+                          onClick={() => { void stop(run) }}
+                        >
+                          {stopping === run.workerRef || state === 'stopping' ? t('memberWorkerRunStopping') : t('memberWorkerStop')}
+                        </Button>
+                      )}
                       <Button
-                        className={createCss.reminderCancel!}
                         size="sm"
                         variant="ghost"
-                        aria-label={t('memberWorkerStopAction', { task: run.task })}
-                        disabled={disabled || stopping !== undefined}
-                        onClick={() => { void stop(run) }}
+                        aria-label={open
+                          ? t('memberWorkerInspectHideAction', { task: run.task })
+                          : t('memberWorkerInspectAction', { task: run.task })}
+                        aria-expanded={open}
+                        disabled={disabled}
+                        onClick={() => { void inspect(run.workerRef) }}
                       >
-                        {stopping === run.workerRef || state === 'stopping' ? t('memberWorkerRunStopping') : t('memberWorkerStop')}
+                        {open ? t('memberWorkerInspectHide') : t('memberWorkerInspect')}
                       </Button>
-                    )}
+                    </div>
                   </div>
                   {outcome?.notice !== undefined && <p className={createCss.error} role="alert">{outcome.notice}</p>}
                   {state === 'unconfirmed' && <small className={css.editHint}>{t('memberWorkerStopUnconfirmedHint')}</small>}
+                  {report?.workerRef === run.workerRef && <WorkerReport report={report} t={t} />}
                 </div>
               </li>
             )
           })}
         </ul>
+      )}
+      {rows.length > 0 && <small className={css.editHint}>{t('memberWorkerRunsWindow')}</small>}
+      <form className={createCss.workerLookup} onSubmit={event => { void readByNumber(event) }}>
+        <label className={`${createCss.field} ${createCss.workerLookupField}`}>
+          <span>{t('memberWorkerInspectLookupTitle')}</span>
+          <Input className={createCss.input!} value={lookupRef} placeholder="worker:…" disabled={disabled}
+            onChange={event => { setLookupRef(event.target.value) }} />
+        </label>
+        <Button type="submit" size="sm" variant="outline" aria-label={t('memberWorkerInspectLookup')}
+          disabled={disabled || lookupRef.trim() === ''}>
+          {t('memberWorkerInspectLookupAction')}
+        </Button>
+      </form>
+      {lookup !== undefined && (
+        <div className={createCss.reminderBody} data-worker-lookup={lookup.workerRef}>
+          {lookup.value === undefined ? null : (
+            // The answer arrives without a page change, so the line that appears
+            // is a status: a reader hears that the read landed, not just that it
+            // started.
+            <p className={createCss.reminderFacts} role="status">
+              <span>{t('memberWorkerInspectLookupFor', { ref: lookup.value.workerRef })}</span>
+              <span>{`${workerEngineName(t, lookup.value.engine)} · `
+                + t(WORKER_RUN_STATE_KEYS[lookup.value.unconfirmed ? 'unconfirmed' : lookup.value.state])}</span>
+              <span>{t('memberWorkerStarted', { time: formatAbsoluteTime(lookup.value.startedAt) })}</span>
+              {lookup.value.settledAt === undefined ? null
+                : <span>{t('memberWorkerSettled', { time: formatAbsoluteTime(lookup.value.settledAt) })}</span>}
+            </p>
+          )}
+          <WorkerReport report={lookup} t={t} />
+        </div>
       )}
       {error !== undefined && (
         <p className={createCss.failure} role="alert">
@@ -552,7 +659,60 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
   )
 }
 
-export function AgentEditorDialog({ status, updateMember, loadModels, loadMemberReminders, cancelMemberReminder, loadWorkerRuns, stopWorker, onCommitted, onClose, t }: {
+/** One open diagnostic: the run it belongs to, and what the Host answered. */
+interface WorkerReportState {
+  readonly workerRef: string
+  readonly value?: AgentTeamWorkerInspection | undefined
+  readonly error?: string | undefined
+}
+
+/**
+ * The Host's report as it came: the summary the Thread already carries, the
+ * native identities the settlement recorded, and the bounded fragments the
+ * engine's own record still answers — or the reason it cannot. Nothing here is
+ * derived from a refusal.
+ */
+function WorkerReport({ report, t }: { readonly report: WorkerReportState; readonly t: TeamSidebarProps['t'] }) {
+  if (report.value === undefined) {
+    // A read in flight is a status; a read that failed is the same failure every
+    // other read on this page reports, so it is an alert.
+    return report.error === undefined
+      ? <p className={createCss.error} role="status">{t('memberWorkerInspectLoading')}</p>
+      : <p className={createCss.error} role="alert">{t('memberWorkerInspectFailed', { message: report.error })}</p>
+  }
+  const value = report.value
+  const native = [
+    value.native.threadId === undefined ? undefined : t('memberWorkerInspectNativeThread', { id: value.native.threadId }),
+    value.native.turnId === undefined ? undefined : t('memberWorkerInspectNativeTurn', { id: value.native.turnId }),
+    value.native.storage === undefined ? undefined : t('memberWorkerInspectNativeRecord', { path: value.native.storage }),
+  ].filter((line): line is string => line !== undefined)
+  return (
+    <div className={createCss.reminderFacts} data-worker-report={value.workerRef}>
+      <p className={createCss.reportLine}>{`${t('memberWorkerInspectSummary')}: ${value.summary}`}</p>
+      {value.stage !== undefined && <p className={createCss.reportLine}>{t('memberWorkerInspectStage', { stage: value.stage })}</p>}
+      {native.length === 0
+        ? <p className={createCss.reportLine}>{t('memberWorkerInspectNoNative')}</p>
+        : native.map(line => <p key={line} className={createCss.reportLine}>{line}</p>)}
+      {value.history.kind === 'read' ? (
+        <>
+          <p className={createCss.reportLine}>{t('memberWorkerInspectFragments')}</p>
+          {value.history.fragments.length === 0
+            ? <p className={createCss.reportLine}>{t('memberWorkerInspectNoFragments')}</p>
+            : <ul className={createCss.reportList}>{value.history.fragments.map((fragment, index) => (
+              // Two fragments of one kind are ordinary (an interrupted turn and a
+              // failed one), so the position is part of the identity.
+              <li key={`${fragment.kind}-${index}`}>{`${fragment.kind}: ${fragment.text}`}</li>
+            ))}</ul>}
+          {value.history.withheld > 0
+            && <p className={createCss.reportLine}>{t('memberWorkerInspectWithheld', { count: value.history.withheld })}</p>}
+          {value.history.truncated && <p className={createCss.reportLine}>{t('memberWorkerInspectTruncated')}</p>}
+        </>
+      ) : <p className={createCss.reportLine}>{value.history.reason}</p>}
+    </div>
+  )
+}
+
+export function AgentEditorDialog({ status, updateMember, loadModels, loadMemberReminders, cancelMemberReminder, loadWorkerRuns, stopWorker, inspectWorker, onCommitted, onClose, t }: {
   readonly status: AgentTeamClientMemberStatus
   readonly updateMember: TeamSidebarProps['updateMember']
   readonly loadModels: TeamSidebarProps['loadModels']
@@ -560,6 +720,7 @@ export function AgentEditorDialog({ status, updateMember, loadModels, loadMember
   readonly cancelMemberReminder: TeamSidebarProps['cancelMemberReminder']
   readonly loadWorkerRuns: TeamSidebarProps['loadWorkerRuns']
   readonly stopWorker: TeamSidebarProps['stopWorker']
+  readonly inspectWorker: TeamSidebarProps['inspectWorker']
   readonly onCommitted: () => Promise<void> | void
   readonly onClose: () => void
   readonly t: TeamSidebarProps['t']
@@ -632,6 +793,7 @@ export function AgentEditorDialog({ status, updateMember, loadModels, loadMember
         memberId={memberId}
         loadWorkerRuns={loadWorkerRuns}
         stopWorker={stopWorker}
+        inspectWorker={inspectWorker}
         disabled={saving}
         t={t}
       />

@@ -276,6 +276,44 @@
   margin-left: auto;
 }
 
+/* One row's trailing controls read as one group: the group claims the free space, so a
+   second control sits beside the first instead of each splitting the gap. */
+.reminderActions {
+  align-items: baseline;
+  display: flex;
+  flex: none;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* The diagnostic report lives inside the row's fact grid. There is no global paragraph or
+   list reset here, so both carry their own: UA margins would break the 2px rhythm and a UA
+   list would add a 40px indent. */
+.reportLine {
+  margin: 0;
+}
+
+.reportList {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 16px;
+}
+
+/* The by-number door under the list: one row that wraps in a narrow dialog, with the input
+   allowed to shrink so the form never widens the column. */
+.workerLookup {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workerLookupField {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
 .sectionLabel {
   align-items: center;
   color: var(--dsw-alias-label-secondary);

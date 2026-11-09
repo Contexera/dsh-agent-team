@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto'
 import type {
   FailureClass,
+  FrameBody,
   InstallationSnapshot,
   RejectionCode,
   Runtime,
@@ -28,6 +29,7 @@ import {
   type SubagentStopReason,
 } from '@deepseek-ai/dsh-subagent'
 
+import type { AgentTeamWorkerStage } from './types/entities.ts'
 import type { WorkerEngine } from './worker-settings.ts'
 
 /** The registry name each engine's provider registers under. */
@@ -36,7 +38,8 @@ export const WORKER_PROVIDER_NAMES: Readonly<Record<WorkerEngine, string>> = Obj
   claude: 'team-worker-claude',
 })
 
-type FailureStage = 'engine-unavailable' | 'installation' | 'startup' | 'turn' | 'abort' | 'dispose'
+/** The stages a Worker run can come apart in; the ledger records the same vocabulary. */
+type FailureStage = AgentTeamWorkerStage
 type FailureCategory = FailureClass | RejectionCode | 'not-found' | 'unsupported' | 'cancelled' | 'timeout'
 
 const failureAdvice: Readonly<Record<FailureStage, string>> = {
@@ -53,6 +56,101 @@ export class WorkerFailure extends Error {
     super(`Team Worker failure (stage: ${stage}; category: ${category}). ${failureAdvice[stage]}`, options)
     this.name = 'WorkerFailure'
   }
+}
+
+/**
+ * What the engine itself said about one run's own record, captured while the
+ * session is still open: the identity a later read-only look-up needs, and
+ * nothing else. The native record is never copied into the Team's ledger — the
+ * settlement write carries these three facts and the record stays where the
+ * engine put it.
+ */
+export interface WorkerAnchors {
+  /** The engine's own session identity. */
+  readonly nativeSessionId: string
+  /** The engine's own identity for the turn this run drove. */
+  readonly nativeTurnId?: string | undefined
+  /** The absolute path of the engine's own record, as the engine reported it. */
+  readonly nativeStorage?: string | undefined
+}
+
+/**
+ * The Team-private key the anchors ride on, so they travel with the one object
+ * the Harness hands back instead of through a process-local map: a map would leak
+ * an entry for every run whose ending never reaches the write (a sealed run, a
+ * late result) and would need taking before anyone could read it. A symbol keeps
+ * the property out of every ordinary view of the result — it is not enumerable
+ * JSON, not a field a notice reads, and not something another provider can set by
+ * accident.
+ */
+const WORKER_ANCHORS = Symbol('@contexera/dsh-agent-team/worker-anchors')
+
+/** The anchors one run carried on its own result, validated so a foreign object cannot shape them. */
+export function workerAnchorsOf(result: object): WorkerAnchors | undefined {
+  const carried = (result as { readonly [WORKER_ANCHORS]?: unknown })[WORKER_ANCHORS]
+  if (carried === null || typeof carried !== 'object') return undefined
+  const anchors = carried as Partial<WorkerAnchors>
+  if (typeof anchors.nativeSessionId !== 'string' || anchors.nativeSessionId === '') return undefined
+  return Object.freeze({ nativeSessionId: anchors.nativeSessionId,
+    ...(typeof anchors.nativeTurnId === 'string' && anchors.nativeTurnId !== '' ? { nativeTurnId: anchors.nativeTurnId } : {}),
+    ...(typeof anchors.nativeStorage === 'string' && anchors.nativeStorage !== '' ? { nativeStorage: anchors.nativeStorage } : {}) })
+}
+
+/**
+ * Attach what the engine said about its own record to the result it produced.
+ * Capturing is a diagnostic aid: a runtime that cannot answer costs the look-up
+ * and never the run's own outcome, so every failure here returns the result
+ * exactly as the engine settled it.
+ */
+function carryWorkerAnchors(outcome: SubagentResult, anchors: WorkerAnchors | undefined): SubagentResult {
+  if (anchors === undefined) return outcome
+  try {
+    const carried: SubagentResult & { readonly [WORKER_ANCHORS]?: WorkerAnchors } = { ...outcome }
+    // A spread keeps every field the Harness settled with; the symbol key is
+    // invisible to JSON, `Object.keys`, and any notice that reads the result.
+    Object.defineProperty(carried, WORKER_ANCHORS, { value: anchors, enumerable: false })
+    return carried
+  } catch {
+    return outcome
+  }
+}
+
+/**
+ * The native record's own path, taken from the frame in which the engine
+ * reported it. Codex states it on `thread/start` and repeats it on
+ * `thread/started`; a runtime that names no path yields none, and the look-up
+ * then says so instead of guessing a location.
+ */
+function nativeThreadPath(body: FrameBody): string | undefined {
+  if (body.type !== 'thread/start' && body.type !== 'thread/started') return undefined
+  const native = body.native
+  if (native === null || typeof native !== 'object') return undefined
+  const thread = (native as { readonly thread?: unknown }).thread
+  if (thread === null || typeof thread !== 'object') return undefined
+  const path = (thread as { readonly path?: unknown }).path
+  return typeof path === 'string' && path !== '' ? path : undefined
+}
+
+/**
+ * Read one open session's anchors off its own record stream, bound to the input
+ * this run submitted. The turn is the one span the root agent's records after
+ * that input carry: a session that also holds another root turn cannot be tied
+ * to this run, so it reports no turn id rather than the last one it saw — a
+ * guessed turn would send a later look-up to another run's failure.
+ */
+function anchorsOf(session: Session, inputSeq: number | undefined): WorkerAnchors {
+  let nativeStorage: string | undefined
+  const turns = new Set<string>()
+  for (const record of session.records()) {
+    if (record.sessionId !== session.id || record.agentPath.length !== 0) continue
+    if (record.kind === 'frame') nativeStorage ??= nativeThreadPath(record.body)
+    if (inputSeq === undefined || record.seq <= inputSeq) continue
+    if (record.spanId !== undefined && record.spanId !== '') turns.add(record.spanId)
+  }
+  const turn = turns.size === 1 ? [...turns][0] : undefined
+  return Object.freeze({ nativeSessionId: session.id,
+    ...(turn === undefined ? {} : { nativeTurnId: turn }),
+    ...(nativeStorage === undefined ? {} : { nativeStorage }) })
 }
 
 /**
@@ -138,6 +236,19 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
   let streamedText = ''
   let phase: 'running' | 'cancelled' | 'timeout' | 'settled' = 'running'
   let disposal: Promise<void> | undefined
+  // The anchors this run owns, captured while its session is still open: an
+  // engine closes its record stream as it tears down, so a capture taken after
+  // the abort or the cleanup would find nothing left to read.
+  let inputSeq: number | undefined
+  let anchors: WorkerAnchors | undefined
+  const captureAnchors = (): void => {
+    if (anchors !== undefined) return
+    try {
+      anchors = anchorsOf(session, inputSeq)
+    } catch {
+      // A session that cannot answer costs the look-up, never the run's ending.
+    }
+  }
 
   const collectOutput = (): readonly ContentBlock[] => {
     let answer = streamedText
@@ -149,6 +260,9 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
   const dispose = (): Promise<void> => disposal ??= disposeSession(session, spec)
   const interrupt = (reason: 'cancelled' | 'timeout'): void => {
     if (phase !== 'running') return
+    // Before the abort and the disposal below: this is the last moment the
+    // engine's own record stream is still there to answer.
+    captureAnchors()
     phase = reason
     stopped.resolve({
       output: collectOutput(),
@@ -173,10 +287,15 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     if (admitted.kind === 'rejected') {
       return { output: collectOutput(), stopReason: 'error', diagnostic: new WorkerFailure('turn', admitted.code).message }
     }
+    // The turn this run drives is the one after its own input, so the capture
+    // reads the record from here on and never another root turn's span.
+    inputSeq = admitted.seq
     const awaitTurnEnd = await awaitTurnEndOf()
     const outcome = await awaitTurnEnd(session, admitted.seq, inputId)
     // A native handled receipt is not a turn end: keep waiting for the turn it belongs to.
-    return completedTurn(outcome.kind === 'handled' ? await awaitTurnEnd(session, outcome.seq) : outcome, collectOutput())
+    const turn = completedTurn(outcome.kind === 'handled' ? await awaitTurnEnd(session, outcome.seq) : outcome, collectOutput())
+    captureAnchors()
+    return turn
   }
   const settled = settleRunResult({
     attempt: async () => {
@@ -197,6 +316,11 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     clearTimeout(timer)
     unsubscribe()
     if (phase === 'running') phase = 'settled'
+    // Every settlement path passes here, and it is still before the Harness's
+    // teardown: a turn whose own wait threw, a prompt the engine refused, and a
+    // transport that failed all keep the native identities the session could
+    // still name. The cancel path captured earlier, and this is idempotent.
+    captureAnchors()
   })
   // The Harness hands the parent the result it captured here, and a teardown
   // failure never edits it. So a cancelled run settles only after disposal had
@@ -214,7 +338,9 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     // The external child's id is the engine's own session identity: the execution
     // record reports it, and a later read-only diagnostic can reopen that history.
     id: SessionId(session.id),
-    result,
+    // The snapshot this run took while its session was open rides the result the
+    // Harness hands back to the Host; nothing is read after teardown.
+    result: result.then(outcome => carryWorkerAnchors(outcome, anchors)),
     signal: request.signal,
     onAbort,
     requestCancel: onAbort,

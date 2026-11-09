@@ -26,6 +26,7 @@ import type {
   AgentTeamThreadRef,
   AgentTeamWorkerRef,
   AgentTeamWorkerSettlement,
+  AgentTeamWorkerStage,
   AgentTeamWorkerStartRecord,
   AgentTeamWorkerStartWrite,
   AgentTeamWorkerSettleWrite,
@@ -38,6 +39,7 @@ import {
   WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC,
   WORKER_PROVIDER_NAMES,
   WorkerFailure,
+  workerAnchorsOf,
   type WorkerRunSpec,
 } from './worker-runtime.ts'
 
@@ -559,16 +561,30 @@ export class WorkerRegistry {
     let state: 'completed' | 'failed' | 'stopped' = result.stopReason === 'completed'
       ? 'completed' : result.stopReason === 'aborted' ? 'stopped' : 'failed'
     let diagnostic = result.stopReason === 'completed' || typeof result.diagnostic !== 'string' ? undefined : result.diagnostic
+    // The engine opened a session here, so a failure is either the turn itself or
+    // the cleanup that followed it — never a start that never happened.
+    let stage: AgentTeamWorkerStage | undefined = state === 'failed'
+      ? diagnostic === WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC ? 'dispose' : 'turn'
+      : undefined
     if (diagnostic === WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC) entry.cleanupUnconfirmed = true
     if (state === 'stopped' && entry.stopping && await this.disposalFailed(entry)) {
       state = 'failed'
+      stage = 'dispose'
       entry.cleanupUnconfirmed = true
       diagnostic = 'The stop was requested, but the engine did not confirm its cleanup, so the run cannot be '
         + 'confirmed stopped. Check the engine\'s process before starting another task.'
         + (diagnostic === undefined ? '' : ` (${diagnostic})`)
     }
+    // The run's own anchors ride its ending: what a later read-only look-up needs
+    // to find the engine's record, and where that record failed if it did. They
+    // came back on the result object itself, so a run whose ending never reaches
+    // this write leaves nothing behind to collect.
+    const anchors = workerAnchorsOf(result)
     await this.settle(entry, state, {
       nativeSessionId,
+      ...(anchors?.nativeTurnId === undefined ? {} : { nativeTurnId: anchors.nativeTurnId }),
+      ...(anchors?.nativeStorage === undefined ? {} : { nativeStorage: anchors.nativeStorage }),
+      ...(stage === undefined ? {} : { stage }),
       ...(output === undefined ? {} : { output }),
       ...(diagnostic === undefined ? {} : { diagnostic }),
     })?.catch(() => {})
@@ -590,7 +606,12 @@ export class WorkerRegistry {
     // The manager can reject with the abort reason after rolling back a start it
     // owns; the engine may have opened, so a stop is not confirmed from that alone.
     const uncertain = entry.stopping && aborted
+    // The ending carries no native identity — a start that failed this way is
+    // never handed one — so it names the stage it came apart in. A read can then
+    // say the record holds no native session instead of guessing one back out of
+    // the sentence, and it never claims the engine opened nothing.
     await this.settle(entry, 'failed', {
+      ...(error instanceof WorkerFailure ? { stage: error.stage } : {}),
       diagnostic: uncertain
         ? `${diagnostic} The stop was requested while the Worker was starting, but the Host could not confirm `
           + 'the engine stopped. Check the engine\'s process before starting another task.'
@@ -617,6 +638,9 @@ export class WorkerRegistry {
    */
   private settle(entry: RunEntry, state: Exclude<AgentTeamWorkerRun['state'], 'running' | 'unconfirmed'>, facts: {
     readonly nativeSessionId?: string | undefined
+    readonly nativeTurnId?: string | undefined
+    readonly nativeStorage?: string | undefined
+    readonly stage?: AgentTeamWorkerStage | undefined
     readonly output?: string | undefined
     readonly diagnostic?: string | undefined
   }): Promise<void> | undefined {
@@ -630,13 +654,17 @@ export class WorkerRegistry {
     // provider did not bound is cut here rather than refused on write.
     const diagnostic = facts.diagnostic === undefined
       ? undefined : truncateToCharacters(facts.diagnostic, WORKER_DIAGNOSTIC_MAX_CHARACTERS)
-    entry.run = Object.freeze({
-      ...entry.run, state, settledAt,
+    const anchors = {
       ...facts.nativeSessionId === undefined ? {} : { nativeSessionId: facts.nativeSessionId },
+      ...facts.nativeTurnId === undefined ? {} : { nativeTurnId: facts.nativeTurnId },
+      ...facts.nativeStorage === undefined ? {} : { nativeStorage: facts.nativeStorage },
+      ...facts.stage === undefined ? {} : { stage: facts.stage },
+    }
+    entry.run = Object.freeze({
+      ...entry.run, state, settledAt, ...anchors,
       ...diagnostic === undefined ? {} : { diagnostic },
     })
-    const settlement: AgentTeamWorkerSettlement = Object.freeze({ workerRef: entry.run.workerRef, state, settledAt,
-      ...(facts.nativeSessionId === undefined ? {} : { nativeSessionId: facts.nativeSessionId }),
+    const settlement: AgentTeamWorkerSettlement = Object.freeze({ workerRef: entry.run.workerRef, state, settledAt, ...anchors,
       ...(facts.output === undefined ? {} : { output: facts.output }),
       ...(diagnostic === undefined ? {} : { diagnostic }) })
     const write = this.deps.recordSettled({ requestId: entry.settleRequestId, settlement })
@@ -674,6 +702,32 @@ export class WorkerRegistry {
     }
     return name
   }
+}
+
+/**
+ * How many ended runs one Member's surface lists beside the live ones. The
+ * record keeps every run; the list is a window, so a Member with months of
+ * delegations still gets one bounded read.
+ */
+export const WORKER_RUN_HISTORY_LIMIT = 20
+
+/**
+ * The window of one Member's ended runs the Human's list shows: the newest
+ * endings, not the newest starts. A run that began early and failed only now is
+ * exactly the record the Human is looking for, so it must outrank twenty short
+ * runs that started later and ended long before it.
+ */
+export function newestEndedRuns<T extends { readonly startedAt: string; readonly settledAt?: string | undefined }>(
+  executions: readonly T[], limit: number,
+): readonly T[] {
+  return Object.freeze([...executions]
+    .sort((left, right) => endingAt(right) - endingAt(left))
+    .slice(0, limit))
+}
+
+/** When a run ended. A settled record always carries it; the start is only a fallback for one that does not. */
+function endingAt(execution: { readonly startedAt: string; readonly settledAt?: string | undefined }): number {
+  return Date.parse(execution.settledAt ?? execution.startedAt)
 }
 
 /** A single-line, bounded preview of a run's task for the Human's run list; the record keeps the full text. */

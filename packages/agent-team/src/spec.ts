@@ -422,7 +422,14 @@ const workerSettlementSchema = z.object({
   workerRef: workerRefSchema,
   state: z.union([z.literal('completed'), z.literal('failed'), z.literal('stopped')]),
   settledAt: z.string().datetime(),
-  nativeSessionId: z.string().min(1).optional(),
+  // The identities an engine reports are short; the path it reports is a filesystem
+  // path. Both are bounded here so a record can never carry a native value the
+  // report would have to truncate into a location nobody recorded.
+  nativeSessionId: z.string().min(1).max(256).optional(),
+  nativeTurnId: z.string().min(1).max(256).optional(),
+  nativeStorage: z.string().min(1).max(4096).optional(),
+  stage: z.union([z.literal('engine-unavailable'), z.literal('installation'), z.literal('startup'),
+    z.literal('turn'), z.literal('abort'), z.literal('dispose')]).optional(),
   output: z.string().min(1).max(WORKER_OUTPUT_MAX_CHARACTERS * 2).optional(),
   diagnostic: z.string().min(1).max(WORKER_DIAGNOSTIC_MAX_CHARACTERS * 2).optional(),
 }).strict()

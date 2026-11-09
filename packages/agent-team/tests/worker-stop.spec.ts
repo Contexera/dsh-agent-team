@@ -420,9 +420,10 @@ describe('a stop that cannot confirm its cleanup', () => {
       ? [entry.fact.activity] : [])[0]!
     expect(settled).toMatchObject({ state: 'failed' })
     expect(settled.reason).toMatch(/did not confirm|may still be active/u)
-    // The human surface reports the same conclusion, not a shorter list.
+    // The human surface reports the same conclusion, not a shorter list: the run
+    // stays reachable after its process exited, in the state it really ended in.
     const listed = host.host.workerRunsForClient({ workspaceId: alpha, memberId: owner.actor.memberId })
-    expect(listed.runs).toEqual([])
+    expect(listed.runs).toMatchObject([{ workerRef: run.workerRef, state: 'failed' }])
     // A stop that arrives after the ending answers with the ending and the
     // Host's own sentence, not a refusal and not a bare state.
     expect(await host.host.stopWorkerForClient({ workspaceId: alpha, workerRef: run.workerRef, memberId: owner.actor.memberId }))
@@ -442,7 +443,8 @@ describe('a Project-only delegation', () => {
     const stopped = await host.host.workerStopForAgent(owner.agent, { workerRef: run.workerRef })
     expect(stopped.state).toBe('stopped')
     await waitRecorded(host, run.workerRef, 'stopped')
-    expect(host.host.workerRunsForClient({ workspaceId: alpha, memberId: owner.actor.memberId }).runs).toEqual([])
+    expect(host.host.workerRunsForClient({ workspaceId: alpha, memberId: owner.actor.memberId }).runs)
+      .toMatchObject([{ workerRef: run.workerRef, state: 'stopped' }])
   })
 })
 

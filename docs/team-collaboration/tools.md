@@ -241,6 +241,18 @@ A Worker holds no Team identity: it cannot post, claim, accept, or answer for th
 
 Every run's record is durable: a Thread read reports every run bound to it as `running`, `completed`, `failed`, `stopped`, or `unconfirmed`, and a Project-only run records the same execution facts without publishing them. A record a previous Host left in `running` reads as `unconfirmed`: the result cannot be confirmed, the run is never restarted or retried on its own, and nothing wakes anyone for it.
 
-Read-only inspection of a finished run is not part of this contract yet. Unloading the bundle refuses new delegations, cancels starts that are still opening (including one still writing its opening record), and waits for the runs this Host holds to report and record their endings before it closes storage.
+The same tool reads one run's diagnostic: pass `inspect: <worker:…>` and nothing else. The answer is the summary the Thread already carries, the stage a failed run came apart in, the native identities the settlement recorded — the engine's own session, the turn this run drove, and the absolute path of its record — and the bounded fragments that record still answers after the process exited, or the one reason it cannot.
+
+The native record itself is never copied into the Team, never stored, and never published: the Thread keeps the summary it already had, and the detailed answer reaches only the Member who delegated the run and the Human, who reads it from the edit-Agent dialog — by row, or by typing a `worker:` number the list's window does not show.
+
+Only the initiating Member and the Human may ask; another Member is refused as `worker_inspect_forbidden`, even when it now owns the Project. A run that has not ended answers with its summary and says its native record is read once it does. A run that ended before the engine recorded a session, or whose record is gone, unreadable, of a shape this Team does not read, or holds no turn with the recorded id, keeps the Team summary and names that reason instead of returning fragments that are not there.
+
+The look-up is bounded and self-checking: the recorded location must be an absolute `.jsonl` path under a `sessions` directory, and an oversized value is refused whole rather than cut into a path nobody recorded. The file that opens must be the file the location named — its identity is compared at open and again after the read — the first record must name the recorded session, and the byte ceiling applies before any line is split or parsed.
+
+Fragments are limited to a few safe fields of the run's own turn, each bounded, and text that looks like a credential is withheld whole rather than masked, quoted JSON pairs included. Every reason is one bounded sentence that names the fact and never echoes a native value, and nothing about the engine's record is written back into the Team.
+
+The Human's edit-Agent dialog lists the runs this Host still holds, the records a previous Host left running as `unconfirmed`, and the newest 20 ended runs by ending time — a long run that started early and failed just now stays inside that window — each with the state it really ended in, and each offering its diagnostic. Every run stays readable by its `worker:` ref, so the list is a window, not the only door.
+
+Unloading the bundle refuses new delegations, cancels starts that are still opening (including one still writing its opening record), and waits for the runs this Host holds to report and record their endings before it closes storage.
 
 A run still unconfirmed at that boundary keeps its `running` record and is sealed, so no late ending is written after storage closes.

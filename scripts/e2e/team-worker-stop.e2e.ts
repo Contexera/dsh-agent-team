@@ -141,9 +141,12 @@ it('stops one of two live Worker runs from the edit-Agent dialog and leaves the 
   await settleLayout(page)
   await page.screenshot({ path: join(WORKER_STOP_SHOTS, 'worker-stop-one-of-two.png') })
 
-  // The Host's own record agrees: one ending, one live run, and the Thread carries one terminal fact.
+  // The Host's own record agrees: one live run, and the stopped one still reachable
+  // in the state it really ended in — the list is a window over endings, not a
+  // live-only view, so a failed or stopped run keeps its diagnostic door.
   const runs = team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs
-  expect(runs.map(view => view.workerRef)).toEqual([second.workerRef])
+  expect(runs.map(view => [view.workerRef, view.state]))
+    .toEqual([[second.workerRef, 'running'], [first.workerRef, 'stopped']])
   const read = await team.readThreadForAgent(memberAgent(scaffold!, workspaceId, runner.memberId),
     { requestId: 'e2e-worker-stop-read' as never, workspaceId, threadRef })
   expect(read.workerStates?.map(state => state.state).sort()).toEqual(['running', 'stopped'])

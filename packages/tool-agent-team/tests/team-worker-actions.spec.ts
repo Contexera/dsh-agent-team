@@ -3,10 +3,11 @@ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { renderText, teamTools } from './render-text.ts'
 
 /**
- * Execution-level tests for `team_worker`'s two call shapes: one delegation and
- * one stop share the tool but never a request. The stop is a ref alone, so a
- * half-filled start can never be read as a stop, and the Host entry points stay
- * distinct: a stop cannot smuggle a task, target, engine, or directory.
+ * Execution-level tests for `team_worker`'s three call shapes: one delegation, one
+ * stop, and one diagnostic read share the tool but never a request. A stop and an
+ * inspect are each a ref alone, so a half-filled start can never be read as
+ * either, and the Host entry points stay distinct: neither can smuggle a task,
+ * target, engine, or directory.
  */
 
 const PROJECT = 'project:00000000-0000-4000-8000-000000000001'
@@ -21,12 +22,28 @@ function run(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function inspection(overrides: Record<string, unknown> = {}) {
+  return {
+    workerRef: WORKER, projectRef: PROJECT, engine: 'codex', state: 'failed', unconfirmed: false,
+    startedAt: '2026-11-09T07:00:00.000Z', settledAt: '2026-11-09T07:10:00.000Z',
+    summary: 'Team Worker failure (stage: turn; category: unknown).',
+    stage: 'turn',
+    native: { threadId: 'native-thread', turnId: 'native-turn', storage: '/tmp/home/sessions/2026/11/09/rollout-x.jsonl' },
+    history: { kind: 'read', withheld: 0, truncated: false, fragments: [
+      { kind: 'session', text: 'Native session record: engine 0.167.0' },
+      { kind: 'failure', text: 'Native turn failed after 15674 ms: unexpected status 401 Unauthorized' },
+    ] },
+    ...overrides,
+  }
+}
+
 function fakeHost() {
   return {
     workerStartForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => run()),
     workerStopForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => run({
       state: 'stopped', settledAt: '2026-11-09T07:10:00.000Z',
     })),
+    workerInspectForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => inspection()),
   }
 }
 
@@ -110,5 +127,65 @@ describe('team_worker stops with a ref alone', () => {
     const host = fakeHost()
     host.workerStopForAgent.mockRejectedValueOnce(new Error('Only the Member who delegated Worker or the Human may stop it.'))
     await expect(call(tool, { stop: WORKER }, host)).rejects.toThrow(/Only the Member who delegated/)
+  })
+})
+
+describe('team_worker inspects with a ref alone', () => {
+  it('calls only the inspect entry with the ref, carrying no start fields', async () => {
+    const host = fakeHost()
+    const result = await call(tool, { inspect: WORKER }, host)
+    expect(host.workerStartForAgent).not.toHaveBeenCalled()
+    expect(host.workerStopForAgent).not.toHaveBeenCalled()
+    expect(host.workerInspectForAgent).toHaveBeenCalledTimes(1)
+    expect(host.workerInspectForAgent.mock.calls[0]![1]).toEqual({ workerRef: WORKER })
+    expect(result).toMatchObject({ mode: 'inspect', workerRef: WORKER, state: 'failed', stage: 'turn',
+      nativeThreadId: 'native-thread', nativeTurnId: 'native-turn', nativeRecord: 'read' })
+  })
+
+  it('renders the summary, the native identities, and the fragments it could read', async () => {
+    const host = fakeHost()
+    const report = renderText(tool, { inspect: WORKER }, await call(tool, { inspect: WORKER }, host))
+    expect(report).toContain('Summary: Team Worker failure (stage: turn; category: unknown).')
+    expect(report).toContain('Failed at: turn')
+    expect(report).toContain('Native thread: native-thread')
+    expect(report).toContain('Native turn: native-turn')
+    expect(report).toContain('- failure: Native turn failed after 15674 ms: unexpected status 401 Unauthorized')
+  })
+
+  it('keeps the Team summary and names the reason when no native record answers', async () => {
+    const host = fakeHost()
+    host.workerInspectForAgent.mockResolvedValueOnce(inspection({ stage: 'installation', native: {},
+      history: { kind: 'unpersisted', reason: 'The run ended before the engine opened a session.' } }))
+    const result = await call(tool, { inspect: WORKER }, host)
+    expect(result).toMatchObject({ nativeRecord: 'unpersisted', nativeReason: 'The run ended before the engine opened a session.' })
+    const report = renderText(tool, { inspect: WORKER }, result)
+    expect(report).toContain('Summary: Team Worker failure')
+    expect(report).toContain('No native fragment to show: The run ended before the engine opened a session.')
+  })
+
+  it('refuses a look-up that mixes the ref with any start parameter', async () => {
+    for (const extra of [
+      { task: 'also do this' }, { threadRef: 'thread:00000000-0000-4000-8000-000000000003' },
+      { taskRef: 'task:00000000-0000-4000-8000-000000000004' }, { projectRef: PROJECT },
+      { engine: 'claude' }, { cwd: CWD }, { requestId: 'request:1' },
+    ]) {
+      const host = fakeHost()
+      await expect(call(tool, { inspect: WORKER, ...extra }, host)).rejects.toThrow(/either a task to start or an inspect ref/)
+      expect(host.workerInspectForAgent).not.toHaveBeenCalled()
+      expect(host.workerStartForAgent).not.toHaveBeenCalled()
+    }
+  })
+
+  it('refuses a call that names both a stop and an inspect', async () => {
+    const host = fakeHost()
+    await expect(call(tool, { stop: WORKER, inspect: WORKER }, host)).rejects.toThrow(/pass stop or inspect, not both/)
+    expect(host.workerStopForAgent).not.toHaveBeenCalled()
+    expect(host.workerInspectForAgent).not.toHaveBeenCalled()
+  })
+
+  it('passes the Host refusal through unchanged', async () => {
+    const host = fakeHost()
+    host.workerInspectForAgent.mockRejectedValueOnce(new Error('Only the Member who delegated Worker may read its diagnostic.'))
+    await expect(call(tool, { inspect: WORKER }, host)).rejects.toThrow(/Only the Member who delegated/)
   })
 })

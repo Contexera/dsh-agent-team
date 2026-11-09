@@ -27,6 +27,8 @@ import type {
   AgentTeamAddMemberResult,
   AgentTeamWorkerRunListRequest,
   AgentTeamWorkerRunListResult,
+  AgentTeamWorkerInspectRequest,
+  AgentTeamWorkerInspection,
   AgentTeamWorkerStopRequest,
   AgentTeamWorkerStopResult,
   AgentTeamRecoverMemberRequest,
@@ -152,10 +154,12 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     loadMemberReminders: (request: AgentTeamMemberReminderListRequest) => Promise<RemoteResult<readonly AgentTeamMemberReminderView[]>>
     /** Human withdrawal of one reminder from Member detail; only the Member's own reminders are listed to withdraw. */
     cancelMemberReminder: (request: Omit<AgentTeamMemberReminderCancelRequest, 'actor'>) => Promise<RemoteResult<AgentTeamMemberReminderCancelResult>>
-    /** One Member's Worker runs: what this Host holds (running/stopping) and the records it cannot confirm. */
+    /** One Member's Worker runs: what this Host holds (running/stopping), the records it cannot confirm, and the newest ended runs. */
     loadWorkerRuns: (request: AgentTeamWorkerRunListRequest) => Promise<RemoteResult<AgentTeamWorkerRunListResult>>
     /** The Human's stop of one of that Member's runs; the answer is the state the engine's own cleanup confirmed. */
     stopWorker: (request: AgentTeamWorkerStopRequest) => Promise<RemoteResult<AgentTeamWorkerStopResult>>
+    /** One run's diagnostic by its Team-owned number: the Thread's summary plus what the engine's own record still answers. */
+    inspectWorker: (request: AgentTeamWorkerInspectRequest) => Promise<RemoteResult<AgentTeamWorkerInspection>>
     recoverMember: (request: AgentTeamRecoverMemberRequest) => Promise<RemoteResult<AgentTeamRecoverMemberResult>>
     archiveMember: (request: AgentTeamArchiveMemberRequest) => Promise<RemoteResult<AgentTeamArchiveMemberResult>>
     joinWorkspace: (request: AgentTeamJoinWorkspaceRequest) => Promise<RemoteResult<AgentTeamJoinWorkspaceResult>>

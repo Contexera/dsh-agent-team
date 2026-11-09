@@ -10,7 +10,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { MemberWorkerRunsSection } from '../src/client/TeamMemberEditor.tsx'
 import { zh } from '../src/client/locales.ts'
-import type { AgentTeamWorkerRunView, AgentTeamWorkerStopResult } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamWorkerInspection, AgentTeamWorkerRunView, AgentTeamWorkerStopResult } from '@contexera/dsh-agent-team/types'
 
 afterEach(cleanup)
 
@@ -34,15 +34,32 @@ const listed = (runs: readonly AgentTeamWorkerRunView[]): RemoteResult<{ readonl
 
 const refused = (message: string): RemoteResult<never> => ({ ok: false, error: { message } }) as RemoteResult<never>
 
+/** One ended run, as the Host lists it after its process exited. */
+const failed: AgentTeamWorkerRunView = { ...running, workerRef: 'worker:failed' as AgentTeamWorkerRunView['workerRef'],
+  state: 'failed', task: 'check the nightly run' }
+
+/** The Host's report for that run: the public summary, the anchors, and what the native record answered. */
+const inspection = (history: AgentTeamWorkerInspection['history'] = { kind: 'read',
+  fragments: [{ kind: 'turn', text: 'model: gpt-6.1-sol' }, { kind: 'failure', text: 'unexpected status 401' }],
+  withheld: 0, truncated: false }): AgentTeamWorkerInspection => ({
+  workerRef: failed.workerRef, projectRef: failed.projectRef, engine: 'codex', state: 'failed', unconfirmed: false,
+  startedAt: failed.startedAt, settledAt: '2026-01-01T00:01:00.000Z', summary: 'The Worker ended in a failed turn.',
+  stage: 'turn',
+  native: { threadId: 'native-thread', turnId: 'native-turn', storage: '/tmp/sessions/rollout.jsonl' },
+  history,
+})
+
 type StopResult = RemoteResult<AgentTeamWorkerStopResult>
 
 function renderSection(options: {
   readonly runs: () => Promise<RemoteResult<{ readonly runs: readonly AgentTeamWorkerRunView[] }>>
   readonly stop?: () => Promise<StopResult>
+  readonly inspect?: Parameters<typeof MemberWorkerRunsSection>[0]['inspectWorker']
 }) {
   return render(
     <MemberWorkerRunsSection workspaceId={workspaceId} memberId={memberId}
       loadWorkerRuns={options.runs} stopWorker={options.stop ?? (async () => refused('unused') as never)}
+      inspectWorker={options.inspect ?? (async () => refused('unused') as never)}
       disabled={false} t={t} />,
   )
 }
@@ -160,5 +177,161 @@ describe('the running Worker list in the edit-Agent dialog', () => {
     expect(screen.getByRole('listitem').textContent).toContain('运行中')
     expect(screen.getByRole('listitem').textContent).not.toContain('停止失败')
     expect(screen.getByRole('button', { name: '停止 Worker：check the schedule' })).toBeTruthy()
+  })
+})
+
+describe('the diagnostic behind one Worker run', () => {
+  it('keeps a failed run on the list after its process exited, with its door and no stop control', async () => {
+    renderSection({ runs: async () => listed([running, failed]) })
+    const rows = await screen.findAllByRole('listitem')
+    expect(rows[1]!.textContent).toContain('已失败')
+    expect(rows[1]!.textContent).toContain('check the nightly run')
+    // Only the live run can still be stopped; the ended one offers its report.
+    expect(screen.getAllByRole('button', { name: /停止 Worker/ })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: '查看诊断：check the nightly run' })).toBeTruthy()
+    // The list is a window, and it says so.
+    expect(screen.getByText(zh.memberWorkerRunsWindow)).toBeTruthy()
+  })
+
+  it('renders the Host report as it came: summary, stage, native identities and fragments', async () => {
+    const inspect = vi.fn(async () => ({ ok: true, value: inspection() }) as RemoteResult<AgentTeamWorkerInspection>)
+    renderSection({ runs: async () => listed([failed]), inspect })
+    fireEvent.click(await screen.findByRole('button', { name: '查看诊断：check the nightly run' }))
+    await screen.findByText('摘要: The Worker ended in a failed turn.')
+    expect(screen.getByText('失败阶段：turn')).toBeTruthy()
+    expect(screen.getByText('原生会话：native-thread')).toBeTruthy()
+    expect(screen.getByText('原生 turn：native-turn')).toBeTruthy()
+    expect(screen.getByText('原生记录：/tmp/sessions/rollout.jsonl')).toBeTruthy()
+    expect(screen.getByText('turn: model: gpt-6.1-sol')).toBeTruthy()
+    expect(screen.getByText('failure: unexpected status 401')).toBeTruthy()
+    expect(screen.queryByText(zh.memberWorkerInspectWithheld)).toBeNull()
+    expect(inspect).toHaveBeenCalledWith({ workspaceId, memberId, workerRef: failed.workerRef })
+    // One flag drives the word, the name, and the expanded state: the control now
+    // says what it does, and the visible word is a prefix of its accessible name.
+    const opened = screen.getByRole('button', { name: '收起诊断：check the nightly run' })
+    expect(opened.textContent).toBe('收起诊断')
+    expect(opened.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(opened)
+    await waitFor(() => { expect(screen.queryByText('摘要: The Worker ended in a failed turn.')).toBeNull() })
+    const closed = screen.getByRole('button', { name: '查看诊断：check the nightly run' })
+    expect(closed.textContent).toBe('查看诊断')
+    expect(closed.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('says what the read could not do instead of inventing fragments', async () => {
+    const inspect = vi.fn(async () => ({ ok: true, value: inspection({ kind: 'unmatched',
+      reason: 'The record holds no turn with the recorded id.' }) }) as RemoteResult<AgentTeamWorkerInspection>)
+    renderSection({ runs: async () => listed([failed]), inspect })
+    fireEvent.click(await screen.findByRole('button', { name: '查看诊断：check the nightly run' }))
+    await screen.findByText('The record holds no turn with the recorded id.')
+    // The Team summary stays: a record that cannot answer does not erase the ending.
+    expect(screen.getByText('摘要: The Worker ended in a failed turn.')).toBeTruthy()
+    expect(screen.queryByText(zh.memberWorkerInspectFragments)).toBeNull()
+  })
+
+  it('shows the read in flight as a status, then a refused one as an alert', async () => {
+    let answer!: (result: RemoteResult<AgentTeamWorkerInspection>) => void
+    const inspect = vi.fn(() => new Promise<RemoteResult<AgentTeamWorkerInspection>>(resolve => { answer = resolve }))
+    renderSection({ runs: async () => listed([failed]), inspect })
+    fireEvent.click(await screen.findByRole('button', { name: '查看诊断：check the nightly run' }))
+    expect((await screen.findByRole('status')).textContent).toBe(zh.memberWorkerInspectLoading)
+    answer(refused('Worker \'worker:failed\' was delegated by another Member.'))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent)
+      .toBe('诊断读取失败：Worker \'worker:failed\' was delegated by another Member.') })
+    // A refused read leaves the row as the Host listed it, and the control folds
+    // away a report that never arrived instead of sending the read again.
+    expect(screen.getByRole('listitem').textContent).toContain('已失败')
+    fireEvent.click(screen.getByRole('button', { name: '收起诊断：check the nightly run' }))
+    await waitFor(() => { expect(screen.queryByRole('alert')).toBeNull() })
+    expect(inspect).toHaveBeenCalledTimes(1)
+  })
+
+  it('folds a read that is still in flight instead of asking twice', async () => {
+    let answer!: (result: RemoteResult<AgentTeamWorkerInspection>) => void
+    const inspect = vi.fn(() => new Promise<RemoteResult<AgentTeamWorkerInspection>>(resolve => { answer = resolve }))
+    renderSection({ runs: async () => listed([failed]), inspect })
+    fireEvent.click(await screen.findByRole('button', { name: '查看诊断：check the nightly run' }))
+    expect((await screen.findByRole('status')).textContent).toBe(zh.memberWorkerInspectLoading)
+    fireEvent.click(screen.getByRole('button', { name: '收起诊断：check the nightly run' }))
+    await waitFor(() => { expect(screen.queryByRole('status')).toBeNull() })
+    expect(inspect).toHaveBeenCalledTimes(1)
+    // The late answer to the folded read does not reopen the report.
+    answer({ ok: true, value: inspection() } as RemoteResult<AgentTeamWorkerInspection>)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(screen.queryByText('摘要: The Worker ended in a failed turn.')).toBeNull()
+    expect(screen.getByRole('button', { name: '查看诊断：check the nightly run' })).toBeTruthy()
+  })
+
+  it('keeps the report the Human moved to when an earlier read answers late', async () => {
+    const other: AgentTeamWorkerRunView = { ...failed, workerRef: 'worker:other' as AgentTeamWorkerRunView['workerRef'],
+      task: 'check the other run' }
+    const answers = new Map<string, (result: RemoteResult<AgentTeamWorkerInspection>) => void>()
+    const inspect = vi.fn((request: { readonly workerRef: string }) =>
+      new Promise<RemoteResult<AgentTeamWorkerInspection>>(resolve => { answers.set(request.workerRef, resolve) }))
+    renderSection({ runs: async () => listed([failed, other]), inspect })
+    fireEvent.click(await screen.findByRole('button', { name: '查看诊断：check the nightly run' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看诊断：check the other run' }))
+    // The first read answers after the second one was asked for: it is not the
+    // answer the Human is looking at, so it may not take the surface over.
+    answers.get(failed.workerRef)?.({ ok: true, value: { ...inspection(), workerRef: failed.workerRef } })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(document.querySelector(`[data-worker-report="${failed.workerRef}"]`)).toBeNull()
+    answers.get(other.workerRef)?.({ ok: true, value: { ...inspection(), workerRef: other.workerRef } })
+    await waitFor(() => { expect(document.querySelector(`[data-worker-report="${other.workerRef}"]`)).not.toBeNull() })
+    expect(document.querySelector(`[data-worker-report="${failed.workerRef}"]`)).toBeNull()
+  })
+
+  it('reads a run outside the window by the number the Human typed', async () => {
+    const outside = 'worker:outside' as AgentTeamWorkerInspection['workerRef']
+    const answer: RemoteResult<AgentTeamWorkerInspection> = { ok: true, value: { ...inspection(), workerRef: outside } }
+    const inspect = vi.fn(async () => answer)
+    renderSection({ runs: async () => listed([failed]), inspect })
+    const input = await screen.findByLabelText(zh.memberWorkerInspectLookupTitle)
+    fireEvent.change(input, { target: { value: `  ${outside}  ` } })
+    const submit = screen.getByRole('button', { name: zh.memberWorkerInspectLookup })
+    expect(submit.textContent).toBe(zh.memberWorkerInspectLookupAction)
+    fireEvent.click(submit)
+    // The ref is the Human's input; the Host decides what it names.
+    await waitFor(() => { expect(inspect).toHaveBeenCalledWith({ workspaceId, memberId, workerRef: outside }) })
+    const report = await waitFor(() => {
+      const found = document.querySelector(`[data-worker-lookup="${outside}"]`)
+      if (found === null) throw new Error('the by-number answer has no seat yet')
+      return found
+    })
+    expect(report.textContent).toContain(`编号：${outside}`)
+    // The answer appears without a page change, so the line that carries it is a
+    // status: a reader hears the read land, not only that it started.
+    expect(report.querySelector('[role="status"]')?.textContent).toContain(`编号：${outside}`)
+    expect(report.textContent).toContain('Codex · 已失败')
+    expect(report.textContent).toContain('摘要: The Worker ended in a failed turn.')
+    // The window is the Host's list: a run read this way is not inserted into it.
+    const rows = document.querySelectorAll('[data-worker-run]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.textContent).toContain('check the nightly run')
+  })
+
+  it('shows a refused number where the form is, leaving the list untouched', async () => {
+    const inspect = vi.fn(async () => refused('Worker \'worker:mine\' was delegated by another Member; '
+      + 'this surface reads only that Member\'s runs.'))
+    renderSection({ runs: async () => listed([failed]), inspect })
+    fireEvent.change(await screen.findByLabelText(zh.memberWorkerInspectLookupTitle), { target: { value: 'worker:mine' } })
+    fireEvent.click(screen.getByRole('button', { name: zh.memberWorkerInspectLookup }))
+    expect((await screen.findByRole('alert')).textContent)
+      .toBe('诊断读取失败：Worker \'worker:mine\' was delegated by another Member; this surface reads only that Member\'s runs.')
+    expect(screen.getByRole('listitem').textContent).toContain('已失败')
+    expect(document.querySelector('[data-worker-lookup]')).not.toBeNull()
+  })
+
+  it('does not submit an empty number', async () => {
+    const inspect = vi.fn(async () => ({ ok: true, value: inspection() }) as RemoteResult<AgentTeamWorkerInspection>)
+    renderSection({ runs: async () => listed([failed]), inspect })
+    const input = await screen.findByLabelText(zh.memberWorkerInspectLookupTitle)
+    fireEvent.change(input, { target: { value: '   ' } })
+    const submit = screen.getByRole('button', { name: zh.memberWorkerInspectLookup })
+    expect(submit.hasAttribute('disabled')).toBe(true)
+    fireEvent.submit(input.closest('form')!)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(inspect).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })

@@ -179,6 +179,7 @@ export const MAIN_STREAM_SHOTS = join(BROWSER_ARTIFACTS, 'main-stream')
 export const SUBSCRIPTION_SHOTS = join(BROWSER_ARTIFACTS, 'subscriptions')
 export const WORKER_SHOTS = join(BROWSER_ARTIFACTS, 'worker-thread')
 export const WORKER_STOP_SHOTS = join(BROWSER_ARTIFACTS, 'worker-stop')
+export const WORKER_INSPECT_SHOTS = join(BROWSER_ARTIFACTS, 'worker-inspect')
 /**
  * Wait until no finite animation is running: a screenshot taken mid-collapse
  * captures the expanded column clipped to the rail. Infinite animations
@@ -546,4 +547,5 @@ export async function installLocalBundle(): Promise<void> {
   await mkdir(SUBSCRIPTION_SHOTS, { recursive: true })
   await mkdir(WORKER_SHOTS, { recursive: true })
   await mkdir(WORKER_STOP_SHOTS, { recursive: true })
+  await mkdir(WORKER_INSPECT_SHOTS, { recursive: true })
 }

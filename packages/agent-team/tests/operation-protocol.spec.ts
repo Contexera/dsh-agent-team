@@ -1897,6 +1897,22 @@ describe('operation protocol coverage', () => {
     }
   })
 
+  it('accepts a settlement with the native anchors and one written before they existed', () => {
+    // The anchors are optional: a record written before ticket 04 replays as it
+    // was, and a record written now carries what a later look-up needs.
+    expect(agentTeamOperationSchema.parse(workerSettled)).toEqual(workerSettled)
+    const settledWithAnchors = {
+      ...workerSettled,
+      data: { ...workerSettled.data, execution: { ...workerSettled.data.execution,
+        nativeTurnId: 'native-turn-1', nativeStorage: '/tmp/sessions/rollout-native-session-1.jsonl', stage: 'turn' } },
+    }
+    expect(agentTeamOperationSchema.parse(settledWithAnchors)).toEqual(settledWithAnchors)
+    // A stage outside the recorded set is refused rather than stored.
+    const unknownStage = { ...settledWithAnchors, data: { ...settledWithAnchors.data,
+      execution: { ...settledWithAnchors.data.execution, stage: 'somewhere' } } }
+    expect(agentTeamOperationSchema.safeParse(unknownStage).success).toBe(false)
+  })
+
   it('rejects a record that holds both spellings of one field', () => {
     const stored = row('team/project-member-added').stored as Extract<AgentTeamOperation, { kind: 'team/project-member-added' }>
     const ambiguous = { ...stored, data: { ...stored.data, channelRef: stored.data.projectRef } }

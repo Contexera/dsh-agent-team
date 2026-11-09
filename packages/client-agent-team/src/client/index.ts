@@ -45,6 +45,7 @@ import type {
   AgentTeamSubscriptionReplayRequest,
   AgentTeamViewRequest,
   AgentTeamWorkerRunListRequest,
+  AgentTeamWorkerInspectRequest,
   AgentTeamWorkerStopRequest,
 } from '@contexera/dsh-agent-team/types'
 import agentTeamRemote from '@contexera/dsh-agent-team/remote'
@@ -257,6 +258,9 @@ function teamSharedRemotes(
     // uses, read by the Member the edit surface belongs to.
     loadWorkerRuns: (request: AgentTeamWorkerRunListRequest) => ctx.remote.agentTeam.workerRuns(request),
     stopWorker: (request: AgentTeamWorkerStopRequest) => ctx.remote.agentTeam.stopWorker(request),
+    // A read-only look-up: the same Host authority the Member's own `team_worker`
+    // inspect mode uses, so the Human and the initiator see one report.
+    inspectWorker: (request: AgentTeamWorkerInspectRequest) => ctx.remote.agentTeam.inspectWorker(request),
     recoverMember: (request: AgentTeamRecoverMemberRequest) => ctx.remote.agentTeam.recoverMember(request),
     archiveMember: (request: AgentTeamArchiveMemberRequest) => ctx.remote.agentTeam.archiveMember(request),
     joinWorkspace: (request: AgentTeamJoinWorkspaceRequest) => ctx.remote.agentTeam.joinWorkspace(request),

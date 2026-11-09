@@ -6276,9 +6276,12 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/worker-settled') {
       const prior = target.workerExecutions.get(operation.data.execution.workerRef)
       if (prior === undefined) throw new Error('agent-team replay settled a Worker run it never recorded')
-      const { state, settledAt, nativeSessionId, output, diagnostic } = operation.data.execution
+      const { state, settledAt, nativeSessionId, nativeTurnId, nativeStorage, stage, output, diagnostic } = operation.data.execution
       target.workerExecutions.set(prior.workerRef, Object.freeze({ ...prior, state, settledAt,
         ...(nativeSessionId === undefined ? {} : { nativeSessionId }),
+        ...(nativeTurnId === undefined ? {} : { nativeTurnId }),
+        ...(nativeStorage === undefined ? {} : { nativeStorage }),
+        ...(stage === undefined ? {} : { stage }),
         ...(output === undefined ? {} : { output }),
         ...(diagnostic === undefined ? {} : { diagnostic }) }))
       if (operation.data.activity !== undefined) this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
