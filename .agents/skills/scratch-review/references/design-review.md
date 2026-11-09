@@ -4,7 +4,7 @@ Review and refine a converged design before implementation. The output is a more
 
 ## 1. Establish the facts and decision authority
 
-Read the current `.scratch` rules, the work item's `README.md`, `spec.md`, all affected tickets, and the existing materials that support the chosen design. Use current source and tests for behavior, maintained documentation for repository standards, and the matching upstream source and documentation for external capabilities. Record the versions or commits used in the final response when they matter to a conclusion.
+Read the current `.scratch` rules, the work item's `README.md`, `spec.md`, all affected tickets, and the existing materials that support the chosen design. Use current source and tests for behavior, maintained documentation for repository standards, and the matching upstream source and documentation for external capabilities. Record the versions or commits used in the final response when they matter to a conclusion. If the work item has no design snapshot, or its core decisions are still open, report that the design has not converged and stop; do not write a spec from scratch.
 
 Distinguish explicit Human decisions, rejected alternatives, derived design details, assumptions, and open questions. Do not silently reopen a settled product decision. New source evidence can expose a conflict with that decision; make the conflict concrete and leave the genuinely new choice to the Human.
 

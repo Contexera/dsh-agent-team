@@ -2,7 +2,7 @@
 
 Review a change through the work item that explains why it exists. Check the implementation against its spec, correctness, repository standards, and unnecessary complexity; leave a report that a later session can act on.
 
-This procedure is read-only except for its new review report. Do not modify implementation code, design materials, ticket status, acceptance checkboxes, or the work-item continuation README.
+This procedure changes nothing except its new review report and temporary verification files. Do not modify implementation code, design materials, ticket status, acceptance checkboxes, or the work-item continuation README.
 
 ## 1. Pin the code range
 
