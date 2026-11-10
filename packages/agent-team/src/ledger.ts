@@ -6270,10 +6270,7 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/worker-started') {
       target.workerExecutions.set(operation.data.execution.workerRef,
         Object.freeze({ ...operation.data.execution, state: 'running' }))
-      if (operation.data.activity !== undefined) {
-        this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
-        this.advanceThreadRevision(target, operation.data.activity.threadRef, operation.sequence)
-      }
+      if (operation.data.activity !== undefined) this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
       return
     }
     if (operation.kind === 'team/worker-settled') {
@@ -6287,10 +6284,7 @@ export class AgentTeamLedger {
         ...(stage === undefined ? {} : { stage }),
         ...(output === undefined ? {} : { output }),
         ...(diagnostic === undefined ? {} : { diagnostic }) }))
-      if (operation.data.activity !== undefined) {
-        this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
-        this.advanceThreadRevision(target, operation.data.activity.threadRef, operation.sequence)
-      }
+      if (operation.data.activity !== undefined) this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
@@ -6377,20 +6371,6 @@ export class AgentTeamLedger {
     const facts = target.factsByThread.get(activity.threadRef) ?? []
     facts.push(fact)
     target.factsByThread.set(activity.threadRef, facts)
-  }
-
-  /**
-   * A public fact advances its Thread's revision, the way every operation that
-   * carries its Thread row does: the revision is the Thread's head, so no fact
-   * may sit past it. A read's confirmation bound is validated against this
-   * number and every Thread write fences on it, so appending a fact without
-   * advancing it leaves each selective read of that Thread unable to confirm
-   * the very fact it delivered.
-   */
-  private advanceThreadRevision(target: Pick<Projection, 'threads'>, threadRef: AgentTeamThreadRef, sequence: number): void {
-    const thread = target.threads.get(threadRef)
-    if (thread === undefined) throw new Error(`agent-team replay recorded a fact on Thread '${threadRef}' it never held`)
-    target.threads.set(threadRef, Object.freeze({ ...thread, revision: sequence }))
   }
 
   /** Display ordinals are a per-Project creation counter; the workspace filter happens at read time. */
@@ -6619,11 +6599,23 @@ export class AgentTeamLedger {
     return this.prepareReadFrom(this.state, memberId, workspaceId, request)
   }
 
+  /**
+   * The Thread's head: the sequence of its last public fact. Every fact an
+   * unread batch can carry sits at or below it, which is what makes it the
+   * bound a confirmation may reach. It is deliberately not `thread.revision`:
+   * that number fences Thread writes and moves only with the operations that
+   * revise Thread state, so a fact that revises none — a bound Worker run's
+   * start or ending — legitimately sits past it.
+   */
+  private threadHeadFrom(projection: Projection, threadRef: AgentTeamThreadRef): number {
+    return this.threadFactsFrom(projection, threadRef).at(-1)?.sequence ?? 0
+  }
+
   /** Validate one Host-selected confirmation bound against the Thread it targets. */
-  private threadReadSelection(revision: number, selected: number | undefined): number | undefined {
+  private threadReadSelection(head: number, selected: number | undefined): number | undefined {
     if (selected === undefined) return undefined
     if (!Number.isInteger(selected) || selected < 0) throw new Error('selectedThroughSequence must be a non-negative integer')
-    if (selected > revision) throw new Error(`selectedThroughSequence ${selected} exceeds Thread revision ${revision}`)
+    if (selected > head) throw new Error(`selectedThroughSequence ${selected} exceeds Thread head ${head}`)
     return selected
   }
 
@@ -6645,7 +6637,7 @@ export class AgentTeamLedger {
       // Version-1 read receipts predate Project membership as a read gate.
       if (projection.rulesVersion >= 2) this.requireProjectMemberActorFrom(projection, { kind: 'member', memberId, handle: member.handle }, projectRef)
     }
-    const selectedThroughSequence = this.threadReadSelection(thread.revision, request.selectedThroughSequence)
+    const selectedThroughSequence = this.threadReadSelection(this.threadHeadFrom(projection, thread.threadRef), request.selectedThroughSequence)
     const attention = this.attentionForFrom(projection, memberId, thread.threadRef)
     const unread = this.unreadForFrom(projection, memberId, thread.threadRef)
     // The default batch is fixed at 20. A Host selection only takes a prefix of

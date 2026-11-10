@@ -47,7 +47,7 @@ async function seededReaderThread() {
     replies.push({ sequence: replied.message.sequence, body })
     revision = replied.thread.revision
   }
-  return { test, ledger, reader, sent, replies, revision }
+  return { test, ledger, reader, sent, replies, revision, projectRef: project.project.projectRef }
 }
 
 /**
@@ -236,8 +236,19 @@ describe('AgentTeam Thread read selection', () => {
     await expect(harness(storedPool(movedSelection))).rejects.toThrow(/invalid Thread read receipt/)
   })
 
-  it('rejects a selection outside the Thread revision or not a non-negative integer', async () => {
-    const { ledger, reader, sent, revision } = await seededReaderThread()
+  it('rejects a selection outside the Thread head or not a non-negative integer', async () => {
+    const { ledger, reader, sent, projectRef, revision } = await seededReaderThread()
+    // The bound is this Thread's own head, so a fact that belongs to another
+    // Thread cannot widen it: this one was started after every reply, so its
+    // own sequence sits past the head the reads under test confirm through.
+    const other = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('other-thread'), workspaceId: alpha,
+      projectRef, body: 'An unrelated discussion', actor: agentTeamHumanActor() })).value)
+    expect(other.thread.revision).toBeGreaterThan(revision)
+    expect(() => ledger.previewThreadRead({ requestId: requestId('other-thread-bound'), workspaceId: alpha,
+      taskRef: sent.task.taskRef, actor: reader.actor, selectedThroughSequence: other.thread.revision }))
+      .toThrow(/selectedThroughSequence/)
+    // One past this Thread's head is refused for the same reason: the head is
+    // the last fact the Thread itself holds, never its write revision.
     expect(() => ledger.previewThreadRead({ requestId: requestId('too-far'), workspaceId: alpha,
       taskRef: sent.task.taskRef, actor: reader.actor, selectedThroughSequence: revision + 1 }))
       .toThrow(/selectedThroughSequence/)

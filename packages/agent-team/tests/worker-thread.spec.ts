@@ -214,14 +214,15 @@ describe('a Worker run bound to a Thread', () => {
 })
 
 /**
- * A read's confirmation bound is validated against the Thread revision, so no
- * fact may sit past it: every operation that appends a Thread fact advances
- * that revision. A Worker start or ending used to append its fact while
- * leaving the Thread row behind, which put the revision behind its own facts
- * and made every Host-selected read of that Thread throw
- * `selectedThroughSequence … exceeds Thread revision …` instead of confirming
- * the run — the read only recovered once an ordinary reply moved the revision
- * past the Worker facts again.
+ * A read's confirmation bound is validated against the Thread's head — the
+ * sequence of its last public fact — because that is the furthest fact an
+ * unread batch can carry. It is deliberately not `thread.revision`, which
+ * fences Thread writes and moves only with the operations that revise Thread
+ * state. A bound Worker run's start and ending revise none, so they sit past
+ * the revision, and while they are a Thread's tail a Host-selected read used
+ * to throw `selectedThroughSequence … exceeds Thread revision …` instead of
+ * confirming the run; it only recovered once an ordinary reply moved the
+ * revision past them.
  */
 describe('a Worker event at the Thread tail', () => {
   const runs = [
@@ -249,10 +250,14 @@ describe('a Worker event at the Thread tail', () => {
         expect(read.value.facts.map(entry => entry.fact.kind)).toEqual(expected)
         expect(read.value.facts.every(entry => entry.unread)).toBe(true)
         expect(read.value.remainingUnreadCount).toBe(0)
-        // The revision is the Thread's head, so the bound a read may confirm
-        // through and the token the next write fences on are the same number.
-        expect(read.value.thread.revision).toBe(read.value.facts.at(-1)!.fact.sequence)
+        // The bound this read confirmed reaches the last fact, past the
+        // revision the Thread's writes still fence on: a Worker fact revises
+        // no Thread state, so the two numbers are legitimately different here.
+        expect(read.value.readThroughSequence).toBe(read.value.facts.at(-1)!.fact.sequence)
+        expect(read.value.thread.revision).toBeLessThan(read.value.facts.at(-1)!.fact.sequence)
 
+        // The token the read hands back is the one the next write fences on,
+        // and the Worker event has not invalidated it.
         const replied = await team.ledger.reply({ requestId: requestId('tail-reply'), actor: human, workspaceId: alpha,
           threadRef, ...(taskRef === undefined ? {} : { taskRef }), body: 'noted', baseRevision: read.value.thread.revision })
         expect(replied.committed).toBe(true)
@@ -271,6 +276,76 @@ describe('a Worker event at the Thread tail', () => {
     await replay.initialize()
     expect(() => replay.validate()).not.toThrow()
     expect(replay.threadWorkerStates(team.threadRef)).toEqual([{ workerRef: 'worker:replay', state: 'failed' }])
+  })
+
+  it('still loads the records an older build wrote, and refuses a stale token in them', async () => {
+    const team = await seed()
+    // The revision the Thread's writes fenced on before the run: a Worker fact
+    // revises no Thread state, so this is also the token the reply that
+    // followed the run carried.
+    const beforeWorker = (await team.ledger.readThread({ requestId: requestId('legacy-before'), actor: human, workspaceId: alpha,
+      taskRef: team.taskRef })).value.thread.revision
+    await startRun(team, { workerRef: 'worker:legacy', threadRef: team.taskThreadRef, taskRef: team.taskRef })
+    await settleRun(team, 'worker:legacy', { state: 'completed', output: 'the nightly run fails at step 3' })
+
+    // The run's facts are ordinary Thread facts to the reader who has not seen
+    // them, so a write that skips them is still stopped by the unread check —
+    // the read bound and the write gate stay two separate questions.
+    const unread = await team.ledger.reply({ requestId: requestId('legacy-unread'), actor: human, workspaceId: alpha,
+      taskRef: team.taskRef, body: 'too early', baseRevision: beforeWorker })
+    expect(unread.value.kind).toBe('unread_required')
+
+    // The Host confirms the run's ending through the Thread head, past the
+    // revision the next write fences on.
+    const opening = await team.ledger.readThread({ requestId: requestId('legacy-read'), actor: human, workspaceId: alpha,
+      taskRef: team.taskRef }, preview => Math.max(...preview.facts.filter(entry => entry.unread).map(entry => entry.fact.sequence)))
+    expect(opening.committed).toBe(true)
+    expect(opening.value.readThroughSequence).toBe(opening.value.facts.at(-1)!.fact.sequence)
+    expect(opening.value.thread.revision).toBe(beforeWorker)
+    expect(beforeWorker).toBeLessThan(opening.value.facts.at(-1)!.fact.sequence)
+
+    // The record shape an older build left behind: the reply that followed a
+    // bound run carried the pre-run token, because that was the revision the
+    // run had not moved. A projection that advanced the revision on Worker
+    // facts re-derives a different number here and can no longer replay the
+    // reply this token was written for.
+    const replied = await team.ledger.reply({ requestId: requestId('legacy-reply'), actor: human, workspaceId: alpha,
+      taskRef: team.taskRef, body: 'noted', baseRevision: beforeWorker })
+    expect(replied.committed).toBe(true)
+    if (replied.value.kind !== 'committed') throw new Error(`expected the reply to commit, received ${replied.value.kind}`)
+    await team.ledger.changeAttention({ requestId: requestId('legacy-follow'), workspaceId: alpha, taskRef: team.taskRef,
+      action: 'follow', actor: team.actor })
+    const read = (await team.ledger.readThread({ requestId: requestId('legacy-member-read'), actor: team.actor, workspaceId: alpha,
+      taskRef: team.taskRef })).value
+    const claimed = await team.ledger.changeClaim({ requestId: requestId('legacy-claim'), workspaceId: alpha,
+      taskRef: team.taskRef, action: 'claim', direction: 'take it', baseRevision: read.thread.revision, actor: team.actor })
+    expect(claimed.committed).toBe(true)
+
+    // The same medium, read by this build: every historical write still
+    // validates against the rule in force when it was written.
+    const table = await openTableOver(team.pool)
+    const replay = new AgentTeamLedger(table)
+    await replay.initialize()
+    expect(() => replay.validate()).not.toThrow()
+    expect(replay.threadWorkerStates(team.taskThreadRef)).toEqual([{ workerRef: 'worker:legacy', state: 'completed' }])
+
+    // The facts the run appended sit past the revision, so a read confirms
+    // them through the Thread head instead of through the revision. What is
+    // left unread for the Human is the Claim the Member wrote last: the reply
+    // is their own fact and never unread to them.
+    const selected = await replay.readThread({ requestId: requestId('legacy-selected'), actor: human, workspaceId: alpha,
+      threadRef: team.taskThreadRef }, preview => Math.max(...preview.facts.filter(entry => entry.unread).map(entry => entry.fact.sequence)))
+    expect(selected.committed).toBe(true)
+    expect(selected.value.facts.map(entry => entry.fact.kind)).toEqual(['activity'])
+    expect(selected.value.readThroughSequence).toBe(selected.value.facts.at(-1)!.fact.sequence)
+    // The writes that followed the run each moved the revision past its facts,
+    // which is what the run itself never did.
+    expect(selected.value.thread.revision).toBeGreaterThan(beforeWorker)
+
+    // New writes stay strict: the pre-run token is refused, not honored.
+    const stale = await replay.reply({ requestId: requestId('legacy-stale'), actor: team.actor, workspaceId: alpha,
+      taskRef: team.taskRef, body: 'too late', baseRevision: beforeWorker })
+    expect(stale.value.kind).toBe('stale_revision')
   })
 })
 
