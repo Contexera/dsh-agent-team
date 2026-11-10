@@ -13,6 +13,8 @@ All notable changes to this project are documented in this file. The format foll
 
 **Fixed**
 
+- Cancelling a Team reading request no longer falls back to a successful capacity lookup when model metadata is missing or fails; ordinary metadata errors still use the conservative limit.
+- Cancelling a Member's alternative compaction summary no longer marks its route as degraded or disables later automatic summaries on that route.
 - An Agent's reminder block in the Agent editor lists only the reminders that can still fire; a reminder that fired or was withdrawn stays in the ledger but leaves the list, so it no longer reads as a row with no remaining action.
 
 ## [0.2.7] - 2026-11-05

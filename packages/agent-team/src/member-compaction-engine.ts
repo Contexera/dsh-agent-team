@@ -106,6 +106,7 @@ export default class MemberCompactionEngine extends BasicCompactionEngine {
       try {
         return await super.summarize(input, agent, signal)
       } catch (alternativeError) {
+        if (signal?.aborted) throw alternativeError
         this.recordFailure(agent, route)
         throw alternativeError
       }
