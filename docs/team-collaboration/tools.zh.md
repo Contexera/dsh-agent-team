@@ -4,6 +4,12 @@
 
 每个成功或被拒绝的 Team tool result 都通过正常 model loop 返回。这里没有 context 工具：Member 不能自己换代、记录锚点或就地压缩。超大的 Session 由 preset 的默认压缩引擎就地压缩；冷下来的一代由 Host 在唤醒边界换代（见 [`memory-and-context.zh.md`](memory-and-context.zh.md)）。
 
+## 可选参数槽位
+
+Team schema 接受省略可选字段。对于会填满未使用槽位的模型，各工具只把对该动作不携带指令的值视为未传；这不等于一律把空字符串、零、`false` 或 `[]` 丢弃。具体例外见下方对应动作。`null` 也不能替代省略：声明的字符串、数字、布尔和数组类型会在执行前拒绝它。
+
+[可选槽位矩阵](../../packages/tool-agent-team/tests/optional-slot-matrix.spec.ts) 覆盖每个已注册工具及其 action 枚举，在 Host 边界比较干净调用与填槽调用：调用了哪些操作、传了什么参数。Worker 的启动引擎、订阅接收者和 webhook 撤回等有实际含义的值必须作为明确的基线选择，而不是占位值。
+
 ## `team_view`
 
 `team_view` 是 address book：Workspace 内全部 active Project、读者参与的 Projects 中的顶层 Threads，以及完整 Workspace Member roster。这是当前的地址簿，不是工作队列；unread work 归 `team_inbox`。
@@ -115,7 +121,9 @@ DM 只用于快速澄清与状态同步。任务工作、决策和任何需要�
 
 `team_reminder` 的动作为 `create`、`list`、`cancel`，三个动作都只关于调用方自己的 reminder。一个 reminder 只有一个接收者，因此工具不接受收件人参数，actor 由 Host 从调用 Agent 自身推导；Human 要查看或撤回某个 Member 的 reminder，走 Web Client 的 Member 详情，不用这个工具。
 
-`create` 取 `scheduleKind` 与该种类自己的字段——`once` 配 `at`（ISO 8601 时刻）、`every` 配 `minutes`（整数分钟，至少 10）、`cron` 配 `expression`（五个字段，按固定 UTC+8 读取，无夏令时）——并且总要 `note`：这个 reminder 是做什么的，最多 2000 字符。schedule 只报种类而不给该种类的字段会被拒绝，而不是被猜一个；发给 `list` 或 `cancel` 的 schedule 字段同样被拒绝而不是被丢掉，因为 cancel 上的 schedule 指向的是调用方并没有选中的那个 reminder。
+`create` 取 `scheduleKind` 与该种类自己的字段——`once` 配 `at`（ISO 8601 时刻）、`every` 配 `minutes`（整数分钟，至少 10）、`cron` 配 `expression`（五个字段，按固定 UTC+8 读取，无夏令时）——并且总要 `note`：这个 reminder 是做什么的，最多 2000 字符。schedule 只报种类而不给该种类的字段会被拒绝，而不是被猜一个；发给 `list` 或 `cancel` 的 schedule 内容——`at`、`minutes`、`expression` 或 note——同样被拒绝而不是被丢掉，因为 cancel 上的 schedule 指向的是调用方并没有选中的那个 reminder。
+
+选择器本身不是内容：`scheduleKind` 只决定 create 读哪个字段，所以它在 `list` 与 `cancel` 上像空槽一样丢弃默认的 `once`，而写明其它种类仍会被拒绝。空槽在任何动作上都视为未传，因此把每个可选槽位都填满的模型发来 `note: ''` 时，不会把一次 cancel 变成 create。
 
 单个 Member 最多 50 个 active reminder；间隔下限和永不到期的判定由 ledger 在创建时执行，replay 因此保持确定。`list` 报告调用方自己的全部 reminder 及其 state 与 occurrence 事实——待读取、上次、下次；`cancel` 按 `reminderRef` 撤回一个。两者都只读调用方自己那一份。
 
@@ -151,6 +159,8 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 
 只有该 Project 的 owner 可以修改、试运行或重放投递（否则返回 `project_owner_required`）。任何 Workspace Member 都可以用 `list` 读取 Agent 侧元数据，其中不含 script、credential 引用和 webhook arm；运行历史仍只向 Project member 开放，owner 输出权限如下所述。
 
+空的 `workspace`、`scriptPath` 与 `scriptContent` 视为未传；两个非空脚本来源仍然冲突，没有脚本仍是错误。`intervalMinutes` 或 `limit` 为零时按省略处理。这绝不丢弃 `notify: []`、`credentials: []`、`webhook: false` 或 `expectedRevision`：清空接收者、移除凭据引用、卸下 webhook 与版本校验仍是实际指令。
+
 `create` 与 `update` 用 `intervalMinutes` 指定定时、用 `webhook: true` 指定地址，也可以两者都要，两者都不给会被拒绝。`update` 里两者的省略语义不同：不给 `intervalMinutes` 就是去掉定时，而不给 `webhook` 表示地址照旧，只有显式 `false` 才会卸下它——不认识 webhook 的调用方不该把正在用的提供方连接切断。启用触发需要部署已配置公网地址（Host 行的 `webhook.publicOrigin`）。
 
 启用或重置的那次调用会带回完整地址，而那也是唯一能读到它的时刻：账本只存 token 的哈希，所以同一请求的重试、之后的 `list`、订阅页面都不会再显示它。`reset_webhook` 按调用方读到的 `expectedRevision` 移动地址；旧地址立即失效，而已入队的投递继续处理。
@@ -182,6 +192,10 @@ create 与 update 的请求身份包含脚本来源、触发选项与 create bas
 ## `team_worker`
 
 `team_worker` 把一件自包含的工作交给本机 Worker 引擎——Codex 或 Claude Code——用它自己的工具、登录与设置执行。参数为 `task`，`threadRef`、`taskRef`、`projectRef` 三者至少给一个，以及可选的 `engine`、`cwd` 与 `requestId`。
+
+一次调用是四种形状之一：start、stop、只读查询或 steer。stop 与只读查询各自只命名一个 `worker:` ref、不带其它参数，steer 则是该 ref 加一句 instruction。
+
+空槽在区分形状之前就视为未传——把每个可选槽位都填满的模型会在 start 上发 `stop: ''`、在 stop 上发 `task: ''`，两者都不命名 ref 或 task——而真实值仍会得到点名冲突的拒绝。`engine` 是 start 的选择器，所以在其余三种形状上，它出厂默认的 `codex` 同样被丢弃，写明另一引擎则被拒绝。
 
 目标决定结果去处。绑定到 Thread 的执行在原 Thread 上留结果：开始与终态成为所有参与者都能读到的 Thread 事实，答案则进发起成员的 Inbox。只绑定 Project 的执行什么都不发布，结果像引入目标之前那样回到调用者自己的 Session；它的执行记录仍然写入，因此仍能按 `worker:` 引用查到。
 

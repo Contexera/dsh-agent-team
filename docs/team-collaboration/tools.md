@@ -4,6 +4,12 @@ English | [中文](tools.zh.md)
 
 Successful and rejected tool results return through the normal model loop. There is no context tool: a Member cannot roll its generation over, record an anchor, or compact in place on its own. The preset's default compaction engine shortens an oversized Session in place, and the Host recycles a cold generation at its wake boundary (see [`memory-and-context.md`](memory-and-context.md)).
 
+## Optional argument slots
+
+The Team schema accepts omitted optional fields. For models that fill unused slots, each tool normalizes only the values that carry no instruction for that action; this is not a blanket rule that empty strings, zero, `false`, or `[]` mean absent. The action sections below describe the exceptions. `null` is not an alternative: the declared string, number, boolean, and array types reject it before execution.
+
+The [optional-slot matrix](../../packages/tool-agent-team/tests/optional-slot-matrix.spec.ts) covers every registered tool and action enum. It compares clean and filled calls at the Host boundary, including which operations were called and their payloads. Meaningful values such as a Worker's start engine, subscription recipients, and webhook removal are explicit baseline choices, not neutral placeholders.
+
 ## `team_view`
 
 `team_view` is the address book: every active Project in the Workspace, top-level Threads from the reader's Project memberships, and the complete Workspace Member roster — current addresses, not a work queue; unread work lives in `team_inbox`.
@@ -125,7 +131,9 @@ Use DMs for quick clarifications and status syncs only. Task work, decisions, an
 
 `create` takes `scheduleKind` with that kind's own fields — `once` with `at` (an ISO 8601 instant), `every` with `minutes` (a whole number, at least 10), or `cron` with `expression` (five fields read in the fixed UTC+8 zone, which has no daylight-saving component) — and always `note`, what the reminder is for, at most 2000 characters.
 
-A schedule named without its own field is refused rather than guessed, and a schedule slot sent to `list` or `cancel` is refused rather than dropped, because a schedule on a cancel names a reminder the caller never picked.
+A schedule named without its own field is refused rather than guessed, and a schedule's content sent to `list` or `cancel` — `at`, `minutes`, `expression`, or the note — is refused rather than dropped, because a schedule on a cancel names a reminder the caller never picked.
+
+The selector is not content: `scheduleKind` only says which field a create reads, so its default `once` is dropped on `list` and `cancel` like a blank slot, while naming another kind is still refused. Blank slots are absent on every action, so a model that fills every optional slot sends `note: ''` without turning a cancel into a create.
 
 At most 50 reminders may be active for one Member, and the ledger enforces the interval floor and the never-fires rule at creation, so replay stays deterministic. `list` reports every reminder the caller owns with its state and its occurrence facts — pending, last, and next — and `cancel` withdraws one by `reminderRef`. Both read the caller's own set only.
 
@@ -167,6 +175,8 @@ A committed resolution names the action, the resulting status and resolution, th
 
 Only the Project's owners may change one, test one, or replay a delivery (`project_owner_required` otherwise). Any Workspace Member may use `list` for Agent-facing metadata that omits scripts, credential references, and webhook arms; run history remains Project-member-only, with owner-only output as described below.
 
+Empty `workspace`, `scriptPath`, and `scriptContent` slots are absent; two nonempty script sources still conflict, and no script is still an error. Zero `intervalMinutes` or `limit` uses omission semantics. This never drops `notify: []`, `credentials: []`, `webhook: false`, or an `expectedRevision`: clearing recipients, removing credentials, disarming a webhook, and revision checks remain real instructions.
+
 `create` and `update` take `intervalMinutes` for a timer, `webhook: true` for an address, or both, and refuse a subscription that names neither. On `update` the two triggers read omission differently: leaving out `intervalMinutes` drops the timer, while leaving out `webhook` keeps the address, and only an explicit `false` disarms it — a caller that does not model webhooks must not cut off a live provider. Arming the trigger needs the deployment's public origin (`webhook.publicOrigin` on the Host row).
 
 The answer to an arming or resetting call carries the complete address, and that is the only time it is readable: the ledger keeps a hash of the token, so a retry of the same request, a later `list`, or the subscription page can never show it again. `reset_webhook` moves the address under the `expectedRevision` the caller read; the old one stops resolving immediately, while deliveries already queued keep running.
@@ -204,6 +214,10 @@ The result names the subscription, its state, its revision, and its interval, an
 ## `team_worker`
 
 `team_worker` delegates one self-contained piece of work to a local Worker engine — Codex or Claude Code — running with its own tools, its own login, and its own settings. It takes `task`, at least one of `threadRef`, `taskRef`, and `projectRef`, and optional `engine`, `cwd`, and `requestId`.
+
+A call is one of four shapes: a start, a stop, a look-up, or a steer. A stop and a look-up each name one `worker:` ref and nothing else; a steer names that ref plus its instruction.
+
+A blank slot is absent before the shapes are told apart — a model that fills every optional slot sends `stop: ''` on a start and `task: ''` on a stop, and neither names a ref or a task — while a real value still gets the refusal that names the conflict. `engine` is a start selector, so on the other three shapes its shipped default `codex` is dropped the same way and naming the other engine is refused.
 
 The target decides where the result goes. A run bound to a Thread reports there: its start and its ending become Thread facts every participant can read, and its answer arrives in the delegating Member's Inbox.
 

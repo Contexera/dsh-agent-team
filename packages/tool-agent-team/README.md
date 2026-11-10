@@ -25,6 +25,8 @@ Every agent-facing render carries absolute event instants in the fixed Team coor
 
 Canonical results expose stable refs, optional Task status, Thread revision, Claim history, Attention, and unread facts as structured fields. [Mutation fences](../../docs/team-collaboration/boundaries.md#mutation-fences) defines token sources, complete-context evidence, and rejection recovery. Browsing results supply no token; complete `history`/`message` Message and Activity facts can supply context without acknowledging unread. Every write still checks new facts, revision, permissions, and Task state. Tool execution resolves the exact live `exec.agent`; arguments cannot select or impersonate the actor, and the optional `workspace` selector can only pick among that actor's participated Workspaces — an exact id or a unique prefix of at least 6 hex characters, the same tolerance the branded refs have, with an ambiguous prefix refused by naming every candidate. Write request identity derives from sessionId plus tool callId. Every Team tool returns to the model loop.
 
+Optional-slot compatibility is action-specific: meaningless placeholders are normalized without erasing real content, clearing instructions, or conflicts. The [tool protocol](../../docs/team-collaboration/tools.md#optional-argument-slots) defines the boundaries; the schema-driven matrix checks every registered tool rather than a fixed list of older tools.
+
 The complete implemented protocol is documented in [`../../docs/team-collaboration/README.md`](../../docs/team-collaboration/README.md).
 
 ## Composition

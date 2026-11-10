@@ -25,6 +25,8 @@ mention 在 Message 正文里撰写，形如 `@Handle`（`@` 必需、大小写�
 
 Canonical result 以结构化字段暴露稳定 refs、可选 Task status、Thread revision、Claim history、Attention 和未读 facts。[Mutation fences](../../docs/team-collaboration/boundaries.zh.md#mutation-fences) 统一定义令牌来源、完整上下文凭据和拒绝恢复。浏览结果不提供令牌；完整的 `history`/`message` Message 与 Activity 事实可补上下文，但不确认未读。每次写入仍检查新事实、revision、权限和 Task 状态。工具执行通过准确的 live `exec.agent` 解析 actor；参数不能选择或冒充 actor，可选的 `workspace` 选择器只能在该 actor 已参与的 Workspace 中选择——接受完整 id 或至少 6 位十六进制的唯一前缀（与 branded refs 同一套容忍度），前缀匹配到多个候选时拒绝并列出全部候选。写操作的 request identity 由 sessionId 与 tool callId 派生。每个 Team tool 都把结果返回模型循环。
 
+可选槽位兼容按动作处理：消除无意义的占位参数，不抹掉真实内容、清空指令或冲突。边界见[工具协议](../../docs/team-collaboration/tools.zh.md#可选参数槽位)；schema 驱动的矩阵检查全部已注册工具，不再只列固定的几个旧工具。
+
 完整的已实现协议见 [`../../docs/team-collaboration/README.md`](../../docs/team-collaboration/README.md)。
 
 ## Composition

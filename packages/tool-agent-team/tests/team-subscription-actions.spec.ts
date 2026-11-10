@@ -40,6 +40,58 @@ async function call(tool: ToolDefinition, args: Record<string, unknown>, host: R
   return tool.execute(args, { agent, callId: 'call:1', signal: new AbortController().signal } as never)
 }
 
+describe('team_subscription optional slots', () => {
+  function writerHost() {
+    const written = { kind: 'changed', subscription: { subscriptionRef: SUBSCRIPTION, projectRef: PROJECT,
+      name: 'watch', revision: 1, state: 'active', triggers: { webhook: true } } }
+    return {
+      ...fakeHost(),
+      createSubscriptionForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => written),
+      updateSubscriptionForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => written),
+    }
+  }
+
+  const create = { action: 'create', projectRef: PROJECT, name: 'watch', webhook: true }
+
+  it.each([
+    [{ scriptPath: '/tmp/watch.sh', scriptContent: '' }, { scriptPath: '/tmp/watch.sh' }],
+    [{ scriptPath: '', scriptContent: 'true\n' }, { scriptContent: 'true\n' }],
+  ])('keeps the real script source and ignores its empty alternate: %j', async (fields, script) => {
+    const host = writerHost()
+    await call(teamTools().get('team_subscription')!, { ...create, ...fields }, host)
+    expect(host.createSubscriptionForAgent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ script }))
+  })
+
+  it('does not invent an interval for a webhook-only subscription', async () => {
+    const host = writerHost()
+    await call(teamTools().get('team_subscription')!, { ...create, scriptContent: 'true\n', intervalMinutes: 0, workspace: '' }, host)
+    expect(host.createSubscriptionForAgent).toHaveBeenCalledWith(expect.anything(), expect.not.objectContaining({ intervalMinutes: expect.anything() }))
+  })
+
+  it('leaves a blank history count at the Host default', async () => {
+    const host = fakeHost()
+    await call(teamTools().get('team_subscription')!, { action: 'logs', projectRef: PROJECT, subscriptionRef: SUBSCRIPTION, limit: 0 }, host)
+    expect(host.subscriptionLogsForAgent.mock.calls[0]![1]).not.toHaveProperty('limit')
+  })
+
+  it('still rejects two real script sources or no script before executing a trial', async () => {
+    const host = writerHost()
+    const tool = teamTools().get('team_subscription')!
+    await expect(call(tool, { ...create, scriptPath: '/tmp/watch.sh', scriptContent: 'true\n' }, host)).rejects.toThrow(/never both/)
+    await expect(call(tool, { ...create, scriptPath: '', scriptContent: '' }, host)).rejects.toThrow(/needs the script/)
+    expect(host.createSubscriptionForAgent).not.toHaveBeenCalled()
+  })
+
+  it('preserves explicit clearing, webhook removal, and revision values', async () => {
+    const host = writerHost()
+    await call(teamTools().get('team_subscription')!, { action: 'update', projectRef: PROJECT, subscriptionRef: SUBSCRIPTION,
+      name: 'watch', scriptContent: 'true\n', expectedRevision: 0, notify: [], webhook: false, credentials: [] }, host)
+    expect(host.updateSubscriptionForAgent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      expectedRevision: 0, notify: [], webhook: false, credentials: [],
+    }))
+  })
+})
+
 describe('team_subscription logs', () => {
   it('carries the identity the Host answered with, so a run and its delivery read as one story', async () => {
     const host = fakeHost()

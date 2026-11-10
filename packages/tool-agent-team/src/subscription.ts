@@ -307,7 +307,15 @@ export const teamSubscription = defineTool({
     },
   },
   async execute(rawArgs, exec): Promise<SubscriptionResult> {
-    const args = rawArgs
+    const args = { ...rawArgs }
+    // These blanks name no address, script, or count. Do not normalize notify,
+    // credentials, webhook, or expectedRevision: empty/false/zero can be real input.
+    for (const key of ['workspace', 'scriptPath', 'scriptContent'] as const) {
+      if (args[key] === '') delete args[key]
+    }
+    for (const key of ['intervalMinutes', 'limit'] as const) {
+      if (args[key] === 0) delete args[key]
+    }
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_subscription requires an Agent session')
     const host = service(agent)

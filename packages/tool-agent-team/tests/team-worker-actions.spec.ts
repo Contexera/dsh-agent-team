@@ -271,3 +271,49 @@ describe('team_worker steers a live run with one instruction', () => {
       .rejects.toThrow(/Only the Member who delegated/)
   })
 })
+
+describe('team_worker tolerates the blank slots a model fills instead of omitting', () => {
+  it('starts when the model sends empty stop and inspect beside the task', async () => {
+    const host = fakeHost()
+    await call(tool, { task: 'fix the parser', threadRef: 'thread:00000000-0000-4000-8000-000000000003', stop: '', inspect: '' }, host)
+    expect(host.workerStartForAgent).toHaveBeenCalledTimes(1)
+    expect(host.workerStopForAgent).not.toHaveBeenCalled()
+    expect(host.workerInspectForAgent).not.toHaveBeenCalled()
+    expect(host.workerSteerForAgent).not.toHaveBeenCalled()
+  })
+
+  it('stops when the model fills the start slots with blanks', async () => {
+    const host = fakeHost()
+    await call(tool, { stop: WORKER, task: '', threadRef: '', cwd: '', requestId: '', steer: '', inspect: '' }, host)
+    expect(host.workerStopForAgent).toHaveBeenCalledTimes(1)
+    expect(host.workerStartForAgent).not.toHaveBeenCalled()
+    expect(host.workerStopForAgent.mock.calls[0]![1]).toMatchObject({ workerRef: WORKER })
+  })
+
+  it('steers when the model sends empty stop and inspect beside the steer ref', async () => {
+    const host = fakeHost()
+    await call(tool, { steer: WORKER, instruction: 'also update the changelog', stop: '', inspect: '' }, host)
+    expect(host.workerSteerForAgent).toHaveBeenCalledTimes(1)
+    expect(host.workerStopForAgent).not.toHaveBeenCalled()
+    expect(host.workerInspectForAgent).not.toHaveBeenCalled()
+  })
+
+  it('drops the engine default a model fills on a stop, but still refuses the other engine', async () => {
+    const host = fakeHost()
+    await call(tool, { stop: WORKER, engine: 'codex' }, host)
+    expect(host.workerStopForAgent).toHaveBeenCalledTimes(1)
+    const other = fakeHost()
+    await expect(call(tool, { stop: WORKER, engine: 'claude' }, other)).rejects.toThrow(/pass stop alone/)
+    expect(other.workerStopForAgent).not.toHaveBeenCalled()
+  })
+
+  it('still refuses a real second ref and a real start field', async () => {
+    const host = fakeHost()
+    await expect(call(tool, { stop: WORKER, inspect: WORKER }, host)).rejects.toThrow(/pass stop or inspect, not both/)
+    await expect(call(tool, { stop: WORKER, task: 'fix the parser' }, host)).rejects.toThrow(/pass stop alone/)
+    await expect(call(tool, { steer: WORKER, instruction: 'go on', inspect: WORKER }, host))
+      .rejects.toThrow(/pass steer, stop, or inspect — never two of them/)
+    expect(host.workerStopForAgent).not.toHaveBeenCalled()
+    expect(host.workerSteerForAgent).not.toHaveBeenCalled()
+  })
+})

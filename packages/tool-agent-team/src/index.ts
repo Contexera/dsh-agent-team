@@ -262,8 +262,14 @@ const OPTIONAL_COLLECTION_KEYS = ['attachments', 'sourceThreadRefs'] as const
  */
 const OPTIONAL_SCHEDULE_KEYS = ['scheduleKind', 'at', 'minutes', 'expression'] as const
 
-/** The slots that belong to `create` alone: a schedule, and the note the occurrence hands back. */
-const CREATE_ONLY_REMINDER_KEYS = [...OPTIONAL_SCHEDULE_KEYS, 'note'] as const
+/** Non-create actions tolerate the default selector, but never real schedule content. */
+const CREATE_ONLY_REMINDER_CONTENT_KEYS = ['at', 'minutes', 'expression', 'note'] as const
+
+/** Only the first enum value is a neutral fill; other selections remain conflicts. */
+function refuseNonDefaultScheduleKind(action: 'cancel' | 'list', scheduleKind: string | undefined): void {
+  if (scheduleKind === undefined || scheduleKind === 'once') return
+  throw new Error(recoveryFor('action_only_arguments').sentence({ action, parameter: 'scheduleKind', owner: 'create' }))
+}
 
 /** One fact as a rejection render receives it: the read fields with tag fields widened to plain strings, because the tool's output schema types `kind` as a string rather than a literal union. */
 type RejectedFact = {
@@ -1626,7 +1632,9 @@ const teamReminder = defineTool({
     },
   },
   async execute(rawArgs, exec) {
-    const args = blankToAbsent(rawArgs, [...OPTIONAL_ADDRESS_KEYS, ...OPTIONAL_SCHEDULE_KEYS])
+    // `note` is content, but an empty one names nothing: on create it must reach the
+    // "needs note" refusal, and on list or cancel it must not read as a create's note.
+    const args = blankToAbsent(rawArgs, [...OPTIONAL_ADDRESS_KEYS, ...OPTIONAL_SCHEDULE_KEYS, 'note'])
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_reminder requires an Agent session')
     const host = service(agent)
@@ -1643,9 +1651,9 @@ const teamReminder = defineTool({
     }
     if (args.action === 'cancel') {
       if (args.reminderRef === undefined) throw new Error(`team_reminder cancel needs reminderRef, one of your own reminders — ${recoveryFor('reminder_ref_required').sentence({})}`)
-      // A schedule on a cancel names a reminder the caller never picked; the note belongs to
-      // the create that made it. Neither can be honored here, so neither is dropped quietly.
-      for (const parameter of CREATE_ONLY_REMINDER_KEYS) {
+      // Real schedule content must never disappear just because the default selector is tolerated.
+      refuseNonDefaultScheduleKind('cancel', args.scheduleKind)
+      for (const parameter of CREATE_ONLY_REMINDER_CONTENT_KEYS) {
         if (args[parameter] !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'cancel', parameter, owner: 'create' }))
       }
       const result = await host.cancelMemberReminderForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId,
@@ -1655,7 +1663,8 @@ const teamReminder = defineTool({
     }
     // A list reads; it writes nothing, so every write-only slot is a mis-send rather than a default.
     if (args.reminderRef !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'list', parameter: 'reminderRef', owner: 'cancel' }))
-    for (const parameter of CREATE_ONLY_REMINDER_KEYS) {
+    refuseNonDefaultScheduleKind('list', args.scheduleKind)
+    for (const parameter of CREATE_ONLY_REMINDER_CONTENT_KEYS) {
       if (args[parameter] !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'list', parameter, owner: 'create' }))
     }
     const reminders = host.memberRemindersForAgent(agent, { workspaceId })
@@ -1760,6 +1769,14 @@ function inspectionReport(value: {
   return lines.join('\n')
 }
 
+/** Empty selectors must disappear before choosing a Worker action; real values still conflict. */
+const WORKER_BLANK_KEYS = [...OPTIONAL_ADDRESS_KEYS, 'task', 'stop', 'inspect', 'steer', 'instruction', 'cwd', 'requestId'] as const
+
+/** A control call may carry the first enum value as a neutral fill, but no other engine. */
+function namesAnotherEngine(args: { readonly engine?: string | undefined }): boolean {
+  return args.engine !== undefined && args.engine !== 'codex'
+}
+
 /**
  * The one delegation entry. A run bound to a Thread reports into it and wakes
  * this Member through the Inbox; an unbound Project delegation keeps the direct
@@ -1817,7 +1834,7 @@ const teamWorker = defineTool({
     }],
   },
   async execute(rawArgs, exec) {
-    const args = rawArgs
+    const args = blankToAbsent(rawArgs, WORKER_BLANK_KEYS)
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_worker requires an Agent session')
     const host = service(agent)
@@ -1831,7 +1848,7 @@ const teamWorker = defineTool({
       // Reading a diagnostic is its own call: it names one run and nothing else,
       // so a half-filled start can never be read as a look-up.
       if (args.task !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
-        || args.projectRef !== undefined || args.engine !== undefined || args.cwd !== undefined
+        || args.projectRef !== undefined || namesAnotherEngine(args) || args.cwd !== undefined
         || args.requestId !== undefined || args.steer !== undefined || args.instruction !== undefined) {
         throw new Error('team_worker takes either a task to start or an inspect ref, not both: pass inspect alone.')
       }
@@ -1860,7 +1877,7 @@ const teamWorker = defineTool({
       // A steer names one run and one instruction, and nothing else: a
       // half-filled start must never be read as an instruction to a live turn.
       if (args.task !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
-        || args.projectRef !== undefined || args.engine !== undefined || args.cwd !== undefined
+        || args.projectRef !== undefined || namesAnotherEngine(args) || args.cwd !== undefined
         || args.stop !== undefined || args.inspect !== undefined) {
         throw new Error('team_worker takes either a task to start, a stop ref, an inspect ref, or a steer ref with its instruction: pass steer alone with instruction.')
       }
@@ -1885,7 +1902,7 @@ const teamWorker = defineTool({
       // Starting and stopping are different calls: a stop names one run and
       // nothing else, so a half-filled start can never be read as a stop.
       if (args.task !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
-        || args.projectRef !== undefined || args.engine !== undefined || args.cwd !== undefined
+        || args.projectRef !== undefined || namesAnotherEngine(args) || args.cwd !== undefined
         || args.requestId !== undefined || args.steer !== undefined || args.instruction !== undefined) {
         throw new Error('team_worker takes either a task to start or a stop ref, not both: pass stop alone.')
       }

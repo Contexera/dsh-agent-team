@@ -215,3 +215,60 @@ describe('team_reminder render', () => {
     expect(renderText(tool, { action: 'cancel' }, value('cancel'))).toContain('no further occurrence will fire')
   })
 })
+
+describe('team_reminder tolerates the create-only slots a model fills on list and cancel', () => {
+  it('cancels when the model also sends the schedule kind default', async () => {
+    const host = fakeHost({ memberRemindersForAgent: vi.fn(() => [{ reminder: reminder() }]) })
+    const result = await call(tool, { action: 'cancel', reminderRef: REF, scheduleKind: 'once' }, host)
+    expect(host.cancelMemberReminderForAgent).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ action: 'cancel', cancelled: true })
+  })
+
+  it('lists when the model also sends the schedule kind default', async () => {
+    const host = fakeHost()
+    await call(tool, { action: 'list', scheduleKind: 'once' }, host)
+    expect(host.memberRemindersForAgent).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a blank note as absent on cancel and list', async () => {
+    const host = fakeHost({ memberRemindersForAgent: vi.fn(() => [{ reminder: reminder() }]) })
+    await call(tool, { action: 'cancel', reminderRef: REF, note: '' }, host)
+    expect(host.cancelMemberReminderForAgent).toHaveBeenCalledTimes(1)
+    await call(tool, { action: 'list', note: '' }, host)
+    expect(host.memberRemindersForAgent).toHaveBeenCalledTimes(2)
+  })
+
+  it('still refuses a schedule value that names something the caller never picked', async () => {
+    const host = fakeHost()
+    for (const extra of [{ minutes: 30 }, { at: '2026-11-04T02:00:00.000Z' }, { scheduleKind: 'every' }, { note: 'check the build' }]) {
+      await expect(call(tool, { action: 'cancel', reminderRef: REF, ...extra }, host))
+        .rejects.toThrow(/cancel does not accept/)
+    }
+    expect(host.cancelMemberReminderForAgent).not.toHaveBeenCalled()
+  })
+
+  // The shape below is copied from a live session, not invented: one cancel sent
+  // `minutes: 30` and was refused, then seven retries sent this one and were
+  // refused identically, so the caller never left the window.
+  it('cancels the retry shape a live session kept sending', async () => {
+    const host = fakeHost({ memberRemindersForAgent: vi.fn(() => [{ reminder: reminder() }]) })
+    const result = await call(tool, { action: 'cancel', reminderRef: REF, minutes: 0, scheduleKind: 'once', note: '' }, host)
+    expect(host.cancelMemberReminderForAgent).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ action: 'cancel', cancelled: true })
+    await call(tool, { action: 'list', minutes: 0, scheduleKind: 'once', note: '' }, host)
+    // Cancel resolves its own ref through the same read, so the list is the second call.
+    expect(host.memberRemindersForAgent).toHaveBeenCalledTimes(2)
+  })
+
+  it('still refuses the schedule content that rode beside those blanks', async () => {
+    // Dropping blanks must not drop the refusal they travelled with: the same
+    // request carrying a real interval is still a schedule this action cannot honor.
+    const host = fakeHost()
+    await expect(call(tool, { action: 'cancel', reminderRef: REF, minutes: 30, scheduleKind: 'once', note: '' }, host))
+      .rejects.toThrow(/cancel does not accept/)
+    await expect(call(tool, { action: 'list', minutes: 30, scheduleKind: 'once', note: '' }, host))
+      .rejects.toThrow(/list does not accept/)
+    expect(host.cancelMemberReminderForAgent).not.toHaveBeenCalled()
+    expect(host.memberRemindersForAgent).not.toHaveBeenCalled()
+  })
+})
