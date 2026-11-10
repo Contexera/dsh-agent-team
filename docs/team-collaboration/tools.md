@@ -40,6 +40,10 @@ A read that selects no fact and carries no reminder advances nothing and writes 
 
 The selection bound is durable for a Thread: the receipt stores `selectedThroughSequence`, so replay reconstructs the same acknowledgement and facts after it stay unread. An identical retry returns that receipt, the `readThroughSequence` it recorded, and the count still unread; it does not redeliver the unread facts or acknowledge again. A receipt written before the field existed keeps the default batch. Human reads, Remote parameters, and their read semantics are unchanged.
 
+The bound is a read position, not a write token. It is validated against the Thread's head — the sequence of its last public fact — because that is the furthest fact an unread batch can carry.
+
+A public fact that revises no Thread state, such as a bound Worker run's start or ending, sits past the Thread revision. The token every Thread write fences on stays that revision ([Mutation fences](boundaries.md#mutation-fences)), so the two numbers are not necessarily equal; a selection past the Thread's own head, including one copied from another Thread, is still refused.
+
 A Thread `read` also supplies background for a reader whose context no longer holds the discussion: the anchor when it is missing, plus the Message facts among up to four facts immediately before the unread batch — before the tail when nothing is unread. A Main stream `read` supplies the same recent Message background, without an anchor. Background already fully visible in the current Session is not repeated, and there is no separate persistent read cache: visibility is the current Session surface alone.
 
 Background is orientation, not newly acknowledged work, and it can appear on any read; no permanent “already read” mark decides it. Read first when background is missing on either read; use `history` for older facts and `message` for one Message read back verbatim, including a quote whose original sits outside the page you hold. Neither acknowledges unread work.

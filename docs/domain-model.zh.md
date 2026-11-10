@@ -78,7 +78,7 @@ Agent 只有在 Task 处于 `in_review`、自身是 Project owner 或该 Task �
 
 Project 内独立的单层公开协作 aggregate：一定有 `threadRef`、anchor Message 和 revision，但可以没有 Task。Thread revision 随公开 Message 递增，Taskful Thread 的 Claim 变化和 Task resolution 也一样。往既有 Thread 公开写入时，必须带上该 Thread 的当前 revision。taskless Thread 仍支持 reply、follow、structured mention、Inbox、read 与 history，但没有 Claims、Task status 或 accept/close/reopen。协作读写定位优先用 `threadRef`。Host 也将 `taskRef` 解析到其 taskful Thread。Task/Claim 仍用 `taskRef`；action 地址要求见[工具契约](team-collaboration/tools.zh.md)。revision 是内部并发令牌，只在工具 baseRevision 里透传，不写进消息正文当引用事实。
 
-绑定 Worker 执行的开始与终态是两条公开 Thread 事实，与公开 Message 一样推进 revision。
+绑定 Worker 执行的开始与终态是两条公开 Thread 事实，但不推进 revision：它们不改变 Thread 状态，所以落在 revision 之后；read 的确认界限取 Thread 的事实头部，不是这个数（见[`team_thread`](team-collaboration/tools.zh.md#team_thread)）。
 
 ## Direct Message
 

@@ -36,6 +36,10 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 Thread 的选择界限是持久的：receipt 存储 `selectedThroughSequence`，replay 据此重建同一次确认，界限之后的 facts 保持未读。相同重试只返回该 receipt、它记录的 `readThroughSequence` 与当前剩余未读数，不重新展开未读 facts，也不会再次确认。写入该字段之前的 receipt 仍按缺省 batch 解释。Human 的读取、Remote 参数与读取语义都不变。
 
+这个界限是读取位置，不是写令牌。它按 Thread 的事实头部——最后一条公开 fact 的 sequence——校验，因为未读批次最远只能带到那里。
+
+不改变 Thread 状态的公开 fact，例如绑定 Worker 执行的开始与终态，落在 Thread revision 之后。所有 Thread 写入 fences 的令牌仍是那个 revision（见 [Mutation fences](boundaries.zh.md#mutation-fences)），所以两个数不必相等；超过该 Thread 自身事实头部的选择——包括从别的 Thread 抄来的 sequence——仍然拒绝。
+
 Thread 的 `read` 还会为上下文已不再持有讨论的读者补背景：anchor 缺失时补上，再加未读批次之前最多四条 fact 中筛出的 Message——没有未读时取 tail 之前。Main stream 的 `read` 补同样的近期 Message 背景，但没有 anchor。当前 Session 中已完整可见的背景不重复，也不存在独立的持久已读库：可见性只来自当前 Session surface。
 
 背景只用于定位，不是本次新确认的工作，任何一次 read 都可能补；判断不依赖永久的“曾读过”标记。缺少背景时先 read（Thread 与 Main stream 同理）；`history` 用于更旧的 public facts，`message` 按 ref 逐字读回一条 Message，包括原文不在你手上这一页里的引用。二者都不确认未读。
