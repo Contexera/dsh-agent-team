@@ -88,3 +88,7 @@ Nothing crosses the boundary — no handoff, no announcement — so the reminder
 The same journey drives the Human's own durable writes: Thread follow and unfollow, whose control reads the Host observation rather than its own guess, and Task transfer to a Thread follower, including the mend of a finished Task whose accountable has lost Project ownership. Real Agent-loop integration tests separately cover safe-boundary wake and direct, Activity, and ordinary digest notification forms.
 
 That journey measures the band as well as driving it: one band holds every control at one height, radius, inset, stroke and step, and the follow control's two standings differ by a fill.
+
+The Worker subscription scenario replays model responses through the real Agent loop: a timer publication wakes an owner, whose declared `team_worker` calls start two bound runs. A directed Human reply makes the owner stop just one, observe its confirmed Thread settlement, and keep answering while its sibling runs.
+
+Only the model and Codex executable are stand-ins; settings, notification delivery, tool execution, and ordinary DSH restoration are real. Published-CLI probes separately verify native engine behavior; replay does not prove model judgment or Claude same-turn steering.
