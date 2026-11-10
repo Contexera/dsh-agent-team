@@ -138,6 +138,25 @@ export function registerTeamShortcuts(host: TeamShortcutHost, shortcuts: Shortcu
       resolve: () => ({ status: 'handled', run: () => { composerInput()?.focus() } }),
     },
     {
+      id: 'team.back' as ShortcutCommandId,
+      label: () => host.t('shortcutBack'),
+      aliases: ['back', 'go back', 'up'],
+      // ArrowLeft pairs with the Project stepping chords; Linux Desktop reserves arrow chords.
+      defaults: altPrimary('ArrowLeft', { linux: false }),
+      regions: ['page', 'editable'],
+      modals: [],
+      resolve: () => ({ status: 'handled', run: () => { host.navigation.actions().back() } }),
+    },
+    {
+      id: 'team.forward' as ShortcutCommandId,
+      label: () => host.t('shortcutForward'),
+      aliases: ['forward', 'go forward', 'down'],
+      defaults: altPrimary('ArrowRight', { linux: false }),
+      regions: ['page', 'editable'],
+      modals: [],
+      resolve: () => ({ status: 'handled', run: () => { host.navigation.actions().forward() } }),
+    },
+    {
       id: 'team.project.previous' as ShortcutCommandId,
       label: () => host.t('shortcutPreviousProject'),
       aliases: ['previous project', 'project up'],

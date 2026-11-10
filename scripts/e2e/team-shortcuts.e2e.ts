@@ -29,12 +29,53 @@ it('reaches Team mode, its two faces, and the shortcut reference from the keyboa
   await page.keyboard.press('Meta+Alt+KeyM')
   await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe('TEXTAREA')
 
+  // Back climbs one face at a time. A Task started from the composer opens a full
+  // Thread page, and Back returns to the Project it was opened from.
+  const snapshot = (): Promise<Record<string, unknown>> => page.evaluate(() => JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as Record<string, unknown>)
+  await page.getByRole('button', { name: '讨论/任务' }).click()
+  await page.getByRole('checkbox', { name: '作为任务' }).check()
+  await page.getByRole('textbox', { name: '消息内容' }).fill('返回键验收')
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  await expect.poll(() => page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true')
+  await page.getByRole('button', { name: '打开 Task #1' }).click()
+  await page.locator('main[data-team-thread]').waitFor()
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('main[data-team-thread]').waitFor({ state: 'detached' })
+  await page.locator('[data-team-project]').waitFor()
+  await expect.poll(async () => (await snapshot()).threadRef).toBeUndefined()
+  expect((await snapshot()).projectRef).toMatch(/^project:/)
+
+  // Forward re-enters the Thread page the last Back left, and Back leaves it
+  // again: on this pair of faces the two chords are exact inverses.
+  await page.keyboard.press('Meta+Alt+ArrowRight')
+  await page.locator('main[data-team-thread]').waitFor()
+  await expect.poll(async () => (await snapshot()).threadRef).toMatch(/^thread:/)
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('main[data-team-thread]').waitFor({ state: 'detached' })
+  await page.locator('[data-team-project]').waitFor()
+
   await page.keyboard.press('Meta+Alt+Digit1')
   await page.locator('[data-team-inbox]').waitFor()
   await page.screenshot({ path: join(UI09_SHOTS, 'shortcut-inbox.png'), fullPage: true })
 
+  // The Inbox and the Board are faces of the workspace, so Back leaves them for it.
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('[data-team-inbox]').waitFor({ state: 'detached' })
+  await page.locator('[data-team-conversation]').waitFor()
+  await expect.poll(async () => (await snapshot()).inbox).toBeUndefined()
+
   await page.keyboard.press('Meta+Alt+Digit2')
   await page.locator('[data-team-task-board]').waitFor()
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('[data-team-task-board]').waitFor({ state: 'detached' })
+  await page.locator('[data-team-conversation]').waitFor()
+  await expect.poll(async () => (await snapshot()).board).toBeUndefined()
+
+  // The welcome surface is the top rung: Back is consumed and nothing moves.
+  const welcome = await snapshot()
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('[data-team-conversation]').waitFor()
+  expect(await snapshot()).toEqual(welcome)
 
   // The same chord hands the column back to the conversation.
   await page.keyboard.press('Meta+Alt+KeyT')
@@ -46,7 +87,7 @@ it('reaches Team mode, its two faces, and the shortcut reference from the keyboa
   const reference = page.getByRole('dialog', { name: '快捷键' })
   await reference.waitFor()
   const application = reference.getByRole('region', { name: '应用操作' })
-  for (const label of ['进入或退出团队模式', '收件箱', '任务看板', '聚焦输入框', '上一个项目', '下一个项目',
+  for (const label of ['进入或退出团队模式', '收件箱', '任务看板', '聚焦输入框', '返回', '前进', '上一个项目', '下一个项目',
     '收件箱第 1 项', '收件箱第 9 项']) {
     expect(await application.getByText(label, { exact: true }).count()).toBe(1)
   }
