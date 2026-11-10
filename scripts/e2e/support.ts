@@ -69,6 +69,8 @@ export async function openTeamPage(options: {
   readonly deviceScaleFactor?: number
   /** A scripted model conversation mounted by the real scaffold before any Member can wake. */
   readonly replay?: { readonly fixture: string; readonly override: string }
+  /** The visiting device the page reports; a shortcut scenario presses one device's defaults. */
+  readonly platform?: string
 } = {}): Promise<{
   readonly page: Page
   readonly consoleWatch: { warnings: string[]; pageErrors: string[] }
@@ -84,6 +86,10 @@ export async function openTeamPage(options: {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN',
     ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }) })
   const consoleWatch = watchConsole(page)
+  // The device is read once at boot, so it is stated before the document loads.
+  if (options.platform !== undefined) {
+    await page.addInitScript((value: string) => { Object.defineProperty(navigator, 'platform', { value }) }, options.platform)
+  }
   await page.goto(scaffold.authenticatedUrl)
   await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
   if (!options.stayInOrdinaryMode) await page.getByRole('button', { name: '团队', exact: true }).click()

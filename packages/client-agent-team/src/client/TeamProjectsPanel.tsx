@@ -299,7 +299,7 @@ function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, re
   }
   return (
     <>
-      <article className={css.projectRow} data-menu-open={menuOpen || undefined} aria-current={selected ? 'page' : undefined}>
+      <article className={css.projectRow} data-team-project-row={project.projectRef} data-menu-open={menuOpen || undefined} aria-current={selected ? 'page' : undefined}>
         <button type="button" className={css.projectSelect} aria-label={`# ${project.name}`} onClick={() => { selectProject(project.projectRef) }}>
           <strong className={css.projectName}># {project.name}</strong>
         </button>

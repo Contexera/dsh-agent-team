@@ -10,6 +10,8 @@
 
 侧栏行自带控件：行级 ⋯ 菜单打开对应编辑器——`updateProject` 修改项目名称/说明；`updateMember` 编辑 Agent 名称/说明，并可为该成员固定可选的 provider/model（缺省即清除覆盖、回到 Host 默认继承；对活跃成员改模型会原地更新 live model selection，保持 Agent 与 Session 身份不变，后续请求使用新选择）。模型选择经与会话无关的 `llm.models` RPC 读取 Host 目录。点击 Agent 卡片会在 Team 模式内临时显示该成员的会话，不会丢掉下层已选中的 Project 或 Thread。两种行菜单都带 danger「归档」入口：`archiveMember` 与 `archiveProject` 经破坏性确认弹窗（明确说明"暂无恢复入口"）后把实体从所有面收起（持久数据保留、活跃 Claim 释放）；归档行随 workspace 刷新消失，mention 候选与成员选择器都排除已归档成员。本轮不做侧栏归档列表与恢复入口。
 
+Team 模式的目的地也是键盘命令，注册进 shell 的快捷键服务而不是自己抓键盘，所以每条都出现在快捷键速查里并可改键：Mod+Alt+T 进出 Team 模式、Mod+Alt+1 收件箱、Mod+Alt+2 任务看板、Mod+Alt+I 聚焦输入框、Mod+Alt+↑/↓ 按侧栏顺序切上一个/下一个项目。收件箱里 Mod+Alt+Shift+1~9 打开第 1~9 行，和鼠标点那一行走同一条路。Mod 在 Mac 上是 ⌘、其他系统是 Ctrl；Web 上每条都带 Alt，因为浏览器占用了裸的 Mod 组合（N、W、T），收件箱九连再带一个 Shift 是因为 macOS 把 ⌘⇧3/4/5 留给了截图；而 Linux Web 只放行三种组合，需要别的组合的命令在那里没有默认键位，也不会顶掉已有快捷键。
+
 Client 使用以下 Host 接口：
 
 - `readThread`：确认一个 Thread 的未读批次。

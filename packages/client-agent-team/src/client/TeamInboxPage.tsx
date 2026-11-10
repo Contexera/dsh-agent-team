@@ -226,7 +226,7 @@ function InboxRowShell({ actor, crumb, unreadCount, directCount, newestOccurredA
   const countLabel = named
     ? t('inboxRowUnreadMentions', { count: unreadCount, mentions: directCount })
     : t('inboxRowUnread', { count: unreadCount })
-  return <button type="button" className={inboxCss.row} data-named={named || undefined} onClick={onOpen}>
+  return <button type="button" className={inboxCss.row} data-team-inbox-row data-named={named || undefined} onClick={onOpen}>
     <span className={inboxCss.rowActor}>{actor}</span>
     <span className={inboxCss.rowLine}>
       <span className={inboxCss.rowCrumb}>{crumb}</span>

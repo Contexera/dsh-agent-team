@@ -69,6 +69,7 @@ import { TeamHumanIdentity } from './human-identity.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
 import { TEAM_PANEL_ID, TeamNavigation } from './navigation.ts'
+import { registerTeamShortcuts } from './team-shortcuts.ts'
 import { TeamChangeStream, TeamReadStream, type TeamChangeListener, type TeamChangeScope } from './team-changes.ts'
 import { TeamQueries, teamQueryKey, type TeamQueryIdentity, type WorkspaceScopeKind } from './team-queries.ts'
 import { TeamDraftStore } from './drafts.ts'
@@ -487,6 +488,18 @@ function applyUi(ctx: ClientContext): void {
     sync()
     return unsubscribe
   }, 'agent-team: panel ownership')
+
+  // Team mode's commands come from the shell's own registry, so they appear in
+  // the shortcut reference and stay rebindable instead of being a private listener.
+  ctx.inject(['shortcuts'], (ready) => {
+    const scoped = ready as ClientContext
+    const t = scoped.locale.bind(NS)
+    scoped.effect(() => registerTeamShortcuts({
+      navigation,
+      selectPanel: panelId => { scoped.layout.selectPanel(panelId) },
+      t,
+    }, scoped.shortcuts), 'agent-team: shortcuts')
+  })
 
   // The Team sidebar's CSS keys off this marker (the shell's New Session button stands down).
   ctx.effect(() => {
