@@ -4,7 +4,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { TeamModelCatalog, TeamModelEffortOption, TeamModelProviderGroup, TeamSidebarProps } from './slots.ts'
 import type { TeamKey } from './locales.ts'
-import { formatAbsoluteTime } from './team-formatters.ts'
+import { formatAbsoluteTime, formatMessageTime } from './team-formatters.ts'
 import { workerEngineName } from './worker-copy.ts'
 import { Button, IconChevronDownOutlineRegular, Input, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -430,19 +430,13 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
   const [reloadToken, setReloadToken] = useState(0)
   const [stopping, setStopping] = useState<string>()
   const [outcomes, setOutcomes] = useState<ReadonlyMap<string, WorkerRunOutcome>>(() => new Map())
-  // A row's report and the by-number answer are separate seats: opening another
-  // row closes the previous row's report instead of stacking them, while the
-  // by-number door keeps its own answer under the form.
+  // One seat for a row's report: opening another row closes the previous one
+  // instead of stacking them.
   const [report, setReport] = useState<WorkerReportState>()
-  // The by-number door answers in its own seat under the form: a run outside the
-  // list's window is read once and never inserted into the list.
-  const [lookup, setLookup] = useState<WorkerReportState>()
-  const [lookupRef, setLookupRef] = useState('')
   const headingId = useId()
   // A read that answers after the surface moved on is not the answer to show:
   // each open bumps its generation, and only the current one lands.
   const reportGeneration = useRef(0)
-  const lookupGeneration = useRef(0)
   useEffect(() => {
     let mounted = true
     let pending: Promise<RemoteResult<{ readonly runs: readonly AgentTeamWorkerRunView[] }>>
@@ -533,28 +527,6 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
     }
   }
 
-  /**
-   * Read one diagnostic by the number the Human typed. The ref is the Human's
-   * input, so the Host decides whether it names a run this Member initiated in
-   * this Workspace; a refusal is shown where the form is, and neither the list
-   * nor an open row report changes.
-   */
-  const readByNumber = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
-    const workerRef = lookupRef.trim()
-    if (workerRef === '') return
-    const current = ++lookupGeneration.current
-    setLookup({ workerRef })
-    try {
-      const result = await inspectWorker({ workspaceId, memberId, workerRef: workerRef as AgentTeamWorkerRef })
-      if (current !== lookupGeneration.current) return
-      setLookup(result.ok ? { workerRef, value: result.value } : { workerRef, error: result.error.message })
-    } catch (cause) {
-      if (current !== lookupGeneration.current) return
-      setLookup({ workerRef, error: cause instanceof Error ? cause.message : String(cause) })
-    }
-  }
-
   const rows: Array<{ readonly run: AgentTeamWorkerRunView; readonly outcome: WorkerRunOutcome | undefined }> =
     (runs ?? []).map(run => ({ run, outcome: outcomes.get(run.workerRef) }))
   for (const outcome of outcomes.values()) {
@@ -562,7 +534,10 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
   }
   return (
     <div className={createCss.section} role="group" aria-labelledby={headingId} data-team-member-workers>
-      <h3 className={settingsCss.groupHeading} id={headingId}>{t('memberWorkerRuns')}</h3>
+      <div className={createCss.sectionHead}>
+        <h3 className={settingsCss.groupHeading} id={headingId}>{t('memberWorkerRuns')}</h3>
+        {rows.length > 0 && <small className={createCss.sectionHeadMeta}>{t('memberWorkerRunsWindow')}</small>}
+      </div>
       {runs === undefined && error === undefined && <small className={css.editHint}>{t('memberWorkerRunsLoading')}</small>}
       {runs !== undefined && rows.length === 0 && <small className={css.editHint}>{t('memberWorkerRunsEmpty')}</small>}
       {rows.length > 0 && (
@@ -579,11 +554,13 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
             return (
               <li key={run.workerRef} className={createCss.reminderRow} data-worker-run={run.workerRef} data-worker-state={state}>
                 <div className={createCss.reminderBody}>
-                  <span className={createCss.reminderNote}>{`${workerEngineName(t, run.engine)} · ${run.task}`}</span>
+                  <span className={createCss.workerRunTask} data-worker-task="" title={run.task}>
+                    {`${workerEngineName(t, run.engine)} · ${run.task}`}
+                  </span>
                   <div className={createCss.reminderFooter}>
-                    <p className={createCss.reminderFacts}>
-                      <span>{`${t(WORKER_RUN_STATE_KEYS[state])} · ${workerRunTargetText(run, t)}`}</span>
-                      <span>{t('memberWorkerStarted', { time: formatAbsoluteTime(run.startedAt) })}</span>
+                    <p className={createCss.workerRunFacts}>
+                      {`${t(WORKER_RUN_STATE_KEYS[state])} · ${workerRunTargetText(run, t)} · `
+                        + t('memberWorkerStarted', { time: formatMessageTime(run.startedAt) })}
                     </p>
                     <div className={createCss.reminderActions}>
                       {(state === 'running' || state === 'stopping') && (
@@ -619,36 +596,6 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
             )
           })}
         </ul>
-      )}
-      {rows.length > 0 && <small className={css.editHint}>{t('memberWorkerRunsWindow')}</small>}
-      <form className={createCss.workerLookup} onSubmit={event => { void readByNumber(event) }}>
-        <label className={`${createCss.field} ${createCss.workerLookupField}`}>
-          <span>{t('memberWorkerInspectLookupTitle')}</span>
-          <Input className={createCss.input!} value={lookupRef} placeholder="worker:…" disabled={disabled}
-            onChange={event => { setLookupRef(event.target.value) }} />
-        </label>
-        <Button type="submit" size="sm" variant="outline" aria-label={t('memberWorkerInspectLookup')}
-          disabled={disabled || lookupRef.trim() === ''}>
-          {t('memberWorkerInspectLookupAction')}
-        </Button>
-      </form>
-      {lookup !== undefined && (
-        <div className={createCss.reminderBody} data-worker-lookup={lookup.workerRef}>
-          {lookup.value === undefined ? null : (
-            // The answer arrives without a page change, so the line that appears
-            // is a status: a reader hears that the read landed, not just that it
-            // started.
-            <p className={createCss.reminderFacts} role="status">
-              <span>{t('memberWorkerInspectLookupFor', { ref: lookup.value.workerRef })}</span>
-              <span>{`${workerEngineName(t, lookup.value.engine)} · `
-                + t(WORKER_RUN_STATE_KEYS[lookup.value.unconfirmed ? 'unconfirmed' : lookup.value.state])}</span>
-              <span>{t('memberWorkerStarted', { time: formatAbsoluteTime(lookup.value.startedAt) })}</span>
-              {lookup.value.settledAt === undefined ? null
-                : <span>{t('memberWorkerSettled', { time: formatAbsoluteTime(lookup.value.settledAt) })}</span>}
-            </p>
-          )}
-          <WorkerReport report={lookup} t={t} />
-        </div>
       )}
       {error !== undefined && (
         <p className={createCss.failure} role="alert">

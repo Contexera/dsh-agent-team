@@ -269,7 +269,7 @@ The file that opens must be the file the location named — its identity is comp
 
 Fragments are limited to a few safe fields of the run's own turn, each bounded, and text that looks like a credential is withheld whole rather than masked, quoted JSON pairs included. Every reason is one bounded sentence that names the fact and never echoes a native value, and nothing about the engine's record is written back into the Team.
 
-The Human's edit-Agent dialog lists the runs this Host still holds, the records a previous Host left running as `unconfirmed`, and the newest 20 ended runs by ending time — a long run that started early and failed just now stays inside that window — each with the state it really ended in, and each offering its diagnostic. Every run stays readable by its `worker:` ref, so the list is a window, not the only door.
+The Human's edit-Agent dialog lists the runs this Host still holds, the records a previous Host left running as `unconfirmed`, and the newest 5 ended runs by ending time — a long run that started early and failed just now stays inside that window — each with the state it really ended in, and each offering its diagnostic. That row is the Human's only door: a `worker:` ref is never shown on that surface, so there is no field to type one into, while reading by ref stays the entry of the Member tool's `inspect`.
 
 The same tool adds one instruction to a run that is still executing: pass `steer: <worker:…>` with `instruction`, and nothing else.
 

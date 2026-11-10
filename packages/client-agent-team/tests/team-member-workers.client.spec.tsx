@@ -287,57 +287,26 @@ describe('the diagnostic behind one Worker run', () => {
     expect(document.querySelector(`[data-worker-report="${failed.workerRef}"]`)).toBeNull()
   })
 
-  it('reads a run outside the window by the number the Human typed', async () => {
-    const outside = 'worker:outside' as AgentTeamWorkerInspection['workerRef']
-    const answer: RemoteResult<AgentTeamWorkerInspection> = { ok: true, value: { ...inspection(), workerRef: outside } }
-    const inspect = vi.fn(async () => answer)
-    renderSection({ runs: async () => listed([failed]), inspect })
-    const input = await screen.findByLabelText(zh.memberWorkerInspectLookupTitle)
-    fireEvent.change(input, { target: { value: `  ${outside}  ` } })
-    const submit = screen.getByRole('button', { name: zh.memberWorkerInspectLookup })
-    expect(submit.textContent).toBe(zh.memberWorkerInspectLookupAction)
-    fireEvent.click(submit)
-    // The ref is the Human's input; the Host decides what it names.
-    await waitFor(() => { expect(inspect).toHaveBeenCalledWith({ workspaceId, memberId, workerRef: outside }) })
-    const report = await waitFor(() => {
-      const found = document.querySelector(`[data-worker-lookup="${outside}"]`)
-      if (found === null) throw new Error('the by-number answer has no seat yet')
+  it('keeps one run to two lines: the task on one, its facts on the next', async () => {
+    renderSection({ runs: async () => listed([running]) })
+    const task = await waitFor(() => {
+      const found = document.querySelector('[data-worker-task]')
+      if (found === null) throw new Error('the task line has no seat yet')
       return found
     })
-    expect(report.textContent).toContain(`编号：${outside}`)
-    // The answer appears without a page change, so the line that carries it is a
-    // status: a reader hears the read land, not only that it started.
-    expect(report.querySelector('[role="status"]')?.textContent).toContain(`编号：${outside}`)
-    expect(report.textContent).toContain('Codex · 已失败')
-    expect(report.textContent).toContain('摘要: The Worker ended in a failed turn.')
-    // The window is the Host's list: a run read this way is not inserted into it.
-    const rows = document.querySelectorAll('[data-worker-run]')
-    expect(rows).toHaveLength(1)
-    expect(rows[0]!.textContent).toContain('check the nightly run')
+    // The Host's bounded preview stays reachable from the line that shows its opening words.
+    expect(task.getAttribute('title')).toBe('check the schedule')
+    expect(task.textContent).toBe('Codex · check the schedule')
+    // State, where it was bound, and when it started share one line instead of stacking two.
+    expect(task.parentElement!.querySelector('p')!.textContent).toMatch(/^运行中 · 仅 Project · 开始于 /)
   })
 
-  it('shows a refused number where the form is, leaving the list untouched', async () => {
-    const inspect = vi.fn(async () => refused('Worker \'worker:mine\' was delegated by another Member; '
-      + 'this surface reads only that Member\'s runs.'))
-    renderSection({ runs: async () => listed([failed]), inspect })
-    fireEvent.change(await screen.findByLabelText(zh.memberWorkerInspectLookupTitle), { target: { value: 'worker:mine' } })
-    fireEvent.click(screen.getByRole('button', { name: zh.memberWorkerInspectLookup }))
-    expect((await screen.findByRole('alert')).textContent)
-      .toBe('诊断读取失败：Worker \'worker:mine\' was delegated by another Member; this surface reads only that Member\'s runs.')
-    expect(screen.getByRole('listitem').textContent).toContain('已失败')
-    expect(document.querySelector('[data-worker-lookup]')).not.toBeNull()
-  })
-
-  it('does not submit an empty number', async () => {
-    const inspect = vi.fn(async () => ({ ok: true, value: inspection() }) as RemoteResult<AgentTeamWorkerInspection>)
-    renderSection({ runs: async () => listed([failed]), inspect })
-    const input = await screen.findByLabelText(zh.memberWorkerInspectLookupTitle)
-    fireEvent.change(input, { target: { value: '   ' } })
-    const submit = screen.getByRole('button', { name: zh.memberWorkerInspectLookup })
-    expect(submit.hasAttribute('disabled')).toBe(true)
-    fireEvent.submit(input.closest('form')!)
-    await new Promise(resolve => setTimeout(resolve, 0))
-    expect(inspect).not.toHaveBeenCalled()
-    expect(screen.queryByRole('alert')).toBeNull()
+  it('offers no by-number door: the listed rows are the only way in', async () => {
+    renderSection({ runs: async () => listed([failed]) })
+    await screen.findByRole('listitem')
+    // The number is never shown on this surface, so a field asking for one has no source.
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(document.querySelector('[data-team-member-workers] form')).toBeNull()
+    expect(document.querySelector('[data-worker-lookup]')).toBeNull()
   })
 })

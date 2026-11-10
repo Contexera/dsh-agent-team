@@ -304,17 +304,47 @@
   padding-left: 16px;
 }
 
-/* The by-number door under the list: one row that wraps in a narrow dialog, with the input
-   allowed to shrink so the form never widens the column. */
-.workerLookup {
-  align-items: flex-end;
+/* The group heading and the window it lists, on one line: the heading keeps the settings
+   page's 13/600, the window trails at the far edge in the same tertiary 12px the Worker
+   settings group uses for its own summary. Four characters replace the paragraph that
+   used to explain the window under the list. */
+.sectionHead {
+  align-items: baseline;
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
 }
 
-.workerLookupField {
-  flex: 1 1 160px;
+.sectionHeadMeta {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+/* One run reads in two lines: the task it was given, then its facts beside its controls.
+   The task is the Host's bounded preview, held to one line so five runs stay scannable;
+   the full text stays reachable through the title. */
+.workerRunTask {
+  color: var(--dsw-alias-label-primary);
+  display: block;
+  font-size: 13px;
+  line-height: 20px;
+  /* A nowrap line asks its grid track for the width of the whole text; without this the
+     row widens past the dialog instead of cutting the line it was told to keep to one. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* State, where the run was bound, and when it started: one line, so the row's second
+   line is facts rather than a stack of them. */
+.workerRunFacts {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
   min-width: 0;
 }
 

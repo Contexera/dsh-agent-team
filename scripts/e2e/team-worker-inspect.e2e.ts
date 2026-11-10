@@ -2,7 +2,7 @@ import { afterEach, it, expect } from 'vitest'
 import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WORKER_INSPECT_SHOTS, chooseMemberModel, closeScenario, maxHorizontalScroll, memberAgent, openSettings,
+import { WORKER_INSPECT_SHOTS, chooseMemberModel, closeScenario, memberAgent, openSettings,
   openSidebar, openTeamPage, scaffold, settleLayout, waitForMemberAgent } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
@@ -87,7 +87,7 @@ async function createAgent(page: Awaited<ReturnType<typeof openTeamPage>>['page'
   await page.getByText(name, { exact: true }).waitFor({ timeout: 20_000 })
 }
 
-it('reads a Worker diagnostic by number, folds it by name, and keeps both doors inside the dialog', async () => {
+it('reads a Worker diagnostic from its row and keeps the list to the newest five', async () => {
   const { page, consoleWatch } = await openTeamPage()
   const team = scaffold!.ctx.agentTeam
   const workspaceId = scaffold!.ctx.workspaceRegistry.list()[0]!.id
@@ -145,8 +145,8 @@ it('reads a Worker diagnostic by number, folds it by name, and keeps both doors 
   }
 
   // The run that will fall out of the window ends first: it carries the turn's own
-  // record, so reading it by number is also the fragment path. Its number is taken
-  // while it is still the only run, because the window is what removes it later.
+  // record, so its diagnostic is the fragment path. It is captured while it is still
+  // the only run, because the window is what removes it later.
   await delegate(runner, '[REC] 最早结束、会掉出窗口的那条')
   await expect.poll(() => team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs.length,
     { timeout: 60_000 }).toBe(1)
@@ -155,25 +155,30 @@ it('reads a Worker diagnostic by number, folds it by name, and keeps both doors 
     { timeout: 60_000 }).toBe('failed')
   const outside = team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs[0]!
   expect(outside.state).toBe('failed')
-  // Twenty more endings fill the window, so the run above is no longer listed.
-  for (let index = 0; index < 20; index += 1) await delegate(runner, `[FAIL] 填满窗口的第 ${index + 1} 条`)
+  // Five more endings fill the window, so the run above is no longer listed. The
+  // first of them carries a task long enough that the one-line rule has to cut it.
+  const longTask = '[FAIL] 填满窗口的第 1 条：这是一段足够长的任务描述，用来证明任务行只占一行、'
+    + '超出的部分以省略号收尾，而全文留在 title 上，读者hover 就能读到。'
+  for (let index = 0; index < 5; index += 1) {
+    await delegate(runner, index === 0 ? longTask : `[FAIL] 填满窗口的第 ${index + 1} 条`)
+  }
   // One live run: the only row that carries both a stop control and a diagnostic door.
   await delegate(runner, '[HOLD] 一直运行、用来验两个尾随按钮的那条')
-  // Another Member's run: its number is the one this Member may not read.
+  // Another Member's run: it stays out of this Member's list.
   await delegate(other, '[FAIL] 另一个成员的执行')
 
+  // Five ended runs plus the live one: the window is the Host's, not the Client's.
   await expect.poll(() => team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs.length,
-    { timeout: 60_000 }).toBe(21)
+    { timeout: 60_000 }).toBe(6)
   const runs = team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs
   const byTask = (needle: string) => runs.find(run => run.task.includes(needle))!
   const live = byTask('[HOLD]')
-  const listed = byTask('[FAIL] 填满窗口的第 20 条')
+  const long = byTask('[FAIL] 填满窗口的第 1 条')
+  const listed = byTask('[FAIL] 填满窗口的第 5 条')
   expect(live.state).toBe('running')
   expect(runs.some(run => run.workerRef === outside.workerRef)).toBe(false)
   await expect.poll(() => team.workerRunsForClient({ workspaceId, memberId: other.memberId }).runs.length,
     { timeout: 60_000 }).toBe(1)
-  const otherRuns = team.workerRunsForClient({ workspaceId, memberId: other.memberId }).runs
-  const foreign = otherRuns[0]!
 
   // The Human's surface: the row menu's edit dialog.
   const row = page.locator('[class*="agentRow"]').filter({ hasText: 'runner' }).first()
@@ -184,10 +189,28 @@ it('reads a Worker diagnostic by number, folds it by name, and keeps both doors 
   const workers = editor.locator('[data-team-member-workers]')
   await workers.waitFor({ timeout: 20_000 })
   const runRows = workers.locator('[data-worker-run]')
-  await expect.poll(async () => await runRows.count(), { timeout: 30_000 }).toBe(21)
+  await expect.poll(async () => await runRows.count(), { timeout: 30_000 }).toBe(6)
   // The list is a window: the oldest ending is not in it, and the live run is.
   expect(await workers.locator(`[data-worker-run="${outside.workerRef}"]`).count()).toBe(0)
   expect(await workers.locator(`[data-worker-run="${live.workerRef}"]`).count()).toBe(1)
+  // The window says its own size beside the heading, in four characters.
+  expect(await workers.getByText('最近 5 条', { exact: true }).count()).toBe(1)
+  // The by-number door is gone: this surface never shows a number, so nothing asks for one.
+  expect(await workers.locator('form').count()).toBe(0)
+  expect(await workers.getByRole('textbox').count()).toBe(0)
+  expect(await workers.locator('[data-worker-lookup]').count()).toBe(0)
+
+  // One run reads in two lines: the task on one, its facts on the next. The task
+  // line is the Host's bounded preview, cut to one line with the full text in title.
+  const longRow = workers.locator(`[data-worker-run="${long.workerRef}"]`)
+  const taskLine = longRow.locator('[data-worker-task]')
+  expect(await taskLine.getAttribute('title')).toBe(long.task)
+  const taskBox = (await taskLine.boundingBox())!
+  expect(Math.round(taskBox.height)).toBe(20)
+  // The line really is cut: its content is wider than the box it was given.
+  expect(await taskLine.evaluate(node => node.scrollWidth > node.clientWidth + 1)).toBe(true)
+  const factsBox = (await longRow.locator('[class*="workerRunFacts"]').boundingBox())!
+  expect(Math.round(factsBox.height)).toBe(18)
 
   // One live row carries both trailing controls, and they sit beside each other.
   const liveRow = workers.locator(`[data-worker-run="${live.workerRef}"]`)
@@ -222,43 +245,16 @@ it('reads a Worker diagnostic by number, folds it by name, and keeps both doors 
   await expect.poll(async () => await listedReport.count()).toBe(1)
   await expect.poll(async () => await listedReport.textContent()).toContain('摘要:')
 
-  // The by-number door: the run that fell out of the window is read from the form,
-  // not inserted into the list, and the answer is announced as a status.
-  const lookup = workers.locator('[data-worker-lookup]')
-  const input = workers.getByLabel('Worker 编号')
-  const submit = workers.getByRole('button', { name: '按编号查询 Worker 诊断' })
-  expect(await submit.isDisabled()).toBe(true)
-  await input.fill(outside.workerRef)
-  await expect.poll(async () => await submit.isDisabled()).toBe(false)
-  await input.press('Enter')
-  await expect.poll(async () => await lookup.count(), { timeout: 20_000 }).toBe(1)
-  const outsideReport = workers.locator(`[data-worker-lookup="${outside.workerRef}"]`)
-  await expect.poll(async () => await outsideReport.count()).toBe(1)
-  await expect.poll(async () => await outsideReport.locator('[role="status"]').textContent(),
-    { timeout: 20_000 }).toContain(`编号：${outside.workerRef}`)
-  await expect.poll(async () => await outsideReport.textContent()).toContain('摘要:')
-  await expect.poll(async () => await outsideReport.textContent()).toContain('fake engine failed the turn')
-  // Reading by number never inserts the run into the window.
-  expect(await runRows.count()).toBe(21)
+  // The report is the Host's answer as it came, and reading it never adds a row.
+  await expect.poll(async () => await listedReport.textContent()).toContain('fake engine failed the turn')
+  expect(await runRows.count()).toBe(6)
 
   await settleLayout(page)
-  await outsideReport.scrollIntoViewIfNeeded()
+  await listedReport.scrollIntoViewIfNeeded()
   await settleLayout(page)
   await page.screenshot({ path: join(WORKER_INSPECT_SHOTS, 'worker-inspect-desktop.png') })
 
-  // Another Member's number is refused where the form is, as an alert.
-  await input.fill(foreign.workerRef)
-  await input.press('Enter')
-  await expect.poll(async () => await workers.locator('[role="alert"]').first().textContent(),
-    { timeout: 20_000 }).toContain('诊断读取失败：')
-  // A number that names nothing is refused the same way.
-  await input.fill('worker:nothing-here')
-  await input.press('Enter')
-  await expect.poll(async () => await workers.locator(`[data-worker-lookup="worker:nothing-here"]`).count(),
-    { timeout: 20_000 }).toBe(1)
-  await expect.poll(async () => await workers.locator('[role="alert"]').first().textContent()).toContain('诊断读取失败：')
-
-  // 390×844: the form wraps and the card never widens past its column.
+  // 390×844: the rows stay inside the column, and the task line still takes one line.
   await editor.getByRole('button', { name: '关闭', exact: true }).click()
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
@@ -270,13 +266,15 @@ it('reads a Worker diagnostic by number, folds it by name, and keeps both doors 
   const narrowEditor = page.getByRole('dialog', { name: '编辑 Agent' })
   const narrowWorkers = narrowEditor.locator('[data-team-member-workers]')
   await narrowWorkers.waitFor({ timeout: 20_000 })
-  await narrowWorkers.getByLabel('Worker 编号').fill(outside.workerRef)
-  await narrowWorkers.getByLabel('Worker 编号').press('Enter')
-  await expect.poll(async () => await narrowWorkers.locator(`[data-worker-lookup="${outside.workerRef}"]`).count(),
-    { timeout: 20_000 }).toBe(1)
   await settleLayout(page)
-  expect(await maxHorizontalScroll(page, '[data-team-member-workers]')).toBe(0)
-  await narrowWorkers.locator(`[data-worker-lookup="${outside.workerRef}"]`).scrollIntoViewIfNeeded()
+  // The card never widens past its column. The task line alone can scroll its own
+  // clipped content — that is the ellipsis doing its job — so the measurement is the
+  // boxes that hold it, not every scroller inside the section.
+  expect(await narrowWorkers.evaluate(node => node.scrollWidth - node.clientWidth)).toBe(0)
+  expect(await narrowEditor.evaluate(node => node.scrollWidth - node.clientWidth)).toBe(0)
+  const narrowTask = narrowWorkers.locator(`[data-worker-run="${long.workerRef}"] [data-worker-task]`)
+  expect(Math.round((await narrowTask.boundingBox())!.height)).toBe(20)
+  await narrowTask.scrollIntoViewIfNeeded()
   await settleLayout(page)
   await page.screenshot({ path: join(WORKER_INSPECT_SHOTS, 'worker-inspect-narrow.png') })
   await narrowEditor.getByRole('button', { name: '关闭', exact: true }).click()
