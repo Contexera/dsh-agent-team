@@ -39,13 +39,27 @@ export type SubscriptionAdmissionRecord = {
   readonly receivedAt: string
   /** Run attempts that already finished, failed or not. */
   readonly attempts: number
-  /** Set while `retrying`: the instant the next attempt may start. */
-  readonly nextAttemptAt?: string
-  /** The batch a run validated while the unpublished queue had no room: kept here, so only the accept is retried. */
-  readonly heldEvents?: readonly SubscriptionEvent[]
 } & (
-  | { readonly state: Exclude<SubscriptionAdmissionState, 'exhausted'>; readonly lastError?: string }
-  | { readonly state: 'exhausted'; readonly lastError: string }
+  | {
+      readonly state: Exclude<SubscriptionAdmissionState, 'exhausted'>
+      /** Set while `retrying`: the instant the next attempt may start. */
+      readonly nextAttemptAt?: string | undefined
+      /** The batch a run validated while the unpublished queue had no room: kept here, so only the accept is retried. */
+      readonly heldEvents?: readonly SubscriptionEvent[] | undefined
+      /** The failure the last attempt reported; `undefined` until one does. */
+      readonly lastError?: string | undefined
+    }
+  | {
+      readonly state: 'exhausted'
+      /**
+       * A spent delivery carries neither a retry instant nor a held batch: the
+       * storage schema refuses both on this state, and the type says the same
+       * thing, so a record built here cannot claim what storage would reject.
+       */
+      readonly nextAttemptAt?: undefined
+      readonly heldEvents?: undefined
+      readonly lastError: string
+    }
 )
 
 /** The request id one attempt's accept commits under, so a restart can ask the ledger what it already accepted. */

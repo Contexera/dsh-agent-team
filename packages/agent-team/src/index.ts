@@ -4359,7 +4359,9 @@ export default class AgentTeam extends TypertRemoteService {
       }
       // These tables cannot commit together. Keep the decision on the admission
       // until the replay record is durable, so recovery does not run the script again.
-      const { nextAttemptAt: _due, ...spent } = record
+      // Both state-only fields come off here: the record that becomes `exhausted`
+      // keeps neither a retry instant nor a held batch, as its type and schema say.
+      const { nextAttemptAt: _due, heldEvents: _held, ...spent } = record
       const exhausted = Object.freeze({ ...spent, attempts, state: 'exhausted' as const, lastError: failure })
       await table.put(key, exhausted)
       await this.finishExhaustedWebhookAdmissionLocked(exhausted)
