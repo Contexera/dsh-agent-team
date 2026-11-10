@@ -67,6 +67,8 @@ export async function openTeamPage(options: {
   readonly webhookOrigin?: string
   /** Device pixels per CSS pixel; a scenario reading a glyph needs more than one. */
   readonly deviceScaleFactor?: number
+  /** A scripted model conversation mounted by the real scaffold before any Member can wake. */
+  readonly replay?: { readonly fixture: string; readonly override: string }
 } = {}): Promise<{
   readonly page: Page
   readonly consoleWatch: { warnings: string[]; pageErrors: string[] }
@@ -76,7 +78,8 @@ export async function openTeamPage(options: {
   // arms a webhook declares it here as the deployment would.
   const overlay = options.webhookOrigin === undefined ? undefined : await webhookOriginOverlay(options.webhookOrigin)
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] },
-    ...(overlay === undefined ? {} : { extraOverlayPath: overlay }) })
+    ...(overlay === undefined ? {} : { extraOverlayPath: overlay }),
+    ...(options.replay === undefined ? {} : { replayFixture: options.replay.fixture, replayOverride: options.replay.override }) })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN',
     ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }) })

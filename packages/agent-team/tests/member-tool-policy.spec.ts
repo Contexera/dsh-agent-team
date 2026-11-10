@@ -187,8 +187,9 @@ async function addMember(ctx: Context, workspaceId: WorkspaceId, handle: string,
   const added = await ctx.agentTeam.addMember({
     requestId: requestId(`add-${handle}`), workspaceId, handle, description: 'Policy member',
     presetId: 'team-member', projectRefs: [], ...(capabilities === undefined ? {} : { capabilities }),
-   model: { provider: 'mock', model: 'mock' },})
-  expect(added.status.availability).toBe('active')
+    model: { provider: 'mock', model: 'mock' },
+  })
+  expect(added.status.availability, JSON.stringify(added.status)).toBe('active')
   return { memberId: added.status.member.memberId, sessionId: added.status.member.sessionId, model: { provider: 'mock', model: 'mock' }, privateMemoryPath: added.status.member.privateMemoryPath }
 }
 
@@ -235,6 +236,16 @@ describe('Agent Team member tool policy', () => {
     await vi.waitFor(() => {
       expect(toolNames(ctx, agent)).toContain('team_worker')
     })
+
+    // Declaration alone is insufficient: the per-Member execution guard must
+    // admit the same live switch. Use a non-owning Member so Host authorization
+    // proves the call reached Worker policy rather than its own guard.
+    const attempted = await executeToolFixture(ctx, {
+      signal: new AbortController().signal, agent, name: 'team_worker', callId: ToolCallId('t21-worker-execute'),
+      arguments: { task: 'check the live tool policy', projectRef: 'project:missing', threadRef: 'thread:missing' },
+    })
+    expect(JSON.stringify(attempted)).not.toContain('not declared for this Team Member')
+    expect(JSON.stringify(attempted)).toContain('not a Thread in this Team')
 
     // Off again: withdrawn, and the rest of the Team surface stays.
     setWorkerSwitch(ctx, false)
@@ -857,7 +868,6 @@ describe('Worker exposure at a pending turn boundary', () => {
       readonly ledger: { updateMember(request: unknown): Promise<unknown> }
       applyWorkerExposure(enabled: boolean): Promise<void>
     }
-    const handle = service.handles.get(member.memberId)!
     const config = ctx.agentTeam.config as unknown as { worker: { get(): { enabled: boolean } } }
     const current = config.worker.get()
     config.worker = { get: () => ({ ...current, enabled: true }) }
