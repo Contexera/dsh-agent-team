@@ -22,7 +22,7 @@
  */
 
 import { open, realpath, stat } from 'node:fs/promises'
-import { isAbsolute, sep } from 'node:path'
+import { isAbsolute } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
 import type {
@@ -108,7 +108,11 @@ function joined(parts: readonly (string | undefined)[]): string[] {
  */
 function isInspectableLocation(path: string, engine: WorkerEngine): boolean {
   if (!isAbsolute(path) || !path.endsWith('.jsonl')) return false
-  const segments = path.split(sep)
+  // The recorded location is whatever the engine wrote, so its segments are
+  // judged under either separator: an engine on Windows may report the same
+  // directory with forward slashes, and refusing that shape would report a
+  // record this Team does read as one it does not.
+  const segments = path.split(/[\\/]/u)
   return segments.includes(engine === 'codex' ? 'sessions' : 'projects')
 }
 

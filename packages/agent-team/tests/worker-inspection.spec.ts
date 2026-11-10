@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -232,7 +232,10 @@ describe('readWorkerHistory', () => {
     await writeFile(path, sessionMeta(threadId) + taskComplete(turnId, 'the recorded failure'))
     const other = await recordPath(threadId)
     await writeFile(other, sessionMeta(threadId) + taskComplete(turnId, 'WRONG_OPENED_FILE_PROBE'))
-    fsControl.substitute = { requested: path, actual: other }
+    // The reader opens the resolved location, so the seam has to name that one:
+    // a temp root whose realpath differs from the spelling (Windows' short names
+    // are the everyday case) would otherwise never be substituted.
+    fsControl.substitute = { requested: await realpath(path), actual: other }
     const read = await readCodex({ nativeSessionId: threadId, nativeTurnId: turnId, nativeStorage: path })
     // The path and its stat never changed; only the handle did, so the identity
     // check is the one that has to catch it.
@@ -248,6 +251,16 @@ describe('readWorkerHistory', () => {
     // Cutting the value into a shorter path would invent a location nobody
     // recorded, so the whole value is refused and never carried into the reason.
     expect(JSON.stringify(read)).not.toContain('PPPPPPPPPP')
+  })
+
+  it('judges a recorded location by shape, whatever separator the engine wrote', async () => {
+    // An engine on Windows reports the same directory with forward slashes, and
+    // a reader that split on the platform separator alone would call a record it
+    // reads one it does not. Nothing is at this location, so the shape decision
+    // is what the outcome shows: accepted as a record shape, then missing.
+    const read = await readCodex({ nativeSessionId: 'thread-mixed', nativeTurnId: 'turn-mixed',
+      nativeStorage: '/fake/sessions\\2026\\rollout-thread-mixed.jsonl' })
+    expect(read.kind).toBe('missing')
   })
 
   it('keeps an ordinary failure sentence that only mentions authentication', async () => {

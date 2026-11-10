@@ -180,7 +180,12 @@ describe('the anchors one run\'s ending carries', () => {
   it('names a Claude run\'s record and the prompt it drove', async () => {
     const { harness, ctx, projectRef, agent } = await setup({ thread: false })
     ;(ctx.agentTeam['config'] as unknown as { worker: unknown }).worker = { get: () => claudeRow().worker }
-    vi.stubEnv('CLAUDE_CONFIG_DIR', '/fake/claude-config')
+    // A real directory, not a POSIX-shaped literal: the derivation resolves the
+    // configured root against the session's cwd, and on Windows that turns a
+    // rooted `/fake/...` into the current drive's own absolute path.
+    const config = await mkdtemp(join(tmpdir(), 'claude-config-'))
+    cleanups.push(async () => { await rm(config, { recursive: true, force: true }) })
+    vi.stubEnv('CLAUDE_CONFIG_DIR', config)
     engine.turn = 'completed'
     const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'), projectRef,
       task: 'check the schedule', cwd: harness.checkout })
@@ -193,12 +198,17 @@ describe('the anchors one run\'s ending carries', () => {
     expect(execution.engine).toBe('claude')
     expect(execution.nativeSessionId).toBe('native-claude-1')
     expect(execution.nativeTurnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-    expect(execution.nativeStorage).toBe('/fake/claude-config/projects/-fake-claude-work/native-claude-1.jsonl')
+    expect(execution.nativeStorage).toBe(join(config, 'projects', '-fake-claude-work', 'native-claude-1.jsonl'))
   }, 60_000)
 
   it('derives a Claude record from the environment the run opened with', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'claude-anchors-'))
-    cleanups.push(async () => { await rm(cwd, { recursive: true, force: true }) })
+    const config = await mkdtemp(join(tmpdir(), 'claude-config-'))
+    const home = await mkdtemp(join(tmpdir(), 'claude-home-'))
+    const hostConfig = await mkdtemp(join(tmpdir(), 'claude-host-config-'))
+    cleanups.push(async () => {
+      await Promise.all([cwd, config, home, hostConfig].map(directory => rm(directory, { recursive: true, force: true })))
+    })
     claude.cwd = cwd
     engine.turn = 'completed'
     const slug = cwd.replaceAll(/[^A-Za-z0-9]/gu, '-')
@@ -212,18 +222,20 @@ describe('the anchors one run\'s ending carries', () => {
       }, { engine: 'claude', env, launchArgs: [] })
       return workerAnchorsOf(await handle.result)?.nativeStorage
     }
+    // The home the engine reads is `HOME` on POSIX and `USERPROFILE` on Windows,
+    // so a run that moves its home moves both.
+    const moved = { HOME: home, USERPROFILE: home }
 
-    // The row's own CLAUDE_CONFIG_DIR wins, a run that only moves HOME keeps its
-    // record under that HOME, and the Host's own setting applies when the row
+    // The row's own CLAUDE_CONFIG_DIR wins, a run that only moves its home keeps
+    // the record under that home, and the Host's own setting applies when the row
     // names none: the anchors read the environment OAR opened the engine with.
-    expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', CLAUDE_CONFIG_DIR: '/fake/isolated-config',
-      HOME: '/fake/isolated-home' }))
-      .toBe(join('/fake/isolated-config', 'projects', slug, 'native-claude-1.jsonl'))
-    expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', HOME: '/fake/isolated-home' }))
-      .toBe(join('/fake/isolated-home', '.claude', 'projects', slug, 'native-claude-2.jsonl'))
-    vi.stubEnv('CLAUDE_CONFIG_DIR', '/fake/host-config')
-    expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', HOME: '/fake/isolated-home' }))
-      .toBe(join('/fake/host-config', 'projects', slug, 'native-claude-3.jsonl'))
+    expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', CLAUDE_CONFIG_DIR: config, ...moved }))
+      .toBe(join(config, 'projects', slug, 'native-claude-1.jsonl'))
+    expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', ...moved }))
+      .toBe(join(home, '.claude', 'projects', slug, 'native-claude-2.jsonl'))
+    vi.stubEnv('CLAUDE_CONFIG_DIR', hostConfig)
+    expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', ...moved }))
+      .toBe(join(hostConfig, 'projects', slug, 'native-claude-3.jsonl'))
   }, 60_000)
 
   it('keeps the anchors when the turn\'s own wait throws instead of reporting', async () => {

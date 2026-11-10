@@ -43,6 +43,7 @@ All notable changes to this project are documented in this file. The format foll
 - An Agent's reminder block in the Agent editor lists only the reminders that can still fire; a reminder that fired or was withdrawn stays in the ledger but leaves the list, so it no longer reads as a row with no remaining action.
 - Opening an Agent's Session no longer fails when the Host has just swapped one in — a wake recycle or a rollover — because the Client pulls the Session catalog once more before it reports that refusal; a second refusal is still the answer it shows.
 - A Main stream read names the Project on a published subscription event instead of printing `Project undefined`: the model-facing view carried the event's subscription and its quoted text but dropped the Project the line reads, so every subscription event rendered as belonging to no Project.
+- A Worker record location is judged by its shape under either path separator, so a Windows engine that reports its record with forward slashes is read instead of refused as a shape this Team does not read.
 
 ## [0.2.7] - 2026-11-05
 
