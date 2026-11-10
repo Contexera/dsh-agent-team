@@ -3,6 +3,9 @@
 # § "Sandbox and CI environments". Step 6 (typecheck + tests) is the Hoplite `check` script.
 set -eu
 
+# Harness Client compilation exceeds Node's default heap on small sandboxes.
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
+
 TEAM_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HARNESS="$TEAM_ROOT/../deepseek-harness"
 cd "$TEAM_ROOT"

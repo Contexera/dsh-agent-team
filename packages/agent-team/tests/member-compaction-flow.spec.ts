@@ -370,6 +370,30 @@ describe('Member summary target and bounded fallback', () => {
     expect(adapter.summaries).toHaveLength(2)
   })
 
+  it('does not open the circuit when the turn is cancelled during the alternative summary', async () => {
+    const { agent, adapter, engine } = await fixture()
+    await history(agent)
+    adapter.windows.set('middle', 1_000_000)
+    adapter.silentRoutes.add('middle')
+    adapter.silentRoutes.add('large')
+    adapter.beforeSummary = () => {
+      if (adapter.summaries.length === 2) agent.cancel({ kind: 'user' })
+    }
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['middle', 'large'])
+    expect(lastTurn(agent)?.kind).toBe('aborted')
+    expect(engine.degraded(agent, { provider: 'budget-test', model: 'middle' })).toBe(false)
+    expect(engine.takeSummaryFailure(agent)).toBe(false)
+
+    adapter.beforeSummary = undefined
+    adapter.silentRoutes.delete('middle')
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    await send(agent, 40_000)
+    expect(adapter.summaries.map(options => options.model)).toEqual(['middle', 'large', 'middle'])
+    expect(lastTurn(agent)?.kind).toBe('completed')
+  })
+
   it('refuses a request whose route left the step selection before summarizing', async () => {
     const { agent, adapter } = await fixture()
     await history(agent)

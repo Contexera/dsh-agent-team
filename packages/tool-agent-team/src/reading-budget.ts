@@ -5,6 +5,7 @@ import { LlmError } from '@deepseek-ai/dsh-llm'
 const READ_MAX_CHARACTERS = 32 * 1024
 
 export async function readingCapacity(agent: Agent, signal: AbortSignal): Promise<number> {
+  signal.throwIfAborted()
   const { provider, model } = agent.session.requestHeader()?.config ?? agent.options
   const llm = agent.ctx.get('llm')
   if (provider === undefined || model === undefined || llm === undefined) return 256 * 1024
@@ -14,6 +15,7 @@ export async function readingCapacity(agent: Agent, signal: AbortSignal): Promis
     // One UTF-16 unit per available token is deliberately conservative, not a tokenizer claim.
     return Math.max(0, Math.min(256 * 1024, (info.context?.contextWindow ?? 320_000) - 16_384))
   } catch (error) {
+    signal.throwIfAborted()
     // An abort is the caller's own cancellation and must surface. Anything else
     // — a missing adapter, unusable model metadata, a transient connection —
     // falls back to the conservative limit, because a reading action that does

@@ -28,6 +28,7 @@ This applies to any fresh environment: a new clone **or a `git worktree`**. A wo
 
 | Variable | Required for | Notes |
 | --- | --- | --- |
+| `NODE_OPTIONS` | sandbox setup (optional) | `hoplite-setup.sh` defaults to `--max-old-space-size=4096` when unset or empty so Harness Client compilation can exceed Node's default heap; an explicit value is preserved |
 | `CHROME_PATH` | `test:browser` (optional) | Defaults to `/usr/bin/google-chrome`; set only when the sandbox Chrome lives elsewhere |
 | `DSH_HARNESS_DIR` | certification escapes only | Points at a tag-suffixed sibling checkout; unset for everyday work — the default name is the contract |
 | `DEEPSEEK_API_KEY` | `npm run preview` | Real-model preview fails fast without it; test and browser paths never need it |

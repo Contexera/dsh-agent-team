@@ -24,6 +24,7 @@
 
 | 变量 | 何时需要 | 说明 |
 | --- | --- | --- |
+| `NODE_OPTIONS` | 沙箱 setup（可选） | 未设或为空时，`hoplite-setup.sh` 默认使用 `--max-old-space-size=4096`，让 Harness Client 编译可超过 Node 默认堆上限；显式值保持不变 |
 | `CHROME_PATH` | `test:browser`（可选） | 默认 `/usr/bin/google-chrome`；仅当沙箱 Chrome 不在默认位置时设置 |
 | `DSH_HARNESS_DIR` | 仅认证场景 | 指向带 tag 后缀的相邻 checkout；日常保持未设——默认名即契约 |
 | `DEEPSEEK_API_KEY` | `npm run preview` | 真实模型预览缺它即刻失败；测试与浏览器路径从不需要 |
