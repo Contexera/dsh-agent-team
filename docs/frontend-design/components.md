@@ -82,7 +82,9 @@ The nav glyph is the shell's own seat: `settings.section.icon` takes one registr
 
 So the Team row registers the bundle's mark under its own section id and the shell renders it — the mark is the row's only glyph, sized by the shell's own 16px and painted in the row's ink, and it leaves with the registration rather than needing an observer to unwind it.
 
-The page writes three things. Identity — the display name and the avatar — goes through the Team Remote, which owns the profile entry the Client would otherwise have to name. The compaction threshold and the Worker delegation group are the Team Host row's own settings groups, read and written through the shared configuration form (`configForms.get(<row id>)`), so the page names a child path such as `memberCompaction.tokens` rather than restating the whole group.
+The page writes four things. Identity — the display name and the avatar — goes through the Team Remote, which owns the profile entry the Client would otherwise have to name. The compaction threshold and the Worker delegation group are the Team Host row's own settings groups, read and written through the shared configuration form (`configForms.get(<row id>)`), so the page names a child path such as `memberCompaction.tokens` rather than restating the whole group.
+
+The profile-wide extra-tool list is the fourth: it also belongs to the Host row, but it writes the settings namespace directly so a stale revision is not collapsed into an ordinary failure.
 
 The group sits between the identity rows and the environment check, under its own 13px/600 heading — the shipped settings card's group label — opening on the page's hairline. Its field and its save are the shipped `SettingsForm` and `SettingsValueField`: the threshold is typed as a capacity (`256K`, `1M`, or a plain count), and a draft the field cannot read (`2GB`) keeps its text and blocks the save.
 
@@ -116,7 +118,7 @@ The avatar row draws a 40px identity circle (`border-radius: 50%` with `corner-s
 
 Both avatar seats draw the picture only while those bytes decode. The Host accepts an avatar by its declared media type rather than by decoding it, so a phone photo in HEIC or a payload damaged on the way in is stored and handed back as a data URL that renders nothing. `useAvatarImage` keys that answer by URL, so a seat shows the initial exactly as it does for a removed avatar and a new upload retries on its own. The footnote states the bundle version and links the repository; an update line appears only when the Host reports one.
 
-`human-identity.ts` is the one reader of that profile. `TeamHumanIdentity` shares a single in-flight read between subscribers, reuses the avatar it already decoded while the reference is unchanged, keeps the last accepted value when a later read fails, and refreshes after every accepted write. Only a never-loaded profile becomes unavailable, rendering as `role="alert"` with its own retry.
+`human-identity.ts` is the one reader of that profile. `TeamHumanIdentity` shares a single in-flight read between subscribers, reuses the avatar it already decoded while the reference is unchanged, keeps the last accepted value when a later read fails, and refreshes after every accepted write. Only a never-loaded profile becomes unavailable; that identity block renders `role="alert"` with its own retry and does not hide the extra-tools or other settings groups.
 
 Its writes go through the Team Remote's own `setHumanProfile` and avatar calls, which own the profile entry: the Client never writes the settings document for the identity fields, so it never has to name them.
 
@@ -125,6 +127,18 @@ Its writes go through the Team Remote's own `setHumanProfile` and avatar calls, 
 `TeamConfigController` wraps that adapter in a `SettingsFormModel` and publishes the one snapshot the page renders.
 
 The Client injects `configForms` — a shipped service every settings consumer uses — and constructs the controller once per Client. If the service is absent the group is not rendered at all, and the controller is disposed with the rest of the navigation services.
+
+The extra-tools component in `TeamSettingsSection.tsx` uses the controller in `extra-tool-grants.ts`. `toolCatalog` discovers global and live Agent-scoped registrations and excludes activated Member preset tools; it neither infers plugin origin nor represents a per-Member filtered snapshot. The copy distinguishes selection and Host registration from execution permission.
+
+The settings namespace supplies the accepted list and revision. The controller separates committed names, the draft, list and catalog loading/errors, and save outcome; `TeamHumanIdentity` independently owns identity state.
+
+Names stay exact and case-sensitive. Search only narrows discovery. Selected names missing from the catalog stay selected and removable, and a catalog failure keeps the accepted selections available for revocation. An explicit clear writes `[]`; it never removes the field to inherit a lower layer. A failed accepted-list read blocks Save rather than being rendered as an empty list, and the group remains usable when the identity section cannot load. The selected count appears only after the saved list has been read; an unknown list is never stated as zero.
+
+While the catalog is still loading or has failed, the saved names fall back to a neutral list rather than the warning-edged one: the catalog's own loading or failure line already says what happened, and only a name that is no longer registered wears the warning edge.
+
+A version conflict reloads the latest committed list beside the preserved draft. Save waits for explicit review; Cancel and review are disabled until that reload succeeds. Cancel then adopts the latest list, never the stale one. Rejections and transport failures retain the draft and name their class. An unreadable success response cannot become a saved draft; it requires a new list read. A conflict lands focus on the conflict itself, then on the review control once the reload makes it usable; a reader who moved on keeps their place.
+
+The search uses shipped `Input`; labelled checkboxes let Space toggle the focused name. Each box is the shipped checkbox's 16px brand-accent box and carries the ring itself, so the row draws none; a locked row dims as a whole. At 390×844 the list and action row wrap without horizontal overflow. Remounting cannot unlock a pending save, and an older read cannot overwrite a newer reload.
 
 A rejected write never leaves a 「正在保存…」 label standing. The identity rows report the Host's message in place under their own controls; the configuration group is the shipped form, so a save the deployment refused leaves its draft staged and states the shared "the deployment did not accept these values" line beside the save.
 

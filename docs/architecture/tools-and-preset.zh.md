@@ -6,11 +6,21 @@
 
 filesystem row 显式写 `applyPatch: false`，而不是沿用 Host 默认值：Member 只被授予 `edit` 这一种文件修改工具，preset 若留空，将来 Host 默认值一翻就会悄悄扩大每个 Member 的工具面。发布包的 preset 测试断言这个值，所以这是一项被检查的决定，不是一个假设。
 
-每个 Member 默认只获准使用所选 preset 注册的工具定义，以及显式共享的 `working_directory`。Host 全局工具不在此范围内。`capabilities.tools.allow` 只能进一步缩减，不能授权 Host 工具或后来插件添加的工具。九个 Team 工具和 `working_directory` 始终保留，只有一个例外由 Host 设置行决定：`team_worker` 只在 Worker 开关打开时声明，Member 不会看到一个 Host 会拒绝的委派工具。
+每个 Member 默认只获准使用所选 preset 注册的工具定义，以及显式共享的 `working_directory`。`capabilities.tools.allow` 仍只能进一步缩减。Team Host row 另有一份 profile 级 `extraToolGrants`，可按确切、区分大小写的已注册宿主工具名放行，包括 Member allow-list 省略掉的继承基线名称。名单默认空，只属于一个 profile，并作用于该 profile 的全部 Team Member。九个 Team 工具与 `working_directory` 仍是保留名称；`team_worker` 仍只由 Worker 开关决定。许可只认名字，不认插件来源、定义对象或注册实例。
+
+Host 在每个 Session 的 `turn/start` 同步读取名单，发生在首次工具解析之前，并在该轮冻结。保存后的编辑从下一轮生效；即使连续两轮之间没有 idle 也成立，创建、恢复与换代走同一条策略路径。restriction 按开轮时已知名称生成。执行时采用 DSH 实际为该 Member 和步骤解析并准入的注册，因此其自身的 `when`、pre-execute 检查、Agent 身份以及直接或嵌套调用的当步准入仍然有效。开轮后才注册的已选名称会在下一个正常步骤重新物化进声明；注销或重注册会使先前准备好的准入失效。
+
+外部工具的可见性与执行许可分开处理。继承的全局或祖先注册在未获许可时会被 `tools.restrict()` 从 schema 移除。Member 自己的 Agent scope 中的注册不受该 restriction 过滤，当前 Harness 公开接口无法隐藏它们；执行 guard 会在未获许可时拒绝调用。
+
+条件式 `team:tool-availability` prompt section 在每次组装时列出这些可见但未获许可的名称，并明确禁止 Member 调用。许可从下一轮生效后，对应名称撤出提示。这是当前接口下的兼容行为，不是永久接口承诺：若 Harness 以后提供自有 scope 的声明过滤接口，Team 可以改为隐藏 schema，同时保留执行 guard。
+
+逐步刷新在公开的 `agent/pre-step` gate 中进行，仍采用该轮冻结的许可。当前步骤的工具解析已完成，所以刷新准备的是后续声明，而不是当前声明；刷新失败仍能拒绝本次请求。Session 事件观察器不能承担这个拒绝职责，`step/start` 也已经太晚。
 
 同一开关还决定 owner guidance section 里的 Worker 段落，而该段落每次组装都会重新求值；Worker registry 在开关关闭时仍然拒绝发起。
 
-Host 在 Agent 发布前保存这些工具定义，并在直接调用和嵌套调用执行前检查。后来注册到 Member 自身 scope 的工具不再被挡在请求之外：restriction 只过滤 Host 全局工具，没有组装期过滤时，scoped 注册仍会出现在请求的工具列表里，但调用依然会被拒绝。允许的工具定义被替换时，拒绝发生在执行期而不是组装期。能力编辑沿用原始定义。检查只作用于该 Member，不影响普通 Agent 或委派子 scope。
+Host 在 Agent 发布前保存 preset 定义，并在直接调用和嵌套调用执行前检查。带额外许可的策略安装失败时，Host 收紧到同一 Member 的无额外许可基线，而不是恢复上一份含许可的 restriction。若该基线也无法建立，pre-step gate 会在模型请求前拒绝该轮，下一次正常开轮再重试。允许的工具定义被替换时，拒绝发生在执行期而不是组装期。检查只作用于该 Member，不影响普通 Agent 或委派子 scope。
+
+设置目录发现 Host 全局注册与每个 live Agent scope 中已注册的工具名。它不推断插件来源、不克隆插件，也不声称是某个 Member 或某一轮的精确过滤集合。已激活 Member preset 提供的名称、Team-owned 名称、`working_directory` 与 `team_worker` 不作候选。已保存但当前未注册的名称仍保留为已选，可随时移除。普通 Session 与其他 profile 不获得任何许可。
 
 Team mode 不过滤其他官方或自定义插件注入的提示。当前 Harness 公开接口不支持完整的 Member 提示隔离：必需上下文会在组装后被恢复。例如 experimental Team 的 `team:policy` 与必需的 `team:identity` 仍会进入上下文，但不会因此阻止激活或对话。
 

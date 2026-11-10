@@ -69,6 +69,7 @@ const EXPECTED_REMOTE_METHODS = [
   'testSubscriptionDraft',
   'threadHistory',
   'threadObservations',
+  'toolCatalog',
   'transferTask',
   'updateMember',
   'updateProject',

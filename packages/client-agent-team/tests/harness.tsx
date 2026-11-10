@@ -1,4 +1,5 @@
 import { RemoteStream, RemoteStreamCarrierError } from '@deepseek-ai/dsh-api-gateway/client'
+import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '@contexera/dsh-agent-team/human-settings'
 import type { AgentTeamChangesRequest } from '@contexera/dsh-agent-team/types'
 import { afterEach, expect, vi } from 'vitest'
 import { fireEvent, type RenderResult } from '@testing-library/react'
@@ -858,6 +859,39 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const failEnvironment = (message?: string): void => {
     environmentFailure = message
   }
+  // The Team settings page reads the Host row directly for its exact-name
+  // grants. These are settings-service doubles, independent of the seeded
+  // ConfigForm used by the other groups.
+  let extraToolGrants: string[] = []
+  let settingsRevision = 1
+  const settingsView = () => ({
+    autoGenerate: false,
+    ns: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+    schema: {},
+    value: { extraToolGrants: [...extraToolGrants] },
+    user: { extraToolGrants: [...extraToolGrants] },
+    applies: 'live' as const,
+    secrets: [],
+    revision: settingsRevision,
+  })
+  const settingsDescribe = vi.fn(async () => ({
+    ok: true as const,
+    value: { writable: true, hasDocument: true, namespaces: [settingsView()] },
+  }))
+  const settingsMutate = vi.fn(async (
+    _namespace: string,
+    ops: readonly { op: 'set' | 'unset'; path: string[]; value?: unknown }[],
+    _expectedRevision?: number,
+  ) => {
+    for (const operation of ops) {
+      if (operation.op === 'set' && operation.path.length === 1 && operation.path[0] === 'extraToolGrants') {
+        extraToolGrants = [...operation.value as string[]]
+      }
+    }
+    settingsRevision += 1
+    return { ok: true as const, value: settingsView() }
+  })
+  const toolCatalog = vi.fn(async () => ({ ok: true as const, value: { names: [] as string[] } }))
 
   // rc.1: the runtime owns one TestRemote; the bench scripts the namespaces
   // the mounted features reach (remote.<name> injects included) and attaches
@@ -865,7 +899,8 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // refuses by contract.
   runtime.remote.provideNamespaces({
     session: { modelCatalog },
-    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, taskBoard: loadTaskBoard, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, changeAttention, transferTask, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar, subscriptions: loadSubscriptions, subscriptionLogs: loadSubscriptionLogs, testSubscriptionDraft, createSubscription: unwiredSubscriptionWrite, updateSubscription: unwiredSubscriptionWrite, pauseSubscription: unwiredSubscriptionWrite, resumeSubscription: unwiredSubscriptionWrite, deleteSubscription: unwiredSubscriptionWrite },
+    settings: { describe: settingsDescribe, mutate: settingsMutate },
+    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, toolCatalog, view: viewProjects, inbox, taskBoard: loadTaskBoard, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, changeAttention, transferTask, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar, subscriptions: loadSubscriptions, subscriptionLogs: loadSubscriptionLogs, testSubscriptionDraft, createSubscription: unwiredSubscriptionWrite, updateSubscription: unwiredSubscriptionWrite, pauseSubscription: unwiredSubscriptionWrite, resumeSubscription: unwiredSubscriptionWrite, deleteSubscription: unwiredSubscriptionWrite },
   })
   Object.assign(runtime.remote, {
     $stream: <T,>(options: ConstructorParameters<typeof RemoteStream<T>>[1]) => new RemoteStream(connection, options),

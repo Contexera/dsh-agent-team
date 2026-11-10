@@ -62,6 +62,9 @@
       "@contexera/dsh-agent-team/human-settings": [
         "./packages/agent-team/src/human-settings.ts"
       ],
+      "@contexera/dsh-agent-team/member-tool-grants": [
+        "./packages/agent-team/src/member-tool-grants.ts"
+      ],
       "@contexera/dsh-agent-team/worker-settings": [
         "./packages/agent-team/src/worker-settings.ts"
       ],

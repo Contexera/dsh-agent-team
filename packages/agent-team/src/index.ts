@@ -53,8 +53,12 @@ export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './s
 export { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
 import { carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY, type TeamContextProjectionState } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
-import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, isReservedToolName, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import {
+  EXTRA_TOOL_GRANTS_FIELD, extraToolGrantsFrom, sanitizeExtraToolGrants,
+} from './member-tool-grants.ts'
 import { PROJECT_OWNER_SECTION, projectOwnerGuidance } from './project-owner-guidance.ts'
+import { TOOL_AVAILABILITY_SECTION, toolAvailabilityGuidance } from './tool-availability-guidance.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
 import { newestEndedRuns, WorkerRefusal, WorkerRegistry, workerTaskPreview, WORKER_RUN_LIST_LIMIT, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
@@ -114,6 +118,8 @@ import type {
   AgentTeamCreateProjectResult,
   AgentTeamEnvironmentRequest,
   AgentTeamEnvironmentResult,
+  AgentTeamToolCatalogRequest,
+  AgentTeamToolCatalogResult,
   AgentTeamGetAttachmentRequest,
   AgentTeamGetAttachmentResult,
   AgentTeamGetHumanAvatarRequest,
@@ -279,7 +285,8 @@ import { admissionAttemptRequestId, admissionDeliveryRef, admissionKey, admissio
 export type * from './types.ts'
 export { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from './ledger.ts'
 export { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName } from './human-profile.ts'
-export { DEFAULT_WEBHOOK_CONFIG, HOST_ROW_FIELDS, MEMBER_COMPACTION_SETTINGS_SCHEMA, TEAM_HOST_ROW_SETTINGS_SCHEMA, WAKE_RECYCLE_SETTINGS_SCHEMA, WEBHOOK_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowField, type HostRowWrite, type WebhookConfig } from './host-row-settings.ts'
+export { DEFAULT_WEBHOOK_CONFIG, EXTRA_TOOL_GRANTS_SETTINGS_SCHEMA, HOST_ROW_FIELDS, MEMBER_COMPACTION_SETTINGS_SCHEMA, TEAM_HOST_ROW_SETTINGS_SCHEMA, WAKE_RECYCLE_SETTINGS_SCHEMA, WEBHOOK_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowField, type HostRowWrite, type WebhookConfig } from './host-row-settings.ts'
+export { EXTRA_TOOL_GRANTS_FIELD, extraToolGrantsFrom, sanitizeExtraToolGrants } from './member-tool-grants.ts'
 export { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 export { humanAvatarsRoot } from './human-avatar.ts'
 export { AGENT_TEAM_TOOL_NAMES } from './member-runtime.ts'
@@ -869,6 +876,11 @@ export default class AgentTeam extends TypertRemoteService {
     return this.config.worker.get().enabled
   }
 
+  /** The profile's exact extra tool-name grants, read at a turn start before tool resolution. */
+  private extraToolGrants(): readonly string[] {
+    return sanitizeExtraToolGrants(this.config[EXTRA_TOOL_GRANTS_FIELD].get())
+  }
+
   /**
    * Follow the Worker switch on the live surfaces. The loader event fires for any
    * volatile row update, so the switch is compared before anything is applied;
@@ -892,10 +904,16 @@ export default class AgentTeam extends TypertRemoteService {
       const member = this.requireLedger().getMember(memberId)
       if (member === undefined) return
       try {
-        const boundary = await this.memberRuntime.awaitTurnBoundary(handle)
+        let boundary = await this.memberRuntime.awaitTurnBoundary(handle)
+        // A turn may start in the gap between the boundary event and this
+        // continuation. Wait again so a delayed apply never replaces that
+        // turn's frozen grants after its turn/start.
+        while (this.accepting && this.handles.get(memberId) === handle && this.runningAgents.has(handle.agent.id)) {
+          boundary = await this.memberRuntime.awaitTurnBoundary(handle)
+        }
         // A suspend, removal, or restart during the wait replaced the surface this
         // apply targeted; the replacement reads the switch on its own activation.
-        if (this.handles.get(memberId) !== handle) return
+        if (!this.accepting || this.handles.get(memberId) !== handle) return
         // A second flip while this one waited supersedes it: the newer sync owns
         // the surface, and applying this value now would undo the newer one.
         if (this.workerEnabled() !== enabled) return
@@ -903,7 +921,7 @@ export default class AgentTeam extends TypertRemoteService {
         // the accepted intent now rather than restoring a pre-wait snapshot.
         const member = this.requireLedger().getMember(memberId)
         if (member === undefined) return
-        this.memberRuntime.reapplyMemberToolPolicy(member, enabled)
+        this.memberRuntime.reapplyMemberToolPolicy(member, enabled, this.extraToolGrants())
         // The swap released the applied-capability record; the stored intent is
         // in force again, so the roster must not read as pending after a toggle.
         this.memberRuntime.recordAppliedCapabilities(memberId, member.capabilities)
@@ -1833,14 +1851,22 @@ export default class AgentTeam extends TypertRemoteService {
   private async applyCapabilityEdit(active: AgentHandle, stored: AgentTeamAgentMember): Promise<'applied' | 'deferred:generation-changed'> {
     const memberId = stored.memberId
     const started = Date.now()
-    const boundary = await this.memberRuntime.awaitTurnBoundary(active)
+    let boundary = await this.memberRuntime.awaitTurnBoundary(active)
+    // A new turn can start after the boundary resolves but before this
+    // continuation. Apply only once the Member is still idle immediately
+    // before the synchronous swap, preserving that turn's frozen grants.
+    while (this.accepting && this.handles.get(memberId) === active && this.runningAgents.has(active.agent.id)) {
+      boundary = await this.memberRuntime.awaitTurnBoundary(active)
+    }
     if (boundary === 'waited') {
       // Only real waits are logged: an edit applied to an already-idle Member
       // spends no time here and would only add noise.
       this.ctx.logger.info(`agent-team: member '${stored.handle}' session '${stored.sessionId}' stage 'wait-turn' waited ${Date.now() - started}ms for its turn boundary before applying the stored configuration`)
     }
-    if (this.generationSwappedDuringWait(memberId, active, boundary)) return 'deferred:generation-changed'
-    this.memberRuntime.reapplyMemberToolPolicy(stored, this.workerEnabled())
+    // Shutdown releases boundary waits before disposing the active handles;
+    // it must not install another observer or apply to that retiring scope.
+    if (!this.accepting || this.generationSwappedDuringWait(memberId, active, boundary)) return 'deferred:generation-changed'
+    this.memberRuntime.reapplyMemberToolPolicy(stored, this.workerEnabled(), this.extraToolGrants())
     this.memberRuntime.swapSkillSelection(memberId, stored.capabilities?.skills?.allow)
     this.memberRuntime.recordAppliedCapabilities(memberId, stored.capabilities)
     return 'applied'
@@ -2034,6 +2060,26 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('environment')
   environmentForClient(_request: AgentTeamEnvironmentRequest): AgentTeamEnvironmentResult {
     return Object.freeze(reportEnvironment())
+  }
+
+  /**
+   * Foreign global and Agent-scoped tool names a Human could grant. Activated
+   * preset baselines and Team-owned names are absent; discovery is not a
+   * per-Member admission snapshot and cannot reopen protected controls.
+   */
+  @Remote('toolCatalog')
+  toolCatalogForClient(_request: AgentTeamToolCatalogRequest): AgentTeamToolCatalogResult {
+    const scoped = this.ctx.agents.list().flatMap((agent) => {
+      const scope = scopeOf(agent.ctx)
+      return scope === undefined ? [] : this.ctx.tools.schemas(scope)
+    })
+    const baseline = this.memberRuntime.baselineToolNames()
+    const names = [...new Set([...this.ctx.tools.schemas(), ...scoped]
+      .map(tool => tool.name)
+      .filter(name => !baseline.has(name) && !isReservedToolName(name)
+        && extraToolGrantsFrom([name]) !== undefined))]
+      .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+    return Object.freeze({ names: Object.freeze(names) })
   }
 
   /**
@@ -2922,6 +2968,15 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
+  /** Own-scope foreign tools cannot be masked by the current restriction API; make their denied status explicit instead. */
+  private installToolAvailabilityGuidance(agentCtx: Context, member: AgentTeamAgentMember): void {
+    agentCtx.systemPrompt.section({
+      name: TOOL_AVAILABILITY_SECTION,
+      order: agentCtx.systemPrompt.getSectionOrder('TEAM_POLICY'),
+      text: () => toolAvailabilityGuidance(this.memberRuntime.visibleUngrantedToolNames(agentCtx, member.memberId)),
+    })
+  }
+
   private async activateMember(member: AgentTeamAgentMember, knownWorkspacePath?: string, knownSessions?: ReadonlySet<SessionId>, forkedFrom?: SessionId, options?: { readonly deferNotify?: boolean }): Promise<void> {
     if (this.handles.has(member.memberId)) return
     let created: AgentHandle | undefined
@@ -2950,7 +3005,7 @@ export default class AgentTeam extends TypertRemoteService {
       const setup = async (agentCtx: Context, agent: Agent) => {
         try {
           await this.ctx.agentPresets.mount(agentCtx, member.presetId)
-          this.memberRuntime.applyMemberToolPolicy(agentCtx, member, this.workerEnabled())
+          this.memberRuntime.applyMemberToolPolicy(agentCtx, member, this.workerEnabled(), this.extraToolGrants())
           this.validateMemberPreset(agentCtx)
         } catch (error) {
           // Tag composition failures with their own class: the activation
@@ -2962,6 +3017,12 @@ export default class AgentTeam extends TypertRemoteService {
         if (persisted) this.applyConfiguredRoute(agent, selection)
         installModelSelection(agentCtx)
         this.installProjectOwnerGuidance(agentCtx, member)
+        this.installToolAvailabilityGuidance(agentCtx, member)
+        this.memberRuntime.observeMemberToolPolicyTurns(agentCtx, agent, member.memberId, () => {
+          const current = this.requireLedger().getMember(member.memberId)
+          if (current === undefined) throw new Error(`Member '${member.memberId}' is no longer in the Team ledger`)
+          return { member: current, workerEnabled: this.workerEnabled(), grants: this.extraToolGrants() }
+        })
         agentCtx.on('session/event', (session, event) => {
           if (session !== agent.session || event.type !== 'request/header') return
           this.adoptMemberRouteFromRequest(member.memberId, agent, session.id, event)
@@ -2973,7 +3034,18 @@ export default class AgentTeam extends TypertRemoteService {
         agentCtx.on('agent/pre-step', async ({ agent }, next) => {
           // The original inbox insertion is the durable replay source even if
           // this driver already claimed it; requeueing can reorder later input.
-          return this.retiringAgents.has(agent) ? { kind: 'reject' as const } : next()
+          if (this.retiringAgents.has(agent)) return { kind: 'reject' as const }
+          // The Harness resolves tools and assembles the prompt before this
+          // waterfall. Refresh here so a failed baseline is still rejected
+          // before the model request; a late registration reaches the next
+          // step's resolution without ever running after this gate.
+          this.memberRuntime.refreshMemberToolPolicyForStep(agentCtx, member.memberId)
+          const policyFailure = this.memberRuntime.turnToolPolicyFailure(member.memberId)
+          if (policyFailure !== undefined) {
+            this.ctx.logger.warn(`agent-team: refusing a Member turn before any model request: ${policyFailure}`)
+            return { kind: 'reject' as const }
+          }
+          return next()
         })
         return {
           commit: () => {

@@ -114,12 +114,18 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Member capabilities 与 skills
 - Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。`model` 是例外，不可清除，见下面的模型契约。
-- Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留 Team tools（`team_worker` 视开关）与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查和限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
+- Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留 Team tools（`team_worker` 视开关）与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查、回退与限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。
 
-  Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么返回 `deferred:no-live-handle`；两种顺序都让存储的意图在下次 activation 时仍然成立。
+  Host row 里的 profile 级 `extraToolGrants` 是另一份按确切已注册工具名的许可：它可以重新放行 allow-list 省略的继承基线名称，也可准入 Agent scope 注册，但不能重开 Team tools、`working_directory` 或 Worker 开关。Host 在 `turn/start` 同步读取并在该轮冻结，后续回合总读取最新已保存名单。
+
+  每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
+
+  每次边界等待返回后，capability 与 Worker 工具面编辑都同步复查 live handle 和真正 idle。若新一轮已开始，就再次等待，而不是覆盖该轮冻结的许可。shutdown 释放等待，但不会再向退役 context 注册观察器或安装 restriction。
+
+  Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么报告延后应用；两种顺序都让存储的意图在下次 activation 时仍然成立。
 
   等待按类别记日志，带 Member、Session 与时长：等自己的回合是 `stage 'wait-turn'`，等外部执行（例如 Agent 释放自己的 Session 写路径）是 `stage 'wait-external'`。activation 期间的 restriction 失败只表现为这个 Member 的 activation failure。
-- live 应用失败不会放宽面：编辑保留其 ledger commit，旧 restriction 继续生效（新装失败时恢复原状），Remote 调用照常暴露失败。同 requestId 重试会重新应用已存储配置且不产生第二次业务提交。Host 比较的是存储意图与运行时实际已应用的效果，绝不与该次请求自身的历史比较。
+- live 应用 Member capability 失败不会放宽面：编辑保留其 ledger commit，不含额外许可的编辑保留旧 restriction，Remote 调用照常暴露失败。同 requestId 重试会重新应用已存储配置且不产生第二次业务提交。profile 许可策略安装失败则收紧到该 Member 的无额外许可基线，绝不恢复到上一份含许可的 restriction；若该基线也失败，下一步会在模型请求前被拒绝。Host 比较的是存储意图与运行时实际已应用的效果，绝不与该次请求自身的历史比较。
 - 配置编辑把「效果」与「提交」分开回报：`updateMember` 返回 `effect`，取值 `applied`、`already-applied`、`deferred:no-live-handle` 或 `deferred:generation-changed`（先落账、下次激活生效）。失败不进取值——保持响亮拒绝，同时留一条可路由的 `capability-apply` diagnostic。`detail` 带 requestId、operationId、阶段与原因，Session 结构化放在 `sessionId`，日志用同一组关联 id。
 - Member 始终跑一条显式路由。创建必须给出一条，编辑只能替换、不能清除回 Host 默认；写入者只有两个：Human 的编辑（本节）与该 Member 自己的 Session（下条）。在此契约之前写入的账本记录没有 `model`，仍可读取，并按当时 Host 的默认选择唤醒。
 - 模型编辑的落账与回报和其他编辑一样，但新路由是否生效由上游决定：切换后新窗口在压缩之后仍装不下当前 Session 时会被拒绝并保留原路由，pending 选择就等到换回兼容模型为止，而记录在案意图两种情况下都在。
@@ -343,7 +349,11 @@ Human 的显示名与头像引用存放在 Team Host row 自己的 Config。sett
 
 只有 Host row 有这条迁移路径：profile patch 用改名前的 id（`wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}`）覆盖其余五行之一的，会被跳过——没有 loader entry 认这个 id，Team 回落到该行的出厂值。手改过 Team preset 或 preset 注册表 `default` 的，升级后要重新应用一次。
 
-设置页由四个 typed Remote 服务。`humanProfile` 提供名字、头像引用与版本脚注 facts。`putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` 只收图片，与 attachments 共用 10 MB 上限。已删除的条目读取时抛错，Client 回退到首字母。
+设置页由五个 Agent Team typed Remote 服务。`humanProfile` 提供名字、头像引用与版本脚注 facts。`putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` 只收图片，与 attachments 共用 10 MB 上限。已删除的条目读取时抛错，Client 回退到首字母。`toolCatalog` 提供跨全局注册与 live Agent scope 注册的工具名发现视图。
+
+许可编辑器经公开 settings Remote 读写 Team Host row 的 `extraToolGrants`，携带其 revision，并且只写该字段的一条 `set` operation。它从不使用 `unset`，所以显式 `[]` 是真正撤销，而不是回落到下层。名单读取失败时不能按空名单保存。目录与 Human 身份读取互相独立：目录失败仍可移除已读取的名称，身份失败也不会收起许可组。
+
+settings 表单与运行时归一化共用 `member-tool-grants.ts` 的结构 schema：由保持确切拼写的非空字符串组成的数组。Team 不另加名称语法、长度上限或许可数量配额；消费者合并重复名称，目录不列保留名。schema 不含 transform 回调，因此 Host 重建可编辑 schema、再序列化给浏览器后仍保留校验，包括缺省与空名单。
 
 脚注携带本 Host 实际运行的那份 bundle 的版本，以及 repository 链接。版本从已安装包自己的 manifest 读取，因此陈述的是 profile 真正装上的版本，而不是每次发版都得记得改的字符串。当后台检查观察到更新的已发布 release，再多一条点名这个版号的更新 tip。
 

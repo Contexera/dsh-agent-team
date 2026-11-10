@@ -356,6 +356,19 @@ export interface AgentTeamEnvironmentResult {
   readonly supportRange?: AgentTeamEnvironmentSupportRange | undefined
 }
 
+/**
+ * Discovery read of global and Agent-scoped tool registrations. It names tools
+ * the profile could grant; it is not a per-Member filtered snapshot and never
+ * claims which plugin registered a name.
+ */
+export interface AgentTeamToolCatalogRequest {
+}
+
+export interface AgentTeamToolCatalogResult {
+  /** Exact names only, sorted for stable display, with Team-owned names removed. */
+  readonly names: readonly string[]
+}
+
 /** Human profile write: each Client-supplied field is optional and independent. */
 export interface AgentTeamSetHumanProfileRequest {
   /** New display name; omitted keeps the current one. */

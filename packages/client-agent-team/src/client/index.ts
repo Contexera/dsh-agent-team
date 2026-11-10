@@ -66,6 +66,7 @@ import {
   TeamConfigController, WorkerConfigController, teamConfigScope, workerConfigScope, type TeamConfigSection,
 } from './team-config.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
+import { ExtraToolGrantsController } from './extra-tool-grants.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
 import { TEAM_PANEL_ID, TeamNavigation } from './navigation.ts'
@@ -88,7 +89,7 @@ const NS = 'team'
 
 export const inject = [
   'slots', 'workspaces', 'layout', 'locale', 'remote', 'remote.session', 'sessions', 'connection', 'conversation', 'uiWorkspace',
-  'configForms',
+  'configForms', 'remote.settings',
 ]
 
 /** The rendered session is the one holding its `mainView` reference, so the selection is read through retention. */
@@ -416,6 +417,19 @@ function applyUi(ctx: ClientContext): void {
   const rowForm = ctx.configForms?.get<TeamConfigSection>(HUMAN_PROFILE_SETTINGS_NAMESPACE)
   const teamConfig = rowForm === undefined ? undefined : new TeamConfigController(teamConfigScope(rowForm))
   const workerConfig = rowForm === undefined ? undefined : new WorkerConfigController(workerConfigScope(rowForm))
+  // The extra-tool editor writes the settings namespace directly. The shared
+  // ConfigForm loses the conflict/rejection distinction and also reloads before
+  // the Human can review a stale draft.
+  const extraToolGrants = new ExtraToolGrantsController({
+    namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+    settings: {
+      describe: () => ctx.remote.settings.describe(),
+      mutate: (namespace, ops, expectedRevision) => ctx.remote.settings.mutate(namespace, [...ops], expectedRevision),
+    },
+    catalog: {
+      load: () => ctx.remote.agentTeam.toolCatalog({}),
+    },
+  })
   ctx.effect(() => () => {
     navigation.dispose()
     drafts.dispose()
@@ -529,6 +543,7 @@ function applyUi(ctx: ClientContext): void {
       environment,
       teamConfig,
       workerConfig,
+      extraToolGrants,
       saveName: async (name: string) => {
         const saved = await ctx.remote.agentTeam.setHumanProfile({ name })
         if (!saved.ok) return saved.error.message

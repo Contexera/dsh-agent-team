@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
+import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '@contexera/dsh-agent-team/human-settings'
 import { apply, inject } from '../src/client/index.ts'
 
 function workspaceFeed() {
@@ -22,7 +23,41 @@ async function bench(persisted: string | null = null) {
   await ctx.plugin(SlotRegistry).await()
   ctx.provide('locale', new LocaleRuntime(ctx))
   ctx.provide('remote', { $mount: async () => async () => {} } as never)
-  ctx.provide('remote.agentTeam', {})
+  ctx.provide('remote.agentTeam', {
+    toolCatalog: vi.fn(async () => ({ ok: true, value: { names: [] } })),
+  })
+  ctx.provide('remote.settings', {
+    describe: vi.fn(async () => ({
+      ok: true,
+      value: {
+        writable: true,
+        hasDocument: true,
+        namespaces: [{
+          autoGenerate: false,
+          ns: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+          schema: {},
+          value: { extraToolGrants: [] },
+          user: { extraToolGrants: [] },
+          applies: 'live',
+          secrets: [],
+          revision: 1,
+        }],
+      },
+    })),
+    mutate: vi.fn(async () => ({
+      ok: true,
+      value: {
+        autoGenerate: false,
+        ns: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+        schema: {},
+        value: { extraToolGrants: [] },
+        user: { extraToolGrants: [] },
+        applies: 'live',
+        secrets: [],
+        revision: 2,
+      },
+    })),
+  })
   ctx.provide('remote.session', { modelCatalog: vi.fn(async () => ({ ok: true, value: { groups: [], failures: [] } })) })
   ctx.provide('conversation', { input: { for: () => ({ submit: vi.fn() }) } } as never)
   ctx.provide('sessions', {

@@ -21,6 +21,7 @@ import type {
 } from './types.ts'
 import * as memberSkills from './member-skills.ts'
 import type { MemberSkillProviderMount } from './member-skills.ts'
+import { sanitizeExtraToolGrants } from './member-tool-grants.ts'
 
 /** Result of waiting for a turn boundary: `waited` if a running turn had to finish first, `idle` if the Member was already between turns. */
 export type TurnBoundary = 'waited' | 'idle'
@@ -80,6 +81,24 @@ export interface MemberRuntimeDeps {
   readonly runningAgents: ReadonlySet<SessionId>
 }
 
+/** One Member's durable policy intent at the instant its next turn opens. */
+export interface MemberToolPolicySnapshot {
+  readonly member: AgentTeamAgentMember
+  readonly workerEnabled: boolean
+  readonly grants: readonly string[]
+}
+
+/** Read the current intent synchronously: this runs from `session/event`, which cannot await. */
+export type MemberToolPolicyReader = () => MemberToolPolicySnapshot
+
+/** The names that keep their existing Member-baseline rules and are never extra grants. */
+const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([...AGENT_TEAM_TOOL_NAMES, 'working_directory'])
+
+/** Whether one tool name is owned by the Team baseline and cannot be reopened by a profile grant. */
+export function isReservedToolName(name: string): boolean {
+  return RESERVED_TOOL_NAMES.has(name)
+}
+
 /** Per-Member runtime state: every map here is keyed by Member and released together with that Member. */
 export class MemberRuntime {
   /** Per-Member tool restriction disposers: activation registers, disposal releases, edits swap at a turn boundary. */
@@ -87,6 +106,12 @@ export class MemberRuntime {
   /** The allow-list enforced behind `memberRestrictions`: the rollback source when a swap fails, so a failed apply never leaves the Member less restricted. */
   private readonly enforcedToolAllow = new Map<AgentTeamMemberId, readonly string[]>()
   private readonly memberToolBindings = new Map<AgentTeamMemberId, ReadonlyMap<string, ToolDefinition>>()
+  /** The exact extra names frozen for this Member's current turn; a settings edit waits for the next `turn/start`. */
+  private readonly turnToolGrants = new Map<AgentTeamMemberId, ReadonlySet<string>>()
+  /** A synchronous turn-start or pre-step refresh failure; `agent/pre-step` turns it into a fail-closed step, i.e. no model request. */
+  private readonly turnToolPolicyFailures = new Map<AgentTeamMemberId, string>()
+  /** The last successfully read durable intent, used to tighten to the Member baseline if the next synchronous read fails. */
+  private readonly lastToolPolicy = new Map<AgentTeamMemberId, { readonly member: AgentTeamAgentMember; readonly workerEnabled: boolean }>()
   /** Capability intent the live surface is known to reflect: presence is the proof, a stored `undefined` means applied with no capabilities. Never persisted; absent when unprovable, so an unknown surface re-applies. */
   private readonly appliedCapabilities = new Map<AgentTeamMemberId, AgentTeamMemberCapabilities | undefined>()
   /** Capability warnings, recomputed at every activation and never persisted: stored ones would lie after a Host restart or a Harness upgrade that renames tools. */
@@ -96,35 +121,245 @@ export class MemberRuntime {
 
   constructor(private readonly deps: MemberRuntimeDeps) {}
 
+  /** Tool names supplied by activated Member presets, rather than discovered foreign registrations. */
+  baselineToolNames(): ReadonlySet<string> {
+    const names = new Set<string>()
+    for (const bindings of this.memberToolBindings.values()) {
+      for (const name of bindings.keys()) names.add(name)
+    }
+    return names
+  }
+
+  /** Foreign own-scope registrations remain visible despite restriction; name exactly those still denied by the Member guard. */
+  visibleUngrantedToolNames(agentCtx: Context, memberId: AgentTeamMemberId): readonly string[] {
+    const scope = scopeOf(agentCtx)
+    if (scope === undefined) throw new Error('Member tool guidance requires a mounted Agent scope')
+    const allowed = this.enforcedToolAllow.get(memberId) ?? []
+    const allowedSet = new Set(allowed)
+    const grants = this.turnToolGrants.get(memberId)
+    return this.deps.ctx.tools.schemas(scope)
+      .map(tool => tool.name)
+      .filter(name => !allowedSet.has(name) && !grants?.has(name))
+      .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+  }
+
   /** One Member's live capability warnings, if any; runtime-derived, never persisted. */
   capabilityWarningsFor(memberId: AgentTeamMemberId): readonly AgentTeamCapabilityWarning[] | undefined {
     return this.capabilityWarnings.get(memberId)
   }
 
   /**
-   * Restrict every Member to its preset tools; a stored allow-list can only
-   * narrow them, retaining Team tools and `working_directory`. `workerEnabled`
-   * is the Host's own switch: while it is off, `team_worker` is not declared at
-   * all, so a Member never sees a tool the Host would refuse.
+   * Restrict every Member to its preset tools plus the profile's exact name
+   * grants. The stored Member allow-list narrows the baseline; an explicit
+   * non-reserved grant can reopen a baseline name. `workerEnabled` stays the
+   * Host's own switch: while it is off, `team_worker` is not declared at all,
+   * so a grant cannot recreate a tool the Host would refuse.
    */
-  applyMemberToolPolicy(agentCtx: Context, member: AgentTeamAgentMember, workerEnabled: boolean): void {
+  applyMemberToolPolicy(
+    agentCtx: Context,
+    member: AgentTeamAgentMember,
+    workerEnabled: boolean,
+    grants: readonly string[] = [],
+  ): void {
     const bindings = this.memberToolBindings.get(member.memberId) ?? this.mountMemberToolBindings(agentCtx, member.memberId)
+    this.installMemberToolPolicy(agentCtx, member, workerEnabled, grants, bindings)
+  }
+
+  /**
+   * Install the per-turn restriction synchronously from `turn/start`. The
+   * session event itself is observe-only (the Harness contains its exceptions
+   * and does not await it), so failure is recorded here and rejected later by
+   * `agent/pre-step`; it must never be mistaken for asynchronous turn blocking.
+   */
+  observeMemberToolPolicyTurns(
+    agentCtx: Context,
+    agent: Agent,
+    memberId: AgentTeamMemberId,
+    readPolicy: MemberToolPolicyReader,
+  ): void {
+    agentCtx.on('session/event', (session, event) => {
+      if (session !== agent.session) return
+      if (event.type === 'turn/start') {
+        this.freezeMemberToolPolicyForTurn(agentCtx, memberId, readPolicy)
+      }
+    })
+  }
+
+  /**
+   * Whether this turn's policy installation or per-step refresh failed.
+   * `agent/pre-step` uses it only to refuse the step and spend no model
+   * request; it never selects tools.
+   */
+  turnToolPolicyFailure(memberId: AgentTeamMemberId): string | undefined {
+    return this.turnToolPolicyFailures.get(memberId)
+  }
+
+  private freezeMemberToolPolicyForTurn(
+    agentCtx: Context,
+    memberId: AgentTeamMemberId,
+    readPolicy: MemberToolPolicyReader,
+  ): void {
+    let snapshot: MemberToolPolicySnapshot
+    try {
+      snapshot = readPolicy()
+      this.lastToolPolicy.set(memberId, { member: snapshot.member, workerEnabled: snapshot.workerEnabled })
+    } catch (error) {
+      // A settings read cannot be replaced with an invented list. The last
+      // accepted Member intent is still enough to establish the no-grants
+      // baseline; only a failed baseline closes the turn.
+      const previous = this.lastToolPolicy.get(memberId)
+      if (previous === undefined) {
+        // No confirmed baseline exists to install. Drop any older surface so a
+        // stale grant-bearing allow-list cannot become the fallback authority;
+        // the pre-step rejection still prevents a model request.
+        this.releaseMemberToolPolicy(memberId)
+        this.turnToolGrants.set(memberId, new Set())
+        this.turnToolPolicyFailures.set(memberId, `could not read the Member tool policy: ${errorMessage(error)}`)
+        return
+      }
+      snapshot = { ...previous, grants: [] }
+    }
+    const bindings = this.memberToolBindings.get(memberId)
+    if (bindings === undefined) {
+      this.releaseMemberToolPolicy(memberId)
+      this.turnToolGrants.set(memberId, new Set())
+      this.turnToolPolicyFailures.set(memberId, 'Member tool bindings are unavailable at the turn boundary')
+      return
+    }
+    try {
+      this.installMemberToolPolicy(agentCtx, snapshot.member, snapshot.workerEnabled, snapshot.grants, bindings)
+    } catch (error) {
+      this.turnToolGrants.set(memberId, new Set())
+      this.turnToolPolicyFailures.set(memberId, `could not establish the Member tool baseline: ${errorMessage(error)}`)
+    }
+  }
+
+  /**
+   * Re-materialize the current turn's restriction against the tool names that
+   * exist now. `tools.restrict()` snapshots global names when installed, so a
+   * selected name first registered after turn start would otherwise stay hidden.
+   * This runs from `agent/pre-step`, after the Harness resolved this step's
+   * tools but before it can send the model request: the current step keeps its
+   * assembly, a successful refresh serves the following step, and a failed
+   * baseline is still visible to the existing pre-step failure gate.
+   */
+  refreshMemberToolPolicyForStep(agentCtx: Context, memberId: AgentTeamMemberId): void {
+    const grants = this.turnToolGrants.get(memberId)
+    const accepted = this.lastToolPolicy.get(memberId)
+    if (grants === undefined || grants.size === 0 || accepted === undefined) return
+    const bindings = this.memberToolBindings.get(memberId)
+    if (bindings === undefined) {
+      this.turnToolGrants.set(memberId, new Set())
+      this.turnToolPolicyFailures.set(memberId, 'Member tool bindings are unavailable at the step boundary')
+      return
+    }
+    try {
+      this.installMemberToolPolicy(
+        agentCtx,
+        accepted.member,
+        accepted.workerEnabled,
+        [...grants],
+        bindings,
+      )
+    } catch (error) {
+      this.turnToolGrants.set(memberId, new Set())
+      this.turnToolPolicyFailures.set(memberId, `could not refresh the Member tool baseline: ${errorMessage(error)}`)
+    }
+  }
+
+  /**
+   * Derive and install one complete restriction. A failed grant-bearing apply
+   * tightens to the current Member baseline, never to the previous restriction
+   * which may still contain a revoked grant. A failed baseline leaves no
+   * old-grant restore behind.
+   */
+  private installMemberToolPolicy(
+    agentCtx: Context,
+    member: AgentTeamAgentMember,
+    workerEnabled: boolean,
+    grants: readonly string[],
+    bindings: ReadonlyMap<string, ToolDefinition>,
+  ): void {
     const configured = member.capabilities?.tools?.allow
     // Drop unknown names instead of failing activation: a Harness upgrade renaming a tool must not make the Member unavailable. The warning carries the known-name digest for diagnosing drift.
     const known = [...bindings.keys()]
     const knownSet = new Set(known)
     const dropped = (configured ?? []).filter(name => !knownSet.has(name))
     this.setCapabilityWarnings(member.memberId, dropped.map(name => ({ name, knownNames: known })))
-    const allow = [...new Set([
+    const baseline = [...new Set([
       ...(configured ?? known).filter(name => knownSet.has(name) && (workerEnabled || name !== WORKER_TOOL_NAME)),
       ...AGENT_TEAM_TOOL_NAMES.filter(name => workerEnabled || name !== WORKER_TOOL_NAME),
       // An allow-list narrows capability, not the checkout the Member works in, so `working_directory` survives like the Team tools.
       ...knownSet.has('working_directory') ? ['working_directory'] : [],
     ])]
-    // `tools.restrict()` requires a scoped context and rejects names outside the inherited surface; either error fails only this Member's activation.
+    const inherited = this.inheritedToolNames(agentCtx)
+    const grantNames = sanitizeExtraToolGrants(grants)
+      .filter(name => !isReservedToolName(name))
+    const desired = [...new Set([
+      ...baseline,
+      ...grantNames.filter(name => inherited.has(name)),
+    ])]
+    const intent = Object.freeze({ member, workerEnabled })
+    this.lastToolPolicy.set(member.memberId, intent)
+    try {
+      this.installRestriction(agentCtx, member.memberId, desired, grantNames)
+      return
+    } catch (error) {
+      // Only a grant-bearing surface has a no-grant fallback. A failed baseline
+      // apply keeps the prior surface and surfaces the failure as before.
+      if (!desired.some(name => !baseline.includes(name))) throw error
+      // A grant-bearing replacement may leave the old grant surface installed
+      // when it fails. Remove it before tightening, so a revoked grant cannot
+      // survive by rolling back to that old restriction.
+      this.memberRestrictions.get(member.memberId)?.()
+      this.memberRestrictions.delete(member.memberId)
+      this.enforcedToolAllow.delete(member.memberId)
+      let fallbackError: unknown
+      try {
+        this.installRestriction(agentCtx, member.memberId, baseline, [])
+      } catch (next) {
+        fallbackError = next
+      }
+      if (fallbackError !== undefined) {
+        this.memberRestrictions.get(member.memberId)?.()
+        this.memberRestrictions.delete(member.memberId)
+        this.enforcedToolAllow.delete(member.memberId)
+        this.turnToolGrants.set(member.memberId, new Set())
+        throw new AggregateError(
+          [error, fallbackError],
+          `failed to establish the Team Member tool baseline for '${member.memberId}'`,
+        )
+      }
+      const message = `extra tool policy failed and was tightened to the Member baseline: ${errorMessage(error)}`
+      this.deps.ctx.logger.warn(`agent-team: member '${member.memberId}' ${message}`)
+    }
+  }
+
+  /** Swap one scoped restriction, recording exactly what it permits. */
+  private installRestriction(
+    agentCtx: Context,
+    memberId: AgentTeamMemberId,
+    allow: readonly string[],
+    grants: readonly string[],
+  ): void {
+    // `tools.restrict()` requires a scoped context and rejects names outside the
+    // inherited surface; either error fails this installation, never widens it.
     const dispose = agentCtx.tools.restrict({ allow })
-    this.memberRestrictions.set(member.memberId, dispose)
-    this.enforcedToolAllow.set(member.memberId, Object.freeze([...allow]))
+    const previous = this.memberRestrictions.get(memberId)
+    this.memberRestrictions.set(memberId, dispose)
+    const frozen = Object.freeze([...allow])
+    this.enforcedToolAllow.set(memberId, frozen)
+    this.turnToolGrants.set(memberId, new Set(grants))
+    this.turnToolPolicyFailures.delete(memberId)
+    previous?.()
+  }
+
+  /** The names `tools.restrict()` can mask: inherited global and ancestor registrations. */
+  private inheritedToolNames(agentCtx: Context): ReadonlySet<string> {
+    const scope = scopeOf(agentCtx)
+    const presetScope = scope === undefined ? undefined : scopeParentOf(scope)
+    if (presetScope === undefined) throw new Error('Member tool policy requires a mounted preset scope')
+    return new Set(this.deps.ctx.tools.schemas(presetScope).map(tool => tool.name))
   }
 
   private mountMemberToolBindings(agentCtx: Context, memberId: AgentTeamMemberId): ReadonlyMap<string, ToolDefinition> {
@@ -144,11 +379,22 @@ export class MemberRuntime {
     this.memberToolBindings.set(memberId, bindings)
     agentCtx.tools.guard(execution => {
       if (execution.agent !== scope) return undefined
-      if (!this.enforcedToolAllow.get(memberId)?.includes(execution.name)) {
+      const name = execution.name
+      const binding = bindings.get(name)
+      const grants = this.turnToolGrants.get(memberId)
+      if (grants?.has(name) && !isReservedToolName(name)) {
+        // Grant execution follows exactly the registration DSH admitted for this
+        // Member and step. It never compares definition identity or infers origin.
+        if (execution.toolSet === undefined) return `Tool "${name}" requires step admission for this Team Member`
+        return execution.toolSet.view(scope).get(name) === undefined
+          ? `Tool "${name}" is not admitted for this Team Member`
+          : undefined
+      }
+      if (!this.enforcedToolAllow.get(memberId)?.includes(name)) {
         return `Tool "${execution.name}" is not declared for this Team Member`
       }
-      if (tools.get(execution.name, scope) !== bindings.get(execution.name)) {
-        return `Team Member tool replaced: ${execution.name}`
+      if (binding === undefined || tools.get(name, scope) !== binding) {
+        return `Team Member tool replaced: ${name}`
       }
       return undefined
     })
@@ -169,28 +415,10 @@ export class MemberRuntime {
     this.appliedCapabilities.set(memberId, capabilities)
   }
 
-  /** Swaps a live Member's tool policy at a turn boundary: disposes the old restriction, applies the new one, and on failure restores the previous allow-list before rethrowing. */
-  reapplyMemberToolPolicy(member: AgentTeamAgentMember, workerEnabled: boolean): void {
+  /** Swaps a live Member's tool policy at a turn boundary; a failed swap leaves the no-grants baseline, never the previous grant-bearing restriction. */
+  reapplyMemberToolPolicy(member: AgentTeamAgentMember, workerEnabled: boolean, grants: readonly string[] = []): void {
     const agentCtx = this.deps.liveMemberContext(member.memberId)
-    const previousAllow = this.enforcedToolAllow.get(member.memberId)
-    this.releaseMemberToolPolicy(member.memberId)
-    try {
-      this.applyMemberToolPolicy(agentCtx, member, workerEnabled)
-    } catch (error) {
-      if (previousAllow !== undefined) this.restoreEnforcedToolAllow(member, agentCtx, previousAllow)
-      throw error
-    }
-  }
-
-  /** Puts the previous allow-list back after a failed swap. Warnings are deliberately not restored: they describe the stored configuration's divergence, and the accepted edit is stored even though its apply failed. If the failure precedes derivation (schemas throws), warnings stay empty; the next apply or activation re-derives them. */
-  private restoreEnforcedToolAllow(member: AgentTeamAgentMember, agentCtx: Context, previousAllow: readonly string[]): void {
-    try {
-      const dispose = agentCtx.tools.restrict({ allow: [...previousAllow] })
-      this.memberRestrictions.set(member.memberId, dispose)
-      this.enforcedToolAllow.set(member.memberId, previousAllow)
-    } catch (restore) {
-      this.deps.ctx.logger.warn(`agent-team: failed to restore the previous tool restriction for member '${member.memberId}' after a failed apply: ${restore instanceof Error ? restore.message : String(restore)}`)
-    }
+    this.applyMemberToolPolicy(agentCtx, member, workerEnabled, grants)
   }
 
   /** Release one Member's restriction disposer and warning state; safe to call twice. */
@@ -201,6 +429,9 @@ export class MemberRuntime {
       dispose()
     }
     this.enforcedToolAllow.delete(memberId)
+    this.turnToolGrants.delete(memberId)
+    this.turnToolPolicyFailures.delete(memberId)
+    this.lastToolPolicy.delete(memberId)
     this.capabilityWarnings.delete(memberId)
     this.appliedCapabilities.delete(memberId)
   }
@@ -322,6 +553,9 @@ export class MemberRuntime {
       ...this.memberRestrictions.keys(),
       ...this.enforcedToolAllow.keys(),
       ...this.memberToolBindings.keys(),
+      ...this.turnToolGrants.keys(),
+      ...this.turnToolPolicyFailures.keys(),
+      ...this.lastToolPolicy.keys(),
       ...this.appliedCapabilities.keys(),
       ...this.capabilityWarnings.keys(),
       ...this.skillProviderMounts.keys(),
@@ -380,6 +614,10 @@ function twinMemoryDirectoryPath(sanitizedPath: string): string | undefined {
 function colonTwinTraceName(name: string): string {
   const dot = name.lastIndexOf('.')
   return dot <= 0 ? `${name}.colon-twin` : `${name.slice(0, dot)}.colon-twin${name.slice(dot)}`
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** Merges a hand-created colon-form twin into the sanitized Member memory directory. Unlike the legacy migration this is a merge: the sanitized directory is the live root, so on conflict its copy wins and the twin's copy is kept beside it under a `.colon-twin` name. Twin-only files move in under their own names, then the emptied twin is removed. */

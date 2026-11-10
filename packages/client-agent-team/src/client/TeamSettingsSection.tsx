@@ -1,9 +1,12 @@
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { Button, IconChevronDownOutlineRegular, Input, SettingsForm, SettingsValueField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { HUMAN_AVATAR_MAX_BYTES } from '@contexera/dsh-agent-team/human-settings'
 import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
+import {
+  useExtraToolGrants, type ExtraToolGrantsFace,
+} from './extra-tool-grants.ts'
 import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'
 import { formLabels } from './locales.ts'
@@ -29,6 +32,8 @@ export interface TeamSettingsInjected {
   teamConfig?: TeamConfigFace | undefined
   /** The Host row's Worker delegation group; absent when the settings service is. */
   workerConfig?: WorkerConfigFace | undefined
+  /** The profile-wide exact tool-name grants; absent when either Remote is. */
+  extraToolGrants?: ExtraToolGrantsFace | undefined
 }
 
 export type TeamSettingsProps =
@@ -224,6 +229,223 @@ function WorkerSettings(props: { t: TeamSettingsProps['t']; face: WorkerConfigFa
   </section>
 }
 
+/**
+ * The profile-wide exact tool-name grant editor. Its list and catalog have
+ * independent failure states, and neither depends on the Human identity read.
+ * @param props - the page dictionary and the controller shared by every render.
+ * @returns the searchable multi-select, its draft actions, and save outcome.
+ */
+function ExtraToolGrantsSettings(props: { t: TeamSettingsProps['t']; face: ExtraToolGrantsFace }) {
+  const { t, face } = props
+  const state = useExtraToolGrants(face)
+  const headingId = useId()
+  const searchId = useId()
+  const conflictRef = useRef<HTMLDivElement | null>(null)
+  const reviewRef = useRef<HTMLButtonElement | null>(null)
+  const saveRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    face.load()
+    face.loadCatalog()
+  }, [face])
+
+  const search = state.search.trim().toLocaleLowerCase()
+  const visible = state.catalog.filter(name => name.toLocaleLowerCase().includes(search))
+  const locked = state.listStatus !== 'ready'
+    || !state.writable
+    || state.saving
+    || state.awaitingReview
+  const notice = state.notice
+  const conflict = notice?.kind === 'conflict' ? notice : undefined
+  const latest = conflict?.latestCommitted
+  const conflictShown = conflict !== undefined
+  const reviewReady = conflict !== undefined && latest !== undefined
+
+  // The Save control that opened a conflict is disabled, so focus would fall to
+  // the document. Land it on the conflict itself, then on the review control
+  // once the reload makes that control usable; a reader who moved on keeps
+  // their place.
+  useEffect(() => {
+    if (!conflictShown) return
+    const active = document.activeElement
+    if (active === document.body || active === saveRef.current) conflictRef.current?.focus()
+  }, [conflictShown])
+  useEffect(() => {
+    if (!reviewReady) return
+    const active = document.activeElement
+    if (active === document.body || active === conflictRef.current) reviewRef.current?.focus()
+  }, [reviewReady])
+
+  return <section className={css.extraTools} aria-labelledby={headingId} data-extra-tool-grants>
+    <div className={css.extraToolHeading}>
+      <h3 className={css.groupHeading} id={headingId}>{t('extraToolsTitle')}</h3>
+      {state.listStatus === 'ready'
+        ? <span className={css.extraToolCount}>{t('extraToolsSelected', { count: state.draft.length })}</span>
+        : null}
+    </div>
+    <p className={css.groupIntro}>{t('extraToolsIntro')}</p>
+    <p className={css.fieldHint}>{t('extraToolsRegistrationHint')}</p>
+
+    {state.listStatus === 'loading'
+      ? <p className={css.state} role="status">{t('extraToolsListLoading')}</p>
+      : state.listStatus === 'error'
+        ? <div className={css.noticeBlock} role="alert">
+          <p className={css.notice}>{t('extraToolsListFailed', { message: state.listError ?? '' })}</p>
+          <div className={css.stateAction}>
+            <Button variant="outline" onClick={() => { face.load() }}>{t('retry')}</Button>
+          </div>
+        </div>
+        : null}
+
+    {state.listStatus === 'ready' && !state.writable
+      ? <p className={css.state}>{t('readOnly')}</p>
+      : null}
+
+    <div className={css.extraSearch}>
+      <label className={css.fieldLabel} htmlFor={searchId}>{t('extraToolsSearch')}</label>
+      <Input
+        id={searchId}
+        type="search"
+        value={state.search}
+        placeholder={t('extraToolsSearchPlaceholder')}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => { face.setSearch(event.target.value) }}
+      />
+      <p className={css.fieldHint}>{t('extraToolsSearchHint')}</p>
+    </div>
+
+    {state.catalogStatus === 'loading'
+      ? <p className={css.state} role="status">{t('extraToolsCatalogLoading')}</p>
+      : state.catalogStatus === 'error'
+        ? <div className={css.noticeBlock} role="alert">
+          <p className={css.notice}>{t('extraToolsCatalogFailed', { message: state.catalogError ?? '' })}</p>
+          <div className={css.stateAction}>
+            <Button variant="outline" onClick={() => { face.loadCatalog() }}>{t('retry')}</Button>
+          </div>
+        </div>
+        : null}
+
+    {state.catalogStatus === 'ready' && state.catalog.length === 0
+      ? <p className={css.state}>{t('extraToolsCatalogEmpty')}</p>
+      : null}
+    {state.catalogStatus === 'ready' && state.catalog.length > 0 && visible.length === 0
+      ? <p className={css.state}>{t('extraToolsNoMatches')}</p>
+      : null}
+    {visible.length === 0 ? null : <ul className={css.toolList} aria-label={t('extraToolsCatalogLabel')}>
+      {visible.map(name => <li key={name}>
+        <label className={css.toolChoice}>
+          <input
+            type="checkbox"
+            checked={state.draft.includes(name)}
+            disabled={locked}
+            onChange={() => { face.toggle(name) }}
+          />
+          <code className={css.toolName}>{name}</code>
+        </label>
+      </li>)}
+    </ul>}
+
+    {state.catalogStatus === 'ready' || state.draft.length === 0 ? null
+      : <div className={css.selectionBlock} data-extra-tool-selected>
+        <div className={css.missingHeading}>{t('extraToolsSelectedTitle')}</div>
+        <p className={css.fieldHint}>{t('extraToolsSelectedHint')}</p>
+        <ul className={css.toolList}>
+          {state.draft.map(name => <li key={name}>
+            <label className={css.toolChoice}>
+              <input
+                type="checkbox"
+                checked
+                disabled={locked}
+                onChange={() => { face.toggle(name) }}
+              />
+              <code className={css.toolName}>{name}</code>
+            </label>
+          </li>)}
+        </ul>
+      </div>}
+
+    {state.catalogStatus !== 'ready' || state.missing.length === 0 ? null
+      : <div className={`${css.selectionBlock} ${css.missingTools}`} data-extra-tool-missing>
+      <div className={css.missingHeading}>{t('extraToolsMissingTitle')}</div>
+      <p className={css.fieldHint}>{t('extraToolsMissingHint')}</p>
+      <ul className={css.toolList}>
+        {state.missing.map(name => <li key={name}>
+          <label className={css.toolChoice}>
+            <input
+              type="checkbox"
+              checked
+              disabled={locked}
+              onChange={() => { face.toggle(name) }}
+            />
+            <code className={css.toolName}>{name}</code>
+            <span className={css.missingBadge}>{t('extraToolsMissingBadge')}</span>
+          </label>
+        </li>)}
+      </ul>
+      </div>}
+
+    {conflict === undefined ? null : <div className={css.conflict} ref={conflictRef} role="alert" tabIndex={-1} data-extra-tool-conflict>
+      <div className={css.conflictTitle}>{t('extraToolsConflictTitle')}</div>
+      <p className={css.conflictText}>{t('extraToolsConflict', { message: conflict.message })}</p>
+      <p className={css.conflictText}>{t('extraToolsConflictDraftKept')}</p>
+      {conflict.reloadFailure === undefined ? null
+        : <p className={css.notice}>{t('extraToolsConflictReloadFailed', { message: conflict.reloadFailure })}</p>}
+      <div className={css.conflictCommitted}>
+        <span>{t('extraToolsCommitted')}</span>
+        {latest === undefined
+          ? <span className={css.emptyValue}>
+            {conflict.reloadFailure === undefined
+              ? t('extraToolsCommittedLoading')
+              : t('extraToolsCommittedUnavailable')}
+          </span>
+          : latest.length === 0
+            ? <span className={css.emptyValue}>{t('extraToolsEmpty')}</span>
+            : latest.map(name => <code key={name} className={css.committedName}>{name}</code>)}
+      </div>
+      <div className={css.stateAction}>
+        <Button
+          ref={reviewRef}
+          variant="outline"
+          disabled={latest === undefined || state.listStatus !== 'ready'}
+          onClick={() => { face.acknowledgeConflict() }}
+        >
+          {t('extraToolsConflictReviewed')}
+        </Button>
+      </div>
+    </div>}
+
+    <div className={css.extraActions}>
+      <Button
+        disabled={locked || state.draft.length === 0}
+        onClick={() => { face.clear() }}
+      >
+        {t('extraToolsClear')}
+      </Button>
+      <span className={css.actionSpacer} />
+      <Button disabled={!state.canDiscard} onClick={() => { face.discard() }}>
+        {t('cancel')}
+      </Button>
+      <Button
+        ref={saveRef}
+        variant="primary"
+        disabled={!state.canSave}
+        onClick={() => { face.save() }}
+      >
+        {state.saving ? t('saving') : t('save')}
+      </Button>
+    </div>
+    {notice?.kind === 'saved'
+      ? <p className={css.success} role="status">{t('extraToolsSaved')}</p>
+      : null}
+    {notice?.kind === 'rejected'
+      ? <p className={css.notice} role="alert">{t('extraToolsRejected', { message: notice.message })}</p>
+      : null}
+    {notice?.kind === 'failed'
+      ? <p className={css.notice} role="alert">{t('extraToolsWriteFailed', { message: notice.message })}</p>
+      : null}
+  </section>
+}
+
 export function TeamSettingsSection(props: TeamSettingsProps) {
   const { t, identity } = props
   const profile = useHumanIdentity(identity)
@@ -281,101 +503,98 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
     <p className={css.intro}>{t('teamSettingsIntro')}</p>
   </>
 
-  if (profile.status === 'loading' && profile.name === undefined) {
-    return <div className={css.section}>
-      {pageHeader}
-      <p className={css.state} role="status">{t('humanSettingsLoading')}</p>
-    </div>
-  }
-
-  if (profile.name === undefined) {
-    return <div className={css.section}>
-      {pageHeader}
-      <p className={css.state} role="alert">{t('humanSettingsUnavailable', { message: profile.error ?? '' })}</p>
-      <div className={css.stateAction}>
-        <Button variant="outline" onClick={() => { void identity.refresh() }}>{t('retry')}</Button>
+  const identityContent = profile.status === 'loading' && profile.name === undefined
+    ? <p className={css.state} role="status">{t('humanSettingsLoading')}</p>
+    : profile.name === undefined
+      ? <div className={css.noticeBlock}>
+        <p className={css.state} role="alert">{t('humanSettingsUnavailable', { message: profile.error ?? '' })}</p>
+        <div className={css.stateAction}>
+          <Button variant="outline" onClick={() => { void identity.refresh() }}>{t('retry')}</Button>
+        </div>
       </div>
-    </div>
-  }
+      : <div className={css.rows}>
+        <div className={css.row}>
+          <div className={css.rowText}>
+            <div className={css.title}>{t('humanSettingsName')}</div>
+            <div className={css.desc}>{t('humanSettingsNameHint')}</div>
+          </div>
+          <form
+            className={css.controls}
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitName()
+            }}
+          >
+            <Input
+              className={css.nameInput!}
+              aria-label={t('humanSettingsName')}
+              aria-invalid={emptyName || undefined}
+              value={name}
+              disabled={saving}
+              onChange={(event) => { setDraft({ kind: 'editing', text: event.target.value }) }}
+            />
+            <Button type="submit" variant="primary" disabled={saving || !dirty || emptyName}>
+              {saving ? t('humanSettingsSaving') : t('humanSettingsSave')}
+            </Button>
+          </form>
+        </div>
+        <div className={css.row}>
+          <div className={css.rowText}>
+            <div className={css.title}>{t('humanSettingsAvatar')}</div>
+            <div className={css.desc}>{t('humanSettingsAvatarHint')}</div>
+          </div>
+          <div className={css.controls}>
+            {avatar.image.kind === 'initial'
+              ? <span className={`${css.identity} ${css.identityFallback}`} data-avatar="initial" aria-hidden="true">{avatarInitial(profile.name)}</span>
+              : <img className={`${css.identity} ${css.identityImage}`} data-avatar="image" src={avatar.image.src} alt="" onError={avatar.failed} />}
+            <input
+              ref={filePicker}
+              type="file"
+              accept="image/*"
+              tabIndex={-1}
+              aria-hidden="true"
+              hidden
+              onChange={(event) => {
+                void pickAvatar(event.target.files?.[0])
+                event.target.value = ''
+              }}
+            />
+            <Button
+              variant="outline"
+              disabled={uploading}
+              onClick={() => { filePicker.current?.click() }}
+            >
+              {uploading ? t('humanSettingsUploading') : hasAvatar ? t('humanSettingsReplace') : t('humanSettingsUpload')}
+            </Button>
+            {hasAvatar && <Button disabled={uploading} onClick={() => { void removeAvatar() }}>{t('humanSettingsRemoveAvatar')}</Button>}
+          </div>
+        </div>
+      </div>
 
   return <div className={css.section}>
     {pageHeader}
-    <div className={css.rows}>
-      <div className={css.row}>
-        <div className={css.rowText}>
-          <div className={css.title}>{t('humanSettingsName')}</div>
-          <div className={css.desc}>{t('humanSettingsNameHint')}</div>
-        </div>
-        <form
-          className={css.controls}
-          onSubmit={(event) => {
-            event.preventDefault()
-            void submitName()
-          }}
-        >
-          <Input
-            className={css.nameInput!}
-            aria-label={t('humanSettingsName')}
-            aria-invalid={emptyName || undefined}
-            value={name}
-            disabled={saving}
-            onChange={(event) => { setDraft({ kind: 'editing', text: event.target.value }) }}
-          />
-          <Button type="submit" variant="primary" disabled={saving || !dirty || emptyName}>
-            {saving ? t('humanSettingsSaving') : t('humanSettingsSave')}
-          </Button>
-        </form>
-      </div>
-      <div className={css.row}>
-        <div className={css.rowText}>
-          <div className={css.title}>{t('humanSettingsAvatar')}</div>
-          <div className={css.desc}>{t('humanSettingsAvatarHint')}</div>
-        </div>
-        <div className={css.controls}>
-          {avatar.image.kind === 'initial'
-            ? <span className={`${css.identity} ${css.identityFallback}`} data-avatar="initial" aria-hidden="true">{avatarInitial(profile.name)}</span>
-            : <img className={`${css.identity} ${css.identityImage}`} data-avatar="image" src={avatar.image.src} alt="" onError={avatar.failed} />}
-          <input
-            ref={filePicker}
-            type="file"
-            accept="image/*"
-            tabIndex={-1}
-            aria-hidden="true"
-            hidden
-            onChange={(event) => {
-              void pickAvatar(event.target.files?.[0])
-              event.target.value = ''
-            }}
-          />
-          <Button
-            variant="outline"
-            disabled={uploading}
-            onClick={() => { filePicker.current?.click() }}
-          >
-            {uploading ? t('humanSettingsUploading') : hasAvatar ? t('humanSettingsReplace') : t('humanSettingsUpload')}
-          </Button>
-          {hasAvatar && <Button disabled={uploading} onClick={() => { void removeAvatar() }}>{t('humanSettingsRemoveAvatar')}</Button>}
-        </div>
-      </div>
-    </div>
+    {identityContent}
+    {props.extraToolGrants === undefined ? null : <ExtraToolGrantsSettings t={t} face={props.extraToolGrants} />}
     {props.teamConfig === undefined ? null : <ContextSettings t={t} face={props.teamConfig} />}
     {props.workerConfig === undefined ? null : <WorkerSettings t={t} face={props.workerConfig} />}
     <div className={css.environment}>
       <EnvironmentCheck t={t} environment={props.environment} />
     </div>
-    <div className={css.footnote}>
-      <span>{t('humanSettingsVersion', { version: profile.version ?? '' })}</span>
-      <span aria-hidden="true">·</span>
-      <a className={css.link} href={profile.repoUrl ?? ''} target="_blank" rel="noreferrer">GitHub</a>
-      {profile.latestVersion !== undefined
-        ? <a
+    {profile.version === undefined && profile.repoUrl === undefined ? null : <div className={css.footnote}>
+      {profile.version === undefined ? null : <span>{t('humanSettingsVersion', { version: profile.version })}</span>}
+      {profile.version === undefined || profile.repoUrl === undefined ? null : <span aria-hidden="true">·</span>}
+      {profile.repoUrl === undefined
+        ? null
+        : <a className={css.link} href={profile.repoUrl} target="_blank" rel="noreferrer">GitHub</a>}
+      {profile.latestVersion === undefined
+        ? null
+        : <a
             className={css.link}
             href={`${profile.repoUrl ?? ''}/releases`}
             target="_blank"
             rel="noreferrer"
-          >{t('humanSettingsUpdateAvailable', { version: profile.latestVersion })}</a>
-        : null}
-    </div>
+          >{t('humanSettingsUpdateAvailable', { version: profile.latestVersion })}</a>}
+    </div>}
     {emptyName && <p className={css.notice}>{t('humanSettingsNameEmpty')}</p>}
     {notice === null ? null : <p className={css.notice} role="alert">{notice}</p>}
   </div>
