@@ -38,6 +38,19 @@ describe('the acceptance context boundary', () => {
     expect(acceptanceReminderText('compact')).toContain('compacted once the Agent settles')
   })
 
+  it('names the standing the reader had in the accepted Task', () => {
+    expect(acceptanceReminderText('remind')).toContain('A Task you contributed to was accepted.')
+    expect(acceptanceReminderText('remind', 'verifier')).toContain('You accepted a Task.')
+    expect(acceptanceReminderText('remind', 'accountable')).toContain('A Task you were accountable for was accepted.')
+  })
+
+  it('keeps the compaction clause for every standing', () => {
+    for (const perspective of ['contributor', 'verifier', 'accountable'] as const) {
+      expect(acceptanceReminderText('remind', perspective)).not.toContain('compacted')
+      expect(acceptanceReminderText('compact', perspective)).toContain('compacted once the Agent settles')
+    }
+  })
+
   it('frames the reminder as injected context and stays readable back from the log', () => {
     const message = createAcceptanceReminder('compact')
     expect(message.content).toEqual([{ type: 'text', text: acceptanceReminderText('compact') }])

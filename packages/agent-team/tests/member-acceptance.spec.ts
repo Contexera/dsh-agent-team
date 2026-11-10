@@ -14,6 +14,7 @@ import { isAcceptanceNotice } from '../src/context-projection.ts'
 import { ACCEPTANCE_COMPACT_TOKENS } from '../src/acceptance-context.ts'
 import { MEMBER_COMPACT_TOKENS } from '../src/member-compaction.ts'
 import type { AgentTeamClaimRef } from '../src/types.ts'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 
 import { realHarness, ScriptedAdapter, acceptanceReminders, textResponse, waitFor, waitForIdle, requestId } from './helpers/member-harness.ts'
 
@@ -133,6 +134,102 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       expect(watcherRead.facts.some(entry => entry.unread && entry.fact.kind === 'activity' && entry.fact.activity.kind === 'accept')).toBe(true)
       expect([...watcherAgent.inbox.nextStep, ...watcherAgent.inbox.nextTurn].some(message => isAcceptanceNotice(message))).toBe(false)
       expect(acceptanceReminders(watcherAgent)).toHaveLength(0)
+    })
+
+    /**
+     * A Task in review whose accountable never held a Claim: the builder finishes
+     * the work and the Human hands the Task to the reviewer, so only the accept
+     * itself can carry the boundary to the reviewer. Every wake needs one
+     * scripted response; leftovers are harmless.
+     */
+    const handOffToVerifier = async (adapter: ScriptedAdapter, ctx: Context, workspaceId: WorkspaceId) => {
+      const project = await ctx.agentTeam.createProject({ requestId: requestId('verifier-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const builder = await ctx.agentTeam.addMember({ requestId: requestId('verifier-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
+      const reviewer = await ctx.agentTeam.addMember({ requestId: requestId('verifier-reviewer'), workspaceId, handle: 'reviewer', description: 'Verifies changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
+      const builderAgent = ctx.agents.get(builder.status.member.sessionId)!
+      const reviewerAgent = ctx.agents.get(reviewer.status.member.sessionId)!
+      adapter.enqueue(textResponse('builder is ready.'))
+      adapter.enqueue(textResponse('reviewer is ready.'))
+      const started = await ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('verifier-task'), workspaceId, projectRef: project.project.projectRef, body: 'Ship the fix' })
+      if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
+      const taskRef = started.task!.taskRef
+      const builderRead = await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('verifier-builder-read'), workspaceId, taskRef })
+      const claim = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('verifier-claim'), workspaceId, taskRef, action: 'claim', baseRevision: builderRead.thread.revision, direction: 'implement' })
+      if (claim.kind !== 'committed') throw new Error(`expected committed claim, received ${claim.kind}`)
+      const builderRead2 = await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('verifier-builder-read-2'), workspaceId, taskRef })
+      const done = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('verifier-done'), workspaceId, taskRef, action: 'done', claimRef: (claim as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: builderRead2.thread.revision })
+      if (done.kind !== 'committed') throw new Error(`expected committed done, received ${done.kind}`)
+      const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('verifier-human-read'), workspaceId, taskRef })
+      // The handover wakes the new accountable and the builder that now follows the Thread.
+      adapter.enqueue(textResponse('reviewer saw the handover.'))
+      adapter.enqueue(textResponse('builder saw the handover.'))
+      const transfer = await ctx.agentTeam.transferTask({ requestId: requestId('verifier-transfer'), workspaceId, taskRef, target: reviewer.status.member.memberId, baseRevision: humanRead.thread.revision })
+      if (transfer.kind !== 'committed') throw new Error(`expected committed transfer, received ${transfer.kind}`)
+      await waitForIdle(ctx, reviewerAgent)
+      await waitForIdle(ctx, builderAgent)
+      const read = await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('verifier-reviewer-read'), workspaceId, taskRef })
+      return { builderAgent, reviewerAgent, reviewerMemberId: reviewer.status.member.memberId, taskRef, read }
+    }
+
+    /** The acceptance reminder wherever it landed: still queued, or claimed by a turn that was already running. */
+    const acceptanceText = async (agent: NonNullable<ReturnType<Context['agents']['get']>>): Promise<string> => {
+      const found = await waitFor(() => {
+        const queued = [...agent.inbox.nextStep, ...agent.inbox.nextTurn].filter(message => isAcceptanceNotice(message))
+        if (queued.length > 0) return JSON.stringify(queued[0]!.content)
+        return acceptanceReminders(agent)[0]
+      })
+      return found
+    }
+
+    it('hands the Member that commits the accept the boundary a claimant would get', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
+      const { builderAgent, reviewerAgent, reviewerMemberId, taskRef, read } = await handOffToVerifier(adapter, ctx, workspaceId)
+      expect(read.task?.accountable).toBe(reviewerMemberId)
+      // Over the budget: the verifier gets the same compaction the contributor gets.
+      pressureState.usageTokens = ACCEPTANCE_COMPACT_TOKENS + 1
+      const compactions: string[] = []
+      const engine = { compactNow: async (agent: { id: string }, signal: AbortSignal): Promise<null> => {
+        compactions.push(`${agent.id}:${signal.aborted ? 'aborted' : 'live'}`)
+        return null
+      } }
+      const serviceFor = vi.spyOn(ctx.agentPresets, 'serviceFor').mockReturnValue(engine as never)
+      try {
+        // The accept wakes the builder, whose Claim it concludes.
+        adapter.enqueue(textResponse('builder saw the acceptance.'))
+        const accepted = await ctx.agentTeam.changeTaskForAgent(reviewerAgent, { requestId: requestId('verifier-accept'), workspaceId, taskRef, action: 'accept', baseRevision: read.thread.revision })
+        if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
+        const text = await acceptanceText(reviewerAgent)
+        expect(text).toContain('You accepted a Task.')
+        expect(text).toContain('compacted once the Agent settles')
+        const reminderSplices = reviewerAgent.session.ownEvents().filter(event => event.type === 'agent/inbox/spliced'
+          && ((event.data as { inserted?: UserMessage[] }).inserted ?? []).some(isAcceptanceNotice))
+        expect(reminderSplices.map(event => (event.data as { target: string }).target)).toEqual(['next-step'])
+        await waitFor(() => compactions.length > 0 ? compactions : undefined)
+        expect(compactions[0]!.startsWith(reviewerAgent.id)).toBe(true)
+        await waitForIdle(ctx, builderAgent)
+      } finally {
+        serviceFor.mockRestore()
+      }
+    })
+
+    it('hands the accountable the boundary when someone else accepts its Task', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
+      const { reviewerAgent, taskRef } = await handOffToVerifier(adapter, ctx, workspaceId)
+      pressureState.usageTokens = 0
+      const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('accountable-human-read'), workspaceId, taskRef })
+      // The Human accepts, so the reviewer never commits the accept and holds no
+      // Claim: only the read-side boundary can reach it.
+      adapter.enqueue(textResponse('reviewer saw the acceptance.'))
+      const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('accountable-accept'), workspaceId, taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
+      if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
+      await waitForIdle(ctx, reviewerAgent)
+      const read = await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('accountable-read'), workspaceId, taskRef })
+      expect(read.facts.some(entry => entry.unread && entry.fact.kind === 'activity' && entry.fact.activity.kind === 'accept')).toBe(true)
+      const text = await acceptanceText(reviewerAgent)
+      expect(text).toContain('A Task you were accountable for was accepted.')
+      expect(text).not.toContain('compacted')
     })
 
     it('resolves the same Host policy through the real preset engine scope', async () => {

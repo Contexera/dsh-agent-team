@@ -72,9 +72,9 @@ Pending hints 按 Member 合并。Consumed 或 ignored 的 hint 不再触发 tur
 
 换代有一段中间态：ledger 绑定已迁移，新 Session 尚未激活。这段时间内 Member 状态显示为 unavailable，并带 "context rollover in progress" diagnostic。这个 Member 的 Session 正嵌入右栏时，Client 只跟随一次到新 Session。归档视图不会跳转。
 
-**验收边界。** 一次 Thread read 若 ack 了某个 Task 的验收，会给读者自己的边界，但只在这次验收结束的是读者自己名下的工作时才触发：只是关注该 Thread 的观察者同样会看到这条 unread accept，Host 不会打扰它。
+**验收边界。** 一次 Thread read 若 ack 了某个 Task 的验收，会给读者自己的边界，但只在这次验收结束的是读者自己名下的工作时才触发——它自己的 Claim，或它作为 accountable 的 Task；只是关注该 Thread 的观察者同样会看到这条 unread accept，Host 不会打扰它。提交这次 accept 的 Member 不必再读一次也能拿到同一边界：验收者结构上永远不持有 read 侧所依据的 Claim。
 
-Host 把一条 `<system-reminder>` steer 进发现这次验收的那个 turn，要求 Member 把持久结论写进 `memory.md` 索引及其指向的 note。实测 context 达到或超过 128000 token 时，同一边界还会在 Agent 空闲后压缩当前代：验收通常发生在 turn 中，而引擎只压缩空闲 Agent。
+Host 把一条 `<system-reminder>` steer 进发现或提交这次验收的那个 turn，要求 Member 把持久结论写进 `memory.md` 索引及其指向的 note；提醒会点明它当时的身份（contributed／accountable／accepted）。实测 context 达到或超过 128000 token 时，同一边界还会在 Agent 空闲后压缩当前代：验收通常发生在 turn 中，而引擎只压缩空闲 Agent。
 
 边界不传递任何东西，既没有 handoff 也没有公告，所以提醒只在真会发生时陈述后果；preset 未挂载压缩引擎时，提醒不会声称会压缩。
 

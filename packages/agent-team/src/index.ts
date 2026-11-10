@@ -45,7 +45,7 @@ import { AgentTeamInvariantError } from './invariant.ts'
 import { createCheckpointContinuationMessage } from './context-codec.ts'
 import { TeamContextManagement, type TeamTransitionPlan } from './team-context-management.ts'
 import { decideWakeRecycle, type WakeRecycleConfig, type WakeRecyclePlan } from './wake-recycle.ts'
-import { createAcceptanceReminder, planAcceptanceContext } from './acceptance-context.ts'
+import { createAcceptanceReminder, planAcceptanceContext, type AcceptancePerspective } from './acceptance-context.ts'
 import { installMemberCompaction, type MemberCompactionConfig } from './member-compaction.ts'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
 import { surfaceVisibilityProbe, teamMessageSurface, visibleTeamSurface, isFactOnSurface, isMainEntryOnSurface } from './surface-visibility.ts'
@@ -2294,6 +2294,9 @@ export default class AgentTeam extends TypertRemoteService {
     const actor = this.memberCall(agent, request.workspaceId)
     const result = await this.requireLedger().changeTask({ ...request, actor })
     this.emitCommittedOutcome(result)
+    // The verifier never holds a Claim on the Task it accepts, so the read-side
+    // boundary cannot reach it: its own accept is the only boundary it gets.
+    if (result.committed && request.action === 'accept') this.deliverAcceptanceBoundary(agent, actor.memberId, 'verifier')
     return result.value
   }
 
@@ -2423,18 +2426,37 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * A read that acknowledged the acceptance of work this Member contributed to hands the reader one reminder to write down what is durable,
+   * A read that acknowledged the acceptance of work this Member owned hands the reader one reminder to write down what is durable,
    * and, above the acceptance budget, one compaction once the Agent settles. Priced from the committed read, never persisted, never reverses it.
    */
   private afterAcceptanceRead(agent: Agent, memberId: AgentTeamMemberId, read: AgentTeamThreadReadResult): void {
+    const perspective = this.acceptancePerspective(read, memberId)
+    if (perspective === undefined) return
+    this.deliverAcceptanceBoundary(agent, memberId, perspective)
+  }
+
+  /**
+   * Which standing the reader had in the acceptance this read acknowledged: its
+   * own Claim, or the Task it was accountable for. An observer following the
+   * Thread sees the same accept as unread and gets no boundary.
+   */
+  private acceptancePerspective(read: AgentTeamThreadReadResult, memberId: AgentTeamMemberId): AcceptancePerspective | undefined {
+    const task = read.task
+    if (task === undefined || task.resolution !== 'accepted' || task.status !== 'done') return undefined
+    const acknowledged = read.facts.some(entry => entry.unread && entry.fact.kind === 'activity' && entry.fact.activity.kind === 'accept')
+    if (!acknowledged) return undefined
+    if (this.acceptedOwnWork(read, memberId)) return 'contributor'
+    return task.accountable === memberId ? 'accountable' : undefined
+  }
+
+  /**
+   * One boundary per running episode: several accepted reads or accepts in one turn must
+   * not queue several identical reminders or race two compactions.
+   */
+  private deliverAcceptanceBoundary(agent: Agent, memberId: AgentTeamMemberId, perspective: AcceptancePerspective): void {
     // A retiring Agent is about to be disposed; a reminder injected into its
     // Session would be discarded unread.
     if (this.retiringAgents.has(agent)) return
-    const task = read.task
-    if (task === undefined || task.resolution !== 'accepted' || task.status !== 'done') return
-    if (!this.acceptedOwnWork(read, memberId)) return
-    // One boundary per running episode: several accepted reads in one turn must
-    // not queue several identical reminders or race two compactions.
     if (this.acceptanceBoundaries.has(agent)) return
     this.acceptanceBoundaries.add(agent)
     const engine = this.compactionEngineFor(agent)
@@ -2443,7 +2465,7 @@ export default class AgentTeam extends TypertRemoteService {
       // Steered, not followed up: the reminder is about the work this turn is
       // finishing, so it belongs at the next step boundary. A follow-up would
       // wait for a turn end that can be hundreds of steps away.
-      agent.steer(createAcceptanceReminder(plan.action))
+      agent.steer(createAcceptanceReminder(plan.action, perspective))
     } catch (error) {
       this.ctx.logger.warn(`agent-team: could not deliver the acceptance reminder to ${this.memberScope(memberId, agent.id)}: ${failureDetail(error)}`)
       return

@@ -1,5 +1,5 @@
 /**
- * Reminder a Member receives after a read acknowledges acceptance of a Task it contributed to.
+ * Reminder a Member receives at an acceptance boundary: a read that acknowledges an acceptance of work it owned, or the accept it committed itself.
  * @module @contexera/dsh-agent-team/acceptance-context
  */
 
@@ -34,11 +34,20 @@ export function planAcceptanceContext(facts: AcceptanceContextFacts): Acceptance
   }
 }
 
+/** Which standing the reader had in the accepted Task; it names the boundary in the reminder. */
+export type AcceptancePerspective = 'contributor' | 'verifier' | 'accountable'
+
+const OPENING: Readonly<Record<AcceptancePerspective, string>> = Object.freeze({
+  contributor: 'A Task you contributed to was accepted.',
+  verifier: 'You accepted a Task.',
+  accountable: 'A Task you were accountable for was accepted.',
+})
+
 /** Reminder text; the compaction clause appears only when compaction will happen. */
-export function acceptanceReminderText(action: AcceptanceContextAction): string {
+export function acceptanceReminderText(action: AcceptanceContextAction, perspective: AcceptancePerspective = 'contributor'): string {
   const lines = [
     '<system-reminder>',
-    'A Task you contributed to was accepted. This is a natural boundary: record what is durable and reusable before moving on. Put the conclusions that will matter again in your private memory.md index, and the detail behind them in the note that index names. Accepted work is not a reason to keep this conversation.',
+    `${OPENING[perspective]} This is a natural boundary: record what is durable and reusable before moving on. Put the conclusions that will matter again in your private memory.md index, and the detail behind them in the note that index names. Accepted work is not a reason to keep this conversation.`,
   ]
   if (action === 'compact') {
     lines.push('', 'This context is over the Team acceptance budget, so it will be compacted once the Agent settles. Anything not written down by then is gone.')
@@ -47,9 +56,9 @@ export function acceptanceReminderText(action: AcceptanceContextAction): string 
   return lines.join('\n')
 }
 
-export function createAcceptanceReminder(action: AcceptanceContextAction): UserMessage {
+export function createAcceptanceReminder(action: AcceptanceContextAction, perspective: AcceptancePerspective = 'contributor'): UserMessage {
   return createUserMessage({
-    content: [{ type: 'text', text: acceptanceReminderText(action) }],
+    content: [{ type: 'text', text: acceptanceReminderText(action, perspective) }],
     source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_ACCEPTANCE_NOTICE_SUMMARY },
   })
 }
