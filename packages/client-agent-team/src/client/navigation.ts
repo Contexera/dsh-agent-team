@@ -116,6 +116,22 @@ export interface TeamNavigationActions {
   selectInbox: () => void
   selectBoard: () => void
   backToWorkspace: () => void
+  /**
+   * Close the Project face and land on the workspace's welcome surface. The sidebar keeps listing Projects, so this is
+   * the one step up from a Project page — the ladder a Back command climbs.
+   */
+  leaveProject: () => void
+  /**
+   * One step up the face ladder: the Member view, a Thread page, the discussion panel beside a Project, the Inbox or
+   * Board, then the Project itself. Each rung is the action its own visible control uses, so the keyboard never takes a
+   * path the pointer cannot, and the face it left is kept for {@link forward}.
+   */
+  back: () => void
+  /**
+   * Re-enter the face the last Back left. A Member view is a session swap rather than a face, so Forward restores the
+   * face alone; any other destination discards what Back left behind.
+   */
+  forward: () => void
   /** Swap the conversation seat to a Member Session. `returnToSessionId` is captured once, so switching Member Sessions keeps the original target. */
   enterMemberSession: (sessionId: SessionId, returnToSessionId?: SessionId) => void
   exitMemberSession: () => void
@@ -141,6 +157,10 @@ function isReselectingActiveMember(snapshot: TeamNavigationSnapshot, sessionId: 
 export class TeamNavigation {
   private snapshot = readSnapshot()
   private readonly listeners = new Set<() => void>()
+  /** Faces Back left behind, most recent last: Forward replays them until another destination is chosen. */
+  private readonly forwardFaces: TeamNavigationSnapshot[] = []
+  /** Set while Back or Forward moves, so its own commits do not discard what the other one keeps. */
+  private keepsForward = false
 
   readonly getSnapshot = (): TeamNavigationSnapshot => this.snapshot
 
@@ -166,6 +186,23 @@ export class TeamNavigation {
       selectInbox: () => { this.clearMemberSession(); this.setInbox() },
       selectBoard: () => { this.clearMemberSession(); this.setBoard() },
       backToWorkspace: () => { this.clearMemberSession(); this.setThread(undefined) },
+      leaveProject: () => { this.clearMemberSession(); this.clearProject() },
+      back: () => {
+        const before = this.snapshot
+        this.keepsForward = true
+        try { this.runBackLadder() } finally { this.keepsForward = false }
+        if (this.snapshot !== before) this.forwardFaces.push(before)
+      },
+      forward: () => {
+        const target = this.forwardFaces.pop()
+        if (target === undefined) return
+        const { memberSessionId: _memberSessionId, returnToSessionId: _returnToSessionId, ...face } = target
+        this.keepsForward = true
+        try {
+          this.snapshot = face
+          this.commit()
+        } finally { this.keepsForward = false }
+      },
       enterMemberSession: (sessionId, returnToSessionId) => { this.setMemberSession(sessionId, returnToSessionId) },
       exitMemberSession: () => { this.clearMemberSession() },
     }
@@ -205,6 +242,15 @@ export class TeamNavigation {
     if (this.snapshot.workspaceId === workspaceId && this.snapshot.inbox !== true && this.snapshot.board !== true && this.snapshot.discussionRef === undefined) return
     const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, discussionRef: _discussionRef, discussionAnchor: _discussionAnchor, inbox: _inbox, board: _board, ...base } = this.snapshot
     this.snapshot = { ...base, workspaceId }
+    this.commit()
+  }
+
+  /** The Project face and everything seated in it: a Thread page, a discussion panel, and the Inbox or Board faces. */
+  private clearProject(): void {
+    if (this.snapshot.projectRef === undefined && this.snapshot.threadRef === undefined && this.snapshot.discussionRef === undefined
+      && this.snapshot.inbox !== true && this.snapshot.board !== true) return
+    const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, discussionRef: _discussionRef, discussionAnchor: _discussionAnchor, inbox: _inbox, board: _board, ...base } = this.snapshot
+    this.snapshot = base
     this.commit()
   }
 
@@ -296,7 +342,24 @@ export class TeamNavigation {
     this.commit()
   }
 
+  /**
+   * The ladder Back climbs, innermost face first. A rung that has nothing to leave returns without a commit, so Back on
+   * the welcome surface moves nothing and leaves no face for Forward.
+   */
+  private runBackLadder(): void {
+    const state = this.snapshot
+    if (state.memberSessionId !== undefined || state.returnToSessionId !== undefined) { this.clearMemberSession(); return }
+    if (state.threadRef !== undefined) { this.setThread(undefined); return }
+    if (state.discussionRef !== undefined) { this.setDiscussion(undefined); return }
+    if (state.inbox === true || state.board === true) {
+      if (state.workspaceId !== undefined) this.setWorkspace(state.workspaceId)
+      return
+    }
+    if (state.projectRef !== undefined) this.clearProject()
+  }
+
   private commit(): void {
+    if (!this.keepsForward) this.forwardFaces.length = 0
     persistSnapshot(this.snapshot)
     for (const listener of this.listeners) listener()
   }

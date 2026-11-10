@@ -48,11 +48,11 @@ describe('Team mode shortcuts', () => {
     const { commands } = register()
 
     expect(commands.map(command => command.id)).toEqual([
-      'team.mode.toggle', 'team.inbox', 'team.board', 'team.composer.focus', 'team.project.previous', 'team.project.next',
+      'team.mode.toggle', 'team.inbox', 'team.board', 'team.composer.focus', 'team.back', 'team.forward', 'team.project.previous', 'team.project.next',
       ...Array.from({ length: 9 }, (_, offset) => `team.inbox.item.${offset + 1}`),
     ])
     expect(commands.map(command => command.label())).toEqual([
-      '进入或退出团队模式', '收件箱', '任务看板', '聚焦输入框', '上一个项目', '下一个项目',
+      '进入或退出团队模式', '收件箱', '任务看板', '聚焦输入框', '返回', '前进', '上一个项目', '下一个项目',
       ...Array.from({ length: 9 }, (_, offset) => `收件箱第 ${offset + 1} 项`),
     ])
     // Web keeps Alt in the chord: the browser owns the bare Command combinations.
@@ -60,7 +60,9 @@ describe('Team mode shortcuts', () => {
       { code: 'KeyT', modifiers: ['primary', 'alt'] },
       { code: 'Digit1', modifiers: ['primary', 'alt'] },
       { code: 'Digit2', modifiers: ['primary', 'alt'] },
-      { code: 'KeyI', modifiers: ['primary', 'alt'] },
+      { code: 'KeyM', modifiers: ['primary', 'alt'] },
+      { code: 'ArrowLeft', modifiers: ['primary', 'alt'] },
+      { code: 'ArrowRight', modifiers: ['primary', 'alt'] },
       { code: 'ArrowUp', modifiers: ['primary', 'alt'] },
       { code: 'ArrowDown', modifiers: ['primary', 'alt'] },
       // macOS keeps Command+Shift+3, 4, and 5 for screenshots, so the family carries Alt.
@@ -74,7 +76,9 @@ describe('Team mode shortcuts', () => {
       { code: 'KeyT', modifiers: ['primary', 'alt'] },
       { code: 'Digit1', modifiers: ['primary', 'alt'] },
       { code: 'Digit2', modifiers: ['primary', 'alt'] },
-      { code: 'KeyI', modifiers: ['primary', 'alt'] },
+      { code: 'KeyM', modifiers: ['primary', 'alt'] },
+      undefined,
+      undefined,
       undefined,
       undefined,
       ...Array.from({ length: 9 }, (_, offset) => ({ code: `Digit${offset + 1}`, modifiers: ['primary', 'alt', 'shift'] })),
@@ -135,10 +139,92 @@ describe('Team mode shortcuts', () => {
     expect(document.activeElement?.tagName).toBe('TEXTAREA')
   })
 
+  it('climbs one face at a time and stops at the workspace', () => {
+    const { navigation, commands } = register()
+    const back = commands[4]
+    const state = (): ReturnType<TeamNavigation['getSnapshot']> => navigation.getSnapshot()
+
+    // Nothing open: the chord is consumed and nothing moves.
+    run(back)
+    expect(state()).toEqual({ mode: 'conversation' })
+
+    // A Member Session view returns to the session it was opened from.
+    navigation.actions().enterMemberSession('session:member' as never, 'session:home' as never)
+    run(back)
+    expect(state().memberSessionId).toBeUndefined()
+    expect(state().returnToSessionId).toBeUndefined()
+
+    navigation.actions().selectWorkspace('workspace:w' as never)
+    // A Thread page returns to its Project, and the discussion panel underneath
+    // survives, so the next Back closes that instead.
+    navigation.actions().selectProject('project:p' as never)
+    navigation.actions().selectDiscussion('thread:d' as never, 'project:p' as never)
+    navigation.actions().selectThread('thread:t' as never, 'project:p' as never)
+    run(back)
+    expect(state()).toMatchObject({ workspaceId: 'workspace:w', projectRef: 'project:p', discussionRef: 'thread:d' })
+    expect(state().threadRef).toBeUndefined()
+    run(back)
+    expect(state().discussionRef).toBeUndefined()
+    expect(state().projectRef).toBe('project:p')
+
+    // The Inbox is a face of the workspace, not of a Project, so it leaves for it.
+    navigation.actions().selectInbox()
+    run(back)
+    expect(state().inbox).toBeUndefined()
+    expect(state().workspaceId).toBe('workspace:w')
+
+    // A Project page is the last rung: Back leaves it for the welcome surface.
+    navigation.actions().selectProject('project:p' as never)
+    run(back)
+    expect(state().projectRef).toBeUndefined()
+    expect(state().workspaceId).toBe('workspace:w')
+
+    // The welcome surface has nowhere further up.
+    const welcome = state()
+    run(back)
+    expect(state()).toEqual(welcome)
+  })
+
+  it('re-enters the face the last Back left, and forgets it after another destination', () => {
+    const { navigation, commands } = register()
+    const back = commands[4]
+    const forward = commands[5]
+    const state = (): ReturnType<TeamNavigation['getSnapshot']> => navigation.getSnapshot()
+
+    // Nothing to replay: Forward is consumed and nothing moves.
+    run(forward)
+    expect(state()).toEqual({ mode: 'conversation' })
+
+    navigation.actions().selectWorkspace('workspace:w' as never)
+    navigation.actions().selectProject('project:p' as never)
+    navigation.actions().selectThread('thread:t' as never, 'project:p' as never)
+    run(back)
+    expect(state().threadRef).toBeUndefined()
+    run(forward)
+    expect(state().threadRef).toBe('thread:t')
+    expect(state().projectRef).toBe('project:p')
+
+    // Two steps back, two steps forward: the stack replays them in order.
+    run(back)
+    run(back)
+    expect(state().projectRef).toBeUndefined()
+    run(forward)
+    expect(state().projectRef).toBe('project:p')
+    run(forward)
+    expect(state().threadRef).toBe('thread:t')
+
+    // Any other destination makes the faces Back left stale, so Forward does nothing.
+    run(back)
+    navigation.actions().selectInbox()
+    run(forward)
+    expect(state().inbox).toBe(true)
+    expect(state().threadRef).toBeUndefined()
+  })
+
   it('steps through the project list in the order the sidebar shows it', () => {
     const { navigation, commands, selectPanel } = register()
-    const previous = commands[4]
-    const next = commands[5]
+    const previous = commands[6]
+    const next = commands[7]
 
     // No list on screen: the chord is consumed and nothing moves.
     run(next)
@@ -169,11 +255,11 @@ describe('Team mode shortcuts', () => {
     }
 
     // The third digit opens the third row, exactly as a click on it does.
-    run(commands[6 + 2])
+    run(commands[8 + 2])
     expect(opened).toEqual(['c'])
 
     // A digit past the list opens nothing rather than reaching outside it.
-    run(commands[6 + 8])
+    run(commands[8 + 8])
     expect(opened).toEqual(['c'])
   })
 })

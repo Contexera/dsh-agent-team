@@ -131,10 +131,30 @@ export function registerTeamShortcuts(host: TeamShortcutHost, shortcuts: Shortcu
       id: 'team.composer.focus' as ShortcutCommandId,
       label: () => host.t('shortcutFocusComposer'),
       aliases: ['composer', 'focus input', 'reply'],
-      defaults: altPrimary('KeyI'),
+      // Not KeyI: Chrome and Safari keep Command+Alt+I for DevTools and never deliver it to the page.
+      defaults: altPrimary('KeyM'),
       regions: ['page', 'editable'],
       modals: [],
       resolve: () => ({ status: 'handled', run: () => { composerInput()?.focus() } }),
+    },
+    {
+      id: 'team.back' as ShortcutCommandId,
+      label: () => host.t('shortcutBack'),
+      aliases: ['back', 'go back', 'up'],
+      // ArrowLeft pairs with the Project stepping chords; Linux Desktop reserves arrow chords.
+      defaults: altPrimary('ArrowLeft', { linux: false }),
+      regions: ['page', 'editable'],
+      modals: [],
+      resolve: () => ({ status: 'handled', run: () => { host.navigation.actions().back() } }),
+    },
+    {
+      id: 'team.forward' as ShortcutCommandId,
+      label: () => host.t('shortcutForward'),
+      aliases: ['forward', 'go forward', 'down'],
+      defaults: altPrimary('ArrowRight', { linux: false }),
+      regions: ['page', 'editable'],
+      modals: [],
+      resolve: () => ({ status: 'handled', run: () => { host.navigation.actions().forward() } }),
     },
     {
       id: 'team.project.previous' as ShortcutCommandId,

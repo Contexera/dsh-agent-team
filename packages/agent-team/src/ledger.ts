@@ -6270,7 +6270,10 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/worker-started') {
       target.workerExecutions.set(operation.data.execution.workerRef,
         Object.freeze({ ...operation.data.execution, state: 'running' }))
-      if (operation.data.activity !== undefined) this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
+      if (operation.data.activity !== undefined) {
+        this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
+        this.advanceThreadRevision(target, operation.data.activity.threadRef, operation.sequence)
+      }
       return
     }
     if (operation.kind === 'team/worker-settled') {
@@ -6284,7 +6287,10 @@ export class AgentTeamLedger {
         ...(stage === undefined ? {} : { stage }),
         ...(output === undefined ? {} : { output }),
         ...(diagnostic === undefined ? {} : { diagnostic }) }))
-      if (operation.data.activity !== undefined) this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
+      if (operation.data.activity !== undefined) {
+        this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
+        this.advanceThreadRevision(target, operation.data.activity.threadRef, operation.sequence)
+      }
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
@@ -6371,6 +6377,20 @@ export class AgentTeamLedger {
     const facts = target.factsByThread.get(activity.threadRef) ?? []
     facts.push(fact)
     target.factsByThread.set(activity.threadRef, facts)
+  }
+
+  /**
+   * A public fact advances its Thread's revision, the way every operation that
+   * carries its Thread row does: the revision is the Thread's head, so no fact
+   * may sit past it. A read's confirmation bound is validated against this
+   * number and every Thread write fences on it, so appending a fact without
+   * advancing it leaves each selective read of that Thread unable to confirm
+   * the very fact it delivered.
+   */
+  private advanceThreadRevision(target: Pick<Projection, 'threads'>, threadRef: AgentTeamThreadRef, sequence: number): void {
+    const thread = target.threads.get(threadRef)
+    if (thread === undefined) throw new Error(`agent-team replay recorded a fact on Thread '${threadRef}' it never held`)
+    target.threads.set(threadRef, Object.freeze({ ...thread, revision: sequence }))
   }
 
   /** Display ordinals are a per-Project creation counter; the workspace filter happens at read time. */
