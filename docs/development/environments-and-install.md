@@ -18,6 +18,8 @@ This applies to any fresh environment: a new clone **or a `git worktree`**. A wo
    `--host-addon-only` exits without building off Linux/macOS, so the same step is safe on every platform. Do not reuse stale `lib/` or `node_modules/` from an earlier build — old artifacts can conceal declaration or runtime incompatibility.
 2. Build the Harness `apps/web` dist with `corepack pnpm build:web` if the workflow needs `test:browser`; the workspace install already provisioned its dependencies.
 3. Inside this repository, install with `corepack pnpm install`. Never run `npm install`: it silently breaks the workspace symlinks into the adjacent checkout's vendor packages, and the failure surfaces later as a misleading `Cannot find module 'zod'`.
+
+   pnpm 11 defaults `strictDepBuilds` to true, so a dependency that declares a lifecycle script fails the install as `ERR_PNPM_IGNORED_BUILDS` until `allowBuilds` in `pnpm-workspace.yaml` decides it: `true` when the repository consumes what the script builds, `false` when it does not. A new transitive dependency carrying a build step therefore needs that decision in the same change that introduces it, or every fresh install and both CI lanes stop at this step.
 4. Link the Harness workspace and its vendor packages into this repository's `node_modules` with `node scripts/link-harness-packages.mjs`, then build the bundle with `npm run build`.
 
    Host tests resolve preset rows and the bundle's own unpublished rows (for example `@contexera/dsh-agent-team/member-context`) through real `node_modules` lookups from this repository root, exactly as a profile install of the published bundle would.

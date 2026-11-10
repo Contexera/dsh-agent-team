@@ -16,6 +16,8 @@
    native 这一步是独立的构建，不会由别处替我们完成。host addon 被 gitignore。Harness 的 `test` script 会在自己的 Vitest 之前用 `build:native-system` 构建它。本仓库是直接对那个 checkout 跑 Vitest。全新 clone 缺了它会表现为宿主 Team 激活失败（`Agent is not an active Team Member`），而不是缺模块报错。 它在所有平台都安全：`--host-addon-only` 在非 Linux/macOS 上直接退出、不构建。 不要复用上一次构建遗留的 `lib/` 或 `node_modules/`——旧产物可能掩盖声明或运行时不兼容。
 2. 工作流需要 `test:browser` 时，用 `corepack pnpm build:web` 构建 Harness `apps/web` dist。workspace install 已备好它的依赖。
 3. 在本仓库内用 `corepack pnpm install` 安装依赖。绝不能运行 `npm install`。它会静默破坏指向相邻 checkout vendor 包的 workspace 符号链接。故障随后才以误导性的 `Cannot find module 'zod'` 暴露。
+
+   pnpm 11 的 `strictDepBuilds` 默认为 true。声明了生命周期脚本的依赖会让安装以 `ERR_PNPM_IGNORED_BUILDS` 失败，直到 `pnpm-workspace.yaml` 的 `allowBuilds` 为它做出决定：仓库会用到该脚本的产物时写 `true`，用不到时写 `false`。因此引入带构建步骤的传递依赖时，要在同一笔改动里给出这个决定，否则每次全新安装和两条 CI 车道都会停在这一步。
 4. 用 `node scripts/link-harness-packages.mjs` 链接两样东西进本仓库 `node_modules`：Harness 的 workspace 与它的 vendor 包。再 `npm run build` 构建 bundle。宿主测试从本仓库根按真实 `node_modules` 查找解析 preset row 与 bundle 自身的未发布 row（如 `@contexera/dsh-agent-team/member-context`）。它与已发布 bundle 的 profile 安装布局一致。
 5. 用 `node scripts/sync-paths.mjs` 对准全新 checkout 重新生成 TypeScript path facades。全新 clone 不能信任仓库里已提交的 facades。没有任何 npm script 会重写它们。跳过这一步，facades 指向的仍是生成时固化的旧路径。`npm test` 里那道只读门 `check:facades` 正是对这种不一致报错。`sync-paths` 同时生成测试 harness 需要的 `@deepseek-ai/dsh-client-locale/src/*` 通配映射。
 6. 冒烟验证：`npm run typecheck && npm test`。全绿 = 环境正确。大面积假挂（见下）= 环境不对。先修环境，再查 diff。

@@ -4,7 +4,13 @@ packages:
 # pnpm 11: allowBuilds replaces onlyBuiltDependencies (map of package -> boolean).
 # strictDepBuilds defaults to true, so an unapproved build script fails install.
 allowBuilds:
+  # Reached through @botiverse/oar -> @earendil-works/pi-ai. Neither script
+  # produces anything this repository consumes: protobufjs only prints a
+  # version-scheme warning, and @google/genai does not ship the file its
+  # `prepare` names, so running it would fail.
+  '@google/genai': false
   esbuild: true
+  protobufjs: false
 
 # Dev resolution goes through tsconfig paths against the sibling deepseek-harness
 # checkout; stale registry peer versions must not block install. Published
