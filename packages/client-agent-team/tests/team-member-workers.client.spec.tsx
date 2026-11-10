@@ -65,6 +65,12 @@ function renderSection(options: {
 }
 
 describe('the running Worker list in the edit-Agent dialog', () => {
+  it('names the block with a heading one rank above the field labels around it', async () => {
+    renderSection({ runs: async () => listed([]) })
+    expect(await screen.findByRole('heading', { level: 3, name: 'Worker 执行记录' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Worker 执行记录' })).toBeTruthy()
+  })
+
   it('lists live runs and leaves an unconfirmed run without a stop control', async () => {
     renderSection({ runs: async () => listed([running, unconfirmed]) })
     const rows = await screen.findAllByRole('listitem')

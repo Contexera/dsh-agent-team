@@ -457,6 +457,27 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Agent has set none, so the block states that rather than rendering an empty list.
   const reminders = agentEditor.getByRole('group', { name: '提醒' })
   await reminders.waitFor()
+  // Both record blocks stand a rank above the form's field labels: each opens on the
+  // settings page's group heading over a hairline. The assertion is the rendered rank
+  // and the break itself, so a heading restyled back into the label grade fails here.
+  const ranks = await agentEditor.evaluate(editor => {
+    const read = (selector: string) => {
+      const style = getComputedStyle(editor.querySelector(selector) as Element)
+      return { size: parseFloat(style.fontSize), weight: style.fontWeight }
+    }
+    return {
+      heading: read('[data-team-member-reminders] h3'),
+      label: read('form label > span'),
+      border: getComputedStyle(editor.querySelector('[data-team-member-reminders]') as Element).borderTopWidth,
+    }
+  })
+  expect(ranks).toEqual({
+    heading: { size: 13, weight: '600' },
+    label: { size: 12, weight: '400' },
+    border: '1px',
+  })
+  expect(await agentEditor.getByRole('heading', { name: '提醒', level: 3 }).count()).toBe(1)
+  expect(await agentEditor.getByRole('heading', { name: 'Worker 执行记录', level: 3 }).count()).toBe(1)
   await expect.poll(() => reminders.textContent()).toContain('这个 Agent 当前没有生效中的提醒。')
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-empty.png'), fullPage: true })
   // The same block at the narrow lane: the dialog reflows inside the 390px viewport

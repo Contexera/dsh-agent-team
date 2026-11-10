@@ -59,6 +59,14 @@ function harness(overrides: { readonly load?: () => Promise<RemoteResult<readonl
 const factLine = (note: string, index = 0): string => screen.getAllByText(note)[index]?.closest('li')?.querySelector('p')?.textContent ?? ''
 
 describe('Member detail reminder list', () => {
+  it('names the block with a heading one rank above the field labels around it', async () => {
+    harness()
+    const heading = await screen.findByRole('heading', { level: 3, name: '提醒' })
+    expect(heading.tagName).toBe('H3')
+    // The group is named by that heading rather than an aria-label that could drift from it.
+    expect(screen.getByRole('group', { name: '提醒' })).toBeTruthy()
+  })
+
   it('reads the Member own reminders with the Member and Workspace the detail is open on', async () => {
     const { load } = harness()
     await waitFor(() => { expect(load).toHaveBeenCalledTimes(1) })

@@ -171,11 +171,15 @@
   margin-top: 16px;
 }
 
-/* The Member detail reminder block sits under the form the same way, and scrolls with it. */
-.remindersSection {
+/* A record block under the editor form opens on the Team settings page's own group break: a
+   hairline 16px under the block above, then 16px to the group heading. The hairline is what
+   separates a group from a field, since both use a 16px step inside the form. */
+.section {
+  border-top: 1px solid var(--dsw-alias-border-l2);
   display: grid;
   gap: 8px;
   margin-top: 16px;
+  padding-top: 16px;
 }
 
 /* One reminder per line, separated like every other list in the app. */

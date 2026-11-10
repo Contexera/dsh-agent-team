@@ -37,9 +37,9 @@ Agent 编辑器（`编辑 Agent`）：名称/说明输入框 + 模型选择。�
 
 编辑只能替换模型，不能清空回 Host 默认；既有账本里没有模型的旧记录仍按当时默认运行。改模型对活跃 Member 原地更新 live model selection，保持 Agent 与 Session 身份不变。后续请求使用新选择。纯展示编辑不重启。
 
-编辑器还带这个 Member 自己的 reminder 区块，放在表单之外而不是表单里：只列出仍可能触发的 reminder。每行先以 note 领起，过长时折到「展开全文」后面；独立一条页脚行把存储的 schedule、state 与 occurrence 事实和撤回按钮放在一起；已触发或已取消的 reminder 留在账本里，但不再出现在这个管理面。区块经 `memberReminders` Remote 读取，撤回走 `cancelMemberReminder`，全程非乐观——在 Host 以 cancelled 状态作答之前，那一行一直保留撤回按钮，作答后离开列表。
+编辑器还带这个 Member 自己的 reminder 区块，放在表单之外而不是表单里，并沿用设置页的分组语言开场——13/600 的分组标题压在一条 `border-l2` 细线上、线下再让 16px，于是它比周围的字段标签高一档：只列出仍可能触发的 reminder。每行先以 note 领起，过长时折到「展开全文」后面；独立一条页脚行把存储的 schedule、state 与 occurrence 事实和撤回按钮放在一起；已触发或已取消的 reminder 留在账本里，但不再出现在这个管理面。区块经 `memberReminders` Remote 读取，撤回走 `cancelMemberReminder`，全程非乐观——在 Host 以 cancelled 状态作答之前，那一行一直保留撤回按钮，作答后离开列表。
 
-编辑器还带这个 Member 的 Worker 执行记录，同样放在表单之外的第二块，沿用 reminder 行自己的写法：note 行写引擎与被委派的任务，事实行把状态词与绑定范围（「仅 Project」／「Thread」／「Task 的 Thread」）叠在开始时间上。列表是窗口，并在最后一行下写明：活着与未确认的执行全列，已结束的只按结束时间取最近 20 条。
+编辑器还带这个 Member 的 Worker 执行记录，同样放在表单之外，用同一个分组标题与细线开场，沿用 reminder 行自己的写法：note 行写引擎与被委派的任务，事实行把状态词与绑定范围（「仅 Project」／「Thread」／「Task 的 Thread」）叠在开始时间上。列表是窗口，并在最后一行下写明：活着与未确认的执行全列，已结束的只按结束时间取最近 20 条。
 
 每行都带诊断门，可见字、无障碍名、`aria-expanded` 与点击由同一个标志驱动——读作「收起诊断」的行，名字也是「收起诊断：{task}」；读取还在飞行中再按一次是收起，不会重读一遍。停止回执的终态压过快照，所以被停或失败的执行留在列表里、显示它真正到达的状态；读者换行之后迟到的应答，不会顶掉他已经打开的那份报告。
 

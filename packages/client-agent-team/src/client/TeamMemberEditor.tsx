@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { AgentTeamClientMemberStatus, AgentTeamMemberReminderView, AgentTeamModelSelection, AgentTeamReminderSchedule, AgentTeamWorkerInspection, AgentTeamWorkerRef, AgentTeamWorkerRunView, AgentTeamWorkerStopResult } from '@contexera/dsh-agent-team/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -12,6 +12,7 @@ import { mintRequestId } from './requests.ts'
 import { useEditDialogSave } from './team-dialog-save.ts'
 import createCss from './create.module.css'
 import css from './sidebar.module.css'
+import settingsCss from './team-settings.module.css'
 
 function modelKey(provider: string, model: string): string {
   return `${provider}\u0000${model}`
@@ -279,9 +280,10 @@ export function MemberRemindersSection({ workspaceId, memberId, loadMemberRemind
   // The ledger keeps a reminder after it fires or is withdrawn, but Member detail is a
   // management surface: a row that can no longer fire has nothing left to manage.
   const manageable = reminders?.filter(view => view.reminder.state === 'active')
+  const headingId = useId()
   return (
-    <div className={createCss.remindersSection} role="group" aria-label={t('memberReminders')} data-team-member-reminders>
-      <span className={createCss.sectionLabel}>{t('memberReminders')}</span>
+    <div className={createCss.section} role="group" aria-labelledby={headingId} data-team-member-reminders>
+      <h3 className={settingsCss.groupHeading} id={headingId}>{t('memberReminders')}</h3>
       {manageable === undefined && error === undefined && <small className={css.editHint}>{t('memberRemindersLoading')}</small>}
       {manageable !== undefined && manageable.length === 0 && <small className={css.editHint}>{t('memberRemindersEmpty')}</small>}
       {manageable !== undefined && manageable.length > 0 && (
@@ -436,6 +438,7 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
   // list's window is read once and never inserted into the list.
   const [lookup, setLookup] = useState<WorkerReportState>()
   const [lookupRef, setLookupRef] = useState('')
+  const headingId = useId()
   // A read that answers after the surface moved on is not the answer to show:
   // each open bumps its generation, and only the current one lands.
   const reportGeneration = useRef(0)
@@ -558,8 +561,8 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
     if (!(runs ?? []).some(run => run.workerRef === outcome.run.workerRef)) rows.push({ run: outcome.run, outcome })
   }
   return (
-    <div className={createCss.remindersSection} role="group" aria-label={t('memberWorkerRuns')} data-team-member-workers>
-      <span className={createCss.sectionLabel}>{t('memberWorkerRuns')}</span>
+    <div className={createCss.section} role="group" aria-labelledby={headingId} data-team-member-workers>
+      <h3 className={settingsCss.groupHeading} id={headingId}>{t('memberWorkerRuns')}</h3>
       {runs === undefined && error === undefined && <small className={css.editHint}>{t('memberWorkerRunsLoading')}</small>}
       {runs !== undefined && rows.length === 0 && <small className={css.editHint}>{t('memberWorkerRunsEmpty')}</small>}
       {rows.length > 0 && (
