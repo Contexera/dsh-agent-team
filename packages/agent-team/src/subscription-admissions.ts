@@ -1,6 +1,6 @@
 /**
- * A webhook delivery waiting to run: the row written before the entry answers 202, and private
- * scheduling state, so it exists only while its delivery owes work.
+ * The private row written before a webhook answers 202. It stays while the
+ * delivery owes execution, acceptance, or a replayable failure record.
  * @module @contexera/dsh-agent-team/subscription-admissions
  */
 
@@ -11,12 +11,12 @@ import type { SubscriptionCredential, SubscriptionEvent, SubscriptionScriptSnaps
  * The states a queued delivery passes through. `accepted` is not one: a delivery writes
  * itself out of this table, so a row that exists is always work still owed.
  */
-export const SUBSCRIPTION_ADMISSION_STATES = ['queued', 'running', 'retrying'] as const
+export const SUBSCRIPTION_ADMISSION_STATES = ['queued', 'running', 'retrying', 'exhausted'] as const
 
 export type SubscriptionAdmissionState = typeof SUBSCRIPTION_ADMISSION_STATES[number]
 
 /** One delivery's admission: what arrived, which definition it pins, and how far it got. */
-export interface SubscriptionAdmissionRecord {
+export type SubscriptionAdmissionRecord = {
   /**
    * The Host's own identity for this delivery, minted at admission and handed to the
    * script as `DSH_TEAM_DELIVERY_ID` through every retry and replay — never the
@@ -39,13 +39,14 @@ export interface SubscriptionAdmissionRecord {
   readonly receivedAt: string
   /** Run attempts that already finished, failed or not. */
   readonly attempts: number
-  readonly state: SubscriptionAdmissionState
   /** Set while `retrying`: the instant the next attempt may start. */
   readonly nextAttemptAt?: string
-  readonly lastError?: string
   /** The batch a run validated while the unpublished queue had no room: kept here, so only the accept is retried. */
   readonly heldEvents?: readonly SubscriptionEvent[]
-}
+} & (
+  | { readonly state: Exclude<SubscriptionAdmissionState, 'exhausted'>; readonly lastError?: string }
+  | { readonly state: 'exhausted'; readonly lastError: string }
+)
 
 /** The request id one attempt's accept commits under, so a restart can ask the ledger what it already accepted. */
 export function admissionAttemptRequestId(admissionRef: string, attempt: number): AgentTeamRequestId {

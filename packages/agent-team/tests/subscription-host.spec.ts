@@ -1010,6 +1010,56 @@ describe('the webhook trigger', () => {
     expect(admissionRows(pool), 'not a held batch').toHaveLength(0)
   }, 30_000)
 
+  it.each([
+    { table: 'deliveries', operation: 'put', paused: false },
+    { table: 'admissions', operation: 'delete', paused: false },
+    { table: 'admissions', operation: 'delete', paused: true },
+  ] as const)('recovers an exhausted webhook after $table $operation fails (paused: $paused)', async ({ table, operation, paused }) => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const first = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await first.fiber.dispose() } })
+    const projectRef = await project(first)
+    const created = await first.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const { subscriptionRef, revision: expectedRevision } = created.subscription
+    const body = '{"delivery":"original"}'
+    const queued = await first.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress),
+      headers: {}, body })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+
+    shell.stdout = Array.from({ length: 501 }, (_, index) => `{"id":"e${index}","title":"event ${index}"}`).join('\n') + '\n'
+    const fault = fakeTimers.fn(() => new Error('injected webhook settlement write failure'))
+    pool.writeFault = write => write.table === table && write.operation === operation ? fault() : undefined
+    await pump(first)
+    expect(fault).toHaveBeenCalled()
+    if (paused) await first.ctx.agentTeam.pauseSubscription({ requestId: requestId('pause-before-restart'),
+      workspaceId, projectRef, subscriptionRef, expectedRevision })
+    await first.fiber.dispose()
+    await first.facility.closeAll()
+
+    pool.writeFault = undefined
+    shell.requests.length = 0
+    shell.stdout = '{"id":"replayed","title":"Replayed"}\n'
+    const second = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await second.fiber.dispose() } })
+    const list = () => second.ctx.agentTeam.subscriptionDeliveriesForClient({ workspaceId, projectRef, subscriptionRef }).deliveries
+    await expect.poll(list, { timeout: 500 }).toHaveLength(1)
+    await expect.poll(() => admissionRows(pool), { timeout: 500 }).toHaveLength(0)
+    expect(shell.requests.filter(request => request.stdin !== undefined), 'recovery does not rerun the script').toHaveLength(0)
+    if (paused) {
+      await second.ctx.agentTeam.resumeSubscription({ requestId: requestId('resume-after-restart'),
+        workspaceId, projectRef, subscriptionRef, expectedRevision })
+      shell.requests.length = 0
+    }
+    const replayed = await second.ctx.agentTeam.replaySubscriptionDeliveryForClient({ requestId: requestId('replay-after-restart'),
+      workspaceId, projectRef, subscriptionRef, deliveryRef: list()[0]!.deliveryRef })
+    expect(replayed).toMatchObject({ kind: 'replayed', eventCount: 1 })
+    const [run] = shell.requests.filter(request => request.stdin !== undefined)
+    expect(run?.env?.DSH_TEAM_DELIVERY_ID).toBe(queued.admissionRef)
+    expect(run?.stdin).toBe(JSON.stringify({ headers: {}, body }))
+  })
+
   it('refuses an address a reset moved while the request waited for the write lock', async () => {
     const pool = new MemoryMediaPool()
     const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })

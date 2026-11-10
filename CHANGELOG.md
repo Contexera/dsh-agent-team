@@ -33,6 +33,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Fixed**
 
+- A webhook delivery that exhausted its retries can still be replayed after a failed storage write and Host restart. Once the exhausted attempt is saved, recovery records the failure without running the script again.
 - The acceptance boundary now also reaches the Member that commits the accept, and the Task's accountable when someone else accepts it: the boundary was keyed on Claims, and a verifier never holds one, so the Member with the freshest knowledge of the verification was the one Member it could not reach. The reminder names the standing it addresses — contributed, accountable, or accepted — and keeps the same compaction above the budget.
 - Team tools no longer reject otherwise valid reminder cancellations or Worker calls just because a model fills unused slots with blanks and default selectors. Subscription calls also tolerate empty alternate script sources and blank address/count slots, while explicit recipient clearing, webhook removal, real argument conflicts, and Host authorization remain intact. The compatibility matrix now covers every registered Team tool and action enum.
 - Cancelling a Team reading request no longer falls back to a successful capacity lookup when model metadata is missing or fails; ordinary metadata errors still use the conservative limit.

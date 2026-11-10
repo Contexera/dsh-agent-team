@@ -160,7 +160,7 @@ Admission re-reads the ledger rather than the queued snapshot: a subscription de
 
 Its state — next due instant, failure count, publication window, last success — lives in the private domain `agent_team_subscriptions` (`packages/agent-team/src/subscription-store.ts`), never in the ledger. Deleting every checkpoint changes no domain result, and a restart resumes from the persisted due instant instead of resetting it.
 
-The same domain keeps four tables no ledger fact depends on: `runs`, the newest fifty runs of each subscription; `deliveries`, the webhook deliveries whose automatic retries were spent; `replays`, the answer each replay request already got; and `admissions`, the accepted webhook requests that still owe a run or an accept, with the definition each arrived under and the batch a full queue held back.
+The same domain keeps four tables no ledger fact depends on: `runs`, the newest fifty runs of each subscription; `deliveries`, the webhook deliveries whose automatic retries were spent; `replays`, the answer each replay request already got; and `admissions`, the accepted webhook requests that still owe a run, an accept, or a replayable failure record, with the definition each arrived under and the batch a full queue held back.
 
 A run record carries the trigger, the start instant, the duration, the structured category, the exit code or timeout, the event count, the last 8 KiB of each stream, and the identity that explains it — `subscriptionRevision`, `scriptHash`, `runRef`, and for a delivery its `deliveryRef` with the attempt that spent the retries.
 
@@ -226,6 +226,8 @@ Only `content-type`, `user-agent`, and names matching `x-*-event`, `x-*-delivery
 The entry answers 202 only after the row is written, so a restart before the answer replays nothing it lost — the queue is private state, and the next pass runs what it owes. A run reads `{headers, body}` on stdin under `DSH_TEAM_TRIGGER=webhook` and the admission's own id as `DSH_TEAM_DELIVERY_ID`, which is what keeps one delivery one identity across its retries and a later replay.
 
 A failed run keeps the row and waits 1, 5, and 30 minutes; the fourth failure turns it into the `deliveries` row an owner replays, and a batch that alone passes the ceiling goes straight there, because retrying it would print the same output again. A retry that succeeds ends the delivery without spending a failure on it.
+
+The Host records that retries are exhausted on the admission before writing the replayable failure. If either writing the failure or removing the admission is interrupted, the next queue pass finishes those writes without running the script again. A pause still permits this cleanup; deletion and Project archival still discard outstanding work.
 
 A reset mints a new token for the same subscription and moves `generation` by one without moving the revision: accepted deliveries keep the version they arrived under, and the address the caller receives is the only copy in the clear, since the ledger keeps a hash.
 

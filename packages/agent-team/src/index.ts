@@ -4204,14 +4204,22 @@ export default class AgentTeam extends TypertRemoteService {
     this.admissionPumpRunning = true
     try {
       for (const subscription of this.ledger.subscriptions()) {
-        // A paused subscription keeps its deliveries; none of them runs.
-        if (subscription.state !== 'active') continue
-        const due = dueAdmissions(this.admissionRecordsOf(subscription.subscriptionRef), Date.now())[0]
-        if (due === undefined) continue
-        await this.runWebhookAdmission(subscription, due)
+        if (subscription.state === 'deleted') continue
+        try {
+          const records = this.admissionRecordsOf(subscription.subscriptionRef)
+          const exhausted = records.find(record => record.state === 'exhausted')
+          if (exhausted !== undefined) {
+            // Pausing stops scripts, not settlement of an attempt that already ended.
+            await this.serializeSubscriptionWrite(subscription.subscriptionRef,
+              () => this.finishExhaustedWebhookAdmissionLocked(exhausted))
+          } else if (subscription.state === 'active') {
+            const due = dueAdmissions(records, Date.now())[0]
+            if (due !== undefined) await this.runWebhookAdmission(subscription, due)
+          }
+        } catch (error) {
+          this.ctx.logger.warn(`agent-team: the webhook queue pass for '${subscription.subscriptionRef}' stopped: ${error instanceof Error ? error.message : String(error)}`)
+        }
       }
-    } catch (error) {
-      this.ctx.logger.warn(`agent-team: the webhook queue pass stopped: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       this.admissionPumpRunning = false
     }
@@ -4349,9 +4357,24 @@ export default class AgentTeam extends TypertRemoteService {
           nextAttemptAt: new Date(Date.now() + delay).toISOString(), lastError: failure }))
         return
       }
-      // Retries are spent: the request itself becomes the thing an owner reads
-      // and replays, keeping the body and the stdin the script would read.
-      await table.delete(key)
+      // These tables cannot commit together. Keep the decision on the admission
+      // until the replay record is durable, so recovery does not run the script again.
+      const { nextAttemptAt: _due, ...spent } = record
+      const exhausted = Object.freeze({ ...spent, attempts, state: 'exhausted' as const, lastError: failure })
+      await table.put(key, exhausted)
+      await this.finishExhaustedWebhookAdmissionLocked(exhausted)
+      this.ctx.logger.warn(`agent-team: a webhook delivery for '${subscription.subscriptionRef}' spent its retries: ${failure}`)
+    })
+  }
+
+  private async finishExhaustedWebhookAdmissionLocked(admission: SubscriptionAdmissionRecord): Promise<void> {
+    const table = this.subscriptionAdmissionsTable
+    if (table === undefined || this.subscriptionDeliveriesTable === undefined) return
+    const key = admissionKey(admission.subscriptionRef, admission.admissionRef)
+    const record = table.get(key)
+    if (record?.state !== 'exhausted') return
+    const live = this.writableSubscription(record.subscriptionRef)
+    if (live !== undefined) {
       await this.recordFailedDeliveryLocked(live, {
         deliveryRef: record.deliveryRef,
         admissionRef: record.admissionRef,
@@ -4360,11 +4383,13 @@ export default class AgentTeam extends TypertRemoteService {
         script: record.script,
         credentials: record.credentials,
         body: webhookStdin(record.headers, record.body),
-        attempts,
-        lastError: failure,
+        attempts: record.attempts,
+        lastError: record.lastError,
       })
-      this.ctx.logger.warn(`agent-team: a webhook delivery for '${subscription.subscriptionRef}' spent its retries: ${failure}`)
-    })
+    }
+    await table.delete(key)
+    // Keep the replay row as the deduplication proof until the queue row is gone.
+    if (live !== undefined) await this.pruneDeliveries(live.subscriptionRef, Date.now())
   }
 
   /** Take a delivery out of the queue: its output was accepted, so no work is owed. */
@@ -4382,8 +4407,10 @@ export default class AgentTeam extends TypertRemoteService {
    * the delivery already counted once when its retries ran out.
    */
   async recordFailedDelivery(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<void> {
-    await this.serializeSubscriptionWrite(subscription.subscriptionRef,
-      () => this.recordFailedDeliveryLocked(subscription, input))
+    await this.serializeSubscriptionWrite(subscription.subscriptionRef, async () => {
+      await this.recordFailedDeliveryLocked(subscription, input)
+      await this.pruneDeliveries(subscription.subscriptionRef, Date.now())
+    })
   }
 
   private async recordFailedDeliveryLocked(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<void> {
@@ -4400,7 +4427,6 @@ export default class AgentTeam extends TypertRemoteService {
     const key = deliveryKey(live.subscriptionRef, input.deliveryRef)
     const earlier = table.get(key)
     await table.put(key, deliveryRecordOf(live, input, earlier))
-    await this.pruneDeliveries(live.subscriptionRef, Date.now())
     // One delivery is one failure however many times it was retried, and a
     // provider that redelivers the same request is still the same delivery.
     if (earlier === undefined && input.receivedRevision === live.revision) await this.countDeliveryFailure(live)
