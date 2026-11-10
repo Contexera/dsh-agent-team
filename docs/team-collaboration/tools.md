@@ -263,7 +263,7 @@ Every run's record is durable: a Thread read reports every run bound to it as `r
 
 The same tool reads one run's diagnostic: pass `inspect: <worker:…>` and nothing else. The answer is the summary the Thread already carries, the stage a failed run came apart in, the native identities the settlement recorded — the engine's own session, the turn this run drove, and the absolute path of its record — and the bounded fragments that record still answers after the process exited, or the one reason it cannot.
 
-The native record itself is never copied into the Team, never stored, and never published: the Thread keeps the summary it already had, and the detailed answer reaches only the Member who delegated the run and the Human, who reads it from the edit-Agent dialog — by row, or by typing a `worker:` number the list's window does not show.
+The native record itself is never copied into the Team, never stored, and never published: the Thread keeps the summary it already had, and the detailed answer reaches only the Member who delegated the run and the Human, who reads it from the edit-Agent dialog by that run's row.
 
 Only the initiating Member and the Human may ask; another Member is refused as `worker_inspect_forbidden`, even when it now owns the Project. A run that has not ended answers with its summary and says its native record is read once it does. A run that ended before the engine recorded a session, or whose record is gone, unreadable, of a shape this Team does not read, or holds no turn with the recorded id, keeps the Team summary and names that reason instead of returning fragments that are not there.
 
