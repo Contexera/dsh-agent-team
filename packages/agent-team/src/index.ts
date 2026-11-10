@@ -3879,7 +3879,7 @@ export default class AgentTeam extends TypertRemoteService {
       seen.add(run.workerRef)
       runs.push(this.workerRunViewOf(execution, live))
     }
-    // The Workspace and Member filters run before the bound, so a Member's twenty
+    // The Workspace and Member filters run before the bound, so a Member's five
     // newest ended runs are their own, not whatever survived another filter.
     const ended: AgentTeamWorkerExecution[] = []
     for (const execution of ledger.workerExecutionsOfMember(request.memberId)) {

@@ -838,15 +838,15 @@ export class WorkerRegistry {
  * How many ended runs one Member's surface lists beside the live ones. The
  * record keeps every run; the list is a window, so a Member with months of
  * delegations still gets one bounded read. Five is what a reader scans without
- * scrolling the dialog, and the Thread keeps the rest of the history.
+ * scrolling the dialog, and the ledger still holds every record.
  */
 export const WORKER_RUN_HISTORY_LIMIT = 5
 
 /**
  * The window of one Member's ended runs the Human's list shows: the newest
  * endings, not the newest starts. A run that began early and failed only now is
- * exactly the record the Human is looking for, so it must outrank twenty short
- * runs that started later and ended long before it.
+ * exactly the record the Human is looking for, so it must outrank a short run
+ * that started later and ended long before it.
  */
 export function newestEndedRuns<T extends { readonly startedAt: string; readonly settledAt?: string | undefined }>(
   executions: readonly T[], limit: number,
