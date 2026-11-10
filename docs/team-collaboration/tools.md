@@ -233,7 +233,9 @@ Delegation is off until the operator turns it on. The Team settings row carries 
 
 While the switch is off, `team_worker` is not declared to Members at all; turning it on adds it to existing Member Sessions at their next turn boundary, and turning it off withdraws it. The same switch adds or removes the Worker paragraph of the `team:project-owner` guidance section, which is re-derived at every assembly. A run already in flight keeps its handle either way: the switch gates new delegations, and the registry still refuses a start while it is off.
 
-A call is refused before the opening record and before any native process exists for each of these reasons: no target was named (`worker_target_required`); the named Thread (`worker_thread_unknown`), Task (`worker_task_unknown`), or Project (`worker_project_unknown`) is not one this Team holds; the Task is not in the Thread it was named with (`worker_target_conflict`); the caller does not currently own the Project the target belongs to (`worker_owner_required`).
+A call is refused before the opening record and before any native process exists when no target was named (`worker_target_required`); a named Thread (`worker_thread_unknown`), Task (`worker_task_unknown`), or Project (`worker_project_unknown`) is not one this Team holds; or the caller does not currently own the target's Project (`worker_owner_required`).
+
+Targets must agree: the Task must belong to the named Thread, and an explicit Project must contain that Thread or Task. A conflict is `worker_target_conflict`, including on a resend of an otherwise valid request; the explicit Project is never silently discarded.
 
 The remaining refusals are the settings and the run itself: the switch is off (`worker_disabled`); the named engine is not a Worker engine (`worker_engine_unknown`) or is not enabled (`worker_engine_disabled`); the task text is empty (`worker_task_required`); no absolute working directory can be resolved (`worker_cwd_required`); the Harness subagent service is not mounted (`worker_unavailable`); or the request id was already opened for a different delegation (`worker_request_conflict`).
 

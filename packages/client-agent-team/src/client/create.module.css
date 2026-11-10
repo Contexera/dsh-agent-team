@@ -290,6 +290,12 @@
   margin-left: auto;
 }
 
+/* Native paths and identifiers must not set the report grid's minimum track width. */
+.workerReport {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* The diagnostic report lives inside the row's fact grid. There is no global paragraph or
    list reset here, so both carry their own: UA margins would break the 2px rhythm and a UA
    list would add a 40px indent. */

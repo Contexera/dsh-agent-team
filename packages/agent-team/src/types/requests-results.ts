@@ -1319,8 +1319,8 @@ export type AgentTeamWorkerSteerRequestState = AgentTeamWorkerSteerAdmission | A
 /**
  * What a delegation target names, as the Host resolves it before it writes
  * anything or starts a process. A Thread and a Task agree about each other or
- * the target is contradictory; the Project is derived from whichever target was
- * named, so a delegation cannot pick a Project its target does not belong to.
+ * the target is contradictory; an explicitly named Project must also contain
+ * that Thread, rather than being silently replaced by the derived Project.
  */
 export type AgentTeamDelegationTarget =
   | {
@@ -1337,6 +1337,7 @@ export type AgentTeamDelegationTarget =
   | { readonly kind: 'thread-unknown'; readonly threadRef: AgentTeamThreadRef }
   | { readonly kind: 'task-unknown'; readonly taskRef: AgentTeamTaskRef }
   | { readonly kind: 'target-conflict'; readonly threadRef: AgentTeamThreadRef; readonly taskRef: AgentTeamTaskRef }
+  | { readonly kind: 'project-conflict'; readonly projectRef: AgentTeamProjectRef; readonly threadRef: AgentTeamThreadRef }
 
 /** Human-only observation of a durable personal Attention change. */
 export interface AgentTeamThreadAttentionObservation {

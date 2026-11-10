@@ -209,7 +209,9 @@ create 与 update 的请求身份包含脚本来源、触发选项与 create bas
 
 开关关闭时，`team_worker` 根本不会声明给 Member；打开后在 Member 的下一个 turn 边界出现，关闭后收回。同一开关还决定 `team:project-owner` guidance section 里的 Worker 段落，而该段落每次组装都会重新求值。已在执行的 run 无论开关如何都保留自己的 handle：开关只拦新的委派，而 registry 在关闭时仍然拒绝发起。
 
-以下情况一律在写 started 记录之前、启动任何原生进程之前拒绝：没有给出目标（`worker_target_required`）；指定的 Thread（`worker_thread_unknown`）、Task（`worker_task_unknown`）或 Project（`worker_project_unknown`）不属于本 Team；Task 不在与它一起给出的 Thread 里（`worker_target_conflict`）；调用者当前不是目标所属 Project 的 owner（`worker_owner_required`）。
+以下情况一律在写 started 记录之前、启动任何原生进程之前拒绝：没有给出目标（`worker_target_required`）；指定的 Thread（`worker_thread_unknown`）、Task（`worker_task_unknown`）或 Project（`worker_project_unknown`）不属于本 Team；调用者当前不是目标所属 Project 的 owner（`worker_owner_required`）。
+
+目标必须一致：Task 须属于同时指定的 Thread；显式给出的 Project 也须包含该 Thread 或 Task。矛盾目标按 `worker_target_conflict` 拒绝，重送一个原先合法的请求时也一样，不会静默丢弃显式 Project。
 
 其余拒绝来自设置与这次执行本身：开关关闭（`worker_disabled`）；指定的引擎不是 Worker 引擎（`worker_engine_unknown`）或未启用（`worker_engine_disabled`）；任务文本为空（`worker_task_required`）；无法解析出绝对工作目录（`worker_cwd_required`）；Harness subagent 服务未挂载（`worker_unavailable`）；或该 `requestId` 已被另一个委派用掉（`worker_request_conflict`）。拥有一个 Project 不授予另一个 Project 的授权，Team preset 之外的普通 DSH Session 也不会获得这个工具。
 

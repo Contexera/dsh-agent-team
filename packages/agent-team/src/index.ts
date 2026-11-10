@@ -3870,6 +3870,8 @@ export default class AgentTeam extends TypertRemoteService {
         throw new WorkerRefusal('worker_task_unknown', `${target.taskRef} is not a Task in this Team.`)
       case 'target-conflict':
         throw new WorkerRefusal('worker_target_conflict', `Task ${target.taskRef} is not in Thread ${target.threadRef}.`)
+      case 'project-conflict':
+        throw new WorkerRefusal('worker_target_conflict', `Project ${target.projectRef} does not contain Thread ${target.threadRef}.`)
     }
   }
 

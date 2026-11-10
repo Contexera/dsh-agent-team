@@ -254,6 +254,40 @@ describe('a delegation through the whole Host', () => {
     expect(host.engines.starts).toEqual([])
   })
 
+  it.each(['discussion', 'task'] as const)('refuses a Project conflicting with a %s target before recording or starting', async (kind) => {
+    const host = await boot(new MemoryMediaPool())
+    const projectRef = await createProject(host)
+    const otherProject = await host.host.createProject({ requestId: requestId('other-project'), workspaceId: alpha,
+      name: 'other', description: 'Other project' })
+    const owner = await addMember(host, projectRef, { owner: true, handle: 'owner' })
+    const thread = await startThread(host, projectRef, kind)
+    const target = kind === 'task' ? { taskRef: thread.taskRef! } : { threadRef: thread.threadRef }
+    await expect(host.host.workerStartForAgent(owner.agent, { requestId: requestId('conflicting-project'),
+      projectRef: otherProject.project.projectRef, ...target, task: 'check the schedule', cwd: process.cwd() }))
+      .rejects.toMatchObject({ code: 'worker_target_conflict' })
+    expect(host.engines.starts).toEqual([])
+    const facts = host.host.threadHistory({ workspaceId: alpha, threadRef: thread.threadRef }).facts
+    expect(facts.filter(fact => fact.kind === 'activity' && fact.activity.kind === 'worker_started')).toEqual([])
+  })
+
+  it.each(['discussion', 'task'] as const)('accepts an agreeing Project and %s target but refuses a contradictory retry', async (kind) => {
+    const host = await boot(new MemoryMediaPool())
+    const projectRef = await createProject(host)
+    const otherProject = await host.host.createProject({ requestId: requestId('other-project'), workspaceId: alpha,
+      name: 'other', description: 'Other project' })
+    const owner = await addMember(host, projectRef, { owner: true, handle: 'owner' })
+    const thread = await startThread(host, projectRef, kind)
+    const target = kind === 'task' ? { taskRef: thread.taskRef! } : { threadRef: thread.threadRef }
+    const request = { requestId: requestId('agreeing-project'), projectRef, ...target,
+      task: 'check the schedule', cwd: process.cwd() }
+    const first = await host.host.workerStartForAgent(owner.agent, request)
+    const again = await host.host.workerStartForAgent(owner.agent, request)
+    expect(again.workerRef).toBe(first.workerRef)
+    await expect(host.host.workerStartForAgent(owner.agent, { ...request,
+      projectRef: otherProject.project.projectRef })).rejects.toMatchObject({ code: 'worker_target_conflict' })
+    expect(host.engines.starts).toHaveLength(1)
+  })
+
   // Both terminal Task states, because a run outliving its Task must not depend on
   // which one an owner picked: close ends the work, accept declares it done.
   for (const [action, resolution] of [['close', 'closed'], ['accept', 'accepted']] as const) {

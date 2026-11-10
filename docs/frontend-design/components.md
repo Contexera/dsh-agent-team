@@ -351,3 +351,9 @@ A Worker run appears as activity rows in the Thread it was bound to, and each ro
 The start row carries no state word of its own. "Running" or "result unconfirmed" comes from the run's whole durable state in the same read that returned the facts, never from whether the terminal fact sits in the loaded page: a run whose end has paged out reads as a plain start, not a guess. The terminal row names the engine and, for a failure or a stop, a bounded reason. What the Worker answered never enters the Thread — it reaches the initiator, and the Human through them.
 
 The engine's name comes from the same copy the settings page uses, so a Thread holding runs of both engines cannot spell one of them two ways.
+
+## Worker diagnostics in the Agent editor
+
+An expanded diagnostic stays inside the dialog's content column. Its grid item may shrink, and long native record paths, identifiers, and fragments wrap rather than imposing their unbroken width on the grid. The report keeps the Host's bounded text intact; wrapping does not truncate it.
+
+Browser checks open a failed run's report at desktop and 390×844, then measure the report and its text against every clipping ancestor, including the surrounding dialog. Checking only the collapsed list or the report's own scroll width cannot prove that its text is visible.

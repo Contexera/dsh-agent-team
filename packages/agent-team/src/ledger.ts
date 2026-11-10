@@ -1473,6 +1473,9 @@ export class AgentTeamLedger {
       if (threadRef !== undefined && threadRef !== thread.threadRef) {
         return Object.freeze({ kind: 'target-conflict' as const, taskRef, threadRef })
       }
+      if (projectRef !== undefined && projectRef !== project.projectRef) {
+        return Object.freeze({ kind: 'project-conflict' as const, projectRef, threadRef: thread.threadRef })
+      }
       return Object.freeze({ kind: 'thread' as const, workspaceId: project.workspaceId, projectRef: project.projectRef,
         threadRef: thread.threadRef, taskRef })
     }
@@ -1480,6 +1483,9 @@ export class AgentTeamLedger {
       const thread = this.state.threads.get(threadRef)
       const project = projectOfThread(threadRef)
       if (thread === undefined || project === undefined) return Object.freeze({ kind: 'thread-unknown' as const, threadRef })
+      if (projectRef !== undefined && projectRef !== project.projectRef) {
+        return Object.freeze({ kind: 'project-conflict' as const, projectRef, threadRef })
+      }
       return Object.freeze({ kind: 'thread' as const, workspaceId: project.workspaceId, projectRef: project.projectRef,
         threadRef, ...(thread.taskRef === undefined ? {} : { taskRef: thread.taskRef }) })
     }

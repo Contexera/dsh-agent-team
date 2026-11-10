@@ -3,7 +3,7 @@ import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WORKER_INSPECT_SHOTS, chooseMemberModel, closeScenario, memberAgent, openSettings,
-  openSidebar, openTeamPage, scaffold, settleLayout, waitForMemberAgent } from './__external-agent-team-support.ts'
+  openSidebar, openTeamPage, scaffold, settleLayout, waitForMemberAgent, type Locator } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -45,7 +45,7 @@ process.stdin.on('data', (chunk) => {
     if (message.method === 'initialize') write({ id: message.id, result: { userAgent: 'fake-codex' } })
     else if (message.method === 'thread/start' || message.method === 'thread/resume') {
       counter += 1
-      threadId = 'fake-thread-' + process.pid + '-' + counter
+      threadId = 'fake-thread-' + process.pid + '-' + 'native'.repeat(16) + '-' + counter
       location = path.join(root, threadId + '.jsonl')
       fs.writeFileSync(location, JSON.stringify({ type: 'session_meta',
         payload: { session_id: threadId, cli_version: '0.0.0-fake', originator: 'e2e' } }) + '\\n')
@@ -75,6 +75,30 @@ const stop = () => { process.exit(0) }
 process.on('SIGTERM', stop)
 process.on('SIGINT', stop)
 `
+
+/** Check visible text against every clipping ancestor, including the Modal outside the Worker subtree. */
+async function expectUnclippedReport(report: Locator): Promise<void> {
+  const overflow = await report.evaluate(node => {
+    if (!(node instanceof HTMLElement)) throw new Error('Worker report is not an HTML element')
+    let left = 0
+    let right = window.innerWidth
+    for (let ancestor: HTMLElement | null = node; ancestor !== null; ancestor = ancestor.parentElement) {
+      if (getComputedStyle(ancestor).overflowX === 'visible') continue
+      const box = ancestor.getBoundingClientRect()
+      left = Math.max(left, box.left + ancestor.clientLeft)
+      right = Math.min(right, box.left + ancestor.clientLeft + ancestor.clientWidth)
+    }
+    const boxes = [node.getBoundingClientRect()]
+    const text = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
+    while (text.nextNode() !== null) {
+      const range = document.createRange()
+      range.selectNodeContents(text.currentNode)
+      boxes.push(...range.getClientRects())
+    }
+    return Math.max(0, ...boxes.map(box => Math.max(left - box.left, box.right - right)))
+  })
+  expect(overflow).toBeLessThanOrEqual(1)
+}
 
 /** Create one Agent through the Human's own dialog, so the Host holds a live handle for it. */
 async function createAgent(page: Awaited<ReturnType<typeof openTeamPage>>['page'], name: string, description: string): Promise<void> {
@@ -242,6 +266,7 @@ it('reads a Worker diagnostic from its row and keeps the list to five rows', asy
   await settleLayout(page)
   await listedReport.scrollIntoViewIfNeeded()
   await settleLayout(page)
+  await expectUnclippedReport(listedReport)
   await page.screenshot({ path: join(WORKER_INSPECT_SHOTS, 'worker-inspect-desktop.png') })
   // The same control folds the report away.
   await closing.click()
@@ -278,6 +303,19 @@ it('reads a Worker diagnostic from its row and keeps the list to five rows', asy
   await narrowTask.scrollIntoViewIfNeeded()
   await settleLayout(page)
   await page.screenshot({ path: join(WORKER_INSPECT_SHOTS, 'worker-inspect-narrow.png') })
+  const narrowListed = narrowWorkers.locator(`[data-worker-run="${listed.workerRef}"]`)
+  const narrowDoor = narrowListed.getByRole('button', { name: `查看诊断：${listed.task}` })
+  await narrowDoor.focus()
+  await narrowDoor.press('Enter')
+  const narrowClosing = narrowListed.getByRole('button', { name: `收起诊断：${listed.task}` })
+  await expect.poll(async () => await narrowClosing.getAttribute('aria-expanded')).toBe('true')
+  expect(await narrowClosing.evaluate(node => node === document.activeElement)).toBe(true)
+  const narrowReport = narrowListed.locator('[data-worker-report]')
+  await expect.poll(async () => await narrowReport.textContent()).toContain('fake engine failed the turn')
+  await narrowReport.scrollIntoViewIfNeeded()
+  await settleLayout(page)
+  await expectUnclippedReport(narrowReport)
+  await page.screenshot({ path: join(WORKER_INSPECT_SHOTS, 'worker-inspect-diagnostic-narrow.png') })
   await narrowEditor.getByRole('button', { name: '关闭', exact: true }).click()
   await page.setViewportSize({ width: 1440, height: 960 })
 
