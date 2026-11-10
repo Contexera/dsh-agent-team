@@ -70,6 +70,8 @@ describe('Project-owner guidance section', () => {
     // The grant reaches the live generation without a restart, and the waking
     // request already carried the duties.
     expect(await sectionText(agent)).toContain('# Owning a Project')
+    // Reminders are every Member's own, so the owner duties must not claim them.
+    expect(await sectionText(agent)).toContain('Reminders are personal, not an owner privilege')
     expect(systemText(adapter.requests[0]!)).toContain('# Owning a Project')
 
     adapter.enqueue(textResponse('Noted the withdrawal.'))

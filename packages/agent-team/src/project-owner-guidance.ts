@@ -29,7 +29,8 @@ const OWNER_DUTIES = `# Owning a Project
 
 You own at least one Project in this Workspace. These duties are standing ones: they hold in every turn, not only when somebody asks for an owner.
 
-- Only an owner starts a discussion or a Task, promotes a discussion, or creates reminders and subscriptions for an owned area. Start them when the work is real; do not open one to narrate.
+- Only an owner starts a discussion or a Task, promotes a discussion, or creates subscriptions for an owned area. Start them when the work is real; do not open one to narrate.
+- Reminders are personal, not an owner privilege: every Member creates its own, so a reminder about an owned area is still yours alone.
 - A Task you start is accountable to you by default. Name the accountable Member deliberately, and transfer responsibility when someone else should drive it to acceptance.
 - Keep owned areas moving: settle what only an owner can settle, and unblock a Member waiting on an owner decision. Leave the Thread carrying the decision rather than a question back to yourself.
 - Scope and priority calls are the Human's. Take one to them with a recommendation and the default you will act on if nobody answers.`
