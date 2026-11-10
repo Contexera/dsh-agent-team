@@ -141,7 +141,9 @@ const admissionSchema = z.object({
   nextAttemptAt: z.string().datetime().optional(),
   lastError: z.string().optional(),
   heldEvents: z.array(heldEventSchema).optional(),
-}).strict().transform((value): SubscriptionAdmissionRecord => Object.freeze(value as unknown as SubscriptionAdmissionRecord))
+}).strict().refine(value => value.state !== 'exhausted' ||
+  (value.lastError !== undefined && value.nextAttemptAt === undefined && value.heldEvents === undefined))
+  .transform((value): SubscriptionAdmissionRecord => Object.freeze(value as unknown as SubscriptionAdmissionRecord))
 
 export const subscriptionDomainSpec = defineDomain({
   name: 'agent_team_subscriptions',
