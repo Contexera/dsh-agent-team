@@ -18,6 +18,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import AgentTeam from '../src/index.ts'
+import { admissionKey } from '../src/subscription-admissions.ts'
 import { subscriptionDomainSpec } from '../src/subscription-store.ts'
 import { subscriptionTestStdin } from '../src/subscriptions.ts'
 import type { AgentTeamCreateSubscriptionRequest, AgentTeamProjectRef, AgentTeamRequestId, AgentTeamSubscriptionRef } from '../src/types.ts'
@@ -1221,6 +1222,38 @@ describe('the webhook trigger', () => {
       'the accept is the run: the script is not executed a second time for it').toHaveLength(1)
     expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!.eventCount,
       'the same output is not accepted a second time').toBe(1)
+  }, 30_000)
+
+  it('settles one spent delivery per pass, and runs nothing while one is still owed', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const subscriptionRef = created.subscription.subscriptionRef
+    const token = addressToken(created.webhookAddress)
+    for (let index = 0; index < 2; index += 1) {
+      expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).toMatchObject({ kind: 'queued' })
+    }
+    const rows = (booted.ctx.agentTeam as unknown as { subscriptionAdmissionsTable: {
+      put(key: string, record: unknown): Promise<unknown> } }).subscriptionAdmissionsTable
+    // The shape a spent delivery leaves when the Host stops between writing the
+    // decision and settling it: the row is durable, the bookkeeping is not. Two of
+    // them, so one pass has more than one to choose from.
+    for (const [index, row] of admissionRows(pool).entries()) {
+      await rows.put(admissionKey(subscriptionRef, String(row.admissionRef)),
+        Object.freeze({ ...row, deliveryRef: `delivery:probe-${index}`, attempts: 4, state: 'exhausted', lastError: 'the run failed' }))
+    }
+    expect(admissionRows(pool), 'both spent deliveries are waiting').toHaveLength(2)
+    shell.requests.length = 0
+    await pump(booted)
+    expect(admissionRows(pool), 'one pass settles one spent delivery').toHaveLength(1)
+    expect(shell.requests.filter(request => request.stdin !== undefined),
+      'settling a spent delivery runs no script for it').toHaveLength(0)
+    await pump(booted)
+    expect(admissionRows(pool), 'the next pass takes the one still owed').toHaveLength(0)
   }, 30_000)
 
   it('drops queued deliveries when the subscription is deleted, so a late result cannot revive the queue', async () => {

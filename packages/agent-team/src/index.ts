@@ -4210,9 +4210,14 @@ export default class AgentTeam extends TypertRemoteService {
           const exhausted = records.find(record => record.state === 'exhausted')
           if (exhausted !== undefined) {
             // Pausing stops scripts, not settlement of an attempt that already ended.
+            // Settlement comes first and one row at a time, so a queue holding several
+            // spent deliveries settles one per pass and runs nothing until the last is
+            // gone: the 5s pass interval makes that wait, not a lock or a retry ladder.
             await this.serializeSubscriptionWrite(subscription.subscriptionRef,
               () => this.finishExhaustedWebhookAdmissionLocked(exhausted))
           } else if (subscription.state === 'active') {
+            // One delivery per subscription per pass, oldest arrival first, so a busy
+            // subscription cannot hold the pass away from the others.
             const due = dueAdmissions(records, Date.now())[0]
             if (due !== undefined) await this.runWebhookAdmission(subscription, due)
           }
