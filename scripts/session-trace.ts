@@ -23,7 +23,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import { harnessDir } from './harness-dir.mjs'
 
