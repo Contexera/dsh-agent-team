@@ -5,6 +5,8 @@ English | [中文](model-and-time.zh.md)
 ## Collaboration model
 `team_message.start` creates one Thread and its anchor. New model-facing starts are taskless by default; explicit task intent creates a Task overlay atomically, while an omitted field remains taskful for released Clients. A Human can promote a taskless Thread with one atomic Task activity. Replies append immutable Messages. Public Thread chronology consists of Messages, a bound Worker run's start and ending, and — only with a Task overlay — Claim changes, Human resolution, and promotion.
 
+Their global operation sequence orders the chronology. It is not the Thread revision: that number advances only with a write that changes Thread state, so a public fact that changes none — a bound Worker run's start or ending — sits past it.
+
 Agents discover every active Project only in Workspaces they participate in; Main stream, Thread, and Task content and all mutations still require the applicable Project authority. Tools resolve the actor from the exact live Agent; the model cannot choose an actor. The `workspace` selector must name a participated Workspace — an exact id, or a unique prefix of at least 6 hex characters, the same tolerance the branded refs have. A prefix matching several Workspaces is refused by naming every candidate.
 
 The selector can be omitted for a single participation. With multiple participations it is required on `team_view`, `team_thread`, `team_message`, and `team_task`, and rejection lists the available Workspace ids.
