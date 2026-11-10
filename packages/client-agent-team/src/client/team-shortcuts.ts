@@ -131,7 +131,8 @@ export function registerTeamShortcuts(host: TeamShortcutHost, shortcuts: Shortcu
       id: 'team.composer.focus' as ShortcutCommandId,
       label: () => host.t('shortcutFocusComposer'),
       aliases: ['composer', 'focus input', 'reply'],
-      defaults: altPrimary('KeyI'),
+      // Not KeyI: Chrome and Safari keep Command+Alt+I for DevTools and never deliver it to the page.
+      defaults: altPrimary('KeyM'),
       regions: ['page', 'editable'],
       modals: [],
       resolve: () => ({ status: 'handled', run: () => { composerInput()?.focus() } }),

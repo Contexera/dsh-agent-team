@@ -60,7 +60,7 @@ describe('Team mode shortcuts', () => {
       { code: 'KeyT', modifiers: ['primary', 'alt'] },
       { code: 'Digit1', modifiers: ['primary', 'alt'] },
       { code: 'Digit2', modifiers: ['primary', 'alt'] },
-      { code: 'KeyI', modifiers: ['primary', 'alt'] },
+      { code: 'KeyM', modifiers: ['primary', 'alt'] },
       { code: 'ArrowUp', modifiers: ['primary', 'alt'] },
       { code: 'ArrowDown', modifiers: ['primary', 'alt'] },
       // macOS keeps Command+Shift+3, 4, and 5 for screenshots, so the family carries Alt.
@@ -74,7 +74,7 @@ describe('Team mode shortcuts', () => {
       { code: 'KeyT', modifiers: ['primary', 'alt'] },
       { code: 'Digit1', modifiers: ['primary', 'alt'] },
       { code: 'Digit2', modifiers: ['primary', 'alt'] },
-      { code: 'KeyI', modifiers: ['primary', 'alt'] },
+      { code: 'KeyM', modifiers: ['primary', 'alt'] },
       undefined,
       undefined,
       ...Array.from({ length: 9 }, (_, offset) => ({ code: `Digit${offset + 1}`, modifiers: ['primary', 'alt', 'shift'] })),
