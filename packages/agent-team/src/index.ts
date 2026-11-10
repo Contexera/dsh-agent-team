@@ -57,7 +57,7 @@ import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName,
 import { PROJECT_OWNER_SECTION, projectOwnerGuidance } from './project-owner-guidance.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
-import { newestEndedRuns, WorkerRefusal, WorkerRegistry, workerTaskPreview, WORKER_RUN_HISTORY_LIMIT, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
+import { newestEndedRuns, WorkerRefusal, WorkerRegistry, workerTaskPreview, WORKER_RUN_LIST_LIMIT, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
 import { readWorkerHistory } from './worker-inspection.ts'
 import { coldInboxOf } from './cold-inbox.ts'
 import { agentTeamDomainSpec } from './spec.ts'
@@ -3860,8 +3860,10 @@ export default class AgentTeam extends TypertRemoteService {
    * One Member's Worker runs for the Human's edit surface: what this Host still
    * holds (running or stopping), the records a previous Host left running, which
    * are listed as unconfirmed and offer no stop control, and the newest ended
-   * runs, each with the state it really ended in. A failed run has to stay
-   * reachable after its process exited, or the diagnostic behind it has no door.
+   * runs, each with the state it really ended in. It is one window of five rows:
+   * the live and unconfirmed runs hold their seats first, and the newest endings
+   * fill the rest. A failed run has to stay reachable after its process exited,
+   * or the diagnostic behind it has no door.
    */
   @Remote('workerRuns')
   workerRunsForClient(request: AgentTeamWorkerRunListRequest): AgentTeamWorkerRunListResult {
@@ -3879,8 +3881,10 @@ export default class AgentTeam extends TypertRemoteService {
       seen.add(run.workerRef)
       runs.push(this.workerRunViewOf(execution, live))
     }
-    // The Workspace and Member filters run before the bound, so a Member's five
-    // newest ended runs are their own, not whatever survived another filter.
+    // The Workspace and Member filters run before the bound, so a Member's window
+    // is their own, not whatever survived another filter. The rows above already
+    // hold their seats: the list is five rows, not five endings plus whatever is
+    // running, and a live run is never the one the bound drops.
     const ended: AgentTeamWorkerExecution[] = []
     for (const execution of ledger.workerExecutionsOfMember(request.memberId)) {
       if (seen.has(execution.workerRef)) continue
@@ -3891,7 +3895,7 @@ export default class AgentTeam extends TypertRemoteService {
       }
       ended.push(execution)
     }
-    for (const execution of newestEndedRuns(ended, WORKER_RUN_HISTORY_LIMIT)) {
+    for (const execution of newestEndedRuns(ended, Math.max(0, WORKER_RUN_LIST_LIMIT - runs.length))) {
       runs.push(this.workerRunViewOf(execution, execution.state))
     }
     return Object.freeze({ runs: Object.freeze(runs) })

@@ -504,10 +504,10 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
   }
 
   /**
-   * Read one run's diagnostic by its Team-owned number. The Host answers the
-   * summary, the native identities it recorded, and whatever the engine's own
-   * record still holds; this surface only renders what it is given. The same
-   * control folds the report away, including while its read is still in flight.
+   * Read one ended run's diagnostic from its row. The Host answers the summary,
+   * the native identities it recorded, and whatever the engine's own record
+   * still holds; this surface only renders what it is given. The same control
+   * folds the report away, including while its read is still in flight.
    */
   const inspect = async (workerRef: AgentTeamWorkerRef): Promise<void> => {
     if (report?.workerRef === workerRef) {
@@ -551,6 +551,10 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
             // state, and the click: a control whose name says "view" while it folds
             // the report away tells a screen reader a different story than the page.
             const open = report?.workerRef === run.workerRef
+            // Only an ended run has a native record to read. The Host answers a live
+            // one with "still going" and an unconfirmed one with the sentence its own
+            // hint already carries, so a door there would open onto nothing.
+            const ended = state === 'stopped' || state === 'completed' || state === 'failed'
             return (
               <li key={run.workerRef} className={createCss.reminderRow} data-worker-run={run.workerRef} data-worker-state={state}>
                 <div className={createCss.reminderBody}>
@@ -562,31 +566,35 @@ export function MemberWorkerRunsSection({ workspaceId, memberId, loadWorkerRuns,
                       {`${t(WORKER_RUN_STATE_KEYS[state])} · ${workerRunTargetText(run, t)} · `
                         + t('memberWorkerStarted', { time: formatMessageTime(run.startedAt) })}
                     </p>
-                    <div className={createCss.reminderActions}>
-                      {(state === 'running' || state === 'stopping') && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          aria-label={t('memberWorkerStopAction', { task: run.task })}
-                          disabled={disabled || stopping !== undefined}
-                          onClick={() => { void stop(run) }}
-                        >
-                          {stopping === run.workerRef || state === 'stopping' ? t('memberWorkerRunStopping') : t('memberWorkerStop')}
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label={open
-                          ? t('memberWorkerInspectHideAction', { task: run.task })
-                          : t('memberWorkerInspectAction', { task: run.task })}
-                        aria-expanded={open}
-                        disabled={disabled}
-                        onClick={() => { void inspect(run.workerRef) }}
-                      >
-                        {open ? t('memberWorkerInspectHide') : t('memberWorkerInspect')}
-                      </Button>
-                    </div>
+                    {(state === 'running' || state === 'stopping' || ended) && (
+                      <div className={createCss.reminderActions}>
+                        {(state === 'running' || state === 'stopping') && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={t('memberWorkerStopAction', { task: run.task })}
+                            disabled={disabled || stopping !== undefined}
+                            onClick={() => { void stop(run) }}
+                          >
+                            {stopping === run.workerRef || state === 'stopping' ? t('memberWorkerRunStopping') : t('memberWorkerStop')}
+                          </Button>
+                        )}
+                        {ended && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={open
+                              ? t('memberWorkerInspectHideAction', { task: run.task })
+                              : t('memberWorkerInspectAction', { task: run.task })}
+                            aria-expanded={open}
+                            disabled={disabled}
+                            onClick={() => { void inspect(run.workerRef) }}
+                          >
+                            {open ? t('memberWorkerInspectHide') : t('memberWorkerInspect')}
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                   {outcome?.notice !== undefined && <p className={createCss.error} role="alert">{outcome.notice}</p>}
                   {state === 'unconfirmed' && <small className={css.editHint}>{t('memberWorkerStopUnconfirmedHint')}</small>}

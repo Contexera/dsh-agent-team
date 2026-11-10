@@ -38,13 +38,17 @@ The Inbox and Task board icons are destinations: clicking one opens its page and
 
 The Agent editor does carry that Member's own reminders, as a group under the form rather than inside it, opening on the settings page's own group heading over a hairline so it stands a rank above the field labels around it: only a reminder that can still fire is listed. Each row leads with the note — folded behind a Show more control when it is long — then a footer line where the stored schedule, state, and occurrence facts sit beside the withdraw button; a fired or cancelled reminder stays in the ledger but leaves this management surface.
 
-The editor carries that Member's Worker runs as a second group under the form, on the same group heading and break, but each run reads in two lines: the task line names the engine and the delegated task, cut to one line with the Host's bounded task preview — 240 characters — behind `title`, and the facts line holds the state word, where the run was bound — `Project only`, `Thread`, `Task Thread` — and its start time in one run of text (minutes only for today, no year within the year), with the diagnostic and stop controls at its right edge.
+The editor carries that Member's Worker runs as a second group under the form, on the same group heading and break, but each run reads in two lines: the task line names the engine and the delegated task, cut to one line with the Host's bounded task preview — 240 characters — behind `title`, and the facts line holds the state word, where the run was bound — `Project only`, `Thread`, `Task Thread` — and its start time in one run of text (minutes only for today, no year within the year).
 
-A live run carries two controls, and in the narrow dialog they wrap under its facts line, so that row takes three lines; the row keeps its state word and its stop control either way.
+That facts line's right edge holds the row's one control: `Stop` while the run is live, `View diagnostic` once it has ended.
 
-The list is a window, and its heading row says so in four characters: the newest five — live and unconfirmed runs are all listed, ended runs are the newest five by ending time.
+One control per row is what keeps every row two lines: no row carries both, so nothing wraps under the facts line even in the narrow dialog. An unconfirmed run carries neither — this Host can neither stop it nor find its record — and says so in one line under its facts.
 
-Each row carries its diagnostic door, and the visible word, the accessible name, `aria-expanded` and the click are one flag — a row reading `收起诊断` is also named `收起诊断：{task}`, and a second press while the read is in flight folds it rather than reading again. A receipt's ending wins over the snapshot, so a stopped or failed run stays listed in the state it really reached, and an answer that lands after the reader moved on does not replace the report they opened.
+The list is a window of five rows, and its heading row says so in four characters: live and unconfirmed runs hold their seats first, and the newest endings fill the rest by ending time. A Member with two runs going therefore sees three endings, and a live run is never the one the window drops — so more than five live runs make the list longer than the window.
+
+Only an ended run carries the diagnostic door — a live run has no native record yet, and an unconfirmed one has none this Host can find.
+
+The visible word, the accessible name, `aria-expanded` and the click are one flag — a row reading `收起诊断` is also named `收起诊断：{task}`, and a second press while the read is in flight folds it rather than reading again. A receipt's ending wins over the snapshot, so a stopped or failed run stays listed in the state it really reached, and an answer that lands after the reader moved on does not replace the report they opened.
 
 There is no second door outside the window: a `worker:` number is never shown on this surface, so the Human has no source to type one, and the by-number field is gone — the row's own door is the Human's only entry, while reading by number stays the entry of the Member tool `team_worker`. That report states the summary, the failure stage, the recorded native identities or one line saying none were, and the engine's own bounded fragments — withheld ones counted, never printed — or the one reason it could not answer.
 

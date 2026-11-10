@@ -18,7 +18,7 @@ import type { Config } from '../src/host-row-settings.ts'
 import type { WorkerConfig } from '../src/worker-service.ts'
 import type { AgentTeamLedger } from '../src/ledger.ts'
 import type { AgentTeamMemberId, AgentTeamProjectRef, AgentTeamWorkerExecution, AgentTeamWorkerRef } from '../src/types.ts'
-import { newestEndedRuns, WORKER_RUN_HISTORY_LIMIT } from '../src/worker-service.ts'
+import { newestEndedRuns, WORKER_RUN_LIST_LIMIT } from '../src/worker-service.ts'
 
 /** What the fake engine does on the next open: where its record lives, and how its turn ends. */
 const engine = { storage: undefined as string | undefined, turn: 'failed' as 'failed' | 'completed' | 'hanging',
@@ -336,7 +336,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     await waitFor(() => engine.release, 20_000)
     engine.turn = 'failed'
     const refs: AgentTeamWorkerRef[] = []
-    for (let index = 0; index < WORKER_RUN_HISTORY_LIMIT; index += 1) {
+    for (let index = 0; index < WORKER_RUN_LIST_LIMIT; index += 1) {
       const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId(`run-${index}`), projectRef,
         task: `check the schedule ${index}`, cwd: harness.checkout })
       refs.push(run.workerRef)
@@ -350,7 +350,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
 
     const listed = ctx.agentTeam.workerRunsForClient({ workspaceId: harness.workspaceId, memberId: member.memberId })
     const listedRefs = listed.runs.map(run => run.workerRef)
-    expect(listed.runs).toHaveLength(WORKER_RUN_HISTORY_LIMIT)
+    expect(listed.runs).toHaveLength(WORKER_RUN_LIST_LIMIT)
     expect(listed.runs.every(run => run.state === 'failed')).toBe(true)
     // Started first, ended last: inside the window. Started second, ended first:
     // the one the bound drops.
@@ -359,6 +359,52 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     expect(listedRefs).toContain(refs.at(-1))
     const endings = listed.runs.map(run => Date.parse(executionOf(ctx.agentTeam, run.workerRef)!.settledAt!))
     expect(endings).toEqual([...endings].sort((left, right) => right - left))
+  }, 120_000)
+
+  it('keeps a live run inside the window instead of adding it on top', async () => {
+    const harness = await realHarness()
+    const ctx = harness.ctx
+    await ctx.plugin(SubagentRuntime)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: harness.workspaceId,
+      name: 'live-seat', description: 'Live seat' })
+    const projectRef = project.project.projectRef as AgentTeamProjectRef
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: harness.workspaceId,
+      handle: 'runner', description: 'Runs work', presetId: 'team-member', projectRefs: [projectRef],
+      model: { provider: 'mock', model: 'mock' } })
+    const member = added.status.member
+    await ctx.agentTeam.addProjectOwner({ requestId: requestId('owner'), workspaceId: harness.workspaceId, projectRef,
+      memberId: member.memberId })
+    const agent = ctx.agents.get(member.sessionId) as Agent
+    ;(ctx.agentTeam['config'] as unknown as { worker: unknown }).worker = { get: () => workerRow().worker }
+    engine.unique = true
+
+    // A run that is still going holds a seat: the list is five rows, not five
+    // endings plus whatever is running.
+    engine.turn = 'hanging'
+    const live = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run-live'), projectRef,
+      task: 'hold the turn', cwd: harness.checkout })
+    await waitFor(() => engine.release, 20_000)
+    engine.turn = 'failed'
+    const refs: AgentTeamWorkerRef[] = []
+    for (let index = 0; index < WORKER_RUN_LIST_LIMIT; index += 1) {
+      const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId(`run-${index}`), projectRef,
+        task: `check the schedule ${index}`, cwd: harness.checkout })
+      refs.push(run.workerRef)
+      await waitFor(() => executionOf(ctx.agentTeam, run.workerRef)?.settledAt, 20_000)
+    }
+
+    const listed = ctx.agentTeam.workerRunsForClient({ workspaceId: harness.workspaceId, memberId: member.memberId })
+    expect(listed.runs).toHaveLength(WORKER_RUN_LIST_LIMIT)
+    // The live row leads and keeps its seat; the ending the window has no room
+    // for is the oldest one, never the run that can still be stopped.
+    expect(listed.runs[0]!.workerRef).toBe(live.workerRef)
+    expect(listed.runs[0]!.state).toBe('running')
+    const listedRefs = listed.runs.map(run => run.workerRef)
+    expect(listedRefs).not.toContain(refs[0])
+    expect(listedRefs).toContain(refs.at(-1))
+
+    await ctx.agentTeam.stopWorkerForClient({ workspaceId: harness.workspaceId,
+      memberId: member.memberId, workerRef: live.workerRef })
   }, 120_000)
 
   it('answers a run whose ending was written before the anchors existed', async () => {
@@ -439,17 +485,17 @@ describe('the ended-run window', () => {
   it('orders by the ending, so a run that started early and failed last leads', () => {
     const long = run('worker:long', '2026-11-09T10:00:00.000Z', '2026-11-09T12:00:00.000Z')
     const short = run('worker:short', '2026-11-09T11:00:00.000Z', '2026-11-09T11:01:00.000Z')
-    expect(newestEndedRuns([long, short], WORKER_RUN_HISTORY_LIMIT).map(entry => entry.workerRef))
+    expect(newestEndedRuns([long, short], WORKER_RUN_LIST_LIMIT).map(entry => entry.workerRef))
       .toEqual(['worker:long', 'worker:short'])
   })
 
   it('keeps the newest endings and drops the earlier ones', () => {
-    const ended = Array.from({ length: WORKER_RUN_HISTORY_LIMIT + 2 }, (_, index) => run(`worker:${index}`,
+    const ended = Array.from({ length: WORKER_RUN_LIST_LIMIT + 2 }, (_, index) => run(`worker:${index}`,
       new Date(Date.UTC(2026, 10, 9, 10, index)).toISOString(),
       new Date(Date.UTC(2026, 10, 9, 12, index)).toISOString()))
-    const window = newestEndedRuns(ended, WORKER_RUN_HISTORY_LIMIT)
-    expect(window).toHaveLength(WORKER_RUN_HISTORY_LIMIT)
-    expect(window[0]!.workerRef).toBe(`worker:${WORKER_RUN_HISTORY_LIMIT + 1}`)
+    const window = newestEndedRuns(ended, WORKER_RUN_LIST_LIMIT)
+    expect(window).toHaveLength(WORKER_RUN_LIST_LIMIT)
+    expect(window[0]!.workerRef).toBe(`worker:${WORKER_RUN_LIST_LIMIT + 1}`)
     expect(window.map(entry => entry.workerRef)).not.toContain('worker:0')
     expect(window.map(entry => entry.workerRef)).not.toContain('worker:1')
   })

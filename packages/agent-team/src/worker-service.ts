@@ -835,12 +835,15 @@ export class WorkerRegistry {
 }
 
 /**
- * How many ended runs one Member's surface lists beside the live ones. The
- * record keeps every run; the list is a window, so a Member with months of
- * delegations still gets one bounded read. Five is what a reader scans without
- * scrolling the dialog, and the ledger still holds every record.
+ * The most runs one Member's surface lists. The record keeps every run; the list
+ * is a window, so a Member with months of delegations still gets one bounded
+ * read. Five is what a reader scans without scrolling the dialog, and the ledger
+ * still holds every record. A live run takes a seat in the window rather than
+ * being added on top of it, and is never dropped for an ended one — it is the
+ * only row that can still be stopped — so more than five live runs make the list
+ * longer than the window.
  */
-export const WORKER_RUN_HISTORY_LIMIT = 5
+export const WORKER_RUN_LIST_LIMIT = 5
 
 /**
  * The window of one Member's ended runs the Human's list shows: the newest

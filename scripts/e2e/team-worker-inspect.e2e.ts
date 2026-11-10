@@ -87,7 +87,7 @@ async function createAgent(page: Awaited<ReturnType<typeof openTeamPage>>['page'
   await page.getByText(name, { exact: true }).waitFor({ timeout: 20_000 })
 }
 
-it('reads a Worker diagnostic from its row and keeps the list to the newest five', async () => {
+it('reads a Worker diagnostic from its row and keeps the list to five rows', async () => {
   const { page, consoleWatch } = await openTeamPage()
   const team = scaffold!.ctx.agentTeam
   const workspaceId = scaffold!.ctx.workspaceRegistry.list()[0]!.id
@@ -155,27 +155,29 @@ it('reads a Worker diagnostic from its row and keeps the list to the newest five
     { timeout: 60_000 }).toBe('failed')
   const outside = team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs[0]!
   expect(outside.state).toBe('failed')
-  // Five more endings fill the window, so the run above is no longer listed. The
-  // first of them carries a task long enough that the one-line rule has to cut it.
+  // Four more endings fill the window beside the live run below, so the run above
+  // is no longer listed. The first of them carries a task long enough that the
+  // one-line rule has to cut it.
   const longTask = '[FAIL] 填满窗口的第 1 条：这是一段足够长的任务描述，用来证明任务行只占一行、'
     + '超出的部分以省略号收尾，而全文留在 title 上，读者hover 就能读到。'
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 4; index += 1) {
     await delegate(runner, index === 0 ? longTask : `[FAIL] 填满窗口的第 ${index + 1} 条`)
   }
-  // One live run: the only row that carries both a stop control and a diagnostic door.
-  await delegate(runner, '[HOLD] 一直运行、用来验两个尾随按钮的那条')
+  // One live run: it takes a seat in the window instead of being added on top.
+  await delegate(runner, '[HOLD] 一直运行、占掉窗口一个座位的那条')
   // Another Member's run: it stays out of this Member's list.
   await delegate(other, '[FAIL] 另一个成员的执行')
 
-  // Five ended runs plus the live one: the window is the Host's, not the Client's.
+  // Five rows: the live run holds one seat, the newest four endings hold the rest.
   await expect.poll(() => team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs.length,
-    { timeout: 60_000 }).toBe(6)
+    { timeout: 60_000 }).toBe(5)
   const runs = team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs
   const byTask = (needle: string) => runs.find(run => run.task.includes(needle))!
   const live = byTask('[HOLD]')
   const long = byTask('[FAIL] 填满窗口的第 1 条')
-  const listed = byTask('[FAIL] 填满窗口的第 5 条')
+  const listed = byTask('[FAIL] 填满窗口的第 4 条')
   expect(live.state).toBe('running')
+  expect(runs[0]!.workerRef).toBe(live.workerRef)
   expect(runs.some(run => run.workerRef === outside.workerRef)).toBe(false)
   await expect.poll(() => team.workerRunsForClient({ workspaceId, memberId: other.memberId }).runs.length,
     { timeout: 60_000 }).toBe(1)
@@ -189,7 +191,7 @@ it('reads a Worker diagnostic from its row and keeps the list to the newest five
   const workers = editor.locator('[data-team-member-workers]')
   await workers.waitFor({ timeout: 20_000 })
   const runRows = workers.locator('[data-worker-run]')
-  await expect.poll(async () => await runRows.count(), { timeout: 30_000 }).toBe(6)
+  await expect.poll(async () => await runRows.count(), { timeout: 30_000 }).toBe(5)
   // The list is a window: the oldest ending is not in it, and the live run is.
   expect(await workers.locator(`[data-worker-run="${outside.workerRef}"]`).count()).toBe(0)
   expect(await workers.locator(`[data-worker-run="${live.workerRef}"]`).count()).toBe(1)
@@ -212,47 +214,39 @@ it('reads a Worker diagnostic from its row and keeps the list to the newest five
   const factsBox = (await longRow.locator('[class*="workerRunFacts"]').boundingBox())!
   expect(Math.round(factsBox.height)).toBe(18)
 
-  // One live row carries both trailing controls, and they sit beside each other.
+  // A live run still has no native record to read, so its row carries the stop
+  // alone: the door belongs to the rows that ended.
   const liveRow = workers.locator(`[data-worker-run="${live.workerRef}"]`)
-  const stopButton = liveRow.getByRole('button', { name: /停止 Worker/ })
-  const doorButton = liveRow.getByRole('button', { name: `查看诊断：${live.task}` })
-  const stopBox = (await stopButton.boundingBox())!
-  const doorBox = (await doorButton.boundingBox())!
-  expect(Math.round(doorBox.x - (stopBox.x + stopBox.width))).toBe(4)
+  expect(await liveRow.getByRole('button', { name: /停止 Worker/ }).count()).toBe(1)
+  expect(await liveRow.getByRole('button', { name: `查看诊断：${live.task}` }).count()).toBe(0)
   expect(await liveRow.locator('[class*="reminderActions"]').count()).toBe(1)
-
-  // The accessible name, the visible word and the expanded state move together.
-  expect(await doorButton.getAttribute('aria-expanded')).toBe('false')
-  expect(await doorButton.textContent()).toBe('查看诊断')
-  await doorButton.click()
-  const closing = liveRow.getByRole('button', { name: `收起诊断：${live.task}` })
-  await expect.poll(async () => await closing.getAttribute('aria-expanded')).toBe('true')
-  expect(await closing.textContent()).toBe('收起诊断')
-  await expect.poll(async () => await liveRow.locator('[data-worker-report]').count()).toBe(1)
-  // The one place a screenshot carries what an assertion cannot: the two trailing
-  // controls sit beside each other instead of splitting the row's free space.
-  await liveRow.scrollIntoViewIfNeeded()
-  await settleLayout(page)
-  await page.screenshot({ path: join(WORKER_INSPECT_SHOTS, 'worker-inspect-actions.png') })
-  await closing.click()
-  await expect.poll(async () => await liveRow.locator('[data-worker-report]').count()).toBe(0)
-  expect(await liveRow.getByRole('button', { name: `查看诊断：${live.task}` }).getAttribute('aria-expanded')).toBe('false')
 
   // An ended run keeps its door, and its report is the Host's answer as it came.
   const listedRow = workers.locator(`[data-worker-run="${listed.workerRef}"]`)
-  await listedRow.getByRole('button', { name: `查看诊断：${listed.task}` }).click()
+  const door = listedRow.getByRole('button', { name: `查看诊断：${listed.task}` })
+  // The accessible name, the visible word and the expanded state move together.
+  expect(await door.getAttribute('aria-expanded')).toBe('false')
+  expect(await door.textContent()).toBe('查看诊断')
+  await door.click()
+  const closing = listedRow.getByRole('button', { name: `收起诊断：${listed.task}` })
+  await expect.poll(async () => await closing.getAttribute('aria-expanded')).toBe('true')
+  expect(await closing.textContent()).toBe('收起诊断')
   const listedReport = listedRow.locator('[data-worker-report]')
   await expect.poll(async () => await listedReport.count()).toBe(1)
   await expect.poll(async () => await listedReport.textContent()).toContain('摘要:')
 
   // The report is the Host's answer as it came, and reading it never adds a row.
   await expect.poll(async () => await listedReport.textContent()).toContain('fake engine failed the turn')
-  expect(await runRows.count()).toBe(6)
+  expect(await runRows.count()).toBe(5)
 
   await settleLayout(page)
   await listedReport.scrollIntoViewIfNeeded()
   await settleLayout(page)
   await page.screenshot({ path: join(WORKER_INSPECT_SHOTS, 'worker-inspect-desktop.png') })
+  // The same control folds the report away.
+  await closing.click()
+  await expect.poll(async () => await listedRow.locator('[data-worker-report]').count()).toBe(0)
+  expect(await listedRow.getByRole('button', { name: `查看诊断：${listed.task}` }).getAttribute('aria-expanded')).toBe('false')
 
   // 390×844: the rows stay inside the column, and the task line still takes one line.
   await editor.getByRole('button', { name: '关闭', exact: true }).click()
@@ -274,6 +268,13 @@ it('reads a Worker diagnostic from its row and keeps the list to the newest five
   expect(await narrowEditor.evaluate(node => node.scrollWidth - node.clientWidth)).toBe(0)
   const narrowTask = narrowWorkers.locator(`[data-worker-run="${long.workerRef}"] [data-worker-task]`)
   expect(Math.round((await narrowTask.boundingBox())!.height)).toBe(20)
+  // One control per row is what keeps every row two lines here: the live row's body
+  // is exactly as tall as an ended row's, so its stop sits beside the facts line
+  // instead of wrapping under it. The row boxes themselves differ by the first and
+  // last row's padding and border, so the body is what the two have in common.
+  const narrowLive = (await narrowWorkers.locator(`[data-worker-run="${live.workerRef}"] [class*="reminderBody"]`).boundingBox())!
+  const narrowEnded = (await narrowWorkers.locator(`[data-worker-run="${long.workerRef}"] [class*="reminderBody"]`).boundingBox())!
+  expect(Math.round(narrowLive.height)).toBe(Math.round(narrowEnded.height))
   await narrowTask.scrollIntoViewIfNeeded()
   await settleLayout(page)
   await page.screenshot({ path: join(WORKER_INSPECT_SHOTS, 'worker-inspect-narrow.png') })

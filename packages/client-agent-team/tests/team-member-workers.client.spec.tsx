@@ -81,6 +81,9 @@ describe('the running Worker list in the edit-Agent dialog', () => {
     expect(rows[1]!.textContent).toContain('结果未确认')
     expect(rows[1]!.textContent).toContain('由之前的 Host 启动')
     expect(screen.getAllByRole('button', { name: /停止 Worker/ })).toHaveLength(1)
+    // Neither row opens a diagnostic: a live run has no native record yet, and the
+    // previous Host's run has none this Host can find.
+    expect(screen.queryByRole('button', { name: /查看诊断/ })).toBeNull()
   })
 
   it('shows the stop in progress, then the ending the Host confirmed', async () => {
@@ -192,8 +195,10 @@ describe('the diagnostic behind one Worker run', () => {
     const rows = await screen.findAllByRole('listitem')
     expect(rows[1]!.textContent).toContain('已失败')
     expect(rows[1]!.textContent).toContain('check the nightly run')
-    // Only the live run can still be stopped; the ended one offers its report.
+    // Only the live run can still be stopped; only the ended one has a record to
+    // read, so the door belongs to that row alone.
     expect(screen.getAllByRole('button', { name: /停止 Worker/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /查看诊断/ })).toHaveLength(1)
     expect(screen.getByRole('button', { name: '查看诊断：check the nightly run' })).toBeTruthy()
     // The list is a window, and it says so.
     expect(screen.getByText(zh.memberWorkerRunsWindow)).toBeTruthy()

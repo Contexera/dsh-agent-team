@@ -303,7 +303,7 @@ Unloading the bundle is the same transaction at Host scale, in order: refuse new
 
 Anything still unconfirmed at that boundary is sealed: the run keeps its `running` record and accepts no later ending, so closing storage cannot race a write into a ledger nobody reads. Pending terminal writes are awaited before the provider registrations are released.
 
-The Human's surface is the edit-Agent dialog, which lists that Member's live runs (`running`, `stopping`), the records a previous Host left running as `unconfirmed`, and the newest five ended runs by ending time — a long run that started early and failed just now stays inside that window — each with the ending the Host confirmed and its own diagnostic door.
+The Human's surface is the edit-Agent dialog, which gives that Member at most five rows: the live runs (`running`, `stopping`) and the records a previous Host left running as `unconfirmed` hold their seats first, and the newest endings by ending time fill the rest — a long run that started early and failed just now stays inside that window — each with the ending the Host confirmed, and a diagnostic door on every run that ended.
 
 Its `stopWorker` receipt is structured rather than a sentence to read: `ended` names the state the run really reached and the Host's diagnostic, `pending` says the cleanup is still in flight, and `unconfirmed` says this Host no longer holds the handle. A run a previous Host left behind appears as `unconfirmed` with an explanation and no stop control, and a call that never completed says only that, never deciding the run's state.
 
