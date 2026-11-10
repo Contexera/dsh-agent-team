@@ -78,6 +78,8 @@ Agent 只有在 Task 处于 `in_review`、自身是 Project owner 或该 Task �
 
 Project 内独立的单层公开协作 aggregate：一定有 `threadRef`、anchor Message 和 revision，但可以没有 Task。Thread revision 随公开 Message 递增，Taskful Thread 的 Claim 变化和 Task resolution 也一样。往既有 Thread 公开写入时，必须带上该 Thread 的当前 revision。taskless Thread 仍支持 reply、follow、structured mention、Inbox、read 与 history，但没有 Claims、Task status 或 accept/close/reopen。协作读写定位优先用 `threadRef`。Host 也将 `taskRef` 解析到其 taskful Thread。Task/Claim 仍用 `taskRef`；action 地址要求见[工具契约](team-collaboration/tools.zh.md)。revision 是内部并发令牌，只在工具 baseRevision 里透传，不写进消息正文当引用事实。
 
+绑定 Worker 执行的开始与终态是两条公开 Thread 事实，与公开 Message 一样推进 revision。
+
 ## Direct Message
 
 Member 之间的私有直达消息，不属于 Thread。ledger 只追加一条 audit-only 的 `team/dm-sent` operation。requestId 幂等，sender/recipient 必须是同 Workspace 的 enabled Agent Member。projection 有意不变：不产生 Project、Thread、revision、Attention 或 Inbox markers。送达是运行时的瞬时效果。正文以 relay-form user message 走 steer 车道送达：idle 收件人由此开一个 turn，busy 收件人在最近的 step 边界收下。正文里带一行有界的相邻上下文（紧邻上一条往来 DM 的摘要）。注入失败不影响 durable 事实，发送方收到结构化 delivery error，不自动重投。DM 用于快速澄清与状态同步；任务工作、决策和需追溯的内容归 Thread。

@@ -213,6 +213,67 @@ describe('a Worker run bound to a Thread', () => {
   })
 })
 
+/**
+ * A read's confirmation bound is validated against the Thread revision, so no
+ * fact may sit past it: every operation that appends a Thread fact advances
+ * that revision. A Worker start or ending used to append its fact while
+ * leaving the Thread row behind, which put the revision behind its own facts
+ * and made every Host-selected read of that Thread throw
+ * `selectedThroughSequence … exceeds Thread revision …` instead of confirming
+ * the run — the read only recovered once an ordinary reply moved the revision
+ * past the Worker facts again.
+ */
+describe('a Worker event at the Thread tail', () => {
+  const runs = [
+    { label: 'a run still running', settlement: undefined },
+    { label: 'a failed run', settlement: { state: 'failed' as const, diagnostic: 'the engine exited before answering' } },
+    { label: 'a completed run', settlement: { state: 'completed' as const, output: 'the nightly run fails at step 3' } },
+  ]
+  for (const target of [
+    { label: 'a taskful Thread', threadRef: (team: Seeded) => team.taskThreadRef, taskRef: (team: Seeded) => team.taskRef },
+    { label: 'an ordinary discussion', threadRef: (team: Seeded) => team.threadRef, taskRef: () => undefined },
+  ]) {
+    for (const run of runs) {
+      it(`lets a read confirm ${run.label} at the tail of ${target.label}`, async () => {
+        const team = await seed()
+        const threadRef = target.threadRef(team)
+        const taskRef = target.taskRef(team)
+        await startRun(team, { workerRef: 'worker:tail', threadRef, ...(taskRef === undefined ? {} : { taskRef }) })
+        if (run.settlement !== undefined) await settleRun(team, 'worker:tail', run.settlement)
+        const expected = run.settlement === undefined ? ['activity'] : ['activity', 'activity']
+
+        // The Host selects the prefix it can render: the last unread fact.
+        const read = await team.ledger.readThread({ requestId: requestId('tail-read'), actor: human, workspaceId: alpha,
+          threadRef }, preview => Math.max(...preview.facts.filter(entry => entry.unread).map(entry => entry.fact.sequence)))
+        expect(read.committed).toBe(true)
+        expect(read.value.facts.map(entry => entry.fact.kind)).toEqual(expected)
+        expect(read.value.facts.every(entry => entry.unread)).toBe(true)
+        expect(read.value.remainingUnreadCount).toBe(0)
+        // The revision is the Thread's head, so the bound a read may confirm
+        // through and the token the next write fences on are the same number.
+        expect(read.value.thread.revision).toBe(read.value.facts.at(-1)!.fact.sequence)
+
+        const replied = await team.ledger.reply({ requestId: requestId('tail-reply'), actor: human, workspaceId: alpha,
+          threadRef, ...(taskRef === undefined ? {} : { taskRef }), body: 'noted', baseRevision: read.value.thread.revision })
+        expect(replied.committed).toBe(true)
+        if (replied.value.kind !== 'committed') throw new Error(`expected the reply to commit, received ${replied.value.kind}`)
+        expect(replied.value.thread.revision).toBeGreaterThan(read.value.thread.revision)
+      })
+    }
+  }
+
+  it('keeps a ledger whose Worker facts sit at the tail replayable', async () => {
+    const team = await seed()
+    await startRun(team, { workerRef: 'worker:replay', threadRef: team.threadRef })
+    await settleRun(team, 'worker:replay')
+    const table = await openTableOver(team.pool)
+    const replay = new AgentTeamLedger(table)
+    await replay.initialize()
+    expect(() => replay.validate()).not.toThrow()
+    expect(replay.threadWorkerStates(team.threadRef)).toEqual([{ workerRef: 'worker:replay', state: 'failed' }])
+  })
+})
+
 describe('a ledger an older build opens', () => {
   it('refuses it and asks for a newer release, because the segment adopted version 6', async () => {
     const team = await seed()

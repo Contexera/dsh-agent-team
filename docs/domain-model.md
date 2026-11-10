@@ -82,7 +82,7 @@ A transfer target is any enabled Project member or the Human, following the Thre
 
 ## Thread
 
-An independent, single-level public collaboration aggregate inside a Project. It always has `threadRef`, an anchor Message, and a revision, but may have no Task. Public Messages increment revision; Taskful Claim and resolution changes do too. Existing-Thread writes require current revision. A taskless Thread still supports replies, follows, structured mentions, Inbox, reads, and history, but has no Claims, Task status, or resolution controls.
+An independent, single-level public collaboration aggregate inside a Project. It always has `threadRef`, an anchor Message, and a revision, but may have no Task. Public Messages increment revision; Taskful Claim and resolution changes do too, as does a bound Worker run's start and ending. Existing-Thread writes require current revision. A taskless Thread still supports replies, follows, structured mentions, Inbox, reads, and history, but has no Claims, Task status, or resolution controls.
 
 Collaboration uses `threadRef` first; the Host also resolves `taskRef` to its taskful Thread, while Task/Claim operations use `taskRef` identity. Each tool action's address requirements are defined in the [tool contract](team-collaboration/tools.md). Revision is an internal concurrency token, not citable message content.
 
