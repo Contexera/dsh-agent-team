@@ -25,6 +25,7 @@ import AgentTeam from '../src/index.ts'
 import type { Config } from '../src/host-row-settings.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
+import { carryWorkerAnchors } from '../src/worker-runtime.ts'
 import type { AgentTeamMemberActor, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamRequestId,
   AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
 
@@ -65,7 +66,8 @@ function fakeEngines(): FakeEngines {
         pending.delete(childId)
         open?.resolve({ output: [], stopReason: 'aborted' })
       }
-      return { childId, result: result.promise, dispose } as unknown as SubagentActivation
+      return { childId, result: result.promise.then(outcome => carryWorkerAnchors(outcome, { nativeSessionId: `native:${childId}` })),
+        dispose } as unknown as SubagentActivation
     },
   } as unknown as SubagentRuntime
   return { runtime, starts, pending }

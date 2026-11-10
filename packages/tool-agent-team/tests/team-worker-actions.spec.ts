@@ -4,7 +4,7 @@ import { renderText, teamTools } from './render-text.ts'
 
 /**
  * Execution-level tests for `team_worker`'s four call shapes: one delegation, one
- * stop, one diagnostic read, and one instruction to a running turn share the tool
+ * stop, one diagnostic read, and one native-session steer share the tool
  * but never a request. A stop and an inspect are each a ref alone, and a steer is
  * one ref plus its instruction, so a half-filled start can never be read as any of
  * them, and the Host entry points stay distinct: none can smuggle a task, target,
@@ -29,7 +29,9 @@ function inspection(overrides: Record<string, unknown> = {}) {
     startedAt: '2026-11-09T07:00:00.000Z', settledAt: '2026-11-09T07:10:00.000Z',
     summary: 'Team Worker failure (stage: turn; category: unknown).',
     stage: 'turn',
-    native: { threadId: 'native-thread', turnId: 'native-turn', storage: '/tmp/home/sessions/2026/11/09/rollout-x.jsonl' },
+    native: { threadId: 'native-thread', turnId: 'native-turn',
+      turnIds: ['native-turn', 'native-steer'], inputIds: ['native-turn', 'native-steer'],
+      storage: '/tmp/home/sessions/2026/11/09/rollout-x.jsonl' },
     history: { kind: 'read', withheld: 0, truncated: false, fragments: [
       { kind: 'session', text: 'Native session record: engine 0.167.0' },
       { kind: 'failure', text: 'Native turn failed after 15674 ms: unexpected status 401 Unauthorized' },
@@ -146,6 +148,8 @@ describe('team_worker inspects with a ref alone', () => {
     expect(host.workerInspectForAgent.mock.calls[0]![1]).toEqual({ workerRef: WORKER })
     expect(result).toMatchObject({ mode: 'inspect', workerRef: WORKER, state: 'failed', stage: 'turn',
       nativeThreadId: 'native-thread', nativeTurnId: 'native-turn', nativeRecord: 'read' })
+    expect(result).toMatchObject({ nativeTurnIds: ['native-turn', 'native-steer'],
+      nativeInputIds: ['native-turn', 'native-steer'] })
   })
 
   it('renders the summary, the native identities, and the fragments it could read', async () => {
@@ -155,7 +159,23 @@ describe('team_worker inspects with a ref alone', () => {
     expect(report).toContain('Failed at: turn')
     expect(report).toContain('Native thread: native-thread')
     expect(report).toContain('Native turn: native-turn')
+    expect(report).toContain('Native turns: native-turn, native-steer')
+    expect(report).toContain('Native inputs: native-turn, native-steer')
     expect(report).toContain('- failure: Native turn failed after 15674 ms: unexpected status 401 Unauthorized')
+  })
+
+  it('bounds native identity lists without crowding out the diagnostic', async () => {
+    const host = fakeHost()
+    const ids = Array.from({ length: 128 }, (_, index) => `${index}:` + 'x'.repeat(250))
+    host.workerInspectForAgent.mockResolvedValueOnce(inspection({
+      native: { threadId: 'native-thread', turnIds: ids, inputIds: ids },
+    }))
+    const result = await call(tool, { inspect: WORKER }, host)
+    const report = renderText(tool, { inspect: WORKER }, result)
+    expect(report.length).toBeLessThan(6_000)
+    expect(report).toContain(ids[0])
+    expect(report).toContain('retained ids omitted')
+    expect(report).toContain('Native turn failed after 15674 ms: unexpected status 401 Unauthorized')
   })
 
   it('keeps the Team summary and names the reason when no native record answers', async () => {
@@ -212,14 +232,27 @@ describe('team_worker steers a live run with one instruction', () => {
     expect(result).toMatchObject({ mode: 'steer', workerRef: WORKER, state: 'submitted', turnId: 'native-turn', runState: 'running' })
   })
 
-  it('says submitted, never that the model read it, and names the turn it entered', async () => {
+  it('says submitted, never that the model read it, and names the turn the engine acknowledged', async () => {
     const host = fakeHost()
     const receipt = renderText(tool, { steer: WORKER, instruction: 'also update the changelog' },
       await call(tool, { steer: WORKER, instruction: 'also update the changelog' }, host))
-    expect(receipt).toContain('took the instruction into the turn it was already running')
+    expect(receipt).toContain('native session accepted the instruction into this execution')
     expect(receipt).toContain('Turn: native-turn')
     expect(receipt).toContain('submitted, not confirmed read')
     expect(receipt).not.toContain('may never have been read')
+  })
+
+  it('returns the new worker ref when an ended execution is continued', async () => {
+    const host = fakeHost()
+    const nextWorker = 'worker:00000000-0000-4000-8000-000000000099'
+    host.workerSteerForAgent.mockResolvedValueOnce(steered({ workerRef: nextWorker, state: 'started',
+      continuedFrom: WORKER, turnId: undefined }))
+    const result = await call(tool, { steer: WORKER, instruction: 'continue the work' }, host)
+    expect(result).toMatchObject({ mode: 'steer', workerRef: nextWorker, state: 'started', continuedFrom: WORKER })
+    const receipt = renderText(tool, { steer: WORKER, instruction: 'continue the work' }, result)
+    expect(receipt).toContain(`New Worker: ${nextWorker}`)
+    expect(receipt).toContain('started a new execution in the same native session')
+    expect(receipt).toContain('submitted, not confirmed read')
   })
 
   it('repeats the run state when a stop landed while the answer was written', async () => {

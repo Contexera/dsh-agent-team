@@ -525,6 +525,12 @@ export default class AgentTeam extends TypertRemoteService {
   private readonly workerRegistry = new WorkerRegistry(this.ctx, {
     config: () => this.config.worker.get(),
     projectExists: projectRef => this.requireLedger().hasProject(projectRef),
+    projectActive: projectRef => {
+      const project = this.requireLedger().getProject(projectRef)
+      return project !== undefined && project.state !== 'archived'
+    },
+    projectWorkspace: projectRef => this.requireLedger().getProject(projectRef)?.workspaceId,
+    memberEnabled: memberId => this.requireLedger().getMember(memberId)?.state === 'enabled',
     projectOwners: projectRef => this.requireLedger().projectOwnerIds(projectRef),
     recordStarted: async write => {
       const result = await this.requireLedger().recordWorkerStarted(write)
@@ -537,6 +543,13 @@ export default class AgentTeam extends TypertRemoteService {
       const result = await this.requireLedger().recordWorkerSettled(write)
       if (result.committed) this.emitCommitted(result.value.receipt)
     },
+    recordSteerAdmitted: async write => (await this.requireLedger().recordWorkerSteerAdmitted(write)).value,
+    recordSteerRecorded: async write => { await this.requireLedger().recordWorkerSteerRecorded(write) },
+    steerRequest: requestId => this.requireLedger().workerSteerRequest(requestId),
+    steerOutcome: requestId => this.requireLedger().workerSteerOutcome(requestId),
+    steerAdmissionsForText: query => this.requireLedger().workerSteerAdmissionsForText(query),
+    workerStartedByRequest: requestId => this.requireLedger().workerStartedByRequest(requestId),
+    workerResumeAnchors: workerRef => this.requireLedger().workerResumeAnchors(workerRef),
     warn: message => { this.ctx.logger.warn(`agent-team: ${message}`) },
   })
   /** Team notice ids waiting for a turn boundary, keyed by the live Agent message id. */
@@ -3819,30 +3832,100 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * One Member's instruction to a run it delegated, added to the turn that run is
-   * already executing. The durable record decides whether the run is still
-   * running; the live registry decides whether this Host can still reach its
-   * engine session. Nothing is written: a steer is not a terminal fact, it does
-   * not survive a restart, and its receipt is the tool's own answer.
+   * One Member's instruction to an execution it delegated. A live execution
+   * takes it now; an ended execution is resumed as a new linked execution in
+   * the same native conversation. The immutable chain and ledger decide which
+   * execution owns the next turn, never a process-local native id.
    */
   async workerSteerForAgent(agent: Agent, request: AgentTeamWorkerSteerRequest): Promise<AgentTeamWorkerSteerResult> {
     const actor = this.memberActor(agent)
-    const execution = this.requireLedger().workerExecution(request.workerRef)
+    const ledger = this.requireLedger()
+    const execution = ledger.workerExecution(request.workerRef)
     if (execution === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${request.workerRef}' was started by this Team.`)
+    const instruction = request.instruction.trim()
+    if (instruction === '') throw new WorkerRefusal('worker_steer_required', 'A steer needs the instruction the Worker should take on.')
+    const normalized = { requestId: request.requestId, instruction }
+    const chain = this.workerChain(execution)
+    const chainTail = chain.at(-1)!
+    const nativeSessionId = chain.findLast(item => item.nativeSessionId !== undefined)?.nativeSessionId
+    const knownTail = nativeSessionId === undefined ? undefined : ledger.workerLatestInNativeSession(nativeSessionId)
+    const target = knownTail ?? chainTail
+    const receiptRefs = new Set<AgentTeamWorkerRef>([...chain.map(item => item.workerRef), target.workerRef])
+    // Request-id identity comes before authorization or state: another Member's
+    // reuse is a collision, not an instruction this Member may apply anywhere.
+    const priorReceipt = await this.workerRegistry.steerReceipt([...receiptRefs], actor, normalized)
+    if (priorReceipt !== undefined) return priorReceipt
+    const durable = ledger.workerStartedByRequest(request.requestId)
+    if (durable !== undefined) {
+      const sameConversation = nativeSessionId !== undefined
+        && ledger.workerNativeSessionOf(durable.workerRef) === nativeSessionId
+      if (durable.task !== instruction || durable.initiatedBy !== actor.memberId
+        || durable.continuedFrom === undefined
+        || (!this.workerChainContains(durable, execution.workerRef) && !sameConversation)) {
+        throw new WorkerRefusal('worker_steer_conflict', `Request id '${request.requestId}' already started another execution; `
+          + 'use a new request id for this instruction.')
+      }
+      if (durable.state === 'running' && this.workerRegistry.get(durable.workerRef) === undefined) {
+        throw new WorkerRefusal('worker_unconfirmed', `Worker '${durable.workerRef}' was started by a Host that no longer holds its `
+          + 'handle, so it cannot be steered.')
+      }
+      return Object.freeze({ workerRef: durable.workerRef, engine: durable.engine, state: 'started' as const,
+        ...(durable.continuedFrom === undefined ? {} : { continuedFrom: durable.continuedFrom }),
+        runState: this.workerRegistry.liveState(durable.workerRef) ?? durable.state })
+    }
     if (execution.initiatedBy !== actor.memberId) {
       throw new WorkerRefusal('worker_steer_forbidden', `Only the Member who delegated Worker '${request.workerRef}' may add an `
         + 'instruction to it.')
     }
-    if (this.workerRegistry.get(request.workerRef) === undefined) {
-      if (execution.state === 'running') {
-        throw new WorkerRefusal('worker_unconfirmed', `Worker '${request.workerRef}' was started by a Host that no longer holds its `
+    // Same-text dedupe is durable and tied to the receiving execution. Checking
+    // it here, before a running-without-handle refusal or an ended-tail resume,
+    // makes a fresh alias answer the original receipt without native history.
+    const textAlias = await this.workerRegistry.steerTextAlias(actor, normalized, {
+      workerRef: target.workerRef,
+      initiatedBy: target.initiatedBy,
+      continuedFrom: target.workerRef,
+      allowSubmitted: target.state === 'running',
+    })
+    if (textAlias !== undefined) return textAlias
+    if (target.state === 'running') {
+      if (this.workerRegistry.get(target.workerRef) === undefined) {
+        throw new WorkerRefusal('worker_unconfirmed', `Worker '${target.workerRef}' was started by a Host that no longer holds its `
           + 'handle, so this Host cannot reach its engine session; its result stays unconfirmed.')
       }
-      throw new WorkerRefusal('worker_steer_ended', `Worker '${request.workerRef}' already ended: ${execution.state}; there is no turn `
-        + 'to add to.')
+      return this.workerRegistry.steer(target.workerRef, actor,
+        normalized)
     }
-    return this.workerRegistry.steer(request.workerRef, actor,
-      { requestId: request.requestId, instruction: request.instruction })
+    return this.workerRegistry.continueFrom({ actor, parent: agent }, target,
+      normalized)
+  }
+
+  /** Follow the immutable `continuedFrom` chain from a caller's ref to its newest execution. */
+  private workerChain(start: AgentTeamWorkerExecution): readonly AgentTeamWorkerExecution[] {
+    const ledger = this.requireLedger()
+    const chain: AgentTeamWorkerExecution[] = []
+    let current = start
+    const seen = new Set<AgentTeamWorkerRef>()
+    while (!seen.has(current.workerRef)) {
+      seen.add(current.workerRef)
+      chain.push(current)
+      const next = ledger.workerSuccessor(current.workerRef)
+      if (next === undefined) return Object.freeze(chain)
+      current = next
+    }
+    throw new WorkerRefusal('worker_unknown', `Worker '${start.workerRef}' has a cyclic continuation chain.`)
+  }
+
+  /** Whether one execution belongs to the chain rooted at a caller's requested ref. */
+  private workerChainContains(execution: AgentTeamWorkerExecution, workerRef: AgentTeamWorkerRef): boolean {
+    const ledger = this.requireLedger()
+    let current: AgentTeamWorkerExecution | undefined = execution
+    const seen = new Set<AgentTeamWorkerRef>()
+    while (current !== undefined && !seen.has(current.workerRef)) {
+      if (current.workerRef === workerRef) return true
+      seen.add(current.workerRef)
+      current = current.continuedFrom === undefined ? undefined : ledger.workerExecution(current.continuedFrom)
+    }
+    return false
   }
 
   /** One run's shape for the Human's list, whichever record of it is being read. */
@@ -4032,6 +4115,8 @@ export default class AgentTeam extends TypertRemoteService {
       native: Object.freeze({
         ...(execution.nativeSessionId === undefined ? {} : { threadId: execution.nativeSessionId }),
         ...(execution.nativeTurnId === undefined ? {} : { turnId: execution.nativeTurnId }),
+        ...(execution.nativeTurnIds === undefined ? {} : { turnIds: execution.nativeTurnIds }),
+        ...(execution.nativeInputIds === undefined ? {} : { inputIds: execution.nativeInputIds }),
         ...(execution.nativeStorage === undefined ? {} : { storage: execution.nativeStorage }),
       }),
       history,

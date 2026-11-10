@@ -203,6 +203,12 @@ import type {
   AgentTeamUpdateMemberRequest,
   AgentTeamView,
   AgentTeamWorkerAnswer,
+  AgentTeamWorkerSteerAdmission,
+  AgentTeamWorkerSteerAdmissionWrite,
+  AgentTeamWorkerSteerAdmittedOperation,
+  AgentTeamWorkerSteerRecordedOperation,
+  AgentTeamWorkerSteerRequestState,
+  AgentTeamWorkerSteerStoredOutcome,
   AgentTeamWorkerExecution,
   AgentTeamWorkerRef,
   AgentTeamWorkerSettledActivity,
@@ -280,9 +286,10 @@ export const TASK_BOARD_FINISHED_PER_PROJECT = 5
  * closing ends every Attention row, so refusing the follow left a finished Task with no follower to hand it to.
  * Version 5 addresses published subscription events to the members a subscription names. Version 6 adds the two
  * delegated-Worker records: a build that implements them declares it, so an older build refuses such a ledger by name
- * instead of failing on an unknown operation kind mid-replay.
+ * instead of failing on an unknown operation kind mid-replay. Version 7 adds continuation links and the native turn /
+ * input arrays settled with a Worker; version-6 Worker records stay valid without those fields.
  */
-export const AGENT_TEAM_RULES_VERSION = 6
+export const AGENT_TEAM_RULES_VERSION = 7
 
 /**
  * The bounded, single-line reason a finished run gives its Thread. It is derived
@@ -611,6 +618,20 @@ interface AgentTeamDurableMemberResult {
 
 export type { AgentTeamDurableMemberResult }
 
+/**
+ * One readable native-record anchor in a continuation chain. A continuation that
+ * failed before opening its own session has no anchor, so a later explicit
+ * continuation inherits the nearest predecessor's anchor while still linking to
+ * the failed tail as its direct predecessor.
+ */
+export interface WorkerResumeAnchor {
+  readonly nativeSessionId: string
+  readonly nativeStorage: string
+  readonly nativeTurnId?: string | undefined
+  readonly nativeTurnIds?: readonly string[] | undefined
+  readonly nativeInputIds?: readonly string[] | undefined
+}
+
 
 /**
  * Everything one Thread read durably claims, plus the projection state the
@@ -740,6 +761,12 @@ interface Projection {
   readonly subscriptionScriptHistory: Map<AgentTeamSubscriptionRef, Map<number, string>>
   /** Delegated Worker runs by ref: the private execution records, materialized from their two durable writes. */
   readonly workerExecutions: Map<AgentTeamWorkerRef, AgentTeamWorkerExecution>
+  /**
+   * Steer admissions and aliases keyed by the caller's request id. This is
+   * private receipt state: it never projects a Thread fact or changes the
+   * receiving execution record.
+   */
+  readonly workerSteerRequests: Map<AgentTeamRequestId, AgentTeamWorkerSteerAdmission>
 }
 
 /** Kinds a rules-version-1 segment rejects (owner operations carry their own check), and the one kind version 2 stops writing. */
@@ -749,6 +776,22 @@ const REPLACED_AT_V2_KINDS: readonly string[] = ['team/message-sent']
 
 /** Kinds only a rules-version-6 segment may carry: a build that never adopted version 6 cannot write them. */
 const V6_ONLY_KINDS: readonly string[] = ['team/worker-started', 'team/worker-settled']
+/** Steer receipts extend the version-7 Worker ledger; a pre-7 segment never carries one. */
+const V7_ONLY_KINDS: readonly string[] = ['team/worker-steer-admitted', 'team/worker-steer-recorded']
+
+type WorkerVersionedExecution = Pick<AgentTeamWorkerStartRecord, 'workerRef' | 'continuedFrom'>
+  & Pick<AgentTeamWorkerSettlement, 'nativeTurnIds' | 'nativeInputIds'>
+
+/** Version 7 extends the version-6 Worker records without changing the kinds themselves. */
+function workerVersion7Problem(execution: WorkerVersionedExecution,
+  rulesVersion: number): string | undefined {
+  if (rulesVersion >= 7) return undefined
+  if (execution.continuedFrom !== undefined) {
+    return `continued Worker '${execution.workerRef}' needs rules version 7; its segment runs version ${rulesVersion}`
+  }
+  if (execution.nativeTurnIds === undefined && execution.nativeInputIds === undefined) return undefined
+  return `native Worker anchors in '${execution.workerRef}' need rules version 7; its segment runs version ${rulesVersion}`
+}
 
 /** One entry of a reader's unread Main stream: why it is unread (ordinary owner unread, a marker, or both). */
 interface MainUnreadItem {
@@ -819,7 +862,7 @@ function emptyProjection(): Projection {
     directMarkersByMember: new Map(), activityMarkersByMember: new Map(), reminderMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map(),
     mainSourcesByProject: new Map(), mainSourceByRef: new Map(), mainMarkers: new Map(), mainMarkersByMember: new Map(), mainAttention: new Map(), humanMainWatermarks: new Map(),
     subscriptions: new Map(), subscriptionsByProject: new Map(), subscriptionBaselines: new Map(), subscriptionEvents: new Map(), acceptedEventsBySequence: new Map(),
-    subscriptionScriptHistory: new Map(), workerExecutions: new Map() }
+    subscriptionScriptHistory: new Map(), workerExecutions: new Map(), workerSteerRequests: new Map() }
 }
 
 /** Exhaustiveness guard for the closed operation union: adding a kind must update every dispatch. */
@@ -1117,6 +1160,9 @@ export class AgentTeamLedger {
         throw new Error(`Worker '${request.execution.workerRef}' is already recorded`)
       }
       this.assertWorkerBindingFrom(this.state, project.projectRef, request.execution)
+      const workerVersionProblem = workerVersion7Problem(request.execution, this.state.rulesVersion)
+      if (workerVersionProblem !== undefined) throw new Error(workerVersionProblem)
+      this.assertWorkerContinuationFrom(this.state, request.execution)
       const base = this.operationBase({ requestId: request.requestId, actor }, this.nextSequence())
       const execution: AgentTeamWorkerStartRecord = Object.freeze({ ...request.execution, startedAt: base.occurredAt })
       const activity = this.workerStartedActivityFor(execution, base.sequence)
@@ -1150,6 +1196,9 @@ export class AgentTeamLedger {
       // restatement: the binding written at start already fixed it.
       const project = this.state.projects.get(prior.projectRef)
       if (project === undefined) throw new Error(`Worker '${prior.workerRef}' belongs to no Project this Team holds`)
+      this.assertWorkerSettlementFrom(this.state, prior, request.settlement)
+      const workerVersionProblem = workerVersion7Problem(request.settlement, this.state.rulesVersion)
+      if (workerVersionProblem !== undefined) throw new Error(workerVersionProblem)
       const base = this.operationBase({ requestId: request.requestId, actor: HOST_ACTOR }, this.nextSequence())
       const execution: AgentTeamWorkerSettlement = Object.freeze({ ...request.settlement, settledAt: base.occurredAt })
       const activity = this.workerSettledActivityFor(prior, execution, base.sequence)
@@ -1170,6 +1219,149 @@ export class AgentTeamLedger {
     })
   }
 
+  /**
+   * Admit one steer request before the Host reaches the engine. A canonical
+   * admission reserves a receiving execution and instruction (after an explicit
+   * refusal, a fresh request id may reserve the same text again); an alias
+   * reserves a fresh id for a request that already did. Neither writes a public
+   * Worker fact or changes the execution record.
+   */
+  recordWorkerSteerAdmitted(request: AgentTeamWorkerSteerAdmissionWrite): Promise<AgentTeamLedgerResult<AgentTeamWorkerSteerAdmission>> {
+    return this.enqueue(async () => {
+      const existing = this.state.workerSteerRequests.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameWorkerSteerAdmission(existing, request)
+        return this.resolved(existing)
+      }
+      const existingOperation = this.state.byRequest.get(
+        `agent-team:worker-steer-admitted:${request.requestId}` as AgentTeamRequestId)
+      if (existingOperation !== undefined) {
+        if (existingOperation.kind !== 'team/worker-steer-admitted') this.throwRequestCollision(request.requestId)
+        this.assertSameWorkerSteerAdmission(this.workerSteerAdmissionOf(existingOperation), request)
+        return this.resolved(this.workerSteerAdmissionOf(existingOperation))
+      }
+      if (this.state.byRequest.has(request.requestId)) this.throwRequestCollision(request.requestId)
+      const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
+      if (actor.kind !== 'member') throw new Error('a Worker steer belongs to a Member')
+      if (request.initiatedBy !== actor.memberId) throw new Error('a Worker steer belongs to the Member that asked for it')
+      if (request.instruction.trim() === '' || request.instruction !== request.instruction.trim()) {
+        throw new Error('a Worker steer instruction must be non-empty and normalized')
+      }
+      if (request.aliasOf !== undefined && request.aliasOf === request.requestId) {
+        throw new Error('a Worker steer request cannot alias itself')
+      }
+      this.workerSteerReceivingExecution(request, this.state)
+      const alias = request.aliasOf === undefined ? undefined : this.workerSteerAliasTarget(request, this.state)
+      if (alias !== undefined) {
+        if (alias.outcome?.kind === 'refused') throw new Error('a refused Worker steer request cannot be aliased')
+      } else {
+        const prior = this.workerSteerCanonicalAdmissionsFor(request, this.state)
+        if (prior.some(candidate => candidate.outcome?.kind !== 'refused')) {
+          throw new Error(`Worker '${request.workerRef}' already admitted this steer instruction under another request id`)
+        }
+      }
+      const operation: AgentTeamWorkerSteerAdmittedOperation = Object.freeze({
+        ...this.operationBase({ requestId: `agent-team:worker-steer-admitted:${request.requestId}` as AgentTeamRequestId, actor },
+          this.nextSequence()),
+        kind: 'team/worker-steer-admitted',
+        data: Object.freeze({
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          workerRef: request.workerRef,
+          instruction: request.instruction,
+          initiatedBy: request.initiatedBy,
+          ...(request.continuedFrom === undefined ? {} : { continuedFrom: request.continuedFrom }),
+          ...(request.aliasOf === undefined ? {} : { aliasOf: request.aliasOf }),
+        }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.workerSteerAdmissionOf(operation))
+    })
+  }
+
+  /**
+   * Write the one outcome of an admitted steer. The caller must wait for this
+   * record before reporting success; a missing outcome after replay is
+   * unconfirmed, never an invitation to send the instruction again.
+   */
+  recordWorkerSteerRecorded(request: {
+    readonly admissionRequestId: AgentTeamRequestId
+    readonly outcome: AgentTeamWorkerSteerStoredOutcome
+  }): Promise<AgentTeamLedgerResult<{ readonly receipt: AgentTeamOperationReceipt
+    readonly outcome: AgentTeamWorkerSteerStoredOutcome }>> {
+    return this.enqueue(async () => {
+      const recordRequestId = `agent-team:worker-steer-recorded:${request.admissionRequestId}` as AgentTeamRequestId
+      const existing = this.state.byRequest.get(recordRequestId)
+      if (existing !== undefined) {
+        if (existing.kind !== 'team/worker-steer-recorded'
+          || existing.data.admissionRequestId !== request.admissionRequestId
+          || !isDeepStrictEqual(existing.data.outcome, request.outcome)) this.throwRequestCollision(recordRequestId)
+        return this.resolved({ receipt: this.receipt(existing), outcome: this.workerSteerOutcomeOfOperation(existing) })
+      }
+      const admission = this.state.workerSteerRequests.get(request.admissionRequestId)
+      if (admission === undefined) throw new Error(`Worker steer request '${request.admissionRequestId}' was never admitted`)
+      if (admission.aliasOf !== undefined) throw new Error('a Worker steer alias has no separate outcome')
+      if (admission.outcome !== undefined) {
+        if (!isDeepStrictEqual(admission.outcome, request.outcome)) this.throwRequestCollision(recordRequestId)
+        const recorded = this.state.byRequest.get(recordRequestId)
+        if (recorded?.kind !== 'team/worker-steer-recorded') throw new Error('Worker steer outcome has no recorded receipt')
+        return this.resolved({ receipt: this.receipt(recorded), outcome: admission.outcome })
+      }
+      this.assertWorkerSteerOutcome(admission, request.outcome, this.state)
+      const operation: AgentTeamWorkerSteerRecordedOperation = Object.freeze({
+        ...this.operationBase({ requestId: recordRequestId, actor: HOST_ACTOR }, this.nextSequence()),
+        kind: 'team/worker-steer-recorded',
+        data: Object.freeze({ admissionRequestId: request.admissionRequestId,
+          outcome: this.freezeWorkerSteerOutcome(request.outcome) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed({ receipt: this.receipt(operation), outcome: operation.data.outcome })
+    })
+  }
+
+  /**
+   * What one request id means for steering: an admitted steer, a non-steer
+   * operation it collides with, or nothing. A legacy `worker-started` request is
+   * left to `workerStartedByRequest`, so a continuation retry from a ledger
+   * written before steer receipts still answers as it always did.
+   */
+  workerSteerRequest(requestId: AgentTeamRequestId): AgentTeamWorkerSteerRequestState | undefined {
+    const admission = this.state.workerSteerRequests.get(requestId)
+    if (admission !== undefined) return admission
+    const operation = this.state.byRequest.get(requestId)
+    if (operation === undefined || operation.kind === 'team/worker-started') return undefined
+    return Object.freeze({ kind: 'conflict' as const, requestId })
+  }
+
+  /** The effective outcome of an admission, following an alias to its canonical request. */
+  workerSteerOutcome(requestId: AgentTeamRequestId): AgentTeamWorkerSteerStoredOutcome | undefined {
+    const admission = this.state.workerSteerRequests.get(requestId)
+    if (admission === undefined) return undefined
+    return admission.outcome ?? (admission.aliasOf === undefined
+      ? undefined : this.state.workerSteerRequests.get(admission.aliasOf)?.outcome)
+  }
+
+  /**
+   * Canonical admissions for one exact text on one receiving execution, oldest
+   * first. A continuation admission is matchable through its source before the
+   * new execution has opened, when its generated ref is not yet discoverable.
+   * Aliases are excluded: they reserve an id, not another native intent.
+   */
+  workerSteerAdmissionsForText(query: {
+    readonly workerRef?: AgentTeamWorkerRef | undefined
+    readonly instruction: string
+    readonly initiatedBy: AgentTeamMemberId
+    readonly continuedFrom?: AgentTeamWorkerRef | undefined
+  }): readonly AgentTeamWorkerSteerAdmission[] {
+    return Object.freeze([...this.state.workerSteerRequests.values()].filter(admission =>
+      admission.aliasOf === undefined
+      && ((query.workerRef !== undefined && admission.workerRef === query.workerRef)
+        || (query.continuedFrom !== undefined && admission.continuedFrom === query.continuedFrom))
+      && admission.instruction === query.instruction && admission.initiatedBy === query.initiatedBy))
+  }
+
   /** Whether this Host recorded the run and has not recorded its ending. */
   workerRunState(workerRef: AgentTeamWorkerRef): AgentTeamWorkerState | undefined {
     return this.state.workerExecutions.get(workerRef)?.state
@@ -1178,6 +1370,49 @@ export class AgentTeamLedger {
   /** One run's whole durable record, for the Host's stop authorization. */
   workerExecution(workerRef: AgentTeamWorkerRef): AgentTeamWorkerExecution | undefined {
     return this.state.workerExecutions.get(workerRef)
+  }
+
+  /** The one execution directly continued from this run, if any. */
+  workerSuccessor(workerRef: AgentTeamWorkerRef): AgentTeamWorkerExecution | undefined {
+    for (const execution of this.state.workerExecutions.values()) {
+      if (execution.continuedFrom === workerRef) return execution
+    }
+    return undefined
+  }
+
+  /**
+   * The newest execution in one native conversation. A running continuation
+   * inherits the session id through its predecessor until its own settlement, so
+   * this remains the durable way to join an alias ref to work already underway.
+   */
+  workerLatestInNativeSession(nativeSessionId: string): AgentTeamWorkerExecution | undefined {
+    let latest: AgentTeamWorkerExecution | undefined
+    for (const execution of this.state.workerExecutions.values()) {
+      if (this.workerNativeSessionFrom(this.state, execution) === nativeSessionId) latest = execution
+    }
+    return latest
+  }
+
+  /** The native conversation one execution belongs to, inherited through its continuation chain. */
+  workerNativeSessionOf(workerRef: AgentTeamWorkerRef): string | undefined {
+    const execution = this.state.workerExecutions.get(workerRef)
+    return execution === undefined ? undefined : this.workerNativeSessionFrom(this.state, execution)
+  }
+
+  /**
+   * The native-record anchors this execution's chain can resume, nearest first.
+   * A cleanly failed continuation may have no anchor of its own; its predecessor
+   * still identifies the same native conversation for an explicit later try.
+   */
+  workerResumeAnchors(workerRef: AgentTeamWorkerRef): readonly WorkerResumeAnchor[] {
+    const execution = this.state.workerExecutions.get(workerRef)
+    return execution === undefined ? [] : this.workerResumeAnchorsFrom(this.state, execution)
+  }
+
+  /** The execution one request id opened, for a continuation retry that outlives its Host. */
+  workerStartedByRequest(requestId: AgentTeamRequestId): AgentTeamWorkerExecution | undefined {
+    const operation = this.state.byRequest.get(requestId)
+    return operation?.kind === 'team/worker-started' ? this.state.workerExecutions.get(operation.data.execution.workerRef) : undefined
   }
 
   /** Every run one Member initiated, newest start first: the record keeps runs that no live execution backs any more. */
@@ -1297,6 +1532,202 @@ export class AgentTeamLedger {
     if (thread.taskRef !== binding.taskRef) {
       throw new Error(`Task '${binding.taskRef ?? 'none'}' does not belong to Thread '${binding.threadRef}'`)
     }
+  }
+
+  /**
+   * A continued execution keeps the source execution's attribution while adding
+   * one new Team execution. The native session must already be anchored, every
+   * fixed binding must match, and no execution in that native conversation may
+   * still be running. The ledger is the concurrency authority, not the live map.
+   */
+  private assertWorkerContinuationFrom(projection: Projection, execution: Omit<AgentTeamWorkerStartRecord, 'startedAt'>): void {
+    const priorRef = execution.continuedFrom
+    if (priorRef === undefined) return
+    const prior = projection.workerExecutions.get(priorRef)
+    if (prior === undefined) throw new Error(`Worker '${priorRef}' was never recorded by this Team`)
+    if (prior.state === 'running') throw new Error(`Worker '${priorRef}' has not ended, so it cannot be continued`)
+    if (prior.stage === 'dispose') throw new Error(`Worker '${priorRef}' did not confirm cleanup, so it cannot be continued`)
+    const nativeSessionId = this.workerNativeSessionFrom(projection, prior)
+    if (nativeSessionId === undefined) {
+      throw new Error(`Worker '${priorRef}' has no native session in its continuation chain to resume`)
+    }
+    if (prior.initiatedBy !== execution.initiatedBy || prior.projectRef !== execution.projectRef
+      || prior.threadRef !== execution.threadRef || prior.taskRef !== execution.taskRef
+      || prior.engine !== execution.engine || prior.cwd !== execution.cwd) {
+      throw new Error(`Worker '${execution.workerRef}' changed the binding of Worker '${priorRef}'`)
+    }
+    for (const existing of projection.workerExecutions.values()) {
+      if (existing.continuedFrom === priorRef) {
+        throw new Error(`Worker '${priorRef}' already has continuation '${existing.workerRef}'`)
+      }
+    }
+    for (const existing of projection.workerExecutions.values()) {
+      if (existing.state !== 'running') continue
+      if (this.workerNativeSessionFrom(projection, existing) === nativeSessionId) {
+        throw new Error(`native session '${nativeSessionId}' already has a running Worker: ${existing.workerRef}`)
+      }
+    }
+  }
+
+  /** Resolve a chain's native session from the terminal predecessor that recorded it. */
+  private workerNativeSessionFrom(projection: Projection, start: AgentTeamWorkerExecution): string | undefined {
+    let current: AgentTeamWorkerExecution | undefined = start
+    const seen = new Set<AgentTeamWorkerRef>()
+    while (current !== undefined && !seen.has(current.workerRef)) {
+      if (current.nativeSessionId !== undefined) return current.nativeSessionId
+      seen.add(current.workerRef)
+      current = current.continuedFrom === undefined ? undefined : projection.workerExecutions.get(current.continuedFrom)
+    }
+    return undefined
+  }
+
+  /** Every complete native-record anchor in a continuation chain, direct predecessor first. */
+  private workerResumeAnchorsFrom(projection: Projection,
+    start: AgentTeamWorkerExecution): readonly WorkerResumeAnchor[] {
+    const anchors: WorkerResumeAnchor[] = []
+    let current: AgentTeamWorkerExecution | undefined = start
+    const seen = new Set<AgentTeamWorkerRef>()
+    while (current !== undefined && !seen.has(current.workerRef)) {
+      seen.add(current.workerRef)
+      if (current.nativeSessionId !== undefined && current.nativeStorage !== undefined) {
+        anchors.push(Object.freeze({
+          nativeSessionId: current.nativeSessionId,
+          nativeStorage: current.nativeStorage,
+          ...(current.nativeTurnId === undefined ? {} : { nativeTurnId: current.nativeTurnId }),
+          ...(current.nativeTurnIds === undefined ? {} : { nativeTurnIds: current.nativeTurnIds }),
+          ...(current.nativeInputIds === undefined ? {} : { nativeInputIds: current.nativeInputIds }),
+        }))
+      }
+      current = current.continuedFrom === undefined ? undefined : projection.workerExecutions.get(current.continuedFrom)
+    }
+    return Object.freeze(anchors)
+  }
+
+  /** A resumed execution may settle only against the native conversation its chain started with. */
+  private assertWorkerSettlementFrom(projection: Projection, prior: AgentTeamWorkerExecution,
+    settlement: Omit<AgentTeamWorkerSettlement, 'settledAt'>): void {
+    if (prior.continuedFrom === undefined) return
+    const expected = this.workerNativeSessionFrom(projection, prior)
+    // A continuation can fail before resume opens a native session. That ending
+    // has no session identity to compare; once one is present it must be the
+    // conversation the chain started with.
+    if (settlement.nativeSessionId === undefined) return
+    if (expected !== settlement.nativeSessionId) {
+      throw new Error(`Worker '${prior.workerRef}' resumed native session '${expected ?? 'none'}', not `
+        + `'${settlement.nativeSessionId ?? 'none'}'`)
+    }
+  }
+
+  /**
+   * Validate an admission against the receiving execution. A live steer names
+   * an execution the ledger already holds; a continuation admission may name a
+   * not-yet-recorded execution and therefore proves its ownership through the
+   * source it resumes.
+   */
+  private workerSteerReceivingExecution(request: Omit<AgentTeamWorkerSteerAdmissionWrite, 'actor'>,
+    projection: Projection): AgentTeamWorkerExecution | undefined {
+    const source = request.continuedFrom === undefined
+      ? undefined : projection.workerExecutions.get(request.continuedFrom)
+    const target = projection.workerExecutions.get(request.workerRef)
+    if (request.continuedFrom === undefined) {
+      if (target === undefined) throw new Error(`Worker '${request.workerRef}' was never recorded by this Team`)
+      const project = projection.projects.get(target.projectRef)
+      if (project === undefined || project.workspaceId !== request.workspaceId) throw new Error('Worker steer Workspace does not own its execution')
+      if (target.initiatedBy !== request.initiatedBy) throw new Error('a Worker steer belongs to the run initiator')
+      return target
+    }
+    if (source === undefined) throw new Error(`Worker '${request.continuedFrom}' was never recorded by this Team`)
+    if (source.state === 'running') throw new Error(`Worker '${source.workerRef}' has not ended, so it cannot be continued by a steer`)
+    if (source.initiatedBy !== request.initiatedBy) throw new Error('a Worker steer belongs to the run initiator')
+    const project = projection.projects.get(source.projectRef)
+    if (project === undefined || project.workspaceId !== request.workspaceId) throw new Error('Worker steer Workspace does not own its execution')
+    if (target !== undefined) {
+      if (target.continuedFrom !== request.continuedFrom || target.initiatedBy !== request.initiatedBy
+        || target.projectRef !== source.projectRef || target.engine !== source.engine) {
+        throw new Error('a continued Worker steer names a different execution')
+      }
+    }
+    return target
+  }
+
+  /** Resolve and validate the canonical request an alias joins. */
+  private workerSteerAliasTarget(request: Omit<AgentTeamWorkerSteerAdmissionWrite, 'actor'>,
+    projection: Projection): AgentTeamWorkerSteerAdmission {
+    const target = request.aliasOf === undefined ? undefined : projection.workerSteerRequests.get(request.aliasOf)
+    if (target === undefined) throw new Error(`Worker steer alias '${request.aliasOf}' was never admitted`)
+    if (target.aliasOf !== undefined) throw new Error('a Worker steer alias must name a canonical request')
+    if (target.workerRef !== request.workerRef || target.instruction !== request.instruction
+      || target.initiatedBy !== request.initiatedBy || target.continuedFrom !== request.continuedFrom
+      || target.workspaceId !== request.workspaceId) {
+      throw new Error('a Worker steer alias must repeat its canonical request exactly')
+    }
+    return target
+  }
+
+  private workerSteerCanonicalAdmissionsFor(request: Pick<AgentTeamWorkerSteerAdmissionWrite,
+    'workerRef' | 'instruction' | 'initiatedBy'>, projection: Projection): readonly AgentTeamWorkerSteerAdmission[] {
+    return [...projection.workerSteerRequests.values()].filter(admission => admission.aliasOf === undefined
+      && admission.workerRef === request.workerRef && admission.instruction === request.instruction
+      && admission.initiatedBy === request.initiatedBy)
+  }
+
+  private workerSteerAdmissionOf(operation: AgentTeamWorkerSteerAdmittedOperation): AgentTeamWorkerSteerAdmission {
+    return Object.freeze({
+      kind: 'admitted' as const,
+      requestId: operation.data.requestId,
+      operationId: operation.operationId,
+      workspaceId: operation.data.workspaceId,
+      workerRef: operation.data.workerRef,
+      instruction: operation.data.instruction,
+      initiatedBy: operation.data.initiatedBy,
+      ...(operation.data.continuedFrom === undefined ? {} : { continuedFrom: operation.data.continuedFrom }),
+      ...(operation.data.aliasOf === undefined ? {} : { aliasOf: operation.data.aliasOf }),
+    })
+  }
+
+  private workerSteerOutcomeOfOperation(operation: AgentTeamWorkerSteerRecordedOperation): AgentTeamWorkerSteerStoredOutcome {
+    return operation.data.outcome
+  }
+
+  private freezeWorkerSteerOutcome(outcome: AgentTeamWorkerSteerStoredOutcome): AgentTeamWorkerSteerStoredOutcome {
+    if (outcome.kind === 'submitted') return Object.freeze({ kind: 'submitted' as const,
+      result: Object.freeze({ ...outcome.result }) })
+    return Object.freeze({ kind: outcome.kind, refusal: Object.freeze({ ...outcome.refusal }) })
+  }
+
+  private assertWorkerSteerOutcome(admission: AgentTeamWorkerSteerAdmission,
+    outcome: AgentTeamWorkerSteerStoredOutcome, projection: Projection): void {
+    if (outcome.kind !== 'submitted') {
+      if (outcome.refusal.code.trim() === '' || outcome.refusal.message.trim() === '') {
+        throw new Error('invalid Worker steer refusal')
+      }
+      return
+    }
+    const { result } = outcome
+    if (result.workerRef !== admission.workerRef) throw new Error('Worker steer result names another execution')
+    const execution = projection.workerExecutions.get(admission.workerRef)
+    if (admission.continuedFrom === undefined) {
+      if (execution === undefined || execution.engine !== result.engine || result.state !== 'submitted'
+        || result.continuedFrom !== undefined) throw new Error('invalid submitted Worker steer result')
+      return
+    }
+    const source = projection.workerExecutions.get(admission.continuedFrom)
+    if (source === undefined || result.state !== 'started' || result.continuedFrom !== admission.continuedFrom
+      || result.engine !== source.engine) throw new Error('invalid started Worker steer result')
+    if (execution !== undefined && (execution.continuedFrom !== admission.continuedFrom
+      || execution.engine !== result.engine)) throw new Error('started Worker steer result names another execution')
+  }
+
+  private assertSameWorkerSteerAdmission(existing: AgentTeamWorkerSteerAdmission,
+    request: AgentTeamWorkerSteerAdmissionWrite): void {
+    const same = existing.requestId === request.requestId
+      && existing.workspaceId === request.workspaceId
+      && existing.workerRef === request.workerRef
+      && existing.instruction === request.instruction
+      && existing.initiatedBy === request.initiatedBy
+      && existing.continuedFrom === request.continuedFrom
+      && existing.aliasOf === request.aliasOf
+    if (!same) this.throwRequestCollision(request.requestId)
   }
 
   private workerStartedRecorded(operation: AgentTeamOperation): AgentTeamWorkerStartedRecorded {
@@ -4453,6 +4884,11 @@ export class AgentTeamLedger {
         // its result reaches the initiator's own session and no shared view.
         return operation.data.activity === undefined ? []
           : [{ kind: 'project', projectRef: operation.data.activity.projectRef }, { kind: 'thread', threadRef: operation.data.activity.threadRef }]
+      case 'team/worker-steer-admitted':
+      case 'team/worker-steer-recorded':
+        // A steer receipt is the private answer to the caller that already has
+        // the execution ref. It writes no Thread fact, revision, or Worker row.
+        return []
       case 'team/project-owner-added':
         // Ownership shows on the Project rows and widens who sees the Project.
         return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
@@ -4559,6 +4995,9 @@ export class AgentTeamLedger {
       case 'team/worker-started':
       case 'team/worker-settled':
         return operation.data.activity === undefined ? [] : [operation.data.activity.threadRef]
+      case 'team/worker-steer-admitted':
+      case 'team/worker-steer-recorded':
+        return []
       case 'team/project-member-removed':
       case 'team/project-archived':
       case 'team/member-removed':
@@ -4667,6 +5106,23 @@ export class AgentTeamLedger {
     }
     if (V6_ONLY_KINDS.includes(operation.kind) && projection.rulesVersion < 6) {
       throw new Error(`agent-team operation ${operation.sequence} (${operation.kind}) needs rules version 6; its segment runs version ${projection.rulesVersion}`)
+    }
+    if (V7_ONLY_KINDS.includes(operation.kind) && projection.rulesVersion < 7) {
+      throw new Error(`agent-team operation ${operation.sequence} (${operation.kind}) needs rules version 7; its segment runs version ${projection.rulesVersion}`)
+    }
+    // A caller's steer request id may also be the id of the continuation it
+    // opens. No other record may reuse that id while a steer admission owns it.
+    const admittedSteer = projection.workerSteerRequests.get(operation.requestId)
+    if (admittedSteer !== undefined && operation.kind !== 'team/worker-started') {
+      throw this.requestCollisionError(operation.requestId)
+    }
+    if (operation.kind === 'team/worker-started') {
+      const workerVersionProblem = workerVersion7Problem(operation.data.execution, projection.rulesVersion)
+      if (workerVersionProblem !== undefined) throw new Error(workerVersionProblem)
+    }
+    if (operation.kind === 'team/worker-settled') {
+      const workerVersionProblem = workerVersion7Problem(operation.data.execution, projection.rulesVersion)
+      if (workerVersionProblem !== undefined) throw new Error(workerVersionProblem)
     }
     if (operation.kind === 'team/project-created') {
       assertHuman()
@@ -5328,12 +5784,19 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/worker-started') {
       const actor = assertMember()
       const { execution, activity } = operation.data
+      const steer = projection.workerSteerRequests.get(operation.requestId)
+      if (steer !== undefined && (steer.aliasOf !== undefined || steer.workerRef !== execution.workerRef
+        || steer.continuedFrom !== execution.continuedFrom || steer.instruction !== execution.task
+        || steer.initiatedBy !== execution.initiatedBy || steer.workspaceId !== operation.data.workspaceId)) {
+        throw new Error('invalid Worker start for an admitted steer')
+      }
       const project = projection.projects.get(execution.projectRef)
       if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
         || execution.initiatedBy !== actor.memberId || !this.isProjectOwnerFrom(projection, project.projectRef, actor.memberId)
         || execution.startedAt !== operation.occurredAt || projection.workerExecutions.has(execution.workerRef)
         || execution.task.trim() === '' || execution.cwd.trim() === '') throw new Error('invalid Worker start')
       this.assertWorkerBindingFrom(projection, project.projectRef, execution)
+      this.assertWorkerContinuationFrom(projection, execution)
       this.addRef(refs, execution.workerRef)
       if (execution.threadRef === undefined) {
         if (activity !== undefined) throw new Error('invalid Worker start activity')
@@ -5356,6 +5819,7 @@ export class AgentTeamLedger {
       if (prior === undefined || prior.state !== 'running' || project === undefined
         || project.workspaceId !== operation.data.workspaceId || settlement.settledAt !== operation.occurredAt
         || settlement.workerRef !== prior.workerRef) throw new Error('invalid Worker settlement')
+      this.assertWorkerSettlementFrom(projection, prior, settlement)
       if (prior.threadRef === undefined) {
         if (activity !== undefined || inbox.activityMarkers.added.length > 0
           || inbox.activityMarkers.removed.length > 0) throw new Error('invalid Worker settlement projection')
@@ -5373,6 +5837,40 @@ export class AgentTeamLedger {
         if (!isDeepStrictEqual(inbox, expected)) throw new Error('invalid Worker settlement inbox projection')
       }
       this.validateInboxDelta(inbox, projection, refs, [], [], activity === undefined ? [] : [activity])
+      return
+    }
+    if (operation.kind === 'team/worker-steer-admitted') {
+      const actor = assertMember()
+      const { requestId, workspaceId, workerRef, instruction, initiatedBy, continuedFrom, aliasOf } = operation.data
+      if (initiatedBy !== actor.memberId || instruction.trim() === '' || instruction !== instruction.trim()
+        || !this.participatesInFrom(projection, initiatedBy, workspaceId)
+        || projection.workerSteerRequests.has(requestId) || projection.byRequest.has(requestId)) {
+        throw new Error('invalid Worker steer admission')
+      }
+      const admission: Omit<AgentTeamWorkerSteerAdmissionWrite, 'actor'> = { requestId, workspaceId, workerRef,
+        instruction, initiatedBy, ...(continuedFrom === undefined ? {} : { continuedFrom }),
+        ...(aliasOf === undefined ? {} : { aliasOf }) }
+      this.workerSteerReceivingExecution(admission, projection)
+      if (aliasOf === undefined) {
+        const prior = this.workerSteerCanonicalAdmissionsFor(admission, projection)
+        if (prior.some(candidate => candidate.outcome?.kind !== 'refused')) {
+          throw new Error('Worker steer admission repeats an instruction without a refusal')
+        }
+      } else {
+        const alias = this.workerSteerAliasTarget(admission, projection)
+        if (alias.outcome?.kind === 'refused') throw new Error('invalid refused Worker steer alias')
+      }
+      return
+    }
+    if (operation.kind === 'team/worker-steer-recorded') {
+      if (operation.actor.kind !== 'host' || operation.actor.handle !== HOST_ACTOR.handle) {
+        throw new Error('invalid Worker steer outcome authority')
+      }
+      const admission = projection.workerSteerRequests.get(operation.data.admissionRequestId)
+      if (admission === undefined || admission.aliasOf !== undefined || admission.outcome !== undefined) {
+        throw new Error('invalid Worker steer outcome')
+      }
+      this.assertWorkerSteerOutcome(admission, operation.data.outcome, projection)
       return
     }
     if (operation.kind === 'team/dm-sent') {
@@ -6273,13 +6771,26 @@ export class AgentTeamLedger {
       if (operation.data.activity !== undefined) this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
       return
     }
+    if (operation.kind === 'team/worker-steer-admitted') {
+      target.workerSteerRequests.set(operation.data.requestId, this.workerSteerAdmissionOf(operation))
+      return
+    }
+    if (operation.kind === 'team/worker-steer-recorded') {
+      const admission = target.workerSteerRequests.get(operation.data.admissionRequestId)
+      if (admission === undefined) throw new Error('agent-team replay recorded an outcome for a steer it never admitted')
+      target.workerSteerRequests.set(admission.requestId, Object.freeze({ ...admission, outcome: operation.data.outcome }))
+      return
+    }
     if (operation.kind === 'team/worker-settled') {
       const prior = target.workerExecutions.get(operation.data.execution.workerRef)
       if (prior === undefined) throw new Error('agent-team replay settled a Worker run it never recorded')
-      const { state, settledAt, nativeSessionId, nativeTurnId, nativeStorage, stage, output, diagnostic } = operation.data.execution
+      const { state, settledAt, nativeSessionId, nativeTurnId, nativeTurnIds, nativeInputIds,
+        nativeStorage, stage, output, diagnostic } = operation.data.execution
       target.workerExecutions.set(prior.workerRef, Object.freeze({ ...prior, state, settledAt,
         ...(nativeSessionId === undefined ? {} : { nativeSessionId }),
         ...(nativeTurnId === undefined ? {} : { nativeTurnId }),
+        ...(nativeTurnIds === undefined ? {} : { nativeTurnIds: Object.freeze([...nativeTurnIds]) }),
+        ...(nativeInputIds === undefined ? {} : { nativeInputIds: Object.freeze([...nativeInputIds]) }),
         ...(nativeStorage === undefined ? {} : { nativeStorage }),
         ...(stage === undefined ? {} : { stage }),
         ...(output === undefined ? {} : { output }),
@@ -8639,7 +9150,11 @@ export class AgentTeamLedger {
   }
 
   private throwRequestCollision(requestId: AgentTeamRequestId): never {
-    throw new Error(`agent-team request id '${requestId}' was reused with a different operation or payload`)
+    throw this.requestCollisionError(requestId)
+  }
+
+  private requestCollisionError(requestId: AgentTeamRequestId): Error {
+    return new Error(`agent-team request id '${requestId}' was reused with a different operation or payload`)
   }
 
   private projectResult(operation: AgentTeamProjectCreatedOperation): AgentTeamCreateProjectResult {

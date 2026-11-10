@@ -91,4 +91,4 @@ That journey measures the band as well as driving it: one band holds every contr
 
 The Worker subscription scenario replays model responses through the real Agent loop: a timer publication wakes an owner, whose declared `team_worker` calls start two bound runs. A directed Human reply makes the owner stop just one, observe its confirmed Thread settlement, and keep answering while its sibling runs.
 
-Only the model and Codex executable are stand-ins; settings, notification delivery, tool execution, and ordinary DSH restoration are real. Published-CLI probes separately verify native engine behavior; replay does not prove model judgment or Claude same-turn steering.
+Only the model and Codex executable are stand-ins; settings, notification delivery, tool execution, and ordinary DSH restoration are real. Published-CLI probes separately verify native engine behavior; replay does not prove model judgment or native steering.

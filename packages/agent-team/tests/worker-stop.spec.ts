@@ -26,7 +26,7 @@ import AgentTeam from '../src/index.ts'
 import type { Config } from '../src/host-row-settings.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
-import { WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC, WorkerFailure } from '../src/worker-runtime.ts'
+import { carryWorkerAnchors, WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC, WorkerFailure } from '../src/worker-runtime.ts'
 import type { AgentTeamMemberActor, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamRequestId,
   AgentTeamTaskRef, AgentTeamThreadRef, AgentTeamWorkerRef } from '../src/types.ts'
 
@@ -98,7 +98,7 @@ function fakeEngines(): FakeEngines {
       state.workers.set(childId, worker)
       return {
         childId,
-        result: result.promise,
+        result: result.promise.then(outcome => carryWorkerAnchors(outcome, { nativeSessionId: `native:${childId}` })),
         dispose: async () => {
           worker.disposed = true
           state.order.push(`dispose:${childId}`)

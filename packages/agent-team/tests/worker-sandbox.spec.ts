@@ -35,6 +35,36 @@ describe('the Codex sandbox policy a Worker carries', () => {
     expect(process.env[KEY]).toBeUndefined()
   })
 
+  it('restores the host environment before two concurrent opens resolve', async () => {
+    process.env[KEY] = 'read-only'
+    const first = Promise.withResolvers<void>()
+    const second = Promise.withResolvers<void>()
+    let firstSaw: string | undefined
+    let secondSaw: string | undefined
+    const openingFirst = withCodexSandbox({ [KEY]: 'workspace-write' }, () => {
+      firstSaw = process.env[KEY]
+      return first.promise
+    })
+    const openingSecond = withCodexSandbox({ [KEY]: 'danger-full-access' }, () => {
+      secondSaw = process.env[KEY]
+      return second.promise
+    })
+
+    // OAR reads this before its first await. Each open has already taken its own
+    // value, and the Host is back to its original value before either resolves.
+    expect(firstSaw).toBe('workspace-write')
+    expect(secondSaw).toBe('danger-full-access')
+    expect(process.env[KEY]).toBe('read-only')
+
+    // Reverse completion order is what used to write the first temporary value
+    // back over the Host's own setting.
+    second.resolve()
+    await openingSecond
+    first.resolve()
+    await openingFirst
+    expect(process.env[KEY]).toBe('read-only')
+  })
+
   it('resolves a stored row that never named the Codex policy to full access', () => {
     // A Worker runs work the operator already delegated: the bundle adds no second
     // permission gate, and narrowing one is the operator's explicit opt-in.

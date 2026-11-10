@@ -588,6 +588,12 @@ export interface AgentTeamWorkerStartRecord {
   readonly task: string
   readonly cwd: string
   readonly startedAt: string
+  /**
+   * The execution this one continues by resuming its native conversation.
+   * Present only on an explicitly continued Worker. The predecessor's terminal
+   * record is immutable; this is the new execution's own start fact.
+   */
+  readonly continuedFrom?: AgentTeamWorkerRef | undefined
 }
 
 /**
@@ -604,6 +610,10 @@ export interface AgentTeamWorkerExecution extends AgentTeamWorkerStartRecord {
   readonly nativeSessionId?: string | undefined
   /** The engine's own identity for the turn this run drove, once one started. */
   readonly nativeTurnId?: string | undefined
+  /** The most recent native turns this execution drove, bounded to 128 at settlement. */
+  readonly nativeTurnIds?: readonly string[] | undefined
+  /** The most recent submitted native input UUIDs, bounded to 128 at settlement. */
+  readonly nativeInputIds?: readonly string[] | undefined
   /** The absolute path of the engine's own record for that session: reported by Codex, derived from the cwd Claude reported and the environment the run opened with. */
   readonly nativeStorage?: string | undefined
   /** Where a failed run came apart; absent when it did not fail. */
@@ -623,6 +633,10 @@ export interface AgentTeamWorkerSettlement {
   readonly nativeSessionId?: string | undefined
   /** The engine's own identity for the turn this run drove, once one started. */
   readonly nativeTurnId?: string | undefined
+  /** The most recent native turns this execution drove, bounded to 128 at settlement. */
+  readonly nativeTurnIds?: readonly string[] | undefined
+  /** The most recent submitted native input UUIDs, bounded to 128 at settlement. */
+  readonly nativeInputIds?: readonly string[] | undefined
   /** The absolute path of the engine's own record for that session: reported by Codex, derived from the cwd Claude reported and the environment the run opened with. */
   readonly nativeStorage?: string | undefined
   /** Where a failed run came apart; absent when it did not fail. */

@@ -24,6 +24,14 @@ The special Member corresponding to the current Harness user. It participates in
 
 A Member created and managed by Team. Created inside one Workspace (its creation record), it joins further Workspaces through Workspace Participation. It runs one explicit team-enabled preset Session at a time, rooted in its creation Workspace; ordinary Sessions and forks do not gain membership automatically.
 
+## Worker Execution
+
+One Team-owned execution of a native Codex or Claude session, identified by an immutable `worker:` ref. It records the initiating Member, Project, optional Thread and Task, engine, cwd, start, one terminal state, result, and the native session/turn/input anchors the Host observed. A Worker holds no Team identity and cannot claim, accept, or answer for its initiator.
+
+A steer is input to the execution's same native session. While it runs, OAR may place the input in the current turn, queue it for the next turn, or prompt an idle native session; the execution remains one Team fact until every accepted input has ended. The receipt means submitted, not model-read or fixed-turn delivery.
+
+After the latest execution in a native-session chain ends cleanly, steer may resume that session as a new execution whose `continuedFrom` names the predecessor. The predecessor's terminal record never changes. If a continuation failed before opening its own native session, a later continuation may use the nearest readable predecessor anchor while still naming the failed execution directly. A native session has at most one running Team execution and each execution at most one direct successor; concurrent continuations join the established execution instead of forking the conversation.
+
 ## Member Capabilities
 
 Durable capability intent on the Member entity (optional `capabilities` field: `tools.allow` and `skills.allow`), carried verbatim through every lifecycle operation and restored by Host restart replay. Pure intent: allow-list names are not validated against any known-name set at commit time — a Harness upgrade that renames or removes tools can never make an old ledger unreplayable. Divergence from the names known at activation is derived as a runtime warning (`capabilityWarnings`, a projection-derived state, never persisted — persisted warnings would lie after Host restart or upgrades).

@@ -29,6 +29,7 @@ vi.mock('@botiverse/oar', () => ({
         return () => {}
       },
       prompt: async () => ({ kind: 'accepted', seq: 1 }),
+      records: () => [],
       abort: async () => {},
       dispose: async () => {
         if (engine.disposeFails) throw new Error('the engine process did not exit')

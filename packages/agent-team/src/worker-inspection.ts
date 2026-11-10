@@ -61,6 +61,10 @@ export interface WorkerHistoryAnchors {
   readonly engine: WorkerEngine
   readonly nativeSessionId?: string | undefined
   readonly nativeTurnId?: string | undefined
+  /** The bounded native turn anchors retained at settlement; older records carry only `nativeTurnId`. */
+  readonly nativeTurnIds?: readonly string[] | undefined
+  /** The bounded native input UUIDs retained at settlement; Claude names turns by these. */
+  readonly nativeInputIds?: readonly string[] | undefined
   readonly nativeStorage?: string | undefined
 }
 
@@ -152,17 +156,20 @@ interface Contribution {
   readonly fragments: readonly AgentTeamWorkerInspectionFragment[]
   /** A failure sentence for the pass to report after it: the last one wins, so retries do not flood the report. */
   readonly failure?: string | undefined
+  /** The owned Codex turn this record closes, once all of its own facts are present. */
+  readonly completedTurnId?: string | undefined
 }
 
 const NOTHING: Contribution = Object.freeze({ matched: false, fragments: Object.freeze([]) })
 
 /** The fragments one record contributes, if it is one of the few this reader understands. */
-function fragmentsOf(record: RawRecord, turnId: string | undefined, engine: WorkerEngine): Contribution {
-  return engine === 'claude' ? claudeFragmentsOf(record, turnId) : codexFragmentsOf(record, turnId)
+function fragmentsOf(record: RawRecord, turnIds: ReadonlySet<string>, activeClaudeTurn: string | undefined,
+  engine: WorkerEngine): Contribution {
+  return engine === 'claude' ? claudeFragmentsOf(record, activeClaudeTurn) : codexFragmentsOf(record, turnIds)
 }
 
 /** Codex's record: a session header, turn contexts, and event messages keyed by the native turn id. */
-function codexFragmentsOf(record: RawRecord, turnId: string | undefined): Contribution {
+function codexFragmentsOf(record: RawRecord, turnIds: ReadonlySet<string>): Contribution {
   if (record.type === 'session_meta') {
     const parts = joined([
       labelled('engine', textOf(record.payload.cli_version)),
@@ -172,7 +179,8 @@ function codexFragmentsOf(record: RawRecord, turnId: string | undefined): Contri
     ])
     return { matched: false, fragments: parts.length === 0 ? [] : [{ kind: 'session', text: `Native session record: ${parts.join(' · ')}` }] }
   }
-  if (turnId === undefined || record.payload.turn_id !== turnId) return NOTHING
+  const turnId = textOf(record.payload.turn_id)
+  if (turnId === undefined || !turnIds.has(turnId)) return NOTHING
   if (record.type === 'turn_context') {
     const sandbox = recordOf(record.payload.sandbox_policy)
     const parts = joined([
@@ -184,7 +192,7 @@ function codexFragmentsOf(record: RawRecord, turnId: string | undefined): Contri
   }
   if (record.type !== 'event_msg') return NOTHING
   if (record.payload.type === 'turn_aborted') {
-    return { matched: true, fragments: [],
+    return { matched: true, fragments: [], completedTurnId: turnId,
       failure: `Native turn interrupted: ${textOf(record.payload.reason) ?? 'no reason reported'}` }
   }
   if (record.payload.type !== 'task_complete') return NOTHING
@@ -192,9 +200,9 @@ function codexFragmentsOf(record: RawRecord, turnId: string | undefined): Contri
   // already reaches the initiator through the run's normal result, so reading it
   // here would only duplicate text this reader cannot vouch for.
   const message = textOf(recordOf(record.payload.error)?.message)
-  if (message === undefined) return { matched: true, fragments: [] }
+  if (message === undefined) return { matched: true, fragments: [], completedTurnId: turnId }
   const duration = typeof record.payload.duration_ms === 'number' ? ` after ${record.payload.duration_ms} ms` : ''
-  return { matched: true, fragments: [], failure: `Native turn failed${duration}: ${message}` }
+  return { matched: true, fragments: [], completedTurnId: turnId, failure: `Native turn failed${duration}: ${message}` }
 }
 
 /**
@@ -212,14 +220,14 @@ function isClaudeRootPrompt(record: RawRecord): boolean {
 }
 
 /**
- * Claude's record: a queue header, then the prompting user message OAR wrote with
- * this run's input id, then the turn's own assistant and system lines. The prompt
- * line is the turn anchor, and the session facts ride it: Claude keeps no separate
- * session header. A sidechain line belongs to a subagent, not to this run.
+ * Claude's record: a queue header, then a prompting user message whose UUID is
+ * one of this execution's inputs, then that turn's assistant and system lines.
+ * The prompt line is the turn anchor, and the session facts ride it: Claude keeps
+ * no separate session header. A sidechain line belongs to a subagent.
  */
 function claudeFragmentsOf(record: RawRecord, turnId: string | undefined): Contribution {
-  if (turnId === undefined || record.raw.isSidechain === true) return NOTHING
-  if (record.type === 'user' && record.raw.uuid === turnId) {
+  if (record.raw.isSidechain === true) return NOTHING
+  if (record.type === 'user' && textOf(record.raw.uuid) === turnId) {
     const parts = joined([
       labelled('engine', textOf(record.raw.version)),
       labelled('cwd', textOf(record.raw.cwd)),
@@ -227,6 +235,7 @@ function claudeFragmentsOf(record: RawRecord, turnId: string | undefined): Contr
     ])
     return { matched: true, fragments: parts.length === 0 ? [] : [{ kind: 'session', text: `Native session record: ${parts.join(' · ')}` }] }
   }
+  if (turnId === undefined) return NOTHING
   const failure = claudeFailureOf(record)
   if (failure !== undefined) return { matched: false, fragments: [], failure }
   if (record.type !== 'assistant') return NOTHING
@@ -279,7 +288,8 @@ type ReadOutcome =
   | { readonly kind: 'failed'; readonly reason: string }
 
 async function readRecord(location: string, expected: { readonly dev: number; readonly ino: number },
-  size: number, engine: WorkerEngine, nativeSessionId: string, turnId: string | undefined): Promise<ReadOutcome> {
+  size: number, engine: WorkerEngine, nativeSessionId: string,
+  turnIds: ReadonlySet<string>, inputIds: ReadonlySet<string>): Promise<ReadOutcome> {
   const handle = await open(location, 'r')
   try {
     const opened = await handle.stat()
@@ -298,11 +308,15 @@ async function readRecord(location: string, expected: { readonly dev: number; re
     let carry = ''
     let identified = false
     let matched = false
-    let seenTurn = false
+    let activeClaudeTurn: string | undefined
+    let seenOwnedClaudePrompt = false
     let stopped = false
     let pendingFailure: string | undefined
     let withheld = 0
+    let omitted = false
     let first = true
+    const endedOwnTurns = new Set<string>()
+    const seenFragments = new Set<string>()
     const take = (line: string): string | undefined => {
       if (line.trim() === '') return undefined
       const record = parseRecord(line)
@@ -321,30 +335,51 @@ async function readRecord(location: string, expected: { readonly dev: number; re
         identified = true
       }
       if (record === undefined) return undefined
-      // A native session that is continued later appends the next root prompt
-      // after this turn's records. The pass ends there: the later turn's model
-      // and failure are not this run's, and reading on would attribute them to it.
-      if (engine === 'claude' && seenTurn && isClaudeRootPrompt(record)) {
-        stopped = true
-        return undefined
+      if (engine === 'claude' && isClaudeRootPrompt(record)) {
+        const promptId = textOf(record.raw.uuid)
+        if (promptId !== undefined && inputIds.has(promptId)) {
+          activeClaudeTurn = promptId
+          seenOwnedClaudePrompt = true
+        } else if (!seenOwnedClaudePrompt) {
+          // A resumed execution shares the native file with its predecessors.
+          // Their prompts are the historical prefix, not another controller
+          // taking over after this execution's own input.
+          return undefined
+        } else {
+          // A later root prompt this execution did not submit is another
+          // controller's continuation. Stop before its model or failure facts;
+          // this is a boundary, not an incomplete read.
+          stopped = true
+          return undefined
+        }
       }
-      // Claude names its turn by the prompting user message: records before that
-      // line belong to an earlier turn (the Team never resumes, but the reader
-      // does not rely on that) and are not this run's.
-      if (engine === 'claude' && !seenTurn && !(record.type === 'user' && record.raw.uuid === turnId)) return undefined
-      const contribution = fragmentsOf(record, turnId, engine)
+      // Records before this execution's first owned prompt belong to an older
+      // turn in the resumed native conversation.
+      if (engine === 'claude' && activeClaudeTurn === undefined) return undefined
+      const contribution = fragmentsOf(record, turnIds, activeClaudeTurn, engine)
       if (contribution.matched) {
         matched = true
-        if (engine === 'claude') seenTurn = true
       }
       if (contribution.failure !== undefined) pendingFailure = contribution.failure
+      if (contribution.completedTurnId !== undefined) endedOwnTurns.add(contribution.completedTurnId)
       for (const fragment of contribution.fragments) {
-        if (fragments.length >= WORKER_HISTORY_MAX_FRAGMENTS) break
+        const key = `${fragment.kind}\0${fragment.text}`
+        if (seenFragments.has(key)) continue
+        seenFragments.add(key)
         if (looksLikeCredential(fragment.text)) {
           withheld += 1
           continue
         }
+        if (fragments.length >= WORKER_HISTORY_MAX_FRAGMENTS) {
+          omitted = true
+          continue
+        }
         fragments.push(Object.freeze({ kind: fragment.kind, text: truncateToCharacters(fragment.text, WORKER_FRAGMENT_MAX_CHARACTERS) }))
+      }
+      if (turnIds.size > 0 && endedOwnTurns.size === turnIds.size) {
+        // All turns this execution drove are complete. Anything after them in
+        // the same file belongs to a later continuation, not this Worker.
+        stopped = true
       }
       return undefined
     }
@@ -367,20 +402,27 @@ async function readRecord(location: string, expected: { readonly dev: number; re
     // A record longer than the bound is not finished, so its trailing bytes are
     // not a line: parsing them would spend the whole budget on a fragment the
     // reader never claimed to read.
-    const truncated = remaining === 0 && position < size
+    const byteTruncated = remaining === 0 && position < size
     carry += decoder.end()
-    if (!stopped && !truncated && carry.trim() !== '') {
+    if (!stopped && !byteTruncated && carry.trim() !== '') {
       const refusal = take(carry)
       if (refusal !== undefined) return { kind: 'refused', reason: refusal }
     }
     // One failure sentence per pass: retries repeat the same error, and the last
     // one is the one the engine settled on. It is appended after the facts, so a
     // report reads as session, turn, then what went wrong.
-    if (pendingFailure !== undefined && fragments.length < WORKER_HISTORY_MAX_FRAGMENTS) {
+    if (pendingFailure !== undefined) {
       if (looksLikeCredential(pendingFailure)) withheld += 1
-      else fragments.push(Object.freeze({ kind: 'failure', text: truncateToCharacters(pendingFailure, WORKER_FRAGMENT_MAX_CHARACTERS) }))
+      else {
+        if (fragments.length >= WORKER_HISTORY_MAX_FRAGMENTS) {
+          fragments.pop()
+          omitted = true
+        }
+        fragments.push(Object.freeze({ kind: 'failure', text: truncateToCharacters(pendingFailure, WORKER_FRAGMENT_MAX_CHARACTERS) }))
+      }
     }
-    return { kind: 'pass', pass: { identified, matched, fragments: Object.freeze(fragments), withheld, truncated } }
+    return { kind: 'pass', pass: { identified, matched, fragments: Object.freeze(fragments), withheld,
+      truncated: byteTruncated || omitted } }
   } finally {
     await handle.close().catch(() => {})
   }
@@ -425,7 +467,10 @@ export async function readWorkerHistory(anchors: WorkerHistoryAnchors): Promise<
   if (before instanceof Error) {
     return { kind: 'unreadable', reason: boundedReason(`The engine's record could not be read: ${messageOf(before)}`) }
   }
-  const outcome = await readRecord(location, before, before.size, anchors.engine, anchors.nativeSessionId, anchors.nativeTurnId)
+  const turnIds = new Set((anchors.nativeTurnIds ?? (anchors.nativeTurnId === undefined ? [] : [anchors.nativeTurnId]))
+    .filter(id => id !== ''))
+  const inputIds = new Set((anchors.nativeInputIds ?? [...turnIds]).filter(id => id !== ''))
+  const outcome = await readRecord(location, before, before.size, anchors.engine, anchors.nativeSessionId, turnIds, inputIds)
     .catch((error: unknown): ReadOutcome => ({ kind: 'failed', reason: messageOf(error) }))
   if (outcome.kind === 'refused') return { kind: 'unsupported', reason: boundedReason(outcome.reason) }
   if (outcome.kind === 'unstable') return { kind: 'unreadable', reason: boundedReason(outcome.reason) }
@@ -442,11 +487,11 @@ export async function readWorkerHistory(anchors: WorkerHistoryAnchors): Promise<
   if (after === undefined || after.dev !== before.dev || after.ino !== before.ino) {
     return { kind: 'unreadable', reason: 'The record changed while it was being opened, so this Team will not read it.' }
   }
-  if (anchors.nativeTurnId === undefined) {
+  if (turnIds.size === 0) {
     return { kind: 'unmatched', reason: 'The ending recorded no native turn id for this run, so there is no turn to look up in its record.' }
   }
   if (!pass.matched) {
-    return { kind: 'unmatched', reason: boundedReason(`The engine's record holds no turn ${anchors.nativeTurnId}.`
+    return { kind: 'unmatched', reason: boundedReason(`The engine's record holds none of this execution's turns (${[...turnIds].join(', ')}).`
       + (pass.truncated ? ' The record is longer than this reader takes, so the turn may be past the part that was read.' : '')) }
   }
   return { kind: 'read', fragments: pass.fragments, withheld: pass.withheld, truncated: pass.truncated }

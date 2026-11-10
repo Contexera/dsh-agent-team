@@ -12,7 +12,7 @@ When changing a Host capability, read package source/tests first and then the ma
 - Mutations enter Host authority and commit one durable operation. Projections, Inbox, tools, commands, Remote responses, and UI derive from committed operations; Client code never interprets ledger records or creates parallel authority.
 
 - Replay re-derives each record's expected Inbox delta and compares it exactly, so a release that changes how an existing kind is validated first records `team/rules-version-adopted` (Host actor, `{ version }`). Each record validates under the newest marker before it; a ledger with none is version 1. `initialize` appends the marker inside its own queued commit, so it precedes every later write, startup recovery included. Markers only ascend, at most one per version, and a build refuses a ledger adopted at a version above its own.
-- Current builds implement version 2: mounting a ledger whose newest marker is lower appends the version 2 marker, and a fresh ledger records it right after `team/initialized`.
+- Current builds implement version 7. Mounting a ledger whose newest marker is lower appends only the version 7 marker, once, and a fresh ledger records it right after `team/initialized`; reopening a ledger already at version 7 appends nothing. The version-2 rules below still describe their own segments, not the current marker.
 - Behind version 2 the Host also commits `team/main-message-posted`, `team/main-stream-read` and `team/thread-started`, which a version-1 segment rejects, while `team/message-sent` is rejected in a version-2 segment. The Host no longer writes `team/message-sent` (a Thread starts with `startThread`); it replays only inside version-1 segments.
 - A ledger the 0.2.5 preview switch opened lands on that rejection exactly: it carries the version 2 marker, and its `sendMessage` — the path a new Thread took then — still wrote the version 1 `team/message-sent` with no guard, so the ledger opens only while that segment holds no `team/message-sent`. The switch was only ever meant for a one-off `DSH_HOME`.
 - An inbox delta may carry an optional `mainMarkers` list with its own marker shape (`projectRef` plus a `messageRef` or `activityRef`). It appears only when it changes something, so version-1 records keep their stored bytes, and a departing Member's Main stream markers clear in the same operation as its other inbox state.
@@ -289,7 +289,7 @@ That makes the record the only holder of the text, so a run that fails or is sto
 
 An **unbound** run stays what it was before on the public face: parent delivery, no Thread fact, nothing published to the Project. Its execution record is written all the same — `team/worker-started` and `team/worker-settled` exist for every run this Host starts — which is what keeps a Project-only execution findable by its `worker:` ref later.
 
-Rules version 6 introduced both operations: an older build meeting a version-6 ledger refuses to open it and asks for a newer release, and a Host adopting version 6 writes that adoption on its next boot.
+Rules version 6 introduced both operations. Version 7 extends them with an optional continuation link on the start and optional native turn/input arrays on the ending; a version-6 Worker record without those fields still replays unchanged. The new fields are refused in a version-6 segment, and a build implementing only version 6 stops at a version-7 marker before it parses the Worker operation.
 
 The durable state of a bound run is derived, never stored twice. `threadWorkerStates` reads the execution records rather than the facts a page returned, so a long Thread reports the state of every run bound to it even when that run's facts sit outside the window.
 
@@ -299,11 +299,15 @@ One stop transaction covers both surfaces: the Member's `team_worker` call with 
 
 The transaction aborts the startup signal (the only cancellation channel before publication), disposes the published activation, and waits for the one terminal write the engine's own evidence decides. `stopping` is a derived, process-local view: the ledger keeps `running → terminal`, and the Thread read and the Human's list add the word while the stop is in flight.
 
-The engine's result decides the ending, not the request. A natural completion or failure that landed first keeps its real state and the stop answers with it. A cancelled run whose disposal rejected is `failed` with a diagnostic saying the cleanup is unconfirmed — never `stopped`, because a stop nobody confirmed would be a claim the Host cannot support. The partial output the run already produced rides that same result, so the one Inbox notice keeps the text and the caveat together.
+The engine's result decides the ending, not the request. A natural completion or failure that landed first keeps its real state and the stop answers with it.
 
-Unloading the bundle is the same transaction at Host scale, in order: refuse new delegations, cancel every start still opening — including one whose opening record is still being written, which is sealed instead of opening an engine — dispose what is published, and wait a bounded five seconds for each ending.
+Every terminal result waits for native cleanup, bounded at five seconds; a cleanup that rejects or exceeds that bound turns the ending into `failed` with an unconfirmed-cleanup diagnostic. A cancelled run whose disposal rejected is therefore never `stopped`, because a stop nobody confirmed would be a claim the Host cannot support. The partial output the run already produced rides that same result, so the one Inbox notice keeps the text and the caveat together.
 
-Anything still unconfirmed at that boundary is sealed: the run keeps its `running` record and accepts no later ending, so closing storage cannot race a write into a ledger nobody reads. Pending terminal writes are awaited before the provider registrations are released.
+Unloading the bundle is the same transaction at Host scale, in order: refuse new delegations and continuations, cancel every start still opening — including one whose opening record is still being written, which is sealed instead of opening an engine — and wait up to five seconds for those starts, continuation admissions, and active steer calls before disposing what is published. A continuation still reading native history or writing its opening record therefore either completes before storage closes or rechecks the unload fence and writes nothing.
+
+After that opening wait, the steer persistence fence refuses late alias admissions and outcome writes. Unload also waits a bounded five seconds for each ending.
+
+Anything still unconfirmed at that boundary is sealed: the run keeps its `running` record and accepts no later ending, so closing storage cannot race a write into a ledger nobody reads. Pending terminal and steer writes are awaited before the provider registrations are released; the five-second deadline does not cancel a storage write that has already started but stopped answering.
 
 The Human's surface is the edit-Agent dialog, which gives that Member at most five rows: the live runs (`running`, `stopping`) and the records a previous Host left running as `unconfirmed` hold their seats first, and the newest endings by ending time fill the rest — a long run that started early and failed just now stays inside that window — each with the ending the Host confirmed, and a diagnostic door on every run that ended.
 
@@ -311,43 +315,53 @@ Its `stopWorker` receipt is structured rather than a sentence to read: `ended` n
 
 ### Reading one run's diagnostic
 
-The anchors a look-up needs are written with the run's ending, never collected afterwards. The provider captures the engine's own session, the turn the run drove, and the absolute path of its record — reported by Codex, derived for Claude — and carries them on the result object itself — a non-enumerable property on the object the Harness hands back unchanged, not a module-level map. A sealed run, or one whose ending lands late, therefore leaves nothing behind to collect.
+The anchors a look-up needs are written with the run's ending, never collected afterwards. The provider knows the engine's native session as soon as it opens, captures the newest 128 turns and native input UUIDs this execution accepted plus the absolute path of its record — reported by Codex, derived for Claude — and carries them on the result object itself: a non-enumerable property on the object the Harness hands back unchanged, not a module-level map. A sealed run, or one whose ending lands late, therefore leaves nothing behind to collect.
 
-The capture happens while the session is still open: before an abort or a cleanup begins, and at the turn's own end. An engine closes its record stream as it tears down, so a capture taken afterwards would find nothing left to read. The turn is bound to the input this run submitted — a record that also holds another root turn cannot be tied to this run, and then reports no turn id rather than the last one it saw.
+The capture happens while the session is still open: before an abort or a cleanup begins, and after the accepted inputs have ended. An engine closes its record stream as it tears down, so a capture taken afterwards would find nothing left to read. Turns and inputs are bound to the UUIDs this execution submitted; a resumed conversation's older turns are not claimed as this execution's own.
 
-A capture that fails changes no outcome: the ending keeps the state, diagnostic, and output the engine reported, and the record simply has no anchor.
+A capture that fails changes no outcome: the ending keeps the state, diagnostic, output, and native session identity the engine already established, but lacks the turn or storage evidence the failed capture could not establish.
 
 `readWorkerHistory` (`packages/agent-team/src/worker-inspection.ts`) is the only reader, and it reads both engines' records through one bounded pass: the engine chooses which fields identify the session, the turn, and a failure, and nothing else changes. It refuses a recorded location that is not an absolute `.jsonl` path under the engine's own directory — `sessions` for Codex, `projects` for Claude — and refuses an oversized value whole rather than cutting it into a path nobody recorded.
 
 It resolves the real path, compares the identity of the file it opened with the one the location named, checks that identity again after the read, and requires the first record to name the recorded session: Codex's session header, or the queue header Claude writes before the first turn.
 
-The run's turn is the span Codex recorded for it, or the prompting user message whose uuid is the input id OAR wrote for Claude. Its 8 MiB budget is spent on the read itself, so an oversized line is never parsed.
+The execution's turns are the Codex spans tied to its submitted inputs, or the Claude prompting messages whose uuids are its submitted input ids. Its 8 MiB budget is spent on the read itself, so an oversized line is never parsed.
 
-It returns records of the run's own turn only, bounded per fragment, and withholds a fragment whole when its text matches a credential shape — quoted JSON pairs included. Claude reports a failed turn as an `api_error` system line or a synthetic assistant message, and its retries repeat the same failure, so the reader reports the last one once instead of a growing list. Every reason it gives is one bounded sentence that names the fact and never echoes a native value. Nothing it reads is written back into the Team.
+It returns records of the execution's own turns only, bounded per fragment, and withholds a fragment whole when its text matches a credential shape — quoted JSON pairs included. Repeated Claude turn metadata is deduplicated so model steps cannot crowd out a later failure; when the four-fragment ceiling still omits a fact, `truncated` says so.
 
-The pass ends at the next root prompt, so a native session that is continued later never lends its model or failure to this run.
+Claude reports a failed turn as an `api_error` system line or a synthetic assistant message, and its retries repeat the same failure, so the reader reports the last one once instead of a growing list. Every reason it gives is one bounded sentence that names the fact and never echoes a native value. Nothing it reads is written back into the Team.
+
+For a continued execution the pass first skips the predecessor's prompt prefix. It ends after every turn this execution owned, or before the next root prompt it did not submit, so a native session continued later never lends its model or failure to this execution.
 
 The report is layered. The public Thread keeps the summary it already had; the detailed answer — the stage a failure came apart in, the native identities, the bounded fragments, or the one reason the record could not answer (`missing`, `unreadable`, `unpersisted`, `unsupported`, `unmatched`) — reaches only the initiating Member and the Human.
 
 A run that has not ended answers with its summary and says its record is read once it does, and a run that ended before any session was recorded says exactly that instead of claiming the engine never opened one.
 
-### Adding an instruction to a running turn
+### Steering a Worker and continuing its native session
 
-A steer is the engine's own same-turn input, not a Team invention. The Host forwards it through OAR's `session.steer`, which sends the runtime's `turn/steer` with the turn id OAR is currently driving, so the instruction enters the turn that is running: no second turn opens, nothing is queued for a later one, and no other run can receive it.
+Both engines expose the same `team_worker` steer shape. For a live execution the Host calls OAR's public `Session.deliver(..., { when: 'now' })` with a native input UUID distinct from the Team request id. OAR chooses steer, queue, or a new prompt from the session state and retries across that state race.
 
-The released CLI's contract — a steer submitted while a tool executes reaches the next model request of the same turn, and one submitted after the turn ended is refused — is proved by `artifacts/probe-05-steer.mjs` against the real binary and a loopback Responses endpoint.
+A `prompted` result is still this execution's input: the runtime keeps the execution open until every accepted input is consumed, then closes the steer window atomically and settles once. The Host acquires that closing hold before durable admission first waits on storage and releases it after recording the outcome, so ledger latency cannot close an idle native session before delivery. No accepted input is discarded because the first native turn ended.
 
-The live control belongs to the run registry. `WorkerRegistry` holds one entry per open engine session, and `TeamWorkerProvider` reports each session as it opens and closes through `WorkerSessionSink`; the entry is removed when that run's result settles and the whole table is cleared when the Host releases its runs. There is no module-level table and no second owner of that state: a session this Host does not hold has no control to reach, and a restart carries none forward.
+The receipt says `submitted`, never that the model read or followed the instruction. It reports where OAR landed the input when known and the execution state at the moment the receipt was written. A native refusal, a stopping execution, an unconfirmed previous-Host execution, or an unavailable session is refused rather than guessed around.
 
-Authorization is the identity that opened the run — its `initiatedBy` Member. Another Member is refused as `worker_steer_forbidden`, and this version has no Human entry, so the Human reads a run's diagnostic but does not add to its turn. The durable record decides whether the run is still running; a record a previous Host left in `running` is refused as `worker_unconfirmed` rather than steered.
+When the latest linked execution has ended cleanly and its handle is gone, steer resumes the recorded native session through `SessionOptions.resume` and writes one new execution whose `continuedFrom` names its predecessor. The old terminal record is immutable. The new execution keeps the original engine, cwd, Project, Thread, Task, and initiating Member, and opens from the steer instruction rather than resending the old task.
 
-Only Codex is opened in this version, because its control names the turn it is driving. Claude Code's acceptance covers a window wider than the current turn — it is accepted while a tool result is pending or the final text is still streaming, which can land in the next turn — so it is refused as `worker_steer_unsupported` rather than borrowing a guarantee the engine does not give.
+Each activation mints a fresh external `SubagentRun.id` for the Harness catalog and live controls; the stable native session id travels separately in the result anchors for resume, settlement, and inspection, so two linked executions never become duplicate catalog children.
 
-The idempotency answer comes before every state check. `RunEntry.steers` keeps one receipt per request id, so a resend answers with the receipt the first call produced while the run is still going and after it ended, and never reaches the engine again; the same sentence under a fresh request id is answered the same way, and a changed instruction under a used id is refused as `worker_steer_conflict`. A run that ended, a run whose stop is in flight, and an engine session without same-turn control each answer with their own refusal instead of sending anything.
+A clean failure is resumable in the same way; a stop in flight, an unconfirmed cleanup, a missing or mismatched native record, or a previous-Host `running` record is refused. If the nearest failed continuation never opened a native session of its own, an explicit later continuation inherits the nearest readable predecessor anchor while still naming that failed execution as its direct predecessor.
 
-The receipt is layered like the diagnostic. `submitted` is OAR's deliberately weak promise: the engine took the input over for the current turn, which is not a claim that the model read it, that it landed before the turn ended, or that any outcome followed. The answer carries the turn the engine's acknowledgement named and the run's state at the moment it was written, so a stop that landed meanwhile is visible.
+Continuation rechecks the current Worker switch, the selected engine switch, the Project's active state, current Project ownership, and the initiating Member's enabled state. It never relies on the old authorization. The ledger permits at most one running execution for a native conversation and one direct successor per execution, so concurrent continuations join the established execution instead of forking the session. A steer through an older ref follows the immutable chain to its newest execution.
 
-A steer writes no ledger operation: it is not a terminal fact, it does not survive a restart, and the run keeps the one ending and the one delivery it already had.
+The authorization is still the initiating Member. Another Member is refused as `worker_steer_forbidden`, and there is no Human steer entry. The live delivery table belongs to `WorkerRegistry`; it is removed when a session closes and cleared when the Host releases its runs. A continuation's new execution is durable and can itself be stopped, inspected, or steered by its own ref.
+
+The idempotency answer precedes state checks. Each steer request is admitted as a private ledger operation before native delivery, and its refused, ambiguous, or submitted outcome is recorded before the Host reports it. A repeated request id returns that first receipt or refusal, including after the execution ended or the Host was reconstructed; a changed instruction, Member, or Worker under it is `worker_steer_conflict`.
+
+A fresh same-text request id is durably registered as an alias of the canonical admission and returns its outcome without reading native history or delivering again; concurrent canonical and alias calls join one admission.
+
+An admission with no confirmed outcome reads as `worker_steer_unconfirmed` and is never sent again automatically. An explicit native refusal took nothing, so a fresh request id may retry its text; transport-unknown stays ambiguous and is not retried. A later linked execution may receive the same text under a fresh id. Continuation request ids and executions are durable across Host restart.
+
+A steer admission and its outcome are private ledger state: they publish no Thread fact, advance no Thread revision, create no Task or Claim, and do not mutate the predecessor or the existing execution record. A continuation additionally writes its own `team/worker-started` and `team/worker-settled`. Old ledgers without steer receipts or continuation anchors replay unchanged, and a historic active steer cannot acquire a receipt retroactively.
 
 ## Composer attachments (cache, not archive)
 

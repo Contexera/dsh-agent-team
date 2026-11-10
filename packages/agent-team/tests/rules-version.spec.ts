@@ -79,6 +79,37 @@ describe('rules version markers', () => {
     expect(storedRecords(pool)[1]).toMatchObject({ actor: { kind: 'host', handle: 'agent-team' }, data: { version: 2 } })
   })
 
+  it('adopts version 7 exactly once on a fresh ledger', async () => {
+    const pool = new MemoryMediaPool()
+    const ledger = new AgentTeamLedger(await openTable(pool))
+    await ledger.initialize()
+    expect(storedKinds(pool)).toEqual(['team/initialized', 'team/rules-version-adopted'])
+    expect(storedRecords(pool)[1]).toMatchObject({ data: { version: 7 } })
+    await closeAll()
+
+    const reopened = new AgentTeamLedger(await openTable(pool))
+    await reopened.initialize()
+    expect(storedKinds(pool).filter(kind => kind === 'team/rules-version-adopted')).toHaveLength(1)
+  })
+
+  it('upgrades a version 6 ledger to version 7 exactly once', async () => {
+    const pool = new MemoryMediaPool()
+    const before = new AgentTeamLedger(await openTable(pool), { rulesVersion: 6 })
+    await before.initialize()
+    await closeAll()
+
+    const upgraded = new AgentTeamLedger(await openTable(pool))
+    await upgraded.initialize()
+    expect(storedRecords(pool).filter(operation => operation.kind === 'team/rules-version-adopted').map(operation => operation.data))
+      .toEqual([{ version: 6 }, { version: 7 }])
+    await closeAll()
+
+    const reopened = new AgentTeamLedger(await openTable(pool))
+    await reopened.initialize()
+    expect(storedRecords(pool).filter(operation => operation.kind === 'team/rules-version-adopted').map(operation => operation.data))
+      .toEqual([{ version: 6 }, { version: 7 }])
+  })
+
   it('adopts a later version once, ahead of every write queued behind initialize', async () => {
     const pool = new MemoryMediaPool()
     const before = new AgentTeamLedger(await openTable(pool), { rulesVersion: 1 })

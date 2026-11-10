@@ -167,6 +167,8 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     expect(execution.state).toBe('failed')
     expect(execution.nativeSessionId).toBe('native-session-1')
     expect(execution.nativeTurnId).toBe('native-turn-1')
+    expect(execution.nativeTurnIds).toEqual(['native-turn-1'])
+    expect(execution.nativeInputIds).toHaveLength(1)
     expect(execution.nativeStorage).toBe(engine.storage)
     expect(execution.stage).toBe('turn')
 
@@ -176,7 +178,8 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     expect(inspection.unconfirmed).toBe(false)
     expect(inspection.summary).toBe(execution.diagnostic)
     expect(inspection.stage).toBe('turn')
-    expect(inspection.native).toEqual({ threadId: 'native-session-1', turnId: 'native-turn-1', storage: engine.storage })
+    expect(inspection.native).toEqual({ threadId: 'native-session-1', turnId: 'native-turn-1',
+      turnIds: ['native-turn-1'], inputIds: execution.nativeInputIds, storage: engine.storage })
     expect(inspection.history.kind).toBe('read')
     if (inspection.history.kind !== 'read') return
     expect(inspection.history.fragments.map(fragment => fragment.kind)).toEqual(['session', 'turn', 'failure'])
@@ -215,6 +218,8 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     expect(execution.engine).toBe('claude')
     expect(execution.nativeSessionId).toBe('native-claude-1')
     expect(execution.nativeTurnId).toBe(engine.claudeInputId)
+    expect(execution.nativeTurnIds).toEqual([engine.claudeInputId])
+    expect(execution.nativeInputIds).toEqual([engine.claudeInputId])
     // The path is derived from the cwd the session reported, not read from a frame.
     const slug = harness.checkout.replaceAll(/[^A-Za-z0-9]/gu, '-')
     const path = join(root, 'projects', slug, 'native-claude-1.jsonl')
@@ -234,7 +239,8 @@ describe('one run\'s diagnostic, read by its Team number', () => {
 
     const inspection = await ctx.agentTeam.workerInspectForAgent(agent, { workerRef: run.workerRef })
     expect(inspection.engine).toBe('claude')
-    expect(inspection.native).toEqual({ threadId: 'native-claude-1', turnId, storage: path })
+    expect(inspection.native).toEqual({ threadId: 'native-claude-1', turnId, turnIds: [turnId],
+      inputIds: [turnId], storage: path })
     expect(inspection.history.kind).toBe('read')
     if (inspection.history.kind !== 'read') return
     expect(inspection.history.fragments.map(fragment => fragment.kind)).toEqual(['session', 'turn', 'failure'])

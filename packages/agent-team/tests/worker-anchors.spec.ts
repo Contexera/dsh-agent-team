@@ -15,7 +15,8 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session } from '@botiverse/oar'
 import { cleanups, realHarness, requestId, waitFor } from './helpers/member-harness.ts'
-import { startWorkerRun, workerAnchorsOf, WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC } from '../src/worker-runtime.ts'
+import AgentTeam from '../src/index.ts'
+import { startWorkerRun, workerAnchorsOf, WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC, type WorkerSteer } from '../src/worker-runtime.ts'
 import type { Config } from '../src/host-row-settings.ts'
 import type { AgentTeamMemberId, AgentTeamProjectRef, AgentTeamThreadRef, AgentTeamWorkerExecution,
   AgentTeamWorkerRef } from '../src/types.ts'
@@ -124,8 +125,8 @@ const settledOf = async (team: unknown, workerRef: AgentTeamWorkerRef): Promise<
   }, 20_000)
 
 /** One Project, one owning Member, and — when asked — the Thread a bound delegation needs. */
-async function setup(options: { readonly thread: boolean }) {
-  const harness = await realHarness()
+async function setup(options: { readonly thread: boolean; readonly ledgerBackend?: 'memory' | 'sqlite' }) {
+  const harness = await realHarness(undefined, 'jsonl', undefined, false, undefined, options.ledgerBackend)
   const ctx = harness.ctx
   await ctx.plugin(SubagentRuntime)
   const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: harness.workspaceId,
@@ -166,6 +167,8 @@ describe('the anchors one run\'s ending carries', () => {
       expect(execution.stage).toBe('turn')
       expect(execution.nativeSessionId).toMatch(/^native-session-\d+$/)
       expect(execution.nativeTurnId).toBe(`turn-${execution.nativeSessionId}`)
+      expect(execution.nativeTurnIds).toEqual([execution.nativeTurnId])
+      expect(execution.nativeInputIds).toHaveLength(1)
       expect(execution.nativeStorage).toBe(`/fake/sessions/2026/11/09/rollout-${execution.nativeSessionId}.jsonl`)
     }
     expect(boundExecution.nativeSessionId).not.toBe(looseExecution.nativeSessionId)
@@ -173,9 +176,24 @@ describe('the anchors one run\'s ending carries', () => {
     // What the settlement recorded is what the read-only look-up opens.
     const inspection = await ctx.agentTeam.workerInspectForAgent(agent, { workerRef: bound.workerRef })
     expect(inspection.native).toEqual({ threadId: boundExecution.nativeSessionId, turnId: boundExecution.nativeTurnId,
-      storage: boundExecution.nativeStorage })
+      turnIds: boundExecution.nativeTurnIds, inputIds: boundExecution.nativeInputIds, storage: boundExecution.nativeStorage })
     expect(inspection.history.kind).toBe('missing')
   }, 60_000)
+
+  it.each([true, false])('records failed cleanup after a completed run (bound: %s)', async thread => {
+    const { harness, ctx, projectRef, agent, threadRef } = await setup({ thread })
+    engine.turn = 'completed'
+    engine.disposeFails = true
+    const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('completed-unclean'),
+      ...(threadRef === undefined ? { projectRef } : { threadRef }),
+      task: 'finish before cleanup fails', cwd: harness.checkout })
+    const execution = await settledOf(ctx.agentTeam, run.workerRef)
+    expect(execution).toMatchObject({ state: 'failed', stage: 'dispose' })
+    expect(execution.diagnostic).toContain(WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC)
+    await expect(ctx.agentTeam.workerSteerForAgent(agent, { workerRef: run.workerRef,
+      requestId: requestId('refuse-unclean-continuation'), instruction: 'do not resume the live old process' }))
+      .rejects.toThrow(/did not confirm its cleanup/)
+  })
 
   it('names a Claude run\'s record and the prompt it drove', async () => {
     const { harness, ctx, projectRef, agent } = await setup({ thread: false })
@@ -356,6 +374,80 @@ describe('the anchors one run\'s ending carries', () => {
     expect(stopped.state).toBe('stopped')
     expect(executionOf(ctx.agentTeam, run.workerRef)?.state).toBe('stopped')
   }, 60_000)
+
+  it.each([
+    { ledgerBackend: 'memory' as const, alias: false },
+    { ledgerBackend: 'memory' as const, alias: true },
+    { ledgerBackend: 'sqlite' as const, alias: false },
+    { ledgerBackend: 'sqlite' as const, alias: true },
+  ])('replays an active steer after Host reconstruction without reading native history ($ledgerBackend, alias: $alias)',
+    async ({ ledgerBackend, alias }) => {
+    const { harness, ctx, agent, projectRef, member } = await setup({ thread: false, ledgerBackend })
+    engine.turn = 'hanging'
+    const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'), projectRef,
+      task: 'check the schedule', cwd: harness.checkout })
+    const deliveries: string[] = []
+    const sessions = (ctx.agentTeam as unknown as { workerRegistry: { sessions: Map<string, WorkerSteer> } })
+      .workerRegistry.sessions
+    sessions.set([...sessions.keys()][0]!, async (instruction, inputId) => {
+      deliveries.push(instruction)
+      return { kind: 'submitted', inputId, landed: 'steered', turnId: 'turn-native-session-1' }
+    })
+    const request = { workerRef: run.workerRef, instruction: 'also check tomorrow', requestId: requestId('steer-original') }
+    const first = await ctx.agentTeam.workerSteerForAgent(agent, request)
+    const retry = { ...request, requestId: alias ? requestId('steer-alias') : request.requestId }
+    expect(await ctx.agentTeam.workerSteerForAgent(agent, retry)).toEqual(first)
+    const freshAlias = { ...request, requestId: requestId(`steer-fresh-alias-${ledgerBackend}`) }
+    expect(await ctx.agentTeam.workerSteerForAgent(agent, freshAlias)).toEqual(first)
+    expect(deliveries).toEqual([request.instruction])
+    await ctx.agentTeam.workerStopForAgent(agent, { workerRef: run.workerRef })
+    const original = await settledOf(ctx.agentTeam, run.workerRef)
+
+    await harness.teamFiber.dispose()
+    await ctx.plugin(AgentTeam)
+    ;(ctx.agentTeam['config'] as unknown as { worker: unknown }).worker = { get: () => workerRow().worker }
+    const resumedAgent = ctx.agents.get(member.sessionId) as Agent
+    expect(executionOf(ctx.agentTeam, run.workerRef)).toEqual(original)
+    // A receipt replay must not depend on a native record still being readable,
+    // and must never turn an already submitted request into a continuation.
+    await expect(ctx.agentTeam.workerSteerForAgent(resumedAgent, retry)).resolves.toEqual(first)
+    await expect(ctx.agentTeam.workerSteerForAgent(resumedAgent, freshAlias)).resolves.toEqual(first)
+    await expect(ctx.agentTeam.workerSteerForAgent(resumedAgent, { ...retry, instruction: 'a changed instruction' }))
+      .rejects.toThrow(/already carried another instruction/)
+    expect(deliveries).toEqual([request.instruction])
+    expect(ledgerOf(ctx.agentTeam).workerExecutionsOfMember(member.memberId)).toHaveLength(1)
+    expect(executionOf(ctx.agentTeam, run.workerRef)).toEqual(original)
+  })
+
+  it('keeps the Thread facts, revision, and execution unchanged when a steer receipt is aliased', async () => {
+    const { harness, ctx, agent, threadRef, member } = await setup({ thread: true })
+    engine.turn = 'hanging'
+    const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('thread-run'),
+      threadRef: threadRef!, task: 'check the schedule', cwd: harness.checkout })
+    const sessions = (ctx.agentTeam as unknown as { workerRegistry: { sessions: Map<string, WorkerSteer> } })
+      .workerRegistry.sessions
+    sessions.set([...sessions.keys()][0]!, async (instruction, inputId) => {
+      return { kind: 'submitted', inputId, landed: 'steered', turnId: 'turn-native-session-1' }
+    })
+    await ctx.agentTeam.readThread({ requestId: requestId('thread-read-baseline'),
+      workspaceId: harness.workspaceId, threadRef: threadRef! })
+    const before = await ctx.agentTeam.readThread({ requestId: requestId('thread-read-before'),
+      workspaceId: harness.workspaceId, threadRef: threadRef! })
+    const execution = executionOf(ctx.agentTeam, run.workerRef)
+
+    await ctx.agentTeam.workerSteerForAgent(agent, { workerRef: run.workerRef,
+      instruction: 'also check tomorrow', requestId: requestId('thread-steer') })
+    await ctx.agentTeam.workerSteerForAgent(agent, { workerRef: run.workerRef,
+      instruction: 'also check tomorrow', requestId: requestId('thread-steer-alias') })
+
+    const after = await ctx.agentTeam.readThread({ requestId: requestId('thread-read-after'),
+      workspaceId: harness.workspaceId, threadRef: threadRef! })
+    expect(after.thread.revision).toBe(before.thread.revision)
+    expect(after.facts).toEqual(before.facts)
+    expect(after.workerStates).toEqual(before.workerStates)
+    expect(executionOf(ctx.agentTeam, run.workerRef)).toEqual(execution)
+    expect(ledgerOf(ctx.agentTeam).workerExecutionsOfMember(member.memberId)).toHaveLength(1)
+  })
 
   it('settles a run the Host releases with the anchors it captured before disposal', async () => {
     const { harness, ctx, agent, projectRef } = await setup({ thread: false })

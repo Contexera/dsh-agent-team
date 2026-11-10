@@ -95,6 +95,7 @@ describe('Project-owner guidance section', () => {
     await waitForIdle(ctx, agent)
     const withWorker = adapter.requests.at(-1)!
     expect(systemText(withWorker)).toContain('# Local Workers')
+    expect(systemText(withWorker)).toContain('A steer is one more input to that Worker\'s same native session')
     expect(declaredTools(withWorker)).toContain('team_worker')
 
     setWorkerSwitch(ctx, false)

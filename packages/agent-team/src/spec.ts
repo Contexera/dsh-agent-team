@@ -414,6 +414,7 @@ const workerStartRecordSchema = z.object({
   task: z.string().min(1),
   cwd: z.string().min(1),
   startedAt: z.string().datetime(),
+  continuedFrom: workerRefSchema.optional(),
 }).strict()
 
 // The Host cuts these to code points; the bound here is the UTF-16 length that
@@ -427,6 +428,8 @@ const workerSettlementSchema = z.object({
   // report would have to truncate into a location nobody recorded.
   nativeSessionId: z.string().min(1).max(256).optional(),
   nativeTurnId: z.string().min(1).max(256).optional(),
+  nativeTurnIds: z.array(z.string().min(1).max(256)).max(128).optional(),
+  nativeInputIds: z.array(z.string().min(1).max(256)).max(128).optional(),
   nativeStorage: z.string().min(1).max(4096).optional(),
   stage: z.union([z.literal('engine-unavailable'), z.literal('installation'), z.literal('startup'),
     z.literal('turn'), z.literal('abort'), z.literal('dispose')]).optional(),
@@ -486,6 +489,28 @@ const workerSettledActivitySchema = z.object({
   state: z.union([z.literal('completed'), z.literal('failed'), z.literal('stopped')]),
   reason: z.string().min(1).max(WORKER_REASON_MAX_CHARACTERS * 2).optional(),
 }).strict()
+
+const workerSteerResultSchema = z.object({
+  workerRef: workerRefSchema,
+  engine: workerEngineSchema,
+  state: z.union([z.literal('submitted'), z.literal('started')]),
+  landed: z.union([z.literal('steered'), z.literal('queued'), z.literal('prompted')]).optional(),
+  turnId: z.string().min(1).max(256).optional(),
+  continuedFrom: workerRefSchema.optional(),
+  runState: z.union([z.literal('running'), z.literal('completed'), z.literal('failed'), z.literal('stopped'),
+    z.literal('unconfirmed'), z.literal('stopping')]),
+}).strict()
+
+const workerSteerRefusalSchema = z.object({
+  code: z.string().min(1).max(200),
+  message: z.string().min(1).max(2000),
+}).strict()
+
+const workerSteerOutcomeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('submitted'), result: workerSteerResultSchema }).strict(),
+  z.object({ kind: z.literal('refused'), refusal: workerSteerRefusalSchema }).strict(),
+  z.object({ kind: z.literal('ambiguous'), refusal: workerSteerRefusalSchema }).strict(),
+])
 
 const activitySchema = z.discriminatedUnion('kind', [claimActivitySchema, taskActivitySchema, claimsReleasedActivitySchema,
   workerStartedActivitySchema, workerSettledActivitySchema])
@@ -1023,6 +1048,29 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       execution: workerSettlementSchema,
       activity: workerSettledActivitySchema.optional(),
       inbox: inboxDeltaSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/worker-steer-admitted'),
+    data: z.object({
+      requestId: requestIdSchema,
+      workspaceId: workspaceIdSchema,
+      workerRef: workerRefSchema,
+      instruction: z.string().min(1),
+      initiatedBy: memberIdSchema,
+      continuedFrom: workerRefSchema.optional(),
+      aliasOf: requestIdSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/worker-steer-recorded'),
+    data: z.object({
+      admissionRequestId: requestIdSchema,
+      outcome: workerSteerOutcomeSchema,
     }).strict(),
   }).strict(),
 ])
