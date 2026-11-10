@@ -6,13 +6,18 @@
  * none.
  *
  * Three rules hold the whole design. The reader opens only the location the
- * engine itself reported, resolves it through every symlink, and requires the
+ * settlement recorded, resolves it through every symlink, and requires the
  * record's own first line to name the session the settlement recorded — never a
  * scan for the newest file, never a path a caller supplied, never a file whose
  * identity the content does not confirm. Its byte bound applies to the read
  * itself, so an oversized line is never buffered or parsed. And a fragment whose
  * text looks like a credential is withheld instead of masked, because a masked
  * secret is still a secret the reader read.
+ *
+ * The two engines name the same facts differently: Codex writes a session header
+ * and a turn id, Claude writes a queue header and names the turn by the prompting
+ * user message. The reader keeps one bounded pass and one set of rules; the
+ * engine only chooses which fields identify the session, the turn, and a failure.
  * @module @contexera/dsh-agent-team/worker-inspection
  */
 
@@ -24,6 +29,7 @@ import type {
   AgentTeamWorkerInspectionFragment,
   AgentTeamWorkerInspectionHistory,
 } from './types/requests-results.ts'
+import type { WorkerEngine } from './worker-settings.ts'
 import { truncateToCharacters } from './text.ts'
 
 /** How much of one native record the reader will take before it stops and says so. */
@@ -51,6 +57,8 @@ function boundedReason(text: string): string {
 
 /** The anchors a settlement recorded, as a look-up takes them. */
 export interface WorkerHistoryAnchors {
+  /** The engine the run used: it decides which record shape the reader expects. */
+  readonly engine: WorkerEngine
   readonly nativeSessionId?: string | undefined
   readonly nativeTurnId?: string | undefined
   readonly nativeStorage?: string | undefined
@@ -94,12 +102,14 @@ function joined(parts: readonly (string | undefined)[]): string[] {
 
 /**
  * Whether a resolved location is one this reader may open: absolute, a JSONL
- * record, and inside a `sessions` directory. The record's own first line then has
- * to name the recorded session, so a wrong or hostile path cannot become a read
- * of an unrelated file.
+ * record, and under the directory the engine writes records in. The record's own
+ * first line then has to name the recorded session, so a wrong or hostile path
+ * cannot become a read of an unrelated file.
  */
-function isInspectableLocation(path: string): boolean {
-  return isAbsolute(path) && path.endsWith('.jsonl') && path.split(sep).includes('sessions')
+function isInspectableLocation(path: string, engine: WorkerEngine): boolean {
+  if (!isAbsolute(path) || !path.endsWith('.jsonl')) return false
+  const segments = path.split(sep)
+  return segments.includes(engine === 'codex' ? 'sessions' : 'projects')
 }
 
 /** The system error code a failed filesystem call carried, if any. */
@@ -112,10 +122,11 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** One parsed line: the record's own `type` and payload, without the rest of the file's shape. */
+/** One parsed line: the record's own type, its Codex payload when it has one, and the whole object. */
 interface RawRecord {
   readonly type: string
   readonly payload: Record<string, unknown>
+  readonly raw: Record<string, unknown>
 }
 
 function parseRecord(line: string): RawRecord | undefined {
@@ -127,20 +138,27 @@ function parseRecord(line: string): RawRecord | undefined {
   }
   const record = recordOf(parsed)
   const type = textOf(record?.type)
-  const payload = recordOf(record?.payload)
-  return type === undefined || payload === undefined ? undefined : { type, payload }
+  if (record === undefined || type === undefined) return undefined
+  return { type, payload: recordOf(record.payload) ?? {}, raw: record }
 }
 
-/** What one record contributes: whether it belongs to the recorded turn, and its fragments. */
+/** What one record contributes: whether it belongs to the recorded turn, its fragments, and a failure to report once. */
 interface Contribution {
   readonly matched: boolean
   readonly fragments: readonly AgentTeamWorkerInspectionFragment[]
+  /** A failure sentence for the pass to report after it: the last one wins, so retries do not flood the report. */
+  readonly failure?: string | undefined
 }
 
 const NOTHING: Contribution = Object.freeze({ matched: false, fragments: Object.freeze([]) })
 
 /** The fragments one record contributes, if it is one of the few this reader understands. */
-function fragmentsOf(record: RawRecord, turnId: string | undefined): Contribution {
+function fragmentsOf(record: RawRecord, turnId: string | undefined, engine: WorkerEngine): Contribution {
+  return engine === 'claude' ? claudeFragmentsOf(record, turnId) : codexFragmentsOf(record, turnId)
+}
+
+/** Codex's record: a session header, turn contexts, and event messages keyed by the native turn id. */
+function codexFragmentsOf(record: RawRecord, turnId: string | undefined): Contribution {
   if (record.type === 'session_meta') {
     const parts = joined([
       labelled('engine', textOf(record.payload.cli_version)),
@@ -162,7 +180,8 @@ function fragmentsOf(record: RawRecord, turnId: string | undefined): Contributio
   }
   if (record.type !== 'event_msg') return NOTHING
   if (record.payload.type === 'turn_aborted') {
-    return { matched: true, fragments: [{ kind: 'failure', text: `Native turn interrupted: ${textOf(record.payload.reason) ?? 'no reason reported'}` }] }
+    return { matched: true, fragments: [],
+      failure: `Native turn interrupted: ${textOf(record.payload.reason) ?? 'no reason reported'}` }
   }
   if (record.payload.type !== 'task_complete') return NOTHING
   // The turn's own failure sentence, and nothing else: the model's last answer
@@ -171,7 +190,63 @@ function fragmentsOf(record: RawRecord, turnId: string | undefined): Contributio
   const message = textOf(recordOf(record.payload.error)?.message)
   if (message === undefined) return { matched: true, fragments: [] }
   const duration = typeof record.payload.duration_ms === 'number' ? ` after ${record.payload.duration_ms} ms` : ''
-  return { matched: true, fragments: [{ kind: 'failure', text: `Native turn failed${duration}: ${message}` }] }
+  return { matched: true, fragments: [], failure: `Native turn failed${duration}: ${message}` }
+}
+
+/**
+ * Whether a Claude line opens the next root prompt. A user line that carries a
+ * tool result belongs to the turn already running, a sidechain line belongs to a
+ * subagent, and a meta line is a synthetic record rather than something the user
+ * asked: none of them ends this turn. Any other user line is the next prompt.
+ */
+function isClaudeRootPrompt(record: RawRecord): boolean {
+  if (record.type !== 'user' || record.raw.isSidechain === true || record.raw.isMeta === true) return false
+  const content = recordOf(record.raw.message)?.content
+  if (typeof content === 'string') return true
+  if (!Array.isArray(content)) return false
+  return !content.some(part => recordOf(part)?.type === 'tool_result')
+}
+
+/**
+ * Claude's record: a queue header, then the prompting user message OAR wrote with
+ * this run's input id, then the turn's own assistant and system lines. The prompt
+ * line is the turn anchor, and the session facts ride it: Claude keeps no separate
+ * session header. A sidechain line belongs to a subagent, not to this run.
+ */
+function claudeFragmentsOf(record: RawRecord, turnId: string | undefined): Contribution {
+  if (turnId === undefined || record.raw.isSidechain === true) return NOTHING
+  if (record.type === 'user' && record.raw.uuid === turnId) {
+    const parts = joined([
+      labelled('engine', textOf(record.raw.version)),
+      labelled('cwd', textOf(record.raw.cwd)),
+      labelled('permission', textOf(record.raw.permissionMode)),
+    ])
+    return { matched: true, fragments: parts.length === 0 ? [] : [{ kind: 'session', text: `Native session record: ${parts.join(' · ')}` }] }
+  }
+  const failure = claudeFailureOf(record)
+  if (failure !== undefined) return { matched: false, fragments: [], failure }
+  if (record.type !== 'assistant') return NOTHING
+  const message = recordOf(record.raw.message)
+  const parts = joined([
+    labelled('model', textOf(record.raw.requestedModel) ?? textOf(message?.model)),
+    labelled('effort', textOf(record.raw.effort)),
+  ])
+  return { matched: false, fragments: parts.length === 0 ? [] : [{ kind: 'turn', text: `Native turn ${turnId}: ${parts.join(' · ')}` }] }
+}
+
+/** The one failure sentence a Claude record carries: an API error line, or the synthetic assistant line of a refused turn. */
+function claudeFailureOf(record: RawRecord): string | undefined {
+  if (record.type === 'system' && (record.raw.subtype === 'api_error' || record.raw.level === 'error')) {
+    const error = recordOf(record.raw.error)
+    return `Native turn failed: ${textOf(error?.formatted) ?? textOf(error?.message) ?? 'the engine reported an error'}`
+  }
+  if (record.type !== 'assistant' || record.raw.isApiErrorMessage !== true) return undefined
+  const code = textOf(record.raw.error)
+  const message = recordOf(record.raw.message)
+  const content = Array.isArray(message?.content) ? message.content : []
+  const text = content.map(part => recordOf(part)).map(part => textOf(part?.text)).find(value => value !== undefined)
+  const detail = joined([code, text]).join(' — ')
+  return `Native turn failed: ${detail === '' ? 'the engine reported an error' : detail}`
 }
 
 /** What one bounded pass over the record found. */
@@ -200,7 +275,7 @@ type ReadOutcome =
   | { readonly kind: 'failed'; readonly reason: string }
 
 async function readRecord(location: string, expected: { readonly dev: number; readonly ino: number },
-  size: number, nativeSessionId: string, turnId: string | undefined): Promise<ReadOutcome> {
+  size: number, engine: WorkerEngine, nativeSessionId: string, turnId: string | undefined): Promise<ReadOutcome> {
   const handle = await open(location, 'r')
   try {
     const opened = await handle.stat()
@@ -219,6 +294,9 @@ async function readRecord(location: string, expected: { readonly dev: number; re
     let carry = ''
     let identified = false
     let matched = false
+    let seenTurn = false
+    let stopped = false
+    let pendingFailure: string | undefined
     let withheld = 0
     let first = true
     const take = (line: string): string | undefined => {
@@ -227,17 +305,35 @@ async function readRecord(location: string, expected: { readonly dev: number; re
       if (first) {
         first = false
         // The record has to name the session the settlement recorded. Anything
-        // else — another thread's file, a hand-written path, a newer layout whose
-        // first line is not a session header — is refused here, before a single
-        // fragment is taken from it.
-        if (record?.type !== 'session_meta' || record.payload.session_id !== nativeSessionId) {
+        // else — another session's file, a hand-written path, a newer layout whose
+        // first line is not a header this Team reads — is refused here, before a
+        // single fragment is taken from it.
+        const names = record !== undefined && (engine === 'codex'
+          ? record.type === 'session_meta' && record.payload.session_id === nativeSessionId
+          : record.raw.sessionId === nativeSessionId)
+        if (!names) {
           return `The file is not the record of native session ${nativeSessionId}, so this Team will not read it.`
         }
         identified = true
       }
       if (record === undefined) return undefined
-      const contribution = fragmentsOf(record, turnId)
-      if (contribution.matched) matched = true
+      // A native session that is continued later appends the next root prompt
+      // after this turn's records. The pass ends there: the later turn's model
+      // and failure are not this run's, and reading on would attribute them to it.
+      if (engine === 'claude' && seenTurn && isClaudeRootPrompt(record)) {
+        stopped = true
+        return undefined
+      }
+      // Claude names its turn by the prompting user message: records before that
+      // line belong to an earlier turn (the Team never resumes, but the reader
+      // does not rely on that) and are not this run's.
+      if (engine === 'claude' && !seenTurn && !(record.type === 'user' && record.raw.uuid === turnId)) return undefined
+      const contribution = fragmentsOf(record, turnId, engine)
+      if (contribution.matched) {
+        matched = true
+        if (engine === 'claude') seenTurn = true
+      }
+      if (contribution.failure !== undefined) pendingFailure = contribution.failure
       for (const fragment of contribution.fragments) {
         if (fragments.length >= WORKER_HISTORY_MAX_FRAGMENTS) break
         if (looksLikeCredential(fragment.text)) {
@@ -260,16 +356,25 @@ async function readRecord(location: string, expected: { readonly dev: number; re
         carry = carry.slice(end + 1)
         const refusal = take(line)
         if (refusal !== undefined) return { kind: 'refused', reason: refusal }
+        if (stopped) break
       }
+      if (stopped) break
     }
     // A record longer than the bound is not finished, so its trailing bytes are
     // not a line: parsing them would spend the whole budget on a fragment the
     // reader never claimed to read.
     const truncated = remaining === 0 && position < size
     carry += decoder.end()
-    if (!truncated && carry.trim() !== '') {
+    if (!stopped && !truncated && carry.trim() !== '') {
       const refusal = take(carry)
       if (refusal !== undefined) return { kind: 'refused', reason: refusal }
+    }
+    // One failure sentence per pass: retries repeat the same error, and the last
+    // one is the one the engine settled on. It is appended after the facts, so a
+    // report reads as session, turn, then what went wrong.
+    if (pendingFailure !== undefined && fragments.length < WORKER_HISTORY_MAX_FRAGMENTS) {
+      if (looksLikeCredential(pendingFailure)) withheld += 1
+      else fragments.push(Object.freeze({ kind: 'failure', text: truncateToCharacters(pendingFailure, WORKER_FRAGMENT_MAX_CHARACTERS) }))
     }
     return { kind: 'pass', pass: { identified, matched, fragments: Object.freeze(fragments), withheld, truncated } }
   } finally {
@@ -298,7 +403,7 @@ export async function readWorkerHistory(anchors: WorkerHistoryAnchors): Promise<
   if (recorded.length > WORKER_LOCATION_MAX_CHARACTERS) {
     return { kind: 'unsupported', reason: 'The recorded location is longer than any native record this Team reads.' }
   }
-  if (!isInspectableLocation(recorded)) {
+  if (!isInspectableLocation(recorded, anchors.engine)) {
     return { kind: 'unsupported', reason: 'The recorded location is not a native record this Team reads.' }
   }
   // Every symlink resolved next: the location this reader opens is the file the
@@ -309,14 +414,14 @@ export async function readWorkerHistory(anchors: WorkerHistoryAnchors): Promise<
     if (code === 'ENOENT') return { kind: 'missing', reason: 'The engine\'s record is no longer at the recorded location.' }
     return { kind: 'unreadable', reason: boundedReason(`The recorded location could not be resolved: ${messageOf(location)}`) }
   }
-  if (!isInspectableLocation(location)) {
+  if (!isInspectableLocation(location, anchors.engine)) {
     return { kind: 'unsupported', reason: 'The resolved location is not a native record this Team reads.' }
   }
   const before = await stat(location).catch((error: unknown): Error => error instanceof Error ? error : new Error(String(error)))
   if (before instanceof Error) {
     return { kind: 'unreadable', reason: boundedReason(`The engine's record could not be read: ${messageOf(before)}`) }
   }
-  const outcome = await readRecord(location, before, before.size, anchors.nativeSessionId, anchors.nativeTurnId)
+  const outcome = await readRecord(location, before, before.size, anchors.engine, anchors.nativeSessionId, anchors.nativeTurnId)
     .catch((error: unknown): ReadOutcome => ({ kind: 'failed', reason: messageOf(error) }))
   if (outcome.kind === 'refused') return { kind: 'unsupported', reason: boundedReason(outcome.reason) }
   if (outcome.kind === 'unstable') return { kind: 'unreadable', reason: boundedReason(outcome.reason) }

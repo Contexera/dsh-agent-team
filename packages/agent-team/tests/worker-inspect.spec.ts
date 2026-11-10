@@ -9,12 +9,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session } from '@botiverse/oar'
 import { cleanups, realHarness, requestId, waitFor } from './helpers/member-harness.ts'
 import type { Config } from '../src/host-row-settings.ts'
+import type { WorkerConfig } from '../src/worker-service.ts'
 import type { AgentTeamLedger } from '../src/ledger.ts'
 import type { AgentTeamMemberId, AgentTeamProjectRef, AgentTeamWorkerExecution, AgentTeamWorkerRef } from '../src/types.ts'
 import { newestEndedRuns, WORKER_RUN_HISTORY_LIMIT } from '../src/worker-service.ts'
@@ -26,7 +27,10 @@ const engine = { storage: undefined as string | undefined, turn: 'failed' as 'fa
   release: undefined as (() => void) | undefined,
   /** Whether each open gets its own session id; the Harness refuses two children under one id. */
   unique: false,
-  nextSession: 1 }
+  nextSession: 1,
+  /** The Claude mock's reported cwd and the prompt input id it was asked to write. */
+  claudeCwd: '/fake/claude-work',
+  claudeInputId: undefined as string | undefined }
 
 vi.mock('@botiverse/oar', () => ({
   codexRuntime: {
@@ -50,7 +54,27 @@ vi.mock('@botiverse/oar', () => ({
       } as unknown as Session
     },
   },
-  claudeRuntime: {},
+  claudeRuntime: {
+    installation: async () => ({ kind: 'available', via: 'executable', command: '/fake/claude', version: '2.1.319' }),
+    session: async (): Promise<Session> => {
+      const id = 'native-claude-1'
+      return {
+        id,
+        events: () => () => {},
+        prompt: async (_input: unknown, options?: { readonly inputId?: string }) => {
+          engine.claudeInputId = options?.inputId
+          return { kind: 'accepted' as const, seq: 1 }
+        },
+        abort: async () => {},
+        dispose: async () => {},
+        records: () => [
+          { sessionId: id, agentPath: [], seq: 1, receivedAt: 0, kind: 'frame',
+            body: { type: 'system/init', native: { type: 'system', subtype: 'init', session_id: id,
+              cwd: engine.claudeCwd, version: '2.1.319' }, events: [] } },
+        ],
+      } as unknown as Session
+    },
+  },
 }))
 
 vi.mock('@botiverse/oar/observe', () => ({
@@ -69,6 +93,9 @@ afterEach(async () => {
   engine.release = undefined
   engine.unique = false
   engine.nextSession = 1
+  engine.claudeCwd = '/fake/claude-work'
+  engine.claudeInputId = undefined
+  vi.unstubAllEnvs()
   while (cleanups.length > 0) await cleanups.pop()!()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 }, 30_000)
@@ -154,6 +181,64 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     if (inspection.history.kind !== 'read') return
     expect(inspection.history.fragments.map(fragment => fragment.kind)).toEqual(['session', 'turn', 'failure'])
     expect(inspection.history.fragments.at(-1)?.text).toBe('Native turn failed after 15674 ms: unexpected status 401 Unauthorized')
+  }, 60_000)
+
+  it('reads a Claude run\'s own record after its process exited', async () => {
+    const harness = await realHarness()
+    const ctx = harness.ctx
+    await ctx.plugin(SubagentRuntime)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: harness.workspaceId,
+      name: 'claude-inspect', description: 'Claude inspect' })
+    const projectRef = project.project.projectRef as AgentTeamProjectRef
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: harness.workspaceId,
+      handle: 'runner', description: 'Runs work', presetId: 'team-member', projectRefs: [projectRef],
+      model: { provider: 'mock', model: 'mock' } })
+    const member = added.status.member
+    await ctx.agentTeam.addProjectOwner({ requestId: requestId('owner'), workspaceId: harness.workspaceId, projectRef,
+      memberId: member.memberId })
+    const agent = ctx.agents.get(member.sessionId) as Agent
+    const base = workerRow().worker as unknown as WorkerConfig
+    const config = { ...base, defaultEngine: 'claude' as const,
+      engines: { ...base.engines, claude: { enabled: true, executable: '/fake/claude', sandbox: '' } } }
+    ;(ctx.agentTeam['config'] as unknown as { worker: unknown }).worker = { get: () => config }
+    const root = await mkdtemp(join(tmpdir(), 'team-worker-claude-'))
+    roots.push(root)
+    vi.stubEnv('CLAUDE_CONFIG_DIR', root)
+    engine.claudeCwd = harness.checkout
+
+    const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'), projectRef,
+      task: 'check the schedule', cwd: harness.checkout })
+    const execution = await waitFor(() => {
+      const recorded = executionOf(ctx.agentTeam, run.workerRef)
+      return recorded?.settledAt === undefined ? undefined : recorded
+    }, 20_000)
+    expect(execution.engine).toBe('claude')
+    expect(execution.nativeSessionId).toBe('native-claude-1')
+    expect(execution.nativeTurnId).toBe(engine.claudeInputId)
+    // The path is derived from the cwd the session reported, not read from a frame.
+    const slug = harness.checkout.replaceAll(/[^A-Za-z0-9]/gu, '-')
+    const path = join(root, 'projects', slug, 'native-claude-1.jsonl')
+    expect(execution.nativeStorage).toBe(path)
+
+    // The process is gone; the record it left is what the look-up opens.
+    const turnId = execution.nativeTurnId!
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, [
+      { type: 'queue-operation', operation: 'enqueue', sessionId: 'native-claude-1' },
+      { type: 'user', uuid: turnId, message: { role: 'user', content: [{ type: 'text', text: 'check the schedule' }] },
+        cwd: harness.checkout, version: '2.1.319', permissionMode: 'bypassPermissions', sessionId: 'native-claude-1' },
+      { type: 'assistant', message: { role: 'assistant', model: 'claude-probe', content: [{ type: 'text', text: 'answer' }] },
+        requestedModel: 'claude-probe', effort: 'high', sessionId: 'native-claude-1' },
+      { type: 'system', subtype: 'api_error', level: 'error', error: { formatted: '500 probe boom' }, sessionId: 'native-claude-1' },
+    ].map(record => `${JSON.stringify(record)}\n`).join(''))
+
+    const inspection = await ctx.agentTeam.workerInspectForAgent(agent, { workerRef: run.workerRef })
+    expect(inspection.engine).toBe('claude')
+    expect(inspection.native).toEqual({ threadId: 'native-claude-1', turnId, storage: path })
+    expect(inspection.history.kind).toBe('read')
+    if (inspection.history.kind !== 'read') return
+    expect(inspection.history.fragments.map(fragment => fragment.kind)).toEqual(['session', 'turn', 'failure'])
+    expect(inspection.history.fragments.at(-1)?.text).toBe('Native turn failed: 500 probe boom')
   }, 60_000)
 
   it('refuses another Member, and answers the Human only for the Member whose surface asked', async () => {

@@ -114,7 +114,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Member capabilities 与 skills
 - Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。`model` 是例外，不可清除，见下面的模型契约。
-- Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留九个 Team tools 与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查和限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
+- Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留 Team tools（`team_worker` 视开关）与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查和限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
 
   Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么返回 `deferred:no-live-handle`；两种顺序都让存储的意图在下次 activation 时仍然成立。
 
@@ -248,9 +248,11 @@ subagent 服务跟随 Host，而不是跟随 Member：Team 组合的是一处 `@
 
 provider 为每次委派打开一个 OAR 会话，使用操作者显式给出的引擎设置，并把设置行里的 Codex 权限模式带进那次打开：精确 pin 的 OAR 0.95.1 从 Host 进程自己的 `OAR_CODEX_SANDBOX` 读取它——会话的 `env` 只到子进程，库也没有逐会话的选项——所以这个值只在打开调用期间设置，到 app-server 握手返回后恢复——这是本 Host 里另一个 Codex 会话打开时可能看到它的唯一窗口。
 
+该行的开关还决定 Member 表面，而不只是执行：关闭时 `team_worker` 不声明给 Member，实时修改在已有 Session 的下一个 turn 边界生效。同一开关还决定 `team:project-owner` prompt section 里的 Worker 段落，而该段落每次组装都会重新求值。registry 在开关关闭时仍然拒绝发起，所以尚未跟上的表面永远不会变成执行路径，而已在执行的 run 保留自己的 handle。
+
 从未存过该策略的设置行解析为 `danger-full-access`；Claude 不需要自己的策略：两个引擎在嵌入式用法里都无门槛运行——没人值守的批准提示是卡死而不是安全——所以本 bundle 不会给操作者已经委派出去的工作再加一道权限闸。收紧某个 Worker 是操作者的显式选择，这个字段只为它存在：设置页只展示开关与引擎，不展示该策略，所以更窄的 Worker 是手写设置行，而不是页面上的字段。
 
-provider 还保留引擎的原生 session 身份与工作目录，并把只读诊断所需的锚点——原生 turn 与引擎自报的记录绝对路径——捕获在结果对象上。它直接使用精确 pin 的 `@botiverse/oar`，而不是 Harness 的 OAR provider：Worker 必须暴露该原生身份，且执行记录必须归 Team；该库按需导入，所以没有它的 Host 依然能启动，普通 Session 也不受影响。
+provider 还保留引擎的原生 session 身份与工作目录，并把只读诊断所需的锚点——原生 turn 与引擎自己记录的绝对路径——捕获在结果对象上。Codex 会自报该路径；Claude 的流里没有，所以它由 CLI 自报的 cwd 与本次执行打开时的环境（`CLAUDE_CONFIG_DIR`，否则 `$HOME/.claude`）推导而来，猜错时只是读不到，而不会去搜别的文件。它直接使用精确 pin 的 `@botiverse/oar`，而不是 Harness 的 OAR provider：Worker 必须暴露该原生身份，且执行记录必须归 Team；该库按需导入，所以没有它的 Host 依然能启动，普通 Session 也不受影响。
 
 委派在写任何东西之前先绑定目标：`taskRef` 定住它的 Thread，只给 `threadRef` 时定住该 Thread 以及它自己的 Task，只给 `projectRef` 则是纯 Project 委派。Thread 或 Task 决定 owner 校验所针对的 Project，把 Task 与不属于它的 Thread 一起给出按矛盾拒绝。所有拒绝都发生在写 started 记录之前、原生进程启动之前。绑定写定后即冻结：之后的页面、目录、成员关系变化或 Task 转派都不会移动一次执行的结果。
 
@@ -280,7 +282,11 @@ Human 的入口是「编辑 Agent」弹窗，列出该成员仍在运行的执�
 
 捕获发生在会话仍然打开的时候：取消或清理开始之前，以及 turn 自己结束之时。引擎在拆除过程中关闭记录流，事后再采只会什么都读不到。turn 绑定到本次执行提交的那条输入——记录里若还有另一个根 turn，就无法与本执行唯一关联，此时报「没有 turn id」，而不是取最后看到的那一个。捕获失败不改变任何结局：终态保留引擎报告的状态、诊断与输出，记录只是没有锚点。
 
-`readWorkerHistory`（`packages/agent-team/src/worker-inspection.ts`）是唯一的读取方。它拒绝不是 `sessions` 目录下绝对 `.jsonl` 路径的记录位置，超长值整条拒绝，而不是裁成一个没人记录过的路径。它解析真实路径，把打开句柄的身份与位置所指的文件比对，读取后再核对一次，并要求首条记录写明所记会话。8 MiB 预算花在读取本身，所以超长单行永远不会被解析。它只返回该次执行自己那个 turn 的记录、逐片段限长，命中凭证形状的文本整条不返回——带引号的 JSON 键值同样如此。每条原因都是一句有界的话，陈述事实而不回显原生值。读到的任何内容都不会写回 Team。
+`readWorkerHistory`（`packages/agent-team/src/worker-inspection.ts`）是唯一的读取方，两个引擎的记录走同一趟有界读取：引擎只决定哪些字段标识会话、turn 与失败，其余规则不变。它拒绝不是引擎自己目录下绝对 `.jsonl` 路径的记录位置——Codex 是 `sessions`，Claude 是 `projects`——超长值整条拒绝，而不是裁成一个没人记录过的路径。
+
+它解析真实路径，把打开句柄的身份与位置所指的文件比对，读取后再核对一次，并要求首条记录写明所记会话：Codex 的 session 头，或 Claude 在第一个 turn 之前写下的 queue 头。本次执行的 turn 是 Codex 为它记录的 span，或 Claude 侧 uuid 等于 OAR 写入的 input id 的那条 prompt user 消息。8 MiB 预算花在读取本身，所以超长单行永远不会被解析。它只返回该次执行自己那个 turn 的记录、逐片段限长，命中凭证形状的文本整条不返回——带引号的 JSON 键值同样如此。Claude 把失败的 turn 记成 `api_error` system 行或合成 assistant 消息，重试会重复同一条失败，所以读取方只报最后一条一次，而不是越堆越长。每条原因都是一句有界的话，陈述事实而不回显原生值。读到的任何内容都不会写回 Team。
+
+读取在下一条顶层 prompt 处结束，所以日后被继续使用的原生会话不会把后续 turn 的模型或失败借给这次执行。
 
 报告是分层的。公开 Thread 保持原有摘要；详细答案——失败发生的阶段、原生标识、有界片段，或记录无法回答的那一个原因（`missing`、`unreadable`、`unpersisted`、`unsupported`、`unmatched`）——只给发起成员与 Human。尚未结束的执行只回答摘要，并说明记录在结束后才读取；在记录会话之前就结束的执行如实说明这一点，而不会声称引擎从未打开会话。
 
@@ -290,7 +296,7 @@ Human 的入口是「编辑 Agent」弹窗，列出该成员仍在运行的执�
 
 这条活动控制归执行注册表所有。`WorkerRegistry` 为每个打开的引擎会话保留一个条目，`TeamWorkerProvider` 通过 `WorkerSessionSink` 在会话打开与关闭时上报；该执行的 result 结算时摘除该条目，Host 释放执行时整表清空。没有模块级表，也没有第二个状态所有者：本 Host 不再持有的会话没有可到达的控制，重启也不带任何条目过去。
 
-授权就是打开这次执行的身份——它的 `initiatedBy` 成员。其他成员按 `worker_steer_forbidden` 拒绝；这一版 Human 没有入口，所以 Human 能读一次执行的诊断，但不往它的 turn 里加东西。是否仍在运行由持久记录决定；上一个 Host 留在 `running` 的记录按 `worker_unconfirmed` 拒绝，而不是照发。这一版只对 Codex 开放：它的控制会指明正在驱动的那个 turn；「接受」覆盖范围超过当前 turn 的引擎按 `worker_steer_unsupported` 拒绝，而不是借用这条保证。
+授权就是打开这次执行的身份——它的 `initiatedBy` 成员。其他成员按 `worker_steer_forbidden` 拒绝；这一版 Human 没有入口，所以 Human 能读一次执行的诊断，但不往它的 turn 里加东西。是否仍在运行由持久记录决定；上一个 Host 留在 `running` 的记录按 `worker_unconfirmed` 拒绝，而不是照发。这一版只对 Codex 开放：它的控制会指明正在驱动的那个 turn；Claude Code 的「接受」覆盖的窗口比当前 turn 更宽——工具结果待处理或最终文本仍在流式时都会接受，可能落进下一个 turn——所以它按 `worker_steer_unsupported` 拒绝，而不是借一个引擎并不提供的保证。
 
 幂等回答先于所有状态检查。`RunEntry.steers` 按 request id 保留一份回执，所以执行仍在跑时和结束后，重送都拿回第一次的回执，且不会再到达引擎；换一个新的 request id 重送同一句话同样如此；用已用过的 request id 送不同指令按 `worker_steer_conflict` 拒绝。已结束的执行、停止在途的执行，以及没有同轮控制能力的引擎会话，各自给出自己的拒绝，而不是发出任何东西。
 

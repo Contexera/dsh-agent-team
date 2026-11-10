@@ -6,7 +6,9 @@ The explicit `team-member` preset is the only Team Member composition. It adds c
 
 The filesystem row states `applyPatch: false` rather than inheriting the Host default: `edit` is the one file-modification tool a Member is granted, and a preset that left the flag unstated would widen every Member's surface the day a Host default flips. The shipped preset test asserts the value, so the decision is checked rather than assumed.
 
-Every Member starts restricted to the tool definitions contributed by its selected preset, plus the explicitly shared `working_directory` tool. Host-global tools are excluded. `capabilities.tools.allow` can only narrow this baseline; it cannot authorize a Host or later plugin tool. The nine Team tools and `working_directory` remain available.
+Every Member starts restricted to the tool definitions contributed by its selected preset, plus the explicitly shared `working_directory` tool. Host-global tools are excluded. `capabilities.tools.allow` can only narrow this baseline; it cannot authorize a Host or later plugin tool. The nine Team tools and `working_directory` remain available, with one exception the Host row decides: `team_worker` is declared only while the Worker switch is on, so a Member never sees a delegation tool the Host would refuse.
+
+The same switch also governs the Worker paragraph of the owner guidance section, which is re-derived at every assembly; the Worker registry still refuses a start while the switch is off.
 
 The Host captures those definitions before Agent publication and guards direct and nested execution. Later own-scope tools are no longer hidden from requests: a restriction filters Host-global tools only, so without an assembly-time filter a scoped registration stays declared while its execution is still denied. Replacing an allowed definition is refused at execution rather than at assembly. Capability edits retain the original bindings. These checks apply to the exact Member, not ordinary Agents or delegated child scopes.
 
@@ -73,5 +75,11 @@ Detail lives in bundled core skills under `packages/agent-team/core-skills/`, lo
 - `team-domain-model` explains roles and permissions (Human, Project owner, Project member, accountable), the Main stream and Thread division of labor, how mentions, linked replies, and ordinary messages are delivered, when to read the Inbox or the board, the Task lifecycle and who accepts, closes, reopens, or transfers, what a DM is for, and the common rejections that state a recovery. It holds stable rules only: identity, owned Projects, and unread work come from the dynamic context and the Team tools, and the Host enforces every permission and delivery rule.
 - `member-memory-manager` and `member-skill-manager` cover private memory and private skill craft.
 - `project-subscriptions` covers read-only Project subscription scripts, GitHub polling examples, webhook registration and signatures, credential handling, and run/delivery debugging.
+
+One section is dynamic rather than resident text. The Host registers `team:project-owner` on each Member's agent scope at activation, at the `TEAM_POLICY` order, and its provider reads the ledger and the Host row at every assembly. It contributes text only while the Member owns at least one active Project, so a grant or a withdrawal takes effect at the next assembly without a restart.
+
+The section carries standing owner duties — what only an owner may start, accountability for a Task the owner starts, keeping owned areas moving, taking scope and priority calls to the Human — and the judgment around handing work over: what makes a delegation self-contained, what the task text must carry, keeping work moving after dispatch, and reviewing the result independently.
+
+While the Worker switch is on it adds a short paragraph on local Workers. It never restates tool parameters or per-Project facts, which the tool descriptions and the ledger own, and because it is a prompt section rather than a message, compaction does not remove it.
 
 `npm run check:core-skills` validates each skill's front matter, description, size budget, and links.

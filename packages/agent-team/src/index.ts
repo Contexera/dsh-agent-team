@@ -21,7 +21,7 @@ import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-app-boot'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import { scopeOf } from '@deepseek-ai/dsh-scope'
+import { scopeOf, scopeParentOf } from '@deepseek-ai/dsh-scope'
 import { Session, SessionId, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
@@ -29,6 +29,7 @@ import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { DomainFacility, type Domain, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
@@ -53,6 +54,7 @@ export { activityFact, activityText, type ActivityFact } from './activity-facts.
 import { carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY, type TeamContextProjectionState } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import { PROJECT_OWNER_SECTION, projectOwnerGuidance } from './project-owner-guidance.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
 import { newestEndedRuns, WorkerRefusal, WorkerRegistry, workerTaskPreview, WORKER_RUN_HISTORY_LIMIT, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
@@ -624,6 +626,13 @@ export default class AgentTeam extends TypertRemoteService {
    */
   private presenceEpoch = 0
   private readonly changeWaiters = new Set<ChangeWaiter>()
+  /**
+   * The Worker switch the live Member surfaces currently reflect. The Host row
+   * is the only switch: it decides whether `team_worker` is declared, and the
+   * registry still refuses a start while it is off, so a stale surface can never
+   * become an execution path.
+   */
+  private workerExposure: boolean
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'agentTeam')
@@ -631,8 +640,10 @@ export default class AgentTeam extends TypertRemoteService {
       settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, this.ctx.fiber))
       this.migrateLegacyHostRow()
     })
+    this.workerExposure = this.config.worker.get().enabled
     this.ctx.on('loader/volatile-update', () => {
       this.syncHumanHandle()
+      this.syncWorkerExposure()
     })
   }
 
@@ -838,6 +849,58 @@ export default class AgentTeam extends TypertRemoteService {
   humanProfile(): { readonly name: string; readonly avatarRef?: string } {
     const avatarRef = this.config.avatarRef.get()
     return Object.freeze({ name: this.humanHandle(), ...(avatarRef === undefined ? {} : { avatarRef }) })
+  }
+
+  /** The Host row's Worker switch, read at each use so a live edit is never cached into a stale decision. */
+  private workerEnabled(): boolean {
+    return this.config.worker.get().enabled
+  }
+
+  /**
+   * Follow the Worker switch on the live surfaces. The loader event fires for any
+   * volatile row update, so the switch is compared before anything is applied;
+   * an unchanged value costs nothing. Members are reached at their next turn
+   * boundary, and a running Worker is never touched: the switch gates new
+   * delegations, not work already in flight.
+   */
+  private syncWorkerExposure(): void {
+    const enabled = this.workerEnabled()
+    if (enabled === this.workerExposure) return
+    this.workerExposure = enabled
+    void this.applyWorkerExposure(enabled).catch((error: unknown) => {
+      this.ctx.logger.warn(`agent-team: failed to apply the Worker switch to live Member surfaces: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
+
+  /** Re-apply the Worker switch to every live Member at its own turn boundary, one failure never stopping the others. */
+  private async applyWorkerExposure(enabled: boolean): Promise<void> {
+    // Members wait independently: one long turn must not delay the others.
+    await Promise.all([...this.handles].map(async ([memberId, handle]) => {
+      const member = this.requireLedger().getMember(memberId)
+      if (member === undefined) return
+      try {
+        const boundary = await this.memberRuntime.awaitTurnBoundary(handle)
+        // A suspend, removal, or restart during the wait replaced the surface this
+        // apply targeted; the replacement reads the switch on its own activation.
+        if (this.handles.get(memberId) !== handle) return
+        // A second flip while this one waited supersedes it: the newer sync owns
+        // the surface, and applying this value now would undo the newer one.
+        if (this.workerEnabled() !== enabled) return
+        // A capability edit may have committed while this switch waited. Read
+        // the accepted intent now rather than restoring a pre-wait snapshot.
+        const member = this.requireLedger().getMember(memberId)
+        if (member === undefined) return
+        this.memberRuntime.reapplyMemberToolPolicy(member, enabled)
+        // The swap released the applied-capability record; the stored intent is
+        // in force again, so the roster must not read as pending after a toggle.
+        this.memberRuntime.recordAppliedCapabilities(memberId, member.capabilities)
+        if (boundary === 'waited') {
+          this.ctx.logger.info(`agent-team: member '${member.handle}' session '${member.sessionId}' stage 'worker-exposure' applied the Worker switch at its next turn boundary`)
+        }
+      } catch (error: unknown) {
+        this.ctx.logger.warn(`agent-team: failed to apply the Worker switch to member '${this.memberLabel(memberId)}': ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }))
   }
 
   /** Push the current Config name into the ledger's runtime @ handle; the ledger may not be open yet, and the post-open sync covers that. */
@@ -1764,7 +1827,7 @@ export default class AgentTeam extends TypertRemoteService {
       this.ctx.logger.info(`agent-team: member '${stored.handle}' session '${stored.sessionId}' stage 'wait-turn' waited ${Date.now() - started}ms for its turn boundary before applying the stored configuration`)
     }
     if (this.generationSwappedDuringWait(memberId, active, boundary)) return 'deferred:generation-changed'
-    this.memberRuntime.reapplyMemberToolPolicy(stored)
+    this.memberRuntime.reapplyMemberToolPolicy(stored, this.workerEnabled())
     this.memberRuntime.swapSkillSelection(memberId, stored.capabilities?.skills?.allow)
     this.memberRuntime.recordAppliedCapabilities(memberId, stored.capabilities)
     return 'applied'
@@ -2807,6 +2870,23 @@ export default class AgentTeam extends TypertRemoteService {
     }
   }
 
+  /**
+   * Register the owner guidance in one Member generation's scope. The provider
+   * reads ownership and the Worker switch at every assembly, so a grant, a
+   * withdrawal, or a switch flip changes the prompt without re-registering it,
+   * and the section is resident: compaction rewrites messages, never sections.
+   */
+  private installProjectOwnerGuidance(agentCtx: Context, member: AgentTeamAgentMember): void {
+    agentCtx.systemPrompt.section({
+      name: PROJECT_OWNER_SECTION,
+      order: agentCtx.systemPrompt.getSectionOrder('TEAM_POLICY'),
+      text: () => projectOwnerGuidance({
+        ownsProject: (this.ledger?.ownedProjects(member.memberId).length ?? 0) > 0,
+        workerEnabled: this.workerEnabled(),
+      }),
+    })
+  }
+
   private async activateMember(member: AgentTeamAgentMember, knownWorkspacePath?: string, knownSessions?: ReadonlySet<SessionId>, forkedFrom?: SessionId, options?: { readonly deferNotify?: boolean }): Promise<void> {
     if (this.handles.has(member.memberId)) return
     let created: AgentHandle | undefined
@@ -2835,7 +2915,7 @@ export default class AgentTeam extends TypertRemoteService {
       const setup = async (agentCtx: Context, agent: Agent) => {
         try {
           await this.ctx.agentPresets.mount(agentCtx, member.presetId)
-          this.memberRuntime.applyMemberToolPolicy(agentCtx, member)
+          this.memberRuntime.applyMemberToolPolicy(agentCtx, member, this.workerEnabled())
           this.validateMemberPreset(agentCtx)
         } catch (error) {
           // Tag composition failures with their own class: the activation
@@ -2846,6 +2926,7 @@ export default class AgentTeam extends TypertRemoteService {
         // Only a resumed Session records the configured route, and it inherits the effort its own log recorded for that route; a fresh Session's route rides AgentOptions, exactly as the driver's own resume does.
         if (persisted) this.applyConfiguredRoute(agent, selection)
         installModelSelection(agentCtx)
+        this.installProjectOwnerGuidance(agentCtx, member)
         agentCtx.on('session/event', (session, event) => {
           if (session !== agent.session || event.type !== 'request/header') return
           this.adoptMemberRouteFromRequest(member.memberId, agent, session.id, event)
@@ -2984,7 +3065,10 @@ export default class AgentTeam extends TypertRemoteService {
       if (scope === undefined) throw new Error(teamPresetScopeMismatchMessage(isTsxDevMode()))
       throw new Error('selected preset is not team-enabled')
     }
-    const available = new Set(this.ctx.tools.schemas(scope).map(tool => tool.name))
+    // The preset's own surface, not the Member's restricted view: a Host switch
+    // may withdraw `team_worker` from the Member without the preset losing it.
+    const presetScope = scope === undefined ? undefined : scopeParentOf(scope)
+    const available = new Set(this.ctx.tools.schemas(presetScope ?? scope).map(tool => tool.name))
     const missing = AGENT_TEAM_TOOL_NAMES.filter(name => !available.has(name))
     if (missing.length > 0) throw new Error(`team-enabled preset is missing tools: ${missing.join(', ')}`)
   }

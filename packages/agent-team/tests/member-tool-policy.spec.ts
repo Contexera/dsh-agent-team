@@ -12,6 +12,7 @@ import { defineContentToolFixture, executeToolFixture } from '@deepseek-ai/dsh-t
 import { TeamService as OfficialTeamService } from '@deepseek-ai/dsh-experimental-agent-team'
 import * as OfficialTeamTools from '@deepseek-ai/dsh-experimental-tool-agent-team'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
+import { agentTeamHumanActor } from '../src/ledger.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 
@@ -92,12 +93,28 @@ function toolNames(ctx: Context, agent: Agent): readonly string[] {
   return ctx.tools.schemas(agent as never).map(schema => schema.name).sort()
 }
 
-/** The tools every Member surface carries whatever its allow-list says. */
-const MEMBER_TOOL_NAMES = [...AGENT_TEAM_TOOL_NAMES, 'working_directory'].sort()
+/**
+ * The tools every Member surface carries whatever its allow-list says, with the
+ * Worker switch off (the Host row's default): `team_worker` is not declared
+ * until the switch is on, and the spec below covers that flip.
+ */
+const MEMBER_TOOL_NAMES = [...AGENT_TEAM_TOOL_NAMES.filter(name => name !== 'team_worker'), 'working_directory'].sort()
 
 async function catalogNames(ctx: Context, agent: Agent): Promise<readonly string[]> {
   const skills = await ctx.skills.list({ scope: agent as never })
   return skills.map(skill => skill.name).sort()
+}
+
+/**
+ * Flip the Host row's Worker switch the way the settings form does: the row's
+ * volatile value changes and the loader announces it, so live Member surfaces
+ * follow the same seam a deployment uses.
+ */
+function setWorkerSwitch(ctx: Context, enabled: boolean): void {
+  const config = ctx.agentTeam.config as unknown as { worker: { get(): { enabled: boolean } } }
+  const current = config.worker.get()
+  config.worker = { get: () => ({ ...current, enabled }) }
+  ctx.emit('loader/volatile-update', [])
 }
 
 function waitForIdle(ctx: Context, agent: Agent): Promise<void> {
@@ -197,6 +214,34 @@ describe('Agent Team member tool policy', () => {
     expect(ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === narrow.memberId)
       ?.capabilityWarnings?.map(warning => warning.name)).toEqual(['foreign_global'])
     expect(ctx.tools.schemas().map(tool => tool.name)).toContain('foreign_global')
+  })
+
+  it('declares team_worker only while the Host Worker switch is on, and withdraws it live', async () => {
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId } = shared
+    const original = (ctx.agentTeam.config as unknown as { worker: unknown }).worker
+    testCleanups.push(() => {
+      ;(ctx.agentTeam.config as unknown as { worker: unknown }).worker = original
+      ctx.emit('loader/volatile-update', [])
+    })
+    const member = await addMember(ctx, workspaceId, 't21-worker-switch')
+    const agent = liveAgent(ctx, member)
+    // Off by default: the Member never sees a tool the Host would refuse.
+    expect(toolNames(ctx, agent)).not.toContain('team_worker')
+    expect(toolNames(ctx, agent)).toEqual(expect.arrayContaining(['team_message', 'team_task', 'ordinary_tool']))
+
+    // On: the existing Session's next step sees it, with no restart.
+    setWorkerSwitch(ctx, true)
+    await vi.waitFor(() => {
+      expect(toolNames(ctx, agent)).toContain('team_worker')
+    })
+
+    // Off again: withdrawn, and the rest of the Team surface stays.
+    setWorkerSwitch(ctx, false)
+    await vi.waitFor(() => {
+      expect(toolNames(ctx, agent)).not.toContain('team_worker')
+    })
+    expect(toolNames(ctx, agent)).toEqual(expect.arrayContaining(['team_message', 'team_task', 'ordinary_tool']))
   })
 
   it('declares a late own-scope registration to the model but still denies its direct and nested calls', async () => {
@@ -302,7 +347,7 @@ describe('Agent Team member tool policy', () => {
     for (const request of adapter.requests) {
       // A restriction filters global tools only and leaves scoped registrations alone, and the official Team tools register in the Agent's exact scope — so, with no assembly-time hook left to hide them, they are declared alongside the Member's own set. The guard, not the declaration, is what refuses them: the direct `list_agents` call above is already denied.
       const declared = new Set(request.tools?.map(tool => tool.name))
-      expect([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].every(name => declared.has(name))).toBe(true)
+      expect([...AGENT_TEAM_TOOL_NAMES.filter(name => name !== 'team_worker'), 'ordinary_tool', 'spare_tool'].every(name => declared.has(name))).toBe(true)
       expect(declared.has('list_agents')).toBe(true)
     }
     const ordinary = await ctx.agents.create({ sessionId: SessionId('t20-ordinary') })
@@ -322,7 +367,7 @@ describe('Agent Team member tool policy', () => {
     expect(adapter.requests).toHaveLength(3)
     // The resumed Member keeps its own tool set; the official Team rows stay declared too, because a restriction leaves scoped registrations alone, and the guard still refuses them.
     const resumedDeclared = new Set(adapter.requests.at(-1)?.tools?.map(tool => tool.name))
-    expect([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].every(name => resumedDeclared.has(name))).toBe(true)
+    expect([...AGENT_TEAM_TOOL_NAMES.filter(name => name !== 'team_worker'), 'ordinary_tool', 'spare_tool'].every(name => resumedDeclared.has(name))).toBe(true)
     expect(resumedDeclared.has('list_agents')).toBe(true)
   })
 
@@ -790,6 +835,54 @@ describe('Agent Team member tool policy', () => {
     expect(settled.status.member.sessionId).toBe(member.sessionId)
     await turnDone
     expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta'])
+    ctx.agentTeam.validateLedger()
+  })
+})
+
+describe('Worker exposure at a pending turn boundary', () => {
+  it('reads a capability edit accepted while the switch was waiting', async () => {
+    const cleanups: Array<() => Promise<void>> = []
+    testCleanups.push(async () => { for (const cleanup of cleanups) await cleanup() })
+    const { ctx, workspaceId } = await mountTeamMemberHost({
+      cleanups, prepare: provideQuietTokenMeter,
+      presetPlugins: [{ id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href }],
+    })
+    const disposeAdapter = ctx.llm.registerAdapter(['mock'], new EmptyAdapter())
+    testCleanups.push(() => { disposeAdapter() })
+    const member = await addMember(ctx, workspaceId, 't22-worker-switch-edit')
+    const agent = liveAgent(ctx, member)
+    const service = ctx.agentTeam as unknown as {
+      readonly memberRuntime: { awaitTurnBoundary(handle: unknown): Promise<'waited'> }
+      readonly handles: Map<AgentTeamMemberId, { agent: Agent }>
+      readonly ledger: { updateMember(request: unknown): Promise<unknown> }
+      applyWorkerExposure(enabled: boolean): Promise<void>
+    }
+    const handle = service.handles.get(member.memberId)!
+    const config = ctx.agentTeam.config as unknown as { worker: { get(): { enabled: boolean } } }
+    const current = config.worker.get()
+    config.worker = { get: () => ({ ...current, enabled: true }) }
+    const gate = Promise.withResolvers<void>()
+    const wait = vi.spyOn(service.memberRuntime, 'awaitTurnBoundary').mockImplementation(async () => {
+      await gate.promise
+      return 'waited'
+    })
+    const applying = service.applyWorkerExposure(true)
+
+    // Commit through the ledger itself: updateMember must also wait on a running
+    // Member, so mocking its boundary wait would deadlock this arrangement.
+    await service.ledger.updateMember({
+      requestId: requestId('t22-narrow'), memberId: member.memberId, handle: 't22-worker-switch-edit',
+      description: 'Policy member', capabilities: { tools: { allow: ['ordinary_tool'] } },
+      actor: agentTeamHumanActor(),
+    })
+    gate.resolve()
+    await applying
+    wait.mockRestore()
+
+    // The switch started with unrestricted intent, but it must apply the edit
+    // accepted during its wait rather than restoring the pre-wait tool list.
+    expect(toolNames(ctx, agent)).toContain('team_worker')
+    expect(toolNames(ctx, agent)).not.toContain('spare_tool')
     ctx.agentTeam.validateLedger()
   })
 })

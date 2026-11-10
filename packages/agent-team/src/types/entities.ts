@@ -604,7 +604,7 @@ export interface AgentTeamWorkerExecution extends AgentTeamWorkerStartRecord {
   readonly nativeSessionId?: string | undefined
   /** The engine's own identity for the turn this run drove, once one started. */
   readonly nativeTurnId?: string | undefined
-  /** The absolute path of the engine's own record for that session, as the engine reported it. */
+  /** The absolute path of the engine's own record for that session: reported by Codex, derived from the cwd Claude reported and the environment the run opened with. */
   readonly nativeStorage?: string | undefined
   /** Where a failed run came apart; absent when it did not fail. */
   readonly stage?: AgentTeamWorkerStage | undefined
@@ -623,7 +623,7 @@ export interface AgentTeamWorkerSettlement {
   readonly nativeSessionId?: string | undefined
   /** The engine's own identity for the turn this run drove, once one started. */
   readonly nativeTurnId?: string | undefined
-  /** The absolute path of the engine's own record for that session, as the engine reported it. */
+  /** The absolute path of the engine's own record for that session: reported by Codex, derived from the cwd Claude reported and the environment the run opened with. */
   readonly nativeStorage?: string | undefined
   /** Where a failed run came apart; absent when it did not fail. */
   readonly stage?: AgentTeamWorkerStage | undefined

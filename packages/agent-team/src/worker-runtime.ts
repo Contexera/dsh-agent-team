@@ -7,6 +7,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import type {
   FailureClass,
   FrameBody,
@@ -70,7 +72,7 @@ export interface WorkerAnchors {
   readonly nativeSessionId: string
   /** The engine's own identity for the turn this run drove. */
   readonly nativeTurnId?: string | undefined
-  /** The absolute path of the engine's own record, as the engine reported it. */
+  /** The absolute path of the engine's own record: reported by Codex, derived from the cwd Claude reported and the environment the run opened with. */
   readonly nativeStorage?: string | undefined
 }
 
@@ -177,22 +179,88 @@ function nativeThreadPath(body: FrameBody): string | undefined {
 }
 
 /**
- * Read one open session's anchors off its own record stream, bound to the input
- * this run submitted. The turn is the one span the root agent's records after
- * that input carry: a session that also holds another root turn cannot be tied
- * to this run, so it reports no turn id rather than the last one it saw — a
- * guessed turn would send a later look-up to another run's failure.
+ * The working directory the released Claude Code CLI reports for the session it
+ * opened. It is the directory the CLI named the session's project by, which is
+ * what its record path is derived from; a session that has not reported one yet
+ * falls back to the directory the run was opened in.
  */
-function anchorsOf(session: Session, inputSeq: number | undefined): WorkerAnchors {
+function nativeClaudeCwd(body: FrameBody): string | undefined {
+  if (body.type !== 'system/init') return undefined
+  const native = body.native
+  if (native === null || typeof native !== 'object') return undefined
+  const cwd = (native as { readonly cwd?: unknown }).cwd
+  return typeof cwd === 'string' && cwd !== '' ? cwd : undefined
+}
+
+/**
+ * The environment the engine's child process actually receives: OAR starts it
+ * from the Host's own environment with the row's overlay applied, where a null
+ * removes a name. Claude derives its record directory from `CLAUDE_CONFIG_DIR`
+ * and `HOME`, so the anchors have to read the same values the child did — the
+ * Host's own `process.env` is only one half of that.
+ */
+function effectiveEnvironment(env: Readonly<Record<string, string | null>>): Readonly<Record<string, string | undefined>> {
+  const merged: Record<string, string | undefined> = { ...process.env }
+  for (const [name, value] of Object.entries(env)) {
+    if (value === null) delete merged[name]
+    else merged[name] = value
+  }
+  return merged
+}
+
+/** The spelling Node selects for one environment name, which Windows makes case-insensitive. */
+function environmentValue(env: Readonly<Record<string, string | undefined>>, name: string): string | undefined {
+  if (process.platform !== 'win32') return env[name]
+  const key = Object.keys(env).filter(entry => entry.toUpperCase() === name).sort()[0]
+  return key === undefined ? undefined : env[key]
+}
+
+/**
+ * Where the released Claude Code CLI keeps one session's own record. The CLI
+ * names the project directory after its working directory (every character
+ * outside `[A-Za-z0-9]` becomes `-`) and the file after the session id, under
+ * `CLAUDE_CONFIG_DIR` or `$HOME/.claude`. The path is derived, not reported: the
+ * CLI's stream carries no record location, so the derivation reads the same
+ * environment the child was opened with. A wrong guess reads nothing and the
+ * look-up says the record is missing rather than searching for another file.
+ */
+function claudeRecordPath(cwd: string, sessionId: string,
+  env: Readonly<Record<string, string | undefined>>): string {
+  const home = environmentValue(env, process.platform === 'win32' ? 'USERPROFILE' : 'HOME')
+  const configured = environmentValue(env, 'CLAUDE_CONFIG_DIR')
+  const config = configured === undefined || configured.trim() === ''
+    ? join(home === undefined || home === '' ? homedir() : resolve(cwd, home), '.claude')
+    : resolve(cwd, configured)
+  return join(config, 'projects', cwd.replaceAll(/[^A-Za-z0-9]/gu, '-'), `${sessionId}.jsonl`)
+}
+
+/**
+ * Read one open session's anchors off its own record stream, bound to the input
+ * this run submitted. Codex's turn is the one span the root agent's records after
+ * that input carry: a session that also holds another root turn cannot be tied to
+ * this run, so it reports no turn id rather than the last one it saw — a guessed
+ * turn would send a later look-up to another run's failure. Claude has no turn
+ * object: its record names the turn by the prompting user message, which OAR
+ * writes with the input id this run generated, so that id is the turn anchor.
+ */
+function anchorsOf(session: Session, inputSeq: number | undefined, engine: WorkerEngine,
+  cwd: string, inputId: string | undefined, env: Readonly<Record<string, string | undefined>>): WorkerAnchors {
   let nativeStorage: string | undefined
+  let reportedCwd: string | undefined
   const turns = new Set<string>()
   for (const record of session.records()) {
     if (record.sessionId !== session.id || record.agentPath.length !== 0) continue
-    if (record.kind === 'frame') nativeStorage ??= nativeThreadPath(record.body)
+    if (record.kind === 'frame') {
+      if (engine === 'codex') nativeStorage ??= nativeThreadPath(record.body)
+      else reportedCwd ??= nativeClaudeCwd(record.body)
+    }
     if (inputSeq === undefined || record.seq <= inputSeq) continue
     if (record.spanId !== undefined && record.spanId !== '') turns.add(record.spanId)
   }
-  const turn = turns.size === 1 ? [...turns][0] : undefined
+  if (engine === 'claude') nativeStorage = claudeRecordPath(reportedCwd ?? cwd, session.id, env)
+  const turn = engine === 'claude'
+    ? (inputSeq === undefined ? undefined : inputId)
+    : turns.size === 1 ? [...turns][0] : undefined
   return Object.freeze({ nativeSessionId: session.id,
     ...(turn === undefined ? {} : { nativeTurnId: turn }),
     ...(nativeStorage === undefined ? {} : { nativeStorage }) })
@@ -275,7 +343,8 @@ async function disposeSession(session: Session, spec: WorkerRunSpec): Promise<vo
   }
 }
 
-function publishRun(session: Session, prompt: string, request: ResolvedSubagentStartRequest, spec: WorkerRunSpec): SubagentRun {
+function publishRun(session: Session, prompt: string, request: ResolvedSubagentStartRequest, spec: WorkerRunSpec,
+  cwd: string): SubagentRun {
   const stopped = Promise.withResolvers<SubagentResult>()
   const messages = new Map<string, string>()
   let streamedText = ''
@@ -285,11 +354,15 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
   // engine closes its record stream as it tears down, so a capture taken after
   // the abort or the cleanup would find nothing left to read.
   let inputSeq: number | undefined
+  let promptInputId: string | undefined
   let anchors: WorkerAnchors | undefined
+  // The environment this run's engine was opened with, read once: the anchors
+  // derive Claude's record directory from it after the session is gone.
+  const childEnv = effectiveEnvironment(spec.env)
   const captureAnchors = (): void => {
     if (anchors !== undefined) return
     try {
-      anchors = anchorsOf(session, inputSeq)
+      anchors = anchorsOf(session, inputSeq, spec.engine, cwd, promptInputId, childEnv)
     } catch {
       // A session that cannot answer costs the look-up, never the run's ending.
     }
@@ -349,8 +422,8 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
   if (request.signal.aborted) onAbort()
   const timer = spec.timeoutMs === undefined ? undefined : setTimeout(() => { interrupt('timeout') }, spec.timeoutMs)
   const runTurn = async (): Promise<SubagentResult> => {
-    const inputId = randomUUID()
-    const admitted = await session.prompt(prompt, { inputId })
+    promptInputId = randomUUID()
+    const admitted = await session.prompt(prompt, { inputId: promptInputId })
     if (admitted.kind === 'rejected') {
       return { output: collectOutput(), stopReason: 'error', diagnostic: new WorkerFailure('turn', admitted.code).message }
     }
@@ -358,7 +431,7 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     // reads the record from here on and never another root turn's span.
     inputSeq = admitted.seq
     const awaitTurnEnd = await awaitTurnEndOf()
-    const outcome = await awaitTurnEnd(session, admitted.seq, inputId)
+    const outcome = await awaitTurnEnd(session, admitted.seq, promptInputId)
     // A native handled receipt is not a turn end: keep waiting for the turn it belongs to.
     const turn = completedTurn(outcome.kind === 'handled' ? await awaitTurnEnd(session, outcome.seq) : outcome, collectOutput())
     captureAnchors()
@@ -487,7 +560,7 @@ export async function startWorkerRun(request: ResolvedSubagentStartRequest, spec
     await disposeSession(session, spec)
     throw cancellationFailure()
   }
-  return publishRun(session, prompt, request, spec)
+  return publishRun(session, prompt, request, spec, cwd)
 }
 
 /**

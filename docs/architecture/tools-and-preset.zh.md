@@ -6,7 +6,9 @@
 
 filesystem row 显式写 `applyPatch: false`，而不是沿用 Host 默认值：Member 只被授予 `edit` 这一种文件修改工具，preset 若留空，将来 Host 默认值一翻就会悄悄扩大每个 Member 的工具面。发布包的 preset 测试断言这个值，所以这是一项被检查的决定，不是一个假设。
 
-每个 Member 默认只获准使用所选 preset 注册的工具定义，以及显式共享的 `working_directory`。Host 全局工具不在此范围内。`capabilities.tools.allow` 只能进一步缩减，不能授权 Host 工具或后来插件添加的工具。九个 Team 工具和 `working_directory` 始终保留。
+每个 Member 默认只获准使用所选 preset 注册的工具定义，以及显式共享的 `working_directory`。Host 全局工具不在此范围内。`capabilities.tools.allow` 只能进一步缩减，不能授权 Host 工具或后来插件添加的工具。九个 Team 工具和 `working_directory` 始终保留，只有一个例外由 Host 设置行决定：`team_worker` 只在 Worker 开关打开时声明，Member 不会看到一个 Host 会拒绝的委派工具。
+
+同一开关还决定 owner guidance section 里的 Worker 段落，而该段落每次组装都会重新求值；Worker registry 在开关关闭时仍然拒绝发起。
 
 Host 在 Agent 发布前保存这些工具定义，并在直接调用和嵌套调用执行前检查。后来注册到 Member 自身 scope 的工具不再被挡在请求之外：restriction 只过滤 Host 全局工具，没有组装期过滤时，scoped 注册仍会出现在请求的工具列表里，但调用依然会被拒绝。允许的工具定义被替换时，拒绝发生在执行期而不是组装期。能力编辑沿用原始定义。检查只作用于该 Member，不影响普通 Agent 或委派子 scope。
 
@@ -77,5 +79,11 @@ Team 内容仍是不可信输入。persona 按代码里的现状点名工具；�
 - `team-domain-model` 说明角色与权限（Human、Project owner、Project member、负责人）、Main stream 与 Thread 的分工、点名、带链接的回复与普通消息如何投递、何时看 Inbox 或 board、Task 生命周期与谁来验收、关闭、重开或转交、DM 的用途，以及写明恢复方式的常见拒绝码。它只写稳定规则，不含当前状态：身份、所属 Project、未读工作来自动态 context 和 Team tools，权限与投递规则由 Host 执行。
 - `member-memory-manager` 与 `member-skill-manager` 负责私有 memory 与私有 skill 的写法。
 - `project-subscriptions` 负责只读 Project 订阅脚本、GitHub 轮询示例、webhook 注册与验签、credential 处理，以及运行和投递调试。
+
+有一个 section 是动态的，不是常驻文本。Host 在激活时把 `team:project-owner` 注册到每个 Member 的 agent scope 上，位置取 `TEAM_POLICY` 顺序，其 provider 每次组装都读取账本与 Host 设置行。只有该 Member 当前拥有至少一个 active Project 时才产出文本，所以授权或撤权在下一次组装即生效，无需重启。
+
+该 section 承载常驻的 owner 职责——只有 owner 能发起什么、owner 发起的 Task 默认由自己负责、让所辖区域继续推进、范围与优先级交 Human 决定——以及交接工作的判断：什么让一次委派自包含、任务正文必须带什么、派发后如何继续推进、返回后如何独立核验。
+
+Worker 开关打开时，它再加一段关于本地 Worker 的简短说明。它从不复述工具参数或单个 Project 的事实，那些属于工具说明与账本；又因为它是 prompt section 而不是消息，compaction 不会把它抹掉。
 
 `npm run check:core-skills` 检查每个 skill 的 front matter、description、体积预算与链接。

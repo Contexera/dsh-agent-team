@@ -209,12 +209,42 @@ it('configures the Worker delegation group on the Team settings page', async () 
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
 
-  // Later lanes share this profile, so put the row back and prove the revert reached the Host.
-  await storedCodex.getByLabel('Codex 的可执行路径').fill('')
+  // Claude is a first-class engine: it can be enabled, given its own executable,
+  // and made the default a delegation names when it names no engine.
+  const storedClaude = stored.locator('[data-worker-engine="claude"]')
+  await storedClaude.getByRole('switch').click()
+  await expect.poll(async () => await storedClaude.getByRole('switch').getAttribute('aria-checked')).toBe('true')
+  await storedClaude.getByLabel('Claude 的可执行路径').fill('/data/bin/claude')
+  await stored.locator('select').selectOption('claude')
+  // Claude alone, so the closed summary names the engine the row now defaults to.
   await storedCodex.getByRole('switch').click()
-  await stored.getByRole('switch', { name: MASTER }).click()
+  await expect.poll(async () => await storedCodex.getByRole('switch').getAttribute('aria-checked')).toBe('false')
   await stored.getByRole('button', { name: SAVE }).click()
   await expect.poll(async () => await stored.getByRole('button', { name: SAVE }).isDisabled(), { timeout: 20_000 }).toBe(true)
+  warningStart = consoleWatch.warnings.length
+  await page.reload()
+  await settleLayout(page)
+  acknowledgeReloadConnectionLoss(consoleWatch, warningStart)
+  const switched = await openWorkerGroup(page)
+  expect(await disclosure(switched.group).textContent()).toContain('已开启 · Claude')
+  await expand(switched.group)
+  const switchedClaude = switched.group.locator('[data-worker-engine="claude"]')
+  expect(await switched.group.locator('select').inputValue()).toBe('claude')
+  expect(await switchedClaude.getByRole('switch').getAttribute('aria-checked')).toBe('true')
+  expect(await switchedClaude.getByLabel('Claude 的可执行路径').inputValue()).toBe('/data/bin/claude')
+  // The evidence shows the enabled engine row itself, not only the closed summary.
+  await switchedClaude.scrollIntoViewIfNeeded()
+  await settleLayout(page)
+  await page.screenshot({ path: join(UI09_SHOTS, 'worker-settings-claude.png') })
+
+  // Later lanes share this profile, so put the row back and prove the revert reached the Host.
+  await switched.group.locator('[data-worker-engine="codex"]').getByLabel('Codex 的可执行路径').fill('')
+  await switchedClaude.getByLabel('Claude 的可执行路径').fill('')
+  await switchedClaude.getByRole('switch').click()
+  await switched.group.locator('select').selectOption('codex')
+  await switched.group.getByRole('switch', { name: MASTER }).click()
+  await switched.group.getByRole('button', { name: SAVE }).click()
+  await expect.poll(async () => await switched.group.getByRole('button', { name: SAVE }).isDisabled(), { timeout: 20_000 }).toBe(true)
   warningStart = consoleWatch.warnings.length
   await page.reload()
   await settleLayout(page)
@@ -223,8 +253,12 @@ it('configures the Worker delegation group on the Team settings page', async () 
   await expect.poll(async () => await disclosure(reverted.group).textContent()).toContain('已关闭')
   await expand(reverted.group)
   const revertedCodex = reverted.group.locator('[data-worker-engine="codex"]')
+  const revertedClaude = reverted.group.locator('[data-worker-engine="claude"]')
   expect(await revertedCodex.getByRole('switch').getAttribute('aria-checked')).toBe('false')
   expect(await revertedCodex.getByLabel('Codex 的可执行路径').inputValue()).toBe('')
+  expect(await revertedClaude.getByRole('switch').getAttribute('aria-checked')).toBe('false')
+  expect(await revertedClaude.getByLabel('Claude 的可执行路径').inputValue()).toBe('')
+  expect(await reverted.group.locator('select').inputValue()).toBe('codex')
 
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 240_000)

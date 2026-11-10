@@ -189,6 +189,8 @@ create 与 update 的请求身份包含脚本来源、触发选项与 create bas
 
 `executable` 存在的原因是 Host 进程的 `PATH` 不是 shell 的 `PATH`：人装好的 CLI 可能不在 Host 搜索的路径里，留空则沿用引擎自己的发现规则。
 
+开关关闭时，`team_worker` 根本不会声明给 Member；打开后在 Member 的下一个 turn 边界出现，关闭后收回。同一开关还决定 `team:project-owner` guidance section 里的 Worker 段落，而该段落每次组装都会重新求值。已在执行的 run 无论开关如何都保留自己的 handle：开关只拦新的委派，而 registry 在关闭时仍然拒绝发起。
+
 以下情况一律在写 started 记录之前、启动任何原生进程之前拒绝：没有给出目标（`worker_target_required`）；指定的 Thread（`worker_thread_unknown`）、Task（`worker_task_unknown`）或 Project（`worker_project_unknown`）不属于本 Team；Task 不在与它一起给出的 Thread 里（`worker_target_conflict`）；调用者当前不是目标所属 Project 的 owner（`worker_owner_required`）。
 
 其余拒绝来自设置与这次执行本身：开关关闭（`worker_disabled`）；指定的引擎不是 Worker 引擎（`worker_engine_unknown`）或未启用（`worker_engine_disabled`）；任务文本为空（`worker_task_required`）；无法解析出绝对工作目录（`worker_cwd_required`）；Harness subagent 服务未挂载（`worker_unavailable`）；或该 `requestId` 已被另一个委派用掉（`worker_request_conflict`）。拥有一个 Project 不授予另一个 Project 的授权，Team preset 之外的普通 DSH Session 也不会获得这个工具。
@@ -213,7 +215,7 @@ Worker 不持有 Team 身份：它不能发帖、认领、验收或代替成员�
 
 只有发起成员与 Human 能查，其他成员即使现在是该 Project 的 owner 也按 `worker_inspect_forbidden` 拒绝。尚未结束的执行只回答摘要，并说明原生记录在结束后才读取。若执行在引擎记录会话之前就结束，或记录已不存在、不可读、格式不认识、没有与所记 id 对应的 turn，则保留 Team 摘要并说明该原因，而不是返回并不存在的片段。
 
-读取有界且自校验：记录位置必须是 `sessions` 目录下以 `.jsonl` 结尾的绝对路径，超长值整条拒绝，而不是裁成一个没人记录过的路径。打开的文件必须就是该位置所指的文件——打开时核对身份，读取后再核对一次——首条记录必须写明所记会话，字节上限在任何分行与解析之前生效。片段只取该 turn 少数结构上安全的字段并逐条限长；命中凭证形状的文本整条不返回，而不是掩码，带引号的 JSON 键值同样如此。每条原因都是一句有界的话，陈述事实而不回显原生值；引擎记录的任何内容都不会写回 Team。
+读取有界且自校验：记录位置必须是引擎自己目录下以 `.jsonl` 结尾的绝对路径——Codex 是 `sessions`，Claude 是 `projects`——超长值整条拒绝，而不是裁成一个没人记录过的路径。Claude 的流里没有记录路径，所以结算时由 CLI 自报的 cwd 与本次执行打开时的环境推导。打开的文件必须就是该位置所指的文件——打开时核对身份，读取后再核对一次——首条记录必须写明所记会话，字节上限在任何分行与解析之前生效。片段只取该 turn 少数结构上安全的字段并逐条限长；命中凭证形状的文本整条不返回，而不是掩码，带引号的 JSON 键值同样如此。每条原因都是一句有界的话，陈述事实而不回显原生值；引擎记录的任何内容都不会写回 Team。
 
 Human 的「编辑 Agent」弹窗列出本 Host 仍持有的执行、上一个 Host 留在 `running` 的未确认记录，以及按结束时间排序的最近 20 条已结束执行——早启动、刚结束的长执行仍在这个窗口内——每条都显示真实终态，并各自提供诊断入口。任何执行都仍可按 `worker:` 编号读取，所以这个列表是窗口，不是唯一的门。
 
@@ -221,7 +223,7 @@ Human 的「编辑 Agent」弹窗列出本 Host 仍持有的执行、上一个 H
 
 这句指令进入引擎正在跑的那一个 turn：不开第二个 turn、不为下一轮排队、也不会到达别的执行。回执只说「已提交」，不说「已收到」——引擎把输入接管进了当前 turn，而 turn 若在下一次模型请求之前结束，指令会随之消失。答案写出时若停止或结束已经发生，回执会把这个状态说出来，因此已接受的补指令不会被报成一次干净的成功。
 
-只有发起这次执行的成员能补，其他成员按 `worker_steer_forbidden` 拒绝；这一版 Human 没有补指令入口。已结束的执行按 `worker_steer_ended` 回答它真实的终态；停止在途的执行直接拒绝，不往一个正在收尾的 turn 里投递（`worker_steer_stopping`）；本 Host 已不再持有的执行按 `worker_unconfirmed` 拒绝。这一版只对 Codex 开放，因为它的控制会指明引擎正在驱动的那个 turn；其他引擎——Claude Code 要等它自己的票核实「接受」覆盖到什么范围——按 `worker_steer_unsupported` 拒绝。引擎自己不肯接管时，回答它给出的代码与有界原因（`worker_steer_refused`），而不是成功。
+只有发起这次执行的成员能补，其他成员按 `worker_steer_forbidden` 拒绝；这一版 Human 没有补指令入口。已结束的执行按 `worker_steer_ended` 回答它真实的终态；停止在途的执行直接拒绝，不往一个正在收尾的 turn 里投递（`worker_steer_stopping`）；本 Host 已不再持有的执行按 `worker_unconfirmed` 拒绝。这一版只对 Codex 开放，因为它的控制会指明引擎正在驱动的那个 turn；Claude Code 的「接受」覆盖的窗口比当前 turn 更宽，所以按 `worker_steer_unsupported` 拒绝，而不是借一个引擎并不提供的保证。引擎自己不肯接管时，回答它给出的代码与有界原因（`worker_steer_refused`），而不是成功。
 
 同一句指令只送一次。用同一 request id 重送，会拿回第一次的回执——执行仍在跑时如此，结束后也如此——且不会再到达引擎；换一个新的 request id 重送同一句话同样如此；用已用过的 request id 送不同指令按 `worker_steer_conflict` 拒绝。
 

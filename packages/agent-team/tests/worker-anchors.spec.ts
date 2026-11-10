@@ -7,12 +7,15 @@
  * proved by `artifacts/probe-04-native-anchors.mjs`.
  */
 
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session } from '@botiverse/oar'
 import { cleanups, realHarness, requestId, waitFor } from './helpers/member-harness.ts'
-import { WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC } from '../src/worker-runtime.ts'
+import { startWorkerRun, workerAnchorsOf, WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC } from '../src/worker-runtime.ts'
 import type { Config } from '../src/host-row-settings.ts'
 import type { AgentTeamMemberId, AgentTeamProjectRef, AgentTeamThreadRef, AgentTeamWorkerExecution,
   AgentTeamWorkerRef } from '../src/types.ts'
@@ -29,6 +32,9 @@ const engine = {
   opening: undefined as PromiseWithResolvers<void> | undefined,
   next: 1,
 }
+
+/** What the fake Claude engine reports about its own session; the record path is derived from it. */
+const claude = { next: 1, cwd: '/fake/claude-work' }
 
 vi.mock('@botiverse/oar', () => ({
   codexRuntime: {
@@ -52,7 +58,24 @@ vi.mock('@botiverse/oar', () => ({
       } as unknown as Session
     },
   },
-  claudeRuntime: {},
+  claudeRuntime: {
+    installation: async () => ({ kind: 'available', via: 'executable', command: '/fake/claude', version: '2.1.319' }),
+    session: async (): Promise<Session> => {
+      const id = `native-claude-${claude.next++}`
+      return {
+        id,
+        events: () => () => {},
+        prompt: async () => ({ kind: 'accepted', seq: 1 }),
+        abort: async () => {},
+        dispose: async () => {},
+        records: () => [
+          { sessionId: id, agentPath: [], seq: 1, receivedAt: 0, kind: 'frame',
+            body: { type: 'system/init', native: { type: 'system', subtype: 'init', session_id: id,
+              cwd: claude.cwd, version: '2.1.319' }, events: [] } },
+        ],
+      } as unknown as Session
+    },
+  },
 }))
 
 vi.mock('@botiverse/oar/observe', () => ({
@@ -70,12 +93,20 @@ afterEach(async () => {
   engine.disposeFails = false
   engine.opening = undefined
   engine.next = 1
+  claude.next = 1
+  claude.cwd = '/fake/claude-work'
+  vi.unstubAllEnvs()
   while (cleanups.length > 0) await cleanups.pop()!()
 }, 30_000)
 
 const workerRow = (): Config => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
   engines: { codex: { enabled: true, executable: '/fake/codex', sandbox: 'workspace-write' },
     claude: { enabled: false, executable: '', sandbox: '' } } } }) as unknown as Config
+
+/** A row whose only enabled engine is Claude: the delegation names no engine and must run the default. */
+const claudeRow = (): Config => ({ worker: { enabled: true, defaultEngine: 'claude' as const, timeoutMs: 0,
+  engines: { codex: { enabled: false, executable: '', sandbox: 'workspace-write' },
+    claude: { enabled: true, executable: '/fake/claude', sandbox: '' } } } }) as unknown as Config
 
 /** The Host's own execution record, which no public read exposes: the inspection result is the surface. */
 function ledgerOf(team: unknown): { workerExecution(ref: AgentTeamWorkerRef): AgentTeamWorkerExecution | undefined
@@ -144,6 +175,55 @@ describe('the anchors one run\'s ending carries', () => {
     expect(inspection.native).toEqual({ threadId: boundExecution.nativeSessionId, turnId: boundExecution.nativeTurnId,
       storage: boundExecution.nativeStorage })
     expect(inspection.history.kind).toBe('missing')
+  }, 60_000)
+
+  it('names a Claude run\'s record and the prompt it drove', async () => {
+    const { harness, ctx, projectRef, agent } = await setup({ thread: false })
+    ;(ctx.agentTeam['config'] as unknown as { worker: unknown }).worker = { get: () => claudeRow().worker }
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/fake/claude-config')
+    engine.turn = 'completed'
+    const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'), projectRef,
+      task: 'check the schedule', cwd: harness.checkout })
+    const execution = await settledOf(ctx.agentTeam, run.workerRef)
+
+    // Claude reports no record path and no turn object: the path is derived from
+    // the cwd the session reported, and the turn is the input id OAR wrote as the
+    // prompting user message's uuid.
+    expect(execution.state).toBe('completed')
+    expect(execution.engine).toBe('claude')
+    expect(execution.nativeSessionId).toBe('native-claude-1')
+    expect(execution.nativeTurnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(execution.nativeStorage).toBe('/fake/claude-config/projects/-fake-claude-work/native-claude-1.jsonl')
+  }, 60_000)
+
+  it('derives a Claude record from the environment the run opened with', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'claude-anchors-'))
+    cleanups.push(async () => { await rm(cwd, { recursive: true, force: true }) })
+    claude.cwd = cwd
+    engine.turn = 'completed'
+    const slug = cwd.replaceAll(/[^A-Za-z0-9]/gu, '-')
+    const open = async (env: Record<string, string | null>) => {
+      const controller = new AbortController()
+      const handle = await startWorkerRun({
+        prompt: [{ type: 'text', text: 'check the schedule' }],
+        cwd,
+        parent: { id: 'session:parent' } as unknown as Agent,
+        signal: controller.signal,
+      }, { engine: 'claude', env, launchArgs: [] })
+      return workerAnchorsOf(await handle.result)?.nativeStorage
+    }
+
+    // The row's own CLAUDE_CONFIG_DIR wins, a run that only moves HOME keeps its
+    // record under that HOME, and the Host's own setting applies when the row
+    // names none: the anchors read the environment OAR opened the engine with.
+    expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', CLAUDE_CONFIG_DIR: '/fake/isolated-config',
+      HOME: '/fake/isolated-home' }))
+      .toBe(join('/fake/isolated-config', 'projects', slug, 'native-claude-1.jsonl'))
+    expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', HOME: '/fake/isolated-home' }))
+      .toBe(join('/fake/isolated-home', '.claude', 'projects', slug, 'native-claude-2.jsonl'))
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/fake/host-config')
+    expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', HOME: '/fake/isolated-home' }))
+      .toBe(join('/fake/host-config', 'projects', slug, 'native-claude-3.jsonl'))
   }, 60_000)
 
   it('keeps the anchors when the turn\'s own wait throws instead of reporting', async () => {
@@ -244,6 +324,25 @@ describe('the anchors one run\'s ending carries', () => {
     expect(execution.nativeSessionId).toBe('native-session-1')
     expect(execution.nativeTurnId).toBe('turn-native-session-1')
     expect(execution.nativeStorage).toBe('/fake/sessions/2026/11/09/rollout-native-session-1.jsonl')
+  }, 60_000)
+
+  it('keeps a running Worker alive when the Host switch is turned off', async () => {
+    const { harness, ctx, agent, projectRef } = await setup({ thread: false })
+    engine.turn = 'hanging'
+    const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'), projectRef,
+      task: 'check the schedule', cwd: harness.checkout })
+
+    // The switch gates new delegations, not work already in flight: the live
+    // Member loses the tool at its next step, while this run keeps its handle.
+    ;(ctx.agentTeam['config'] as unknown as { worker: unknown }).worker =
+      { get: () => ({ ...workerRow().worker, enabled: false }) }
+    ctx.emit('loader/volatile-update', [])
+    await waitFor(() => ctx.tools.schemas(agent as never).some(tool => tool.name === 'team_worker') ? undefined : true)
+
+    expect(executionOf(ctx.agentTeam, run.workerRef)?.state).toBe('running')
+    const stopped = await ctx.agentTeam.workerStopForAgent(agent, { workerRef: run.workerRef })
+    expect(stopped.state).toBe('stopped')
+    expect(executionOf(ctx.agentTeam, run.workerRef)?.state).toBe('stopped')
   }, 60_000)
 
   it('settles a run the Host releases with the anchors it captured before disposal', async () => {

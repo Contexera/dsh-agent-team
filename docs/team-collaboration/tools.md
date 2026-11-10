@@ -213,6 +213,8 @@ Delegation is off until the operator turns it on. The Team settings row carries 
 
 `executable` exists because a Host's `PATH` is not a shell's: the CLI a human installed may be nowhere the Host process searches, and an empty value keeps the engine's own discovery.
 
+While the switch is off, `team_worker` is not declared to Members at all; turning it on adds it to existing Member Sessions at their next turn boundary, and turning it off withdraws it. The same switch adds or removes the Worker paragraph of the `team:project-owner` guidance section, which is re-derived at every assembly. A run already in flight keeps its handle either way: the switch gates new delegations, and the registry still refuses a start while it is off.
+
 A call is refused before the opening record and before any native process exists for each of these reasons: no target was named (`worker_target_required`); the named Thread (`worker_thread_unknown`), Task (`worker_task_unknown`), or Project (`worker_project_unknown`) is not one this Team holds; the Task is not in the Thread it was named with (`worker_target_conflict`); the caller does not currently own the Project the target belongs to (`worker_owner_required`).
 
 The remaining refusals are the settings and the run itself: the switch is off (`worker_disabled`); the named engine is not a Worker engine (`worker_engine_unknown`) or is not enabled (`worker_engine_disabled`); the task text is empty (`worker_task_required`); no absolute working directory can be resolved (`worker_cwd_required`); the Harness subagent service is not mounted (`worker_unavailable`); or the request id was already opened for a different delegation (`worker_request_conflict`).
@@ -247,7 +249,9 @@ The native record itself is never copied into the Team, never stored, and never 
 
 Only the initiating Member and the Human may ask; another Member is refused as `worker_inspect_forbidden`, even when it now owns the Project. A run that has not ended answers with its summary and says its native record is read once it does. A run that ended before the engine recorded a session, or whose record is gone, unreadable, of a shape this Team does not read, or holds no turn with the recorded id, keeps the Team summary and names that reason instead of returning fragments that are not there.
 
-The look-up is bounded and self-checking: the recorded location must be an absolute `.jsonl` path under a `sessions` directory, and an oversized value is refused whole rather than cut into a path nobody recorded. The file that opens must be the file the location named — its identity is compared at open and again after the read — the first record must name the recorded session, and the byte ceiling applies before any line is split or parsed.
+The look-up is bounded and self-checking: the recorded location must be an absolute `.jsonl` path under the engine's own directory — `sessions` for Codex, `projects` for Claude — and an oversized value is refused whole rather than cut into a path nobody recorded. Claude's stream carries no record path, so the settlement derives it from the cwd the CLI reported and the environment the run opened with.
+
+The file that opens must be the file the location named — its identity is compared at open and again after the read — the first record must name the recorded session, and the byte ceiling applies before any line is split or parsed.
 
 Fragments are limited to a few safe fields of the run's own turn, each bounded, and text that looks like a credential is withheld whole rather than masked, quoted JSON pairs included. Every reason is one bounded sentence that names the fact and never echoes a native value, and nothing about the engine's record is written back into the Team.
 
@@ -259,7 +263,7 @@ The instruction enters the turn the engine is already running. It opens no secon
 
 Only the Member who delegated the run may ask; another Member is refused as `worker_steer_forbidden`, and this version has no steer entry for the Human. A run that already ended answers with the state it ended in (`worker_steer_ended`), and a run whose stop is in flight refuses instead of sending into a turn that is ending (`worker_steer_stopping`).
 
-A run this Host no longer holds is refused as `worker_unconfirmed`. This version opens the path for Codex only, because its control names the turn the engine is driving; another engine — Claude Code, until its own ticket verifies what its acceptance covers — is refused as `worker_steer_unsupported`. An engine that will not take the input answers with its own code and bounded reason (`worker_steer_refused`) rather than a success.
+A run this Host no longer holds is refused as `worker_unconfirmed`. This version opens the path for Codex only, because its control names the turn the engine is driving; Claude Code's acceptance covers a window wider than the current turn, so it is refused as `worker_steer_unsupported` instead of borrowing a guarantee the engine does not give. An engine that will not take the input answers with its own code and bounded reason (`worker_steer_refused`) rather than a success.
 
 One instruction is sent once. A resend with the same request id answers with the receipt the first call produced — while the run is still going and after it ended — and never reaches the engine again; the same sentence under a fresh request id is answered the same way, and a different instruction under a used request id is refused as `worker_steer_conflict`.
 

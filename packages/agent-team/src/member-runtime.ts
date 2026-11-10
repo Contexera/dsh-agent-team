@@ -28,6 +28,9 @@ export type TurnBoundary = 'waited' | 'idle'
 /** Read-only core skills shipped beside the preset (meta skill first: its description routes skill-management work to itself), resolved from this module's emitted location so it follows the installed plugin. */
 const BUNDLED_SKILLS_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), '../core-skills')
 
+/** The one Team tool a Host switch can withdraw from a Member's declared surface. */
+export const WORKER_TOOL_NAME = 'team_worker'
+
 /** Model-facing capabilities every Team-enabled preset must publish. */
 export const AGENT_TEAM_TOOL_NAMES = Object.freeze([
   'team_inbox',
@@ -98,8 +101,13 @@ export class MemberRuntime {
     return this.capabilityWarnings.get(memberId)
   }
 
-  /** Restrict every Member to its preset tools; a stored allow-list can only narrow them, retaining Team tools and `working_directory`. */
-  applyMemberToolPolicy(agentCtx: Context, member: AgentTeamAgentMember): void {
+  /**
+   * Restrict every Member to its preset tools; a stored allow-list can only
+   * narrow them, retaining Team tools and `working_directory`. `workerEnabled`
+   * is the Host's own switch: while it is off, `team_worker` is not declared at
+   * all, so a Member never sees a tool the Host would refuse.
+   */
+  applyMemberToolPolicy(agentCtx: Context, member: AgentTeamAgentMember, workerEnabled: boolean): void {
     const bindings = this.memberToolBindings.get(member.memberId) ?? this.mountMemberToolBindings(agentCtx, member.memberId)
     const configured = member.capabilities?.tools?.allow
     // Drop unknown names instead of failing activation: a Harness upgrade renaming a tool must not make the Member unavailable. The warning carries the known-name digest for diagnosing drift.
@@ -108,8 +116,8 @@ export class MemberRuntime {
     const dropped = (configured ?? []).filter(name => !knownSet.has(name))
     this.setCapabilityWarnings(member.memberId, dropped.map(name => ({ name, knownNames: known })))
     const allow = [...new Set([
-      ...(configured ?? known).filter(name => knownSet.has(name)),
-      ...AGENT_TEAM_TOOL_NAMES,
+      ...(configured ?? known).filter(name => knownSet.has(name) && (workerEnabled || name !== WORKER_TOOL_NAME)),
+      ...AGENT_TEAM_TOOL_NAMES.filter(name => workerEnabled || name !== WORKER_TOOL_NAME),
       // An allow-list narrows capability, not the checkout the Member works in, so `working_directory` survives like the Team tools.
       ...knownSet.has('working_directory') ? ['working_directory'] : [],
     ])]
@@ -162,12 +170,12 @@ export class MemberRuntime {
   }
 
   /** Swaps a live Member's tool policy at a turn boundary: disposes the old restriction, applies the new one, and on failure restores the previous allow-list before rethrowing. */
-  reapplyMemberToolPolicy(member: AgentTeamAgentMember): void {
+  reapplyMemberToolPolicy(member: AgentTeamAgentMember, workerEnabled: boolean): void {
     const agentCtx = this.deps.liveMemberContext(member.memberId)
     const previousAllow = this.enforcedToolAllow.get(member.memberId)
     this.releaseMemberToolPolicy(member.memberId)
     try {
-      this.applyMemberToolPolicy(agentCtx, member)
+      this.applyMemberToolPolicy(agentCtx, member, workerEnabled)
     } catch (error) {
       if (previousAllow !== undefined) this.restoreEnforcedToolAllow(member, agentCtx, previousAllow)
       throw error

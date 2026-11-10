@@ -175,6 +175,20 @@ describe('Worker delegation runs', () => {
     expect(spec.request.cwd).toBe(cwd)
   })
 
+  it('runs the default engine when the operator enabled only that one', async () => {
+    const config = enabled({
+      defaultEngine: 'claude',
+      engines: {
+        codex: { enabled: false, executable: '', sandbox: 'workspace-write' },
+        claude: { enabled: true, executable: '', sandbox: '' },
+      },
+    })
+    const { registry, service } = registryFor({ config })
+    const run = await registry.start(caller(), request())
+    expect(run.engine).toBe('claude')
+    expect(service.starts[0]!.provider).toBe('team-worker-claude')
+  })
+
   it('honours an explicit engine over the default', async () => {
     const config = enabled({
       defaultEngine: 'codex',
