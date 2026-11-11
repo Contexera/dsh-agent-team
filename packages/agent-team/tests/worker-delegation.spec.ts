@@ -233,8 +233,8 @@ describe('Worker delegation runs', () => {
     const spec = service.starts[0]!
     expect(spec.delivery).toBe('parent')
     expect(spec.provider).toBe('team-worker-codex')
-    expect(spec.request.parent).toBe(parent)
-    expect(spec.request.cwd).toBe(cwd)
+    expect(spec.parent).toBe(parent)
+    expect(spec.cwd).toBe(cwd)
   })
 
   it('runs the default engine when the operator enabled only that one', async () => {

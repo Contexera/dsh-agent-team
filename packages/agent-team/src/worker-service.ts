@@ -500,7 +500,7 @@ export class WorkerRegistry {
       const activation = await subagents.startActivation({
         provider: provider.name,
         label: `${engine} worker`,
-        request: { parent: caller.parent, prompt: [{ type: 'text', text: request.task }], cwd },
+        parent: caller.parent, prompt: [{ type: 'text', text: request.task }], cwd,
         // A stop asked for during startup cancels through this signal; once the
         // activation is published, its own disposal is the channel.
         signal: entry.startup.signal,

@@ -58,7 +58,7 @@ it('reaches a Host-mounted subagent service from a Member context and delivers a
   const activation = await subagents.startActivation({
     provider: 'probe',
     label: 'probe worker',
-    request: { parent: agent!, prompt: [{ type: 'text', text: 'run the probe' }], cwd: harness.checkout },
+    parent: agent!, prompt: [{ type: 'text', text: 'run the probe' }], cwd: harness.checkout,
     signal: new AbortController().signal,
     delivery: 'parent',
   })

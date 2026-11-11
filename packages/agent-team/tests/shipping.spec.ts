@@ -274,16 +274,16 @@ describe('Agent Team shipping contract', () => {
     // A plugin's own `engines.dsh` decides DSH compatibility alone (peers are
     // then ignored), so it states the same certified line the peers do: one
     // line, one answer whichever field an installer reads.
-    expect(bundleManifest.engines.dsh).toBe('>=0.2.2-rc.1 <0.2.3')
-    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-tool-web']).toBe('>=0.2.2-rc.1 <0.2.3')
-    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-command-compact']).toBe('>=0.2.2-rc.1 <0.2.3')
-    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-preset']).toBe('>=0.2.2-rc.1 <0.2.3')
-    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-preset-registry']).toBe('>=0.2.2-rc.1 <0.2.3')
+    expect(bundleManifest.engines.dsh).toBe('>=0.2.2-rc.2 <0.2.3')
+    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-tool-web']).toBe('>=0.2.2-rc.2 <0.2.3')
+    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-command-compact']).toBe('>=0.2.2-rc.2 <0.2.3')
+    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-preset']).toBe('>=0.2.2-rc.2 <0.2.3')
+    expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-preset-registry']).toBe('>=0.2.2-rc.2 <0.2.3')
     expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-presets']).toBeUndefined()
     // The certified baseline moves as one cut: every DSH peer carries the same
     // range, or an install resolves two DSH generations at once. No host-scope
     // package may sit in `dependencies` (see the host-scope gate below).
-    expect([...dshPeerRanges(bundleManifest)]).toEqual(['>=0.2.2-rc.1 <0.2.3'])
+    expect([...dshPeerRanges(bundleManifest)]).toEqual(['>=0.2.2-rc.2 <0.2.3'])
     expect(preset).toContain('compaction: true')
     expect(preset).toContain('toolResultPruner: true')
     expect(preset).toContain('team_inbox, team_thread, team_attention, team_message, team_dm, team_task, team_view, team_subscription, and team_reminder')
@@ -362,7 +362,7 @@ describe('Agent Team shipping contract', () => {
     expect(manifest.dependencies).toEqual({
       '@botiverse/oar': '0.95.1',
       yaml: '^2.9.1',
-      zod: '^4.4.3',
+      zod: '4.6.6',
     })
     expect(bundleManifest.dsh.client).toEqual({
       platform: 'web',

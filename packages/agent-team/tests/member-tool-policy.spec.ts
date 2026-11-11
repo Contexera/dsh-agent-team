@@ -12,8 +12,11 @@ import {
   defineContentToolFixture, executeModelToolFixture, executeToolFixture,
 } from '@deepseek-ai/dsh-tool-testkit'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
-import { TeamService as OfficialTeamService } from '@deepseek-ai/dsh-experimental-agent-team'
-import * as OfficialTeamTools from '@deepseek-ai/dsh-experimental-tool-agent-team'
+import { TeamService as OfficialTeamService } from '@deepseek-ai/dsh-agent-team'
+import * as OfficialTeamTools from '@deepseek-ai/dsh-tool-agent-team'
+import * as OfficialSubagentControl from '@deepseek-ai/dsh-tool-subagent-control'
+import { ROOT_AGENT_NAME } from '@deepseek-ai/dsh-subagent'
+import type { SubagentRuntime as SubagentRuntimeService } from '@deepseek-ai/dsh-subagent'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
 import { TOOL_AVAILABILITY_SECTION } from '../src/tool-availability-guidance.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
@@ -323,6 +326,14 @@ describe('Agent Team member tool policy', () => {
     }
     expect(agent.session.requestHeader()?.tools?.map(tool => tool.name).sort())
       .toEqual(adapter.requests.at(-1)?.tools?.map(tool => tool.name).sort())
+    // The prompt section names exactly the visible rows the guard still denies. The
+    // official Team tools used to be that carrier; on this Host they register
+    // globally instead, so a scoped registration like this one is the reachable case.
+    const lateAssembly = await agent.ctx.systemPrompt.assemble({ scope: agent })
+    const lateGuidance = lateAssembly.sections.find(section => section.name === TOOL_AVAILABILITY_SECTION)?.text ?? ''
+    expect(lateGuidance).toContain('`foreign_late`')
+    expect(lateGuidance).toContain('Do not invoke them while they are ungranted')
+    expect(lateGuidance).toContain('Schema visibility is not execution permission')
     expect(body).not.toHaveBeenCalled()
     const ordinary = await ctx.agents.create({ sessionId: SessionId('t17-ordinary') })
     testCleanups.push(async () => { await ordinary.dispose() })
@@ -361,9 +372,18 @@ describe('Agent Team member tool policy', () => {
     })
     const adapter = new ScriptedAdapter()
     ctx.llm.registerAdapter(['mock'], adapter)
-    // No delegation is attempted; membership and tool installation use the
-    // real official services, with only their unused provider dependency stubbed.
-    ctx.provide('subagents', {})
+    // The official subagent-control tool `list_agents` reads the caller's tree
+    // root and its descendants; the official Team service names that caller
+    // through `namesOf`. Tree discovery is not this spec's subject, so the stub
+    // answers those three calls for a caller that is its own root and nothing
+    // else — a wider service contract breaks the `satisfies` check instead of
+    // silently passing.
+    ctx.provide('subagents', {
+      rootOf: (caller: Agent) => caller,
+      listDescendants: async () => [],
+      namesOf: () => ({ self: ROOT_AGENT_NAME }),
+    } satisfies Pick<SubagentRuntimeService, 'rootOf' | 'listDescendants' | 'namesOf'>)
+    await ctx.plugin(OfficialSubagentControl)
     if (timing === 'before') {
       await ctx.plugin(OfficialTeamService)
       await ctx.plugin(OfficialTeamTools)
@@ -388,21 +408,31 @@ describe('Agent Team member tool policy', () => {
     expect(agent.session.ownEvents().filter(event => event.type === 'turn/end').at(-1)?.data.reason.kind).toBe('completed')
     expect(adapter.requests).toHaveLength(2)
     for (const request of adapter.requests) {
-      // A restriction filters global tools only and leaves scoped registrations alone, and the official Team tools register in the Agent's exact scope — so, with no assembly-time hook left to hide them, they are declared alongside the Member's own set. The guard, not the declaration, is what refuses them: the direct `list_agents` call above is already denied.
+      // On this Host the official subagent and Team tools register globally, and
+      // a restriction masks inherited global rows, so none of them reach a
+      // Member's declarations — the ordinary Session created below declares all
+      // six, which is what makes their absence here ours and not the plugin's.
+      // The direct call above is refused by the guard either way: that refusal,
+      // not the declaration, is the rule that has to hold across Hosts.
       const declared = new Set(request.tools?.map(tool => tool.name))
       expect([...AGENT_TEAM_TOOL_NAMES.filter(name => name !== 'team_worker'), 'ordinary_tool', 'spare_tool'].every(name => declared.has(name))).toBe(true)
-      expect(declared.has('list_agents')).toBe(true)
+      expect(declared.has('list_agents')).toBe(false)
+      expect(declared.has('team_task_create')).toBe(false)
     }
-    const memberAssembly = await agent.ctx.systemPrompt.assemble({ scope: agent })
-    const guidance = memberAssembly.sections.find(section => section.name === TOOL_AVAILABILITY_SECTION)?.text ?? ''
-    expect(guidance).toContain('`list_agents`')
-    expect(guidance).toContain('Do not invoke them while they are ungranted')
-    expect(guidance).toContain('Schema visibility is not execution permission')
+    // This Host's required identity context comes from the subagent-control
+    // plugin and reads `namesOf`; a tool restriction cannot remove a required
+    // context, so a Member must still carry a non-empty one. The wording has
+    // three legal branches (root, delegated, unauthorized fallback), so only
+    // presence and non-emptiness are asserted.
+    const memberAssembly = await agent.ctx.systemPrompt.assemble({ agent, scope: agent })
+    const identity = memberAssembly.contexts.find(context => context.name === 'subagent:identity')?.text ?? ''
+    expect(identity).not.toBe('')
     const ordinary = await ctx.agents.create({ sessionId: SessionId('t20-ordinary') })
     testCleanups.push(async () => { await ordinary.dispose() })
-    expect(toolNames(ctx, ordinary.agent)).toContain('spawn_teammate')
+    expect(toolNames(ctx, ordinary.agent)).toContain('list_agents')
+    // An ordinary Session gets the official plugin's surfaces and no Team
+    // availability guidance: only a Member has a restriction to explain.
     const assembly = await ordinary.agent.ctx.systemPrompt.assemble({ scope: ordinary.agent })
-    expect(assembly.contexts.find(context => context.name === 'team:identity')?.text).toContain('Team Lead')
     expect(assembly.sections.map(section => section.name)).not.toContain(TOOL_AVAILABILITY_SECTION)
     await ctx.agentTeam.suspendMember({ requestId: requestId('t20-suspend'), memberId: member.memberId })
     const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('t20-resume'), memberId: member.memberId })
@@ -414,12 +444,10 @@ describe('Agent Team member tool policy', () => {
     await resumedIdle
     expect(resumedAgent.session.ownEvents().filter(event => event.type === 'turn/end').at(-1)?.data.reason.kind).toBe('completed')
     expect(adapter.requests).toHaveLength(3)
-    // The resumed Member keeps its own tool set; the official Team rows stay declared too, because a restriction leaves scoped registrations alone, and the guard still refuses them.
+    // A resumed Member keeps its own tool set, and the ungranted global row stays masked.
     const resumedDeclared = new Set(adapter.requests.at(-1)?.tools?.map(tool => tool.name))
     expect([...AGENT_TEAM_TOOL_NAMES.filter(name => name !== 'team_worker'), 'ordinary_tool', 'spare_tool'].every(name => resumedDeclared.has(name))).toBe(true)
-    expect(resumedDeclared.has('list_agents')).toBe(true)
-    const resumedAssembly = await resumedAgent.ctx.systemPrompt.assemble({ scope: resumedAgent })
-    expect(resumedAssembly.sections.find(section => section.name === TOOL_AVAILABILITY_SECTION)?.text).toContain('`list_agents`')
+    expect(resumedDeclared.has('list_agents')).toBe(false)
   })
 
   it('admits an official Agent-scoped tool behind a profile grant', async () => {
@@ -431,9 +459,20 @@ describe('Agent Team member tool policy', () => {
     })
     const adapter = new ScriptedAdapter()
     ctx.llm.registerAdapter(['mock'], adapter)
-    ctx.provide('subagents', {})
+    // The official subagent-control tool `list_agents` reads the caller's tree
+    // root and its descendants; the official Team service names that caller
+    // through `namesOf`. Tree discovery is not this spec's subject, so the stub
+    // answers those three calls for a caller that is its own root and nothing
+    // else — a wider service contract breaks the `satisfies` check instead of
+    // silently passing.
+    ctx.provide('subagents', {
+      rootOf: (caller: Agent) => caller,
+      listDescendants: async () => [],
+      namesOf: () => ({ self: ROOT_AGENT_NAME }),
+    } satisfies Pick<SubagentRuntimeService, 'rootOf' | 'listDescendants' | 'namesOf'>)
     await ctx.plugin(OfficialTeamService)
     await ctx.plugin(OfficialTeamTools)
+    await ctx.plugin(OfficialSubagentControl)
     useExtraToolGrants(ctx, ['list_agents'])
     const member = await addMember(ctx, workspaceId, 't20-official-grant')
     const agent = liveAgent(ctx, member)
@@ -442,7 +481,6 @@ describe('Agent Team member tool policy', () => {
     const assembly = await agent.ctx.systemPrompt.assemble({ scope: agent })
     const guidance = assembly.sections.find(section => section.name === TOOL_AVAILABILITY_SECTION)?.text ?? ''
     expect(guidance).not.toContain('`list_agents`')
-    expect(guidance).toContain('`spawn_teammate`')
     const signal = new AbortController().signal
     const toolSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'mock', model: 'mock' }, signal })
     testCleanups.push(() => { toolSet.dispose() })

@@ -13,6 +13,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Context } from '@deepseek-ai/cordis'
 import type { Session } from '@botiverse/oar'
 import { cleanups, realHarness, requestId, waitFor } from './helpers/member-harness.ts'
 import type { WorkerConfig } from '../src/worker-service.ts'
@@ -247,8 +248,21 @@ const settledWithin = async (promise: Promise<unknown>, milliseconds = 50): Prom
     new Promise<'pending'>(resolve => setTimeout(() => { resolve('pending') }, milliseconds)),
   ])
 
-const resumeProviders = (ctx: { readonly subagents: { list(): string[] } }): string[] =>
-  ctx.subagents.list().filter(name => name.includes(':resume:'))
+/** Registrations the runtime announced, kept because it no longer enumerates them. */
+type ProviderProbe = { readonly live: Set<string>; readonly added: string[] }
+
+/** Follows the runtime's own registration events, so the probe cannot invent state. */
+const observeProviders = (ctx: Context): ProviderProbe => {
+  const live = new Set<string>()
+  const added: string[] = []
+  ctx.on('subagent/provider-added', provider => { live.add(provider.name); added.push(provider.name) })
+  ctx.on('subagent/provider-removed', name => { live.delete(name) })
+  return { live, added }
+}
+
+/** Resume registrations still live and still resolved by the runtime: two answers, one set. */
+const resumeProviders = (probe: ProviderProbe, ctx: Context): string[] =>
+  [...probe.live].filter(name => name.includes(':resume:') && ctx.subagents.getProvider(name) !== undefined)
 
 /** One Project, one owning Member, and a second Member who owns nothing here. */
 async function setup() {
@@ -261,6 +275,7 @@ async function setup() {
   engine.storageRoot = harness.root
   process.env.CLAUDE_CONFIG_DIR = join(harness.root, 'claude')
   await ctx.plugin(SubagentRuntime)
+  const probe = observeProviders(ctx)
   const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: harness.workspaceId,
     name: 'steer', description: 'Steer' })
   const projectRef = project.project.projectRef as AgentTeamProjectRef
@@ -275,7 +290,7 @@ async function setup() {
     model: { provider: 'mock', model: 'mock' } })
   setWorkerConfig(ctx)
   return {
-    harness, ctx, projectRef, member,
+    harness, ctx, probe, projectRef, member,
     agent: ctx.agents.get(member.sessionId) as Agent,
     otherAgent: ctx.agents.get(other.status.member.sessionId) as Agent,
     otherId: other.status.member.memberId as AgentTeamMemberId,
@@ -283,6 +298,31 @@ async function setup() {
 }
 
 describe('one instruction in the Worker native session', () => {
+  // The probe is the only record of provider names now that the runtime stopped
+  // enumerating them. This control proves it sees a resume registration while it
+  // is live, so an empty answer later is a withdrawal, not a blind probe.
+  it('observes the resumed provider it later requires to be withdrawn', async () => {
+    const { harness, ctx, agent, projectRef, probe } = await setup()
+    const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'),
+      projectRef, task: 'refactor the parser', cwd: harness.checkout })
+    engine.release!.resolve()
+    await settledOf(ctx.agentTeam, run.workerRef)
+
+    engine.resumeOpenGate = Promise.withResolvers()
+    const opening = ctx.agentTeam.workerSteerForAgent(agent, { workerRef: run.workerRef,
+      instruction: 'continue under observation', requestId: requestId('continue-observed') })
+    await waitFor(() => engine.sessions.find(session => session.resume !== undefined), 10_000)
+    const observed = [...probe.live].filter(name => name.includes(':resume:'))
+    expect(observed).toHaveLength(1)
+    expect(ctx.subagents.getProvider(observed[0]!)).toBeDefined()
+
+    engine.resumeOpenGate.resolve()
+    await opening
+    expect(probe.added.filter(name => name.includes(':resume:'))).toEqual(observed)
+    expect(ctx.subagents.getProvider(observed[0]!)).toBeUndefined()
+    expect(resumeProviders(probe, ctx)).toEqual([])
+  })
+
   it('reports submitted with the turn the engine named, without starting another execution', async () => {
     const { harness, ctx, agent, projectRef } = await setup()
     const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'),
@@ -791,7 +831,7 @@ describe('one instruction in the Worker native session', () => {
   })
 
   it('waits for a continuation reading native history before unloading', async () => {
-    const { harness, ctx, agent, projectRef } = await setup()
+    const { harness, ctx, agent, projectRef, probe } = await setup()
     const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'),
       projectRef, task: 'refactor the parser', cwd: harness.checkout })
     engine.release!.resolve()
@@ -816,11 +856,11 @@ describe('one instruction in the Worker native session', () => {
     expect(ctx.agentTeam.status().sequence).toBe(sequenceBeforeRelease)
     expect(engine.sessions.filter(session => session.resume !== undefined)).toHaveLength(0)
     expect(ledger.workerSuccessor(run.workerRef)).toBeUndefined()
-    expect(resumeProviders(ctx)).toEqual([])
+    expect(resumeProviders(probe, ctx)).toEqual([])
   })
 
   it('waits for an opening record write before unloading closes its storage', async () => {
-    const { harness, ctx, agent, projectRef } = await setup()
+    const { harness, ctx, agent, projectRef, probe } = await setup()
     const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'),
       projectRef, task: 'refactor the parser', cwd: harness.checkout })
     engine.release!.resolve()
@@ -852,7 +892,7 @@ describe('one instruction in the Worker native session', () => {
     await new Promise(resolve => setTimeout(resolve, 25))
     expect(ctx.agentTeam.status().sequence).toBe(sequenceAfterDispose)
     expect(engine.sessions.filter(session => session.resume !== undefined)).toHaveLength(0)
-    expect(resumeProviders(ctx)).toEqual([])
+    expect(resumeProviders(probe, ctx)).toEqual([])
     expect(ledger.workerSuccessor(run.workerRef)?.state).toBe('running')
   })
 
@@ -877,14 +917,14 @@ describe('one instruction in the Worker native session', () => {
     },
     {
       label: 'Member',
-      refusal: /not an active Team Member|parent is no longer live/u,
+      refusal: /not an active Team Member|parent is no longer live|exact live caller/u,
       settledStage: undefined,
       change: async (ctx: Awaited<ReturnType<typeof setup>>['ctx'], memberId: AgentTeamMemberId) => {
         await ctx.agentTeam.suspendMember({ requestId: requestId('member-changed-at-startup'), memberId })
       },
     },
   ])('rechecks the $label when resumed native startup returns', async ({ refusal, settledStage, change }) => {
-    const { harness, ctx, agent, member, projectRef } = await setup()
+    const { harness, ctx, agent, member, projectRef, probe } = await setup()
     const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'),
       projectRef, task: 'refactor the parser', cwd: harness.checkout })
     engine.release!.resolve()
@@ -908,7 +948,7 @@ describe('one instruction in the Worker native session', () => {
     if (settledStage === undefined) {
       expect(ledger.workerSuccessor(run.workerRef)?.stage).toBeUndefined()
     }
-    expect(resumeProviders(ctx)).toEqual([])
+    expect(resumeProviders(probe, ctx)).toEqual([])
   })
 
   it('refuses a continuation into an archived Project', async () => {

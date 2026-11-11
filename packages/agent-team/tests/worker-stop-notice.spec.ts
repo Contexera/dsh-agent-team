@@ -127,7 +127,7 @@ describe('the parent notice of a stop that could not confirm its cleanup', () =>
     // Session; a bound run's answer belongs to its Thread and Inbox instead.
     const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'), projectRef,
       task: 'check the schedule', cwd: harness.checkout })
-    await waitFor(() => subagents.list().includes('team-worker-codex') ? true : undefined)
+    await waitFor(() => subagents.getProvider('team-worker-codex') !== undefined ? true : undefined)
 
     // The engine keeps producing output and then refuses to confirm its exit.
     await expect(ctx.agentTeam.workerStopForAgent(agent, { workerRef: run.workerRef }))
