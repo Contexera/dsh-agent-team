@@ -721,12 +721,15 @@
   width: fit-content;
 }
 
-/* Thumbnails open the large view; chips carry name + size; GC'd bytes degrade to a name-only chip. */
+/* Thumbnails open the large view; chips carry name + size; GC'd bytes degrade to a name-only chip. The strip is a flex item
+   of the column body, so without a cap it takes its fit-content width — which a nowrap filename drives past the column and
+   into the timeline's horizontal scroll. */
 .attachmentStrip {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 4px;
+  max-width: 100%;
 }
 
 .attachmentThumb {
@@ -854,6 +857,9 @@
   display: inline-flex;
   gap: 6px;
   max-width: 100%;
+  /* The nowrap filename gives this chip a min-content wider than the column; without this the automatic minimum wins over
+     `max-width`, so the chip pushes the timeline sideways instead of ellipsizing the name. */
+  min-width: 0;
   padding: 3px 8px;
   position: relative;
 }
@@ -886,6 +892,7 @@
   border: 0;
   color: var(--dsw-alias-state-business-primary);
   cursor: pointer;
+  flex: none;
   font-size: 11px;
   line-height: 17px;
   margin: -3px -2px;
