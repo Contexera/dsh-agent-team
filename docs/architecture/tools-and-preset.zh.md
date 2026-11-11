@@ -6,7 +6,7 @@
 
 filesystem row 显式写 `applyPatch: false`，而不是沿用 Host 默认值：Member 只被授予 `edit` 这一种文件修改工具，preset 若留空，将来 Host 默认值一翻就会悄悄扩大每个 Member 的工具面。发布包的 preset 测试断言这个值，所以这是一项被检查的决定，不是一个假设。
 
-每个 Member 默认只获准使用所选 preset 注册的工具定义，以及显式共享的 `working_directory`。`capabilities.tools.allow` 仍只能进一步缩减。Team Host row 另有一份 profile 级 `extraToolGrants`，可按确切、区分大小写的已注册宿主工具名放行，包括 Member allow-list 省略掉的继承基线名称。名单默认空，只属于一个 profile，并作用于该 profile 的全部 Team Member。九个 Team 工具与 `working_directory` 仍是保留名称；`team_worker` 仍只由 Worker 开关决定。许可只认名字，不认插件来源、定义对象或注册实例。
+每个 Member 默认只获准使用所选 preset 注册的工具定义，以及显式共享的 `working_directory`。`capabilities.tools.allow` 仍只能进一步缩减。Team Host row 另有一份 profile 级 `extraToolGrants`，可按确切、区分大小写的已注册宿主工具名放行，包括 Member allow-list 省略掉的继承基线名称。名单默认空，只属于一个 profile，并作用于该 profile 的全部 Team Member。十个 Team 工具与 `working_directory` 仍是保留名称，许可不能点名它们。`team_worker` 就在这十个里，只在 Host 的 Worker 开关打开时声明，许可开不了它。许可只认名字，不认插件来源、定义对象或注册实例。
 
 Host 在每个 Session 的 `turn/start` 同步读取名单，发生在首次工具解析之前，并在该轮冻结。保存后的编辑从下一轮生效；即使连续两轮之间没有 idle 也成立，创建、恢复与换代走同一条策略路径。restriction 按开轮时已知名称生成。执行时采用 DSH 实际为该 Member 和步骤解析并准入的注册，因此其自身的 `when`、pre-execute 检查、Agent 身份以及直接或嵌套调用的当步准入仍然有效。开轮后才注册的已选名称会在下一个正常步骤重新物化进声明；注销或重注册会使先前准备好的准入失效。
 
@@ -28,7 +28,7 @@ Team mode 不过滤其他官方或自定义插件注入的提示。当前 Harnes
 
 每一行 `name:` 都是 Loader 按 profile 解析的裸标识符，不按本 bundle 解析。profile 只链接本 bundle 与宿主闭包，所以一行只能点名宿主包或本 bundle 自己的子路径。绝不能点名嵌在本 bundle 依赖树里的包。工作树里能解析的名字，在真实安装里仍可能让该行 `never started`：依赖里的模块只能经由本 bundle 自己名下的再导出到达一行。
 
-九个 model-facing tools 定义在 `packages/tool-agent-team/src/index.ts` 与 `packages/tool-agent-team/src/subscription.ts`。collaboration contract 记录在 [`tools.zh.md`](../team-collaboration/tools.zh.md)。它们挂载在隔离的 `team-member` preset 下（`cordis.patch.yml` 里的一条 declarative row）。不要为了测试可用，就把 tool package 作为 global row 添加；普通 Sessions 必须保持 Team-free。
+十个 model-facing tools 定义在 `packages/tool-agent-team/src/index.ts` 与 `packages/tool-agent-team/src/subscription.ts`。collaboration contract 记录在 [`tools.zh.md`](../team-collaboration/tools.zh.md)。它们挂载在隔离的 `team-member` preset 下（`cordis.patch.yml` 里的一条 declarative row）。不要为了测试可用，就把 tool package 作为 global row 添加；普通 Sessions 必须保持 Team-free。
 
 Member 没有 context 工具。preset 的 `compaction-basic` 行挂载 Team 的薄适配层 `member-compaction-engine`：Team 负责主动请求准入，Harness 的 `BasicCompactionEngine` 提供摘要模板、压缩事务与 overflow 恢复。预算定义归 [`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md)。换代仍是 Host 的决定，不是模型的。
 

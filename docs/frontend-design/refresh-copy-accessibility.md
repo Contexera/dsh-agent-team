@@ -10,9 +10,9 @@ Thread passive changes merge into current facts; the durable read pointer advanc
 Once an Agent or Project edit commits, the dialog closes. Until the list refresh succeeds, a failed read reports that the edit is already saved and offers to refresh the list. The Project and Member list results can succeed independently, and a superseded read cannot change the list or its error.
 
 ## Copy and localization
-All visible copy comes from structurally matching zh/en locale keys, whose types derive from zh. Parameter conventions are `{count}`, `{ids}`, `{kind}`, `{number}`, `{actor}`, and `{direction}`. Error copy follows the Host: a refusal with a known remedy renders through locale-key copy (`staleRevision`, `memberNotFollowing`), while a failure the Client cannot word better — a dropped transport, for instance — shows the Host's own message verbatim.
+All visible copy comes from structurally matching zh/en locale keys, whose types derive from zh. Parameter conventions are `{count}`, `{ids}`, `{kind}`, `{number}`, `{actor}`, `{direction}`, and `{message}`. Error copy follows the Host: a refusal with a known remedy renders through locale-key copy (`staleRevision` for a Thread that moved, `extraToolsConflict` for a settings revision conflict).
 
-> TODO: decide whether a raw transport message should be replaced by localized copy or stay exactly as the Host worded it; today the surfaces show it verbatim.
+Every other failure keeps the Host's own message verbatim: the localized layer is the frame naming the failed action (`restartFailed`, `archiveProjectFailed`) where the surface does not already name it, because the raw text is the only diagnostic for an unknown refusal and `isUncertainRemoteFailure` treats a dropped carrier and an ordinary Host exception alike.
 
 ## Accessibility baseline
 Section headers, expand/collapse buttons, menus, listbox/options, the 「作为任务」 control, and the Project page's `项目 | 看板` tab strip use native keyboard behavior and complete ARIA state. The tab strip is one tab stop for the group with Left/Right/Home/End moving selection and focus together, each tab naming its panel through `aria-controls`/`aria-labelledby`.

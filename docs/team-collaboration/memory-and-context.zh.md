@@ -91,6 +91,6 @@ Host 把一条 `<system-reminder>` steer 进发现或提交这次验收的那个
 
 trace 还要求 Human 写入一条版本 2 的 mention，确认它直接送达、没有邀请确认环节。然后验证 Agent durable Inbox 与 explicit read/reply，再验证 Human Project 和 Thread state。Desktop、390×844 和 keyboard paths 都属于 assembled acceptance。Page reload 从 Host projections 读取同一批 facts。journey 最后离开 Team mode，确认 ordinary DSH conversation surface 恢复。
 
-Browser storage 仍仅限 navigation 和 Workspace selection。Acceptance trace 不从 local storage 或 Member Session relay text 推导 unread、Attention 或 Thread facts。真实 Agent-loop integration tests 覆盖 Agent safe-boundary wake 及三种 notification forms。测试代码见 `packages/agent-team/tests/member-lifecycle.spec.ts`。包括 direct mention、Task/Claim Activity、ordinary digest route。browser replay 不依赖 live provider behavior。
+Browser storage 仍仅限 navigation 和 Workspace selection。Acceptance trace 不从 local storage 或 Member Session relay text 推导 unread、Attention 或 Thread facts。真实 Agent-loop integration tests 覆盖 Agent safe-boundary wake 及三种 notification forms。测试见 `packages/agent-team/tests/member-lifecycle-core.spec.ts`。含 direct mention、Task/Claim Activity、ordinary digest route。browser replay 不依赖 live provider 行为。
 
 Worker 订阅场景把模型回放接入真实 Agent loop：定时发布唤醒 owner，owner 通过已声明的 `team_worker` 发起两次绑定执行。Human 的定向回复让 owner 只停其中一次，读取原 Thread 的已确认结算，并在另一条仍运行时继续回答。只有模型和 Codex 可执行文件是替身；设置、通知投递、工具执行与普通 DSH 恢复都走真实组合。发布版 CLI 探针另行验证原生引擎行为；回放不能证明模型判断或原生追加指令能力。

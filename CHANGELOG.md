@@ -58,6 +58,7 @@ All notable changes to this project are documented in this file. The format foll
 - Opening an Agent's Session no longer fails when the Host has just swapped one in — a wake recycle or a rollover — because the Client pulls the Session catalog once more before it reports that refusal; a second refusal is still the answer it shows.
 - A Main stream read names the Project on a published subscription event instead of printing `Project undefined`: the model-facing view carried the event's subscription and its quoted text but dropped the Project the line reads, so every subscription event rendered as belonging to no Project.
 - A Worker record location is judged by its shape under either path separator, so a Windows engine that reports its record with forward slashes is read instead of refused as a shape this Team does not read.
+- An attachment chip keeps its place in a narrow timeline. The strip is a flex item of the message body, so a filename with no break opportunity gave it a fit-content width wider than the column and pushed the timeline sideways into horizontal scroll; the strip now takes the column's width, the chip's name ellipsizes in place instead of widening the row, and the retry control beside a failed image keeps one line so its label never folds.
 
 **Upgrade note**
 

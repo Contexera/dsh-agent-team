@@ -27,6 +27,15 @@ Bodies over the 600-character formatter threshold use a persistent wrapper with 
 
 That same wrapper carries `data-document`: the threshold that folds a body also calls it a document, so its Markdown reads on the document rhythm (Typography table above) while short messages keep the chat grid, and the preview stays eight lines of whatever the content-font axis sets.
 
+## Attachments
+A Message's files render as one strip under its body: a wrapping row at a 6px gap, thumbnails and chips mixed. The strip is a flex item of the body column, so it takes the column's width rather than its own — a filename with no break opportunity would otherwise give the strip a fit-content width past the column and push the timeline into horizontal scroll.
+
+A file that is not an image is a chip: the name, then its byte size. An image starts as the same chip stating its own state — `Loading image`, `File expired and cleaned up` on a confirmed cache miss, `Image unavailable` after a read or decode failure with a retry control beside it — and becomes a thumbnail that opens the large view once its bytes decode.
+
+While it waits, that chip is a polite live region, so the state change is announced rather than only painted. The name ellipsizes inside the chip: the chip's automatic minimum would otherwise win over its cap, so the chip sets `min-width: 0` and the name keeps `nowrap` with an ellipsis, and a long name shortens in place instead of widening the row.
+
+The retry control takes `flex: none`: it is an action label, so it keeps one line while the name shortens beside it.
+
 ## Message runs
 A run groups consecutive same-sender Messages and its Thread entry row. Activity and unread boundaries break runs. An entry row in a grouped row gets a hairline; ordinary continuation does not. Runs have no hover box, fill, shadow, or permanent border—only two-pixel spacing. Time is stated by the row that owns it, never by a line: a row with an identity line states its instant beside the name, a continuation row in the avatar seat under the pointer or keyboard focus.
 
@@ -110,7 +119,7 @@ The default engine is a picker inside the same panel, and when the engine it nam
 
 Only a save writes, and it writes leaf paths (`worker.engines.codex.executable`, never the group object), so the row's other groups and each group's unturned switches survive. A control staged back to the value it already showed stages nothing, which is why toggling a switch on and off again leaves the row clean.
 
-The engine list and Codex's modes are one dependency-free module both halves import (`worker-settings`), because the Client bundle must not pull in the Host's engine code; the page therefore cannot offer an engine or a mode the Host would not run.
+The engine list lives in one dependency-free module both halves import (`worker-settings`), because the Client bundle must not pull in the Host's engine code; the page therefore cannot offer an engine the Host would not run.
 
 Because the nav lists that entry among the Harness's own pages, a 13px tertiary intro under the heading names what owns the page and where a change applies. That header renders in every state — including a failed read — so the page never leaves "whose Team is this?" open. The name row is a form: a 36×200px field whose primary Save button owns the submit, so Enter saves a dirty field and Tab reaches that button as the next stop.
 

@@ -10,10 +10,9 @@
 
 ## 文案与本地化
 - 全部用户可见文案经 locale key（`locales.ts` zh/en 同构，key 类型取自 zh）。禁止在组件里拼接英文句子。
-- 参数化 key 的约定：`{count}` 数量、`{ids}` 成员句柄列表、`{kind}` 内部种类、`{number}` 任务号、`{actor}`/`{direction}` 活动主体。
-- 错误文案跟随 Host：有明确补救动作的拒绝走 locale key（`staleRevision`、`memberNotFollowing`），而 Client 无法更好地措辞的失败——例如传输断开——直接展示 Host 自己的 message。
-
-> TODO：原始 transport message 应该换成本地化文案，还是保持 Host 的原话？当前各面是原样展示。
+- 参数化 key 的约定：`{count}` 数量、`{ids}` 成员句柄列表、`{kind}` 内部种类、`{number}` 任务号、`{actor}`/`{direction}` 活动主体、`{message}` Host 原话。
+- 错误文案跟随 Host：有明确补救动作的拒绝走 locale key（Thread 已变化用 `staleRevision`，设置版本冲突用 `extraToolsConflict`）。
+- 其余失败一律保留 Host 原话：本地化层只负责「点明失败动作」的那句框（`restartFailed`、`archiveProjectFailed`），且只在所在面本身没点明动作时用。未知拒绝的原文是唯一诊断，而 `isUncertainRemoteFailure` 对「传输断开」和普通 Host 异常同等看待。
 
 ## 可访问性基线
 - 侧栏分区折叠头是原生 button（`aria-expanded`），键盘 Enter/Space 由原生行为保证。

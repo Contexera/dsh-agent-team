@@ -8,7 +8,7 @@ The filesystem row states `applyPatch: false` rather than inheriting the Host de
 
 Every Member starts restricted to the tool definitions contributed by its selected preset, plus the explicitly shared `working_directory` tool. `capabilities.tools.allow` still only narrows this baseline.
 
-A separate profile-wide `extraToolGrants` list in the Team Host row can grant exact, case-sensitive registered Host tool names, including an inherited baseline name the Member allow-list omitted. The list defaults to empty, belongs to one profile, and applies to every Team Member in that profile. The nine Team tools and `working_directory` remain reserved; `team_worker` remains solely the Worker switch's decision. A grant is a name, never a plugin origin, definition object, or registration instance.
+A separate profile-wide `extraToolGrants` list in the Team Host row can grant exact, case-sensitive registered Host tool names, including an inherited baseline name the Member allow-list omitted. The list defaults to empty, belongs to one profile, and applies to every Team Member in that profile. The ten Team tools and `working_directory` remain reserved, so a grant cannot name them. `team_worker` is one of the ten and is declared only while the Host Worker switch is on, so a grant cannot turn it on. A grant is a name, never a plugin origin, definition object, or registration instance.
 
 The Host reads the grants synchronously at each Session `turn/start`, before the first tool resolution, and freezes them for that turn. A later-saved edit reaches the next turn even when consecutive turns never pass through idle, and creation, resume, and generation replacement use the same policy path. The restriction materializes the names known at that boundary.
 
@@ -32,7 +32,7 @@ This uses public Harness hooks rather than an enforced final request policy. Oth
 
 Every row `name:` is a bare specifier the Loader resolves against the profile, not against this bundle. A profile links this bundle and the host closure, so a row may name a host package or one of this bundle's own subpaths, and never a package nested inside this bundle's dependency tree. A name that resolves in a working tree can still leave the row `never started` in a real install, so a dependency's module reaches a row only through a re-export under this bundle's own name.
 
-The nine tools are defined in `packages/tool-agent-team/src/index.ts` and `packages/tool-agent-team/src/subscription.ts`; their contract is in [`tools.md`](../team-collaboration/tools.md). They mount under the isolated `team-member` preset. The Web Client is the only Human control surface and delegates every mutation through `ctx.agentTeam` typed Remote; do not restore a slash-command adapter.
+The ten tools are defined in `packages/tool-agent-team/src/index.ts` and `packages/tool-agent-team/src/subscription.ts`; their contract is in [`tools.md`](../team-collaboration/tools.md). They mount under the isolated `team-member` preset. The Web Client is the only Human control surface and delegates every mutation through `ctx.agentTeam` typed Remote; do not restore a slash-command adapter.
 
 A Member has no context tool. The preset's `compaction-basic` row mounts Team's thin `member-compaction-engine` adapter: Team owns proactive admission, while the Harness's `BasicCompactionEngine` supplies the summary template, compaction transaction, and overflow recovery. [`memory-and-context.md`](../team-collaboration/memory-and-context.md) defines the budgets. Generation swaps remain Host decisions, never model ones.
 

@@ -136,7 +136,7 @@ dsh plugin --profile web remove @contexera/dsh-agent-team
 
 - A durable single-host Team: Workspaces, Projects with a Main stream and named owners, discussion and Task Threads, Claims, accountable owners, and a task board.
 - A Web Client for the Human: create Projects and Agents, set owners, post and reply, follow or step back from Threads, and accept, close, reopen, or transfer Tasks. The Inbox and a cross-Workspace task board show what needs you.
-- An isolated `team-member` preset with nine model-facing Team tools: `team_inbox`, `team_thread`, `team_attention`, `team_message`, `team_dm`, `team_task`, `team_view`, `team_subscription`, and `team_reminder`.
+- An isolated `team-member` preset with ten model-facing Team tools: `team_inbox`, `team_thread`, `team_attention`, `team_message`, `team_dm`, `team_task`, `team_view`, `team_subscription`, `team_reminder`, and `team_worker`.
 - A pull-based collaboration protocol. Agent Inbox admission is durable, but it does not claim that the model has already processed the update.
 
 ![Human Inbox in the DSH Web UI: one Thread needing you, with its unread and direct counts stated](assets/readme/inbox.png)
