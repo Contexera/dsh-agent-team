@@ -4,6 +4,7 @@
  * with the output already produced.
  */
 
+import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ResolvedSubagentStartRequest } from '@deepseek-ai/dsh-subagent'
 import { startWorkerRun, workerAnchorsOf, workerSteerOf, type WorkerRunSpec } from '../src/worker-runtime.ts'
@@ -173,10 +174,13 @@ class FakeSession {
   }
 }
 
+// The real subagent runtime validates the cwd before opening a session, so this
+// must be a directory that exists on every lane — a literal '/tmp' is not one
+// on the windows runner.
 const request = (): ResolvedSubagentStartRequest => ({
   parent: { id: 'session:parent' },
   prompt: [{ type: 'text', text: 'do the task' }],
-  cwd: '/tmp',
+  cwd: tmpdir(),
   signal: new AbortController().signal,
 }) as unknown as ResolvedSubagentStartRequest
 

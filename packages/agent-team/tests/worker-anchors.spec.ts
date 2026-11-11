@@ -375,6 +375,9 @@ describe('the anchors one run\'s ending carries', () => {
     expect(executionOf(ctx.agentTeam, run.workerRef)?.state).toBe('stopped')
   }, 60_000)
 
+  // The sqlite arms pay a durable commit per ledger write. On the windows lane
+  // the memory arms settle around 1.2s while both sqlite arms crossed the 5s
+  // default (run #235), so this reconstruction round trip needs headroom.
   it.each([
     { ledgerBackend: 'memory' as const, alias: false },
     { ledgerBackend: 'memory' as const, alias: true },
@@ -417,7 +420,7 @@ describe('the anchors one run\'s ending carries', () => {
     expect(deliveries).toEqual([request.instruction])
     expect(ledgerOf(ctx.agentTeam).workerExecutionsOfMember(member.memberId)).toHaveLength(1)
     expect(executionOf(ctx.agentTeam, run.workerRef)).toEqual(original)
-  })
+  }, 60_000)
 
   it('keeps the Thread facts, revision, and execution unchanged when a steer receipt is aliased', async () => {
     const { harness, ctx, agent, threadRef, member } = await setup({ thread: true })
