@@ -1,7 +1,8 @@
 /**
  * What the registered Worker provider reads at each open: the settings row as it
- * stands then, and the engine's own session identity as the run's id. OAR is
- * mocked here because this pins the seam the acceptance run proves natively.
+ * stands then, a fresh external execution id, and the native conversation anchors
+ * carried separately on its result. OAR is mocked here because this pins the seam
+ * the acceptance run proves natively.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -15,16 +16,18 @@ import { TeamWorkerProvider, WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC, workerAnchor
 const KEY = 'OAR_CODEX_SANDBOX'
 
 /** What the fake engine does on the next open: its output, its turn, and its disposal verdict. */
-const control = { text: '', hangTurn: false, disposeFails: false, eraseOnDispose: false, extraTurn: false }
+const control = { text: '', hangTurn: false, disposeFails: false, eraseOnDispose: false, extraTurn: false,
+  mismatchResume: false, emptyRecords: false }
 
 /** `hostSandbox` is what OAR 0.95.1 actually reads at open; `env` only reaches the child. */
 const sessions: Array<{ id: string; env: Readonly<Record<string, string | null>>; hostSandbox: string | undefined }> = []
+const disposals: string[] = []
 
 vi.mock('@botiverse/oar', () => ({
   codexRuntime: {
     installation: async () => ({ kind: 'available', via: 'executable', command: '/fake/codex', version: 'x' }),
-    session: async (_installation: unknown, options: { env: Readonly<Record<string, string | null>> }): Promise<Session> => {
-      const id = `native-${sessions.length + 1}`
+    session: async (_installation: unknown, options: { env: Readonly<Record<string, string | null>>; resume?: string }): Promise<Session> => {
+      const id = control.mismatchResume ? 'native-other' : options.resume ?? `native-${sessions.length + 1}`
       let disposed = false
       const session = {
         id,
@@ -36,6 +39,7 @@ vi.mock('@botiverse/oar', () => ({
         abort: async () => {},
         dispose: async () => {
           disposed = true
+          disposals.push(id)
           if (control.disposeFails) throw new Error('the engine process did not exit')
         },
         // The engine's own record stream: the opening frame names where its record
@@ -43,6 +47,7 @@ vi.mock('@botiverse/oar', () => ({
         // closes this stream as it tears down, which `eraseOnDispose` models.
         records: () => {
           if (disposed && control.eraseOnDispose) throw new Error('record stream is closed')
+          if (control.emptyRecords) return []
           return [
             { sessionId: id, agentPath: [], seq: 1, receivedAt: 0, kind: 'frame',
               body: { type: 'thread/start', native: { thread: { id, path: `/fake/sessions/2026/11/09/rollout-${id}.jsonl` } }, events: [] } },
@@ -66,11 +71,14 @@ vi.mock('@botiverse/oar/observe', () => ({
 
 afterEach(() => {
   sessions.splice(0)
+  disposals.splice(0)
   control.text = ''
   control.hangTurn = false
   control.disposeFails = false
   control.eraseOnDispose = false
   control.extraTurn = false
+  control.mismatchResume = false
+  control.emptyRecords = false
 })
 
 const request = (cwd: string): ResolvedSubagentStartRequest => ({
@@ -93,10 +101,12 @@ describe('the Worker provider', () => {
         engine: 'codex', env: { OAR_CODEX_BIN: '/data/bin/codex', OAR_CODEX_SANDBOX: 'workspace-write' }, launchArgs: [],
       }
       const provider = new TeamWorkerProvider('team-worker-codex', () => spec, NO_SESSIONS)
-      await (await provider.start(request(cwd))).result
-      spec = { engine: 'codex', env: { OAR_CODEX_BIN: '/data/bin/codex', OAR_CODEX_SANDBOX: 'read-only' }, launchArgs: [] }
+      const first = await provider.start(request(cwd))
+      await first.result
+      spec = { engine: 'codex', env: { OAR_CODEX_BIN: '/data/bin/codex', OAR_CODEX_SANDBOX: 'read-only' }, launchArgs: [],
+        resume: 'native-1' }
       const second = await provider.start(request(cwd))
-      await second.result
+      const secondResult = await second.result
 
       expect(sessions.map(session => session.env)).toEqual([
         { OAR_CODEX_BIN: '/data/bin/codex', OAR_CODEX_SANDBOX: 'workspace-write' },
@@ -105,12 +115,51 @@ describe('the Worker provider', () => {
       // Each open carries its own policy into the Host's env and hands the Host's back.
       expect(sessions.map(session => session.hostSandbox)).toEqual(['workspace-write', 'read-only'])
       expect(process.env[KEY]).toBe('danger-full-access')
-      // The external child's id is the engine's own session identity.
-      expect(second.id).toBe('native-2')
-      expect(await second.result).toMatchObject({ stopReason: 'completed' })
+      // A resumed native conversation is a fresh external child in the parent catalog.
+      expect(second.id).not.toBe(first.id)
+      expect(second.id).not.toBe('native-1')
+      expect(secondResult).toMatchObject({ stopReason: 'completed' })
+      expect(workerAnchorsOf(secondResult)?.nativeSessionId).toBe('native-1')
     } finally {
       if (operatorDefault === undefined) delete process.env[KEY]
       else process.env[KEY] = operatorDefault
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('disposes a native session that did not resume the requested conversation', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'team-worker-provider-'))
+    const provider = new TeamWorkerProvider('team-worker-codex', () => ({
+      engine: 'codex', env: {}, launchArgs: [], resume: 'native-expected',
+    }), NO_SESSIONS)
+    control.mismatchResume = true
+    let failure: unknown
+    try {
+      // If the provider incorrectly publishes the mismatched run, settle it so
+      // the regression cannot leave an open turn behind.
+      await (await provider.start(request(cwd))).result
+    } catch (error: unknown) {
+      failure = error
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+    expect(failure).toMatchObject({ stage: 'startup', category: 'unsupported' })
+    expect(disposals).toEqual(['native-other'])
+  })
+
+  it('keeps the native conversation identity when its record stream is empty', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'team-worker-provider-'))
+    const provider = new TeamWorkerProvider('team-worker-codex', () => ({ engine: 'codex', env: {}, launchArgs: [] }), NO_SESSIONS)
+    control.emptyRecords = true
+    try {
+      const run = await provider.start(request(cwd))
+      const anchors = workerAnchorsOf(await run.result)
+      expect(anchors).toMatchObject({ nativeSessionId: 'native-1' })
+      expect(anchors?.nativeTurnId).toBeUndefined()
+      expect(anchors?.nativeStorage).toBeUndefined()
+      expect(run.id).not.toBe('native-1')
+      await run.dispose()
+    } finally {
       await rm(cwd, { recursive: true, force: true })
     }
   })

@@ -426,6 +426,216 @@
   gap: 12px;
 }
 
+.noticeBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Extra tool grants: a discoverable name list rather than a plugin-local
+ * settings form. The selected count and draft actions stay visible while the
+ * Host's independent list/catalog reads move through loading and failure. */
+.extraTools {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.extraToolHeading {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.extraToolCount {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  margin-inline-start: auto;
+}
+
+.extraSearch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toolList {
+  background: var(--dsw-alias-bg-layer-2);
+  border-radius: var(--dsw-radius-md);
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 4px;
+}
+
+.toolChoice {
+  align-items: center;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  min-height: 32px;
+  min-width: 0;
+  padding: 4px 8px;
+}
+
+@media (hover: hover) {
+  .toolChoice:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+/* The box carries the ring, as the shipped checkbox atom does, and the row
+ * draws none: a focused row shows one ring, not two. */
+.toolChoice input {
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: inherit;
+  flex: none;
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.toolChoice input:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+
+.toolChoice:has(input:disabled) {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.toolName {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* The fallback list and the unregistered list share one block anatomy; only the
+ * unregistered one wears the warning edge, because the fallback is a normal
+ * selection view rather than a failure. */
+.selectionBlock {
+  background: var(--dsw-alias-bg-layer-2);
+  border-radius: var(--dsw-radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.missingTools {
+  border-inline-start: 3px solid var(--dsw-alias-state-warn-primary, var(--dsw-alias-border-l4));
+}
+
+.missingHeading {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.missingBadge {
+  color: var(--dsw-alias-state-warn-primary, var(--dsw-alias-label-tertiary));
+  font-size: 11px;
+  line-height: 1.4;
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+.conflict {
+  background: var(--dsw-alias-bg-layer-2);
+  border-inline-start: 3px solid var(--dsw-alias-state-warn-primary, var(--dsw-alias-border-l4));
+  border-radius: var(--dsw-radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.conflictTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.conflictText {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+.conflictCommitted {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px;
+  line-height: 18px;
+}
+
+.committedName {
+  background: var(--dsw-alias-bg-layer-3);
+  border-radius: var(--dsw-radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  padding: 1px 5px;
+}
+
+.emptyValue {
+  color: var(--dsw-alias-label-tertiary);
+  font-style: italic;
+}
+
+.extraActions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actionSpacer {
+  flex: 1;
+}
+
+.success {
+  color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary));
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+@media (min-width: 560px) {
+  .toolList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 520px) {
+  .extraToolCount {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+
+  .actionSpacer {
+    display: none;
+  }
+
+  .extraActions > :last-child {
+    margin-inline-start: auto;
+  }
+}
+
 /* The settings shell keeps its 188px nav rail at every viewport, so on a phone the content column is ~100px wide; the row
    stacks and the controls wrap. The section is its own container, so this answers the width it gets, not the viewport's. */
 @container (max-width: 420px) {

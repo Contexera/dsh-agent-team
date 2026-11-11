@@ -23,10 +23,9 @@ import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import AgentTeam from '../src/index.ts'
-import type { Config } from '../src/host-row-settings.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
-import { WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC, WorkerFailure } from '../src/worker-runtime.ts'
+import { carryWorkerAnchors, WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC, WorkerFailure } from '../src/worker-runtime.ts'
 import type { AgentTeamMemberActor, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamRequestId,
   AgentTeamTaskRef, AgentTeamThreadRef, AgentTeamWorkerRef } from '../src/types.ts'
 
@@ -35,9 +34,9 @@ const cleanups: Array<() => Promise<void>> = []
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 
 /** A Host row with delegation allowed on Codex, which is what a Human has to switch on first. */
-const workerRow = (): Config => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
+const workerRow = () => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
   engines: { codex: { enabled: true, executable: '', sandbox: 'workspace-write' },
-    claude: { enabled: false, executable: '', sandbox: '' } } } }) as unknown as Config
+    claude: { enabled: false, executable: '', sandbox: '' } } } })
 
 afterEach(async () => {
   vi.useRealTimers()
@@ -98,7 +97,7 @@ function fakeEngines(): FakeEngines {
       state.workers.set(childId, worker)
       return {
         childId,
-        result: result.promise,
+        result: result.promise.then(outcome => carryWorkerAnchors(outcome, { nativeSessionId: `native:${childId}` })),
         dispose: async () => {
           worker.disposed = true
           state.order.push(`dispose:${childId}`)

@@ -14,6 +14,9 @@ import { DEFAULT_WAKE_RECYCLE, type WakeRecycleConfig } from './wake-recycle.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_SETTINGS_SCHEMA, assertValidHumanName } from './human-profile.ts'
 import { HUMAN_AVATAR_NONE } from './human-settings.ts'
 import { SIDEBAR_ORDER_SETTINGS_SCHEMA, SIDEBAR_ORDER_VALUE_SCHEMA, type SidebarOrderConfig } from './sidebar-order.ts'
+import {
+  EXTRA_TOOL_GRANTS_FIELD, EXTRA_TOOL_GRANTS_VALUE_SCHEMA, sanitizeExtraToolGrants,
+} from './member-tool-grants.ts'
 
 /**
  * The webhook trigger's deployment facts: not the listener's host and port, which the
@@ -40,6 +43,7 @@ export interface Config {
   worker: Volatile<WorkerConfig>
   webhook: Volatile<WebhookConfig>
   sidebarOrder: Volatile<SidebarOrderConfig>
+  extraToolGrants: Volatile<string[]>
 }
 
 /**
@@ -100,6 +104,9 @@ export const WORKER_SETTINGS_SCHEMA = WORKER_VALUE.default({}).volatile()
 /** The webhook deployment group. */
 export const WEBHOOK_SETTINGS_SCHEMA = WEBHOOK_VALUE.default({}).volatile()
 
+/** Exact extra tool names shared by every Team Member in this profile; empty until the Human opts in. */
+export const EXTRA_TOOL_GRANTS_SETTINGS_SCHEMA = EXTRA_TOOL_GRANTS_VALUE_SCHEMA.default([]).volatile()
+
 /**
  * The Host row's whole schema: the profile fields verbatim, so {@link HUMAN_PROFILE_SETTINGS_SCHEMA} keeps owning their volatility and defaults.
  * A patch layer replaces the row's whole config, so the parts are declared together.
@@ -111,10 +118,11 @@ export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   worker: WORKER_SETTINGS_SCHEMA,
   webhook: WEBHOOK_SETTINGS_SCHEMA,
   sidebarOrder: SIDEBAR_ORDER_SETTINGS_SCHEMA,
+  [EXTRA_TOOL_GRANTS_FIELD]: EXTRA_TOOL_GRANTS_SETTINGS_SCHEMA,
 })
 
 /** Every field the row stores, in the order a migration writes them. */
-export const HOST_ROW_FIELDS = ['name', 'avatarRef', 'wakeRecycle', 'memberCompaction', 'worker', 'webhook', 'sidebarOrder'] as const
+export const HOST_ROW_FIELDS = ['name', 'avatarRef', 'wakeRecycle', 'memberCompaction', 'worker', 'webhook', 'sidebarOrder', EXTRA_TOOL_GRANTS_FIELD] as const
 
 export type HostRowField = typeof HOST_ROW_FIELDS[number]
 
@@ -125,7 +133,8 @@ export type HostRowWrite = {
     : K extends 'wakeRecycle' ? WakeRecycleConfig
       : K extends 'memberCompaction' ? MemberCompactionConfig
         : K extends 'worker' ? WorkerConfig
-        : K extends 'webhook' ? WebhookConfig : SidebarOrderConfig
+        : K extends 'webhook' ? WebhookConfig
+          : K extends 'sidebarOrder' ? SidebarOrderConfig : string[]
 }
 
 /**
@@ -170,6 +179,14 @@ function carriedField(field: HostRowField, raw: unknown): unknown {
   if (field === 'avatarRef') {
     if (raw === HUMAN_AVATAR_NONE) return HUMAN_AVATAR_NONE
     return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
+  }
+  if (field === EXTRA_TOOL_GRANTS_FIELD) {
+    if (!Array.isArray(raw)) return undefined
+    try {
+      return [...sanitizeExtraToolGrants(EXTRA_TOOL_GRANTS_VALUE_SCHEMA(raw as never))]
+    } catch {
+      return undefined
+    }
   }
   const schema = field === 'wakeRecycle' ? WAKE_RECYCLE_VALUE
     : field === 'memberCompaction' ? MEMBER_COMPACTION_VALUE

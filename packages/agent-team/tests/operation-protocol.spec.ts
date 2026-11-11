@@ -645,6 +645,35 @@ const workerSettled: Op<'team/worker-settled'> = {
   },
 }
 
+const steerAdmitted: Op<'team/worker-steer-admitted'> = {
+  ...opBase('operation:protocol-worker-steer-admitted',
+    'agent-team:worker-steer-admitted:request:protocol-steer', 46, memberActor),
+  previousOperationId,
+  kind: 'team/worker-steer-admitted',
+  data: {
+    requestId: requestId('request:protocol-steer'),
+    workspaceId: alpha,
+    workerRef,
+    instruction: 'also check tomorrow',
+    initiatedBy: memberId,
+  },
+}
+
+const steerRecorded: Op<'team/worker-steer-recorded'> = {
+  ...opBase('operation:protocol-worker-steer-recorded',
+    'agent-team:worker-steer-recorded:request:protocol-steer', 47, hostActor),
+  previousOperationId,
+  kind: 'team/worker-steer-recorded',
+  data: {
+    admissionRequestId: requestId('request:protocol-steer'),
+    outcome: {
+      kind: 'submitted',
+      result: { workerRef, engine: 'codex', state: 'submitted', landed: 'steered',
+        turnId: 'turn-protocol-steer', runState: 'running' },
+    },
+  },
+}
+
 const dmSent: Op<'team/dm-sent'> = {
   ...opBase('operation:protocol-28', 'request:protocol-dm-sent', 28, memberActor),
   previousOperationId,
@@ -1681,6 +1710,56 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'delta' },
+  },
+  'team/worker-steer-admitted': {
+    stored: steerAdmitted,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.recordWorkerSteerAdmitted({
+          requestId: steerAdmitted.data.requestId,
+          actor: memberActor,
+          workspaceId: steerAdmitted.data.workspaceId,
+          workerRef: steerAdmitted.data.workerRef,
+          instruction: steerAdmitted.data.instruction,
+          initiatedBy: steerAdmitted.data.initiatedBy,
+        })
+        expect(out.value.instruction, 'the admission mapper answers with the stored request').toBe(steerAdmitted.data.instruction)
+        return out
+      },
+      changed: () => ledger.recordWorkerSteerAdmitted({
+        requestId: steerAdmitted.data.requestId,
+        actor: memberActor,
+        workspaceId: steerAdmitted.data.workspaceId,
+        workerRef: steerAdmitted.data.workerRef,
+        instruction: 'a changed instruction',
+        initiatedBy: steerAdmitted.data.initiatedBy,
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'no-op', inbox: 'none' },
+  },
+  'team/worker-steer-recorded': {
+    stored: steerRecorded,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.recordWorkerSteerRecorded({
+          admissionRequestId: steerRecorded.data.admissionRequestId,
+          outcome: steerRecorded.data.outcome,
+        })
+        expect(out.value.outcome.kind, 'the outcome mapper answers with the stored outcome').toBe('submitted')
+        return out
+      },
+      changed: () => ledger.recordWorkerSteerRecorded({
+        admissionRequestId: steerRecorded.data.admissionRequestId,
+        outcome: steerRecorded.data.outcome.kind === 'submitted'
+          ? { ...steerRecorded.data.outcome, result: { ...steerRecorded.data.outcome.result, runState: 'completed' } }
+          : steerRecorded.data.outcome,
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'no-op', inbox: 'none' },
   },
   'team/subscription-created': {
     stored: subscriptionCreated,

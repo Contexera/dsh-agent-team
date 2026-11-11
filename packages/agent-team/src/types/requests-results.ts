@@ -358,6 +358,19 @@ export interface AgentTeamEnvironmentResult {
   readonly supportRange?: AgentTeamEnvironmentSupportRange | undefined
 }
 
+/**
+ * Discovery read of global and Agent-scoped tool registrations. It names tools
+ * the profile could grant; it is not a per-Member filtered snapshot and never
+ * claims which plugin registered a name.
+ */
+export interface AgentTeamToolCatalogRequest {
+}
+
+export interface AgentTeamToolCatalogResult {
+  /** Exact names only, sorted for stable display, with Team-owned names removed. */
+  readonly names: readonly string[]
+}
+
 /** Human display-name write against the settings revision the page read. */
 export interface AgentTeamSetHumanProfileRequest {
   readonly name: string
@@ -1195,7 +1208,12 @@ export interface AgentTeamWorkerInspection {
   /** The engine's own identities, as recorded; a missing one says the run never reached it. */
   readonly native: {
     readonly threadId?: string | undefined
+    /** The anchor older ledgers recorded; it names one turn, not necessarily every turn the execution drove. */
     readonly turnId?: string | undefined
+    /** The bounded native turn anchors retained by this execution's settlement. */
+    readonly turnIds?: readonly string[] | undefined
+    /** The bounded native input UUIDs retained by this execution's settlement. */
+    readonly inputIds?: readonly string[] | undefined
     readonly storage?: string | undefined
   }
   readonly history: AgentTeamWorkerInspectionHistory
@@ -1210,10 +1228,12 @@ export interface AgentTeamWorkerInspectRequest {
 }
 
 /**
- * One Member's instruction to a Worker run it delegated, added to the turn that
- * run is already executing. The request id is the idempotency key: a resend with
- * the same instruction answers with the first receipt, and the same id with a
- * different instruction is refused rather than sent.
+ * One Member's instruction to a Worker execution it delegated. A live execution
+ * may take it in the current turn or a later turn of the same native session. A
+ * cleanly ended execution resumes that native session as a linked execution.
+ * The request id is the idempotency key: a resend with the same instruction
+ * answers with the first receipt, and the same id with a different instruction
+ * is refused rather than sent.
  */
 export interface AgentTeamWorkerSteerRequest {
   readonly workerRef: AgentTeamWorkerRef
@@ -1222,26 +1242,87 @@ export interface AgentTeamWorkerSteerRequest {
 }
 
 /**
- * What the engine took over. `submitted` means the instruction entered the turn
- * the engine is running — not that the model read it, not that it landed before
- * the turn ended, and not that any outcome followed. `runState` is the execution's
- * state when this answer was written, so a stop that landed meanwhile is visible
- * instead of being reported as a clean success.
+ * What the steer call did. `submitted` means the native session accepted the
+ * instruction into its current execution, not that the model read it or that it
+ * landed in a fixed turn. `started` means the source execution had ended, so the
+ * Host created a linked execution by resuming the same native session and sent
+ * this instruction as its opening input.
  */
 export interface AgentTeamWorkerSteerResult {
   readonly workerRef: AgentTeamWorkerRef
   readonly engine: import('../worker-settings.ts').WorkerEngine
-  readonly state: 'submitted'
+  readonly state: 'submitted' | 'started'
+  /** Where OAR delivered the input: the running turn, a later queued turn, or an idle session's next turn. */
+  readonly landed?: 'steered' | 'queued' | 'prompted' | undefined
   /** The turn the engine said it steered into, when its acknowledgement named one. */
   readonly turnId?: string | undefined
+  /** The execution this continuation resumed; present only when `state` is `started`. */
+  readonly continuedFrom?: AgentTeamWorkerRef | undefined
   readonly runState: AgentTeamWorkerState | 'unconfirmed' | 'stopping'
 }
+
+/** One refusal sentence the Host may replay exactly, already bounded at the delivery boundary. */
+export interface AgentTeamWorkerSteerRefusal {
+  readonly code: string
+  readonly message: string
+}
+
+/**
+ * The durable outcome of one steer request. `ambiguous` includes both a native
+ * transport whose delivery is unknown and an admission that never reached a
+ * recorded result; neither may be retried automatically.
+ */
+export type AgentTeamWorkerSteerStoredOutcome =
+  | { readonly kind: 'submitted'; readonly result: AgentTeamWorkerSteerResult }
+  | { readonly kind: 'refused'; readonly refusal: AgentTeamWorkerSteerRefusal }
+  | { readonly kind: 'ambiguous'; readonly refusal: AgentTeamWorkerSteerRefusal }
+
+/**
+ * Host-internal admission of one steer request id, written before any native
+ * delivery. An alias names the canonical request whose submitted result a
+ * same-text retry answers with; it performs no native side effect.
+ */
+export interface AgentTeamWorkerSteerAdmissionWrite {
+  readonly requestId: AgentTeamRequestId
+  readonly actor: import('./entities.ts').AgentTeamMemberActor
+  readonly workspaceId: import('@deepseek-ai/dsh-workspace').WorkspaceId
+  readonly workerRef: AgentTeamWorkerRef
+  readonly instruction: string
+  readonly initiatedBy: AgentTeamMemberId
+  /** The ended execution this admission resumes, when the receiving execution does not exist yet. */
+  readonly continuedFrom?: AgentTeamWorkerRef | undefined
+  readonly aliasOf?: AgentTeamRequestId | undefined
+}
+
+/** One admission or alias as replay resolves it. */
+export interface AgentTeamWorkerSteerAdmission {
+  readonly kind: 'admitted'
+  readonly requestId: AgentTeamRequestId
+  readonly operationId: AgentTeamOperationId
+  readonly workspaceId: WorkspaceId
+  readonly workerRef: AgentTeamWorkerRef
+  readonly instruction: string
+  readonly initiatedBy: AgentTeamMemberId
+  readonly continuedFrom?: AgentTeamWorkerRef | undefined
+  readonly aliasOf?: AgentTeamRequestId | undefined
+  /** Absent means the request was admitted but no outcome was stored. */
+  readonly outcome?: AgentTeamWorkerSteerStoredOutcome | undefined
+}
+
+/** One request id already belongs to a non-steer operation or a start that cannot answer a steer. */
+export interface AgentTeamWorkerSteerRequestConflict {
+  readonly kind: 'conflict'
+  readonly requestId: AgentTeamRequestId
+}
+
+/** What one request id means in the steer projection. */
+export type AgentTeamWorkerSteerRequestState = AgentTeamWorkerSteerAdmission | AgentTeamWorkerSteerRequestConflict
 
 /**
  * What a delegation target names, as the Host resolves it before it writes
  * anything or starts a process. A Thread and a Task agree about each other or
- * the target is contradictory; the Project is derived from whichever target was
- * named, so a delegation cannot pick a Project its target does not belong to.
+ * the target is contradictory; an explicitly named Project must also contain
+ * that Thread, rather than being silently replaced by the derived Project.
  */
 export type AgentTeamDelegationTarget =
   | {
@@ -1258,6 +1339,7 @@ export type AgentTeamDelegationTarget =
   | { readonly kind: 'thread-unknown'; readonly threadRef: AgentTeamThreadRef }
   | { readonly kind: 'task-unknown'; readonly taskRef: AgentTeamTaskRef }
   | { readonly kind: 'target-conflict'; readonly threadRef: AgentTeamThreadRef; readonly taskRef: AgentTeamTaskRef }
+  | { readonly kind: 'project-conflict'; readonly projectRef: AgentTeamProjectRef; readonly threadRef: AgentTeamThreadRef }
 
 /** Human-only observation of a durable personal Attention change. */
 export interface AgentTeamThreadAttentionObservation {

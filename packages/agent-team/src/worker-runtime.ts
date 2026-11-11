@@ -72,6 +72,10 @@ export interface WorkerAnchors {
   readonly nativeSessionId: string
   /** The engine's own identity for the turn this run drove. */
   readonly nativeTurnId?: string | undefined
+  /** Every native turn this execution drove, including accepted follow-up turns. */
+  readonly nativeTurnIds?: readonly string[] | undefined
+  /** Every native input UUID this execution submitted, in submission order. */
+  readonly nativeInputIds?: readonly string[] | undefined
   /** The absolute path of the engine's own record: reported by Codex, derived from the cwd Claude reported and the environment the run opened with. */
   readonly nativeStorage?: string | undefined
 }
@@ -95,6 +99,12 @@ export function workerAnchorsOf(result: object): WorkerAnchors | undefined {
   if (typeof anchors.nativeSessionId !== 'string' || anchors.nativeSessionId === '') return undefined
   return Object.freeze({ nativeSessionId: anchors.nativeSessionId,
     ...(typeof anchors.nativeTurnId === 'string' && anchors.nativeTurnId !== '' ? { nativeTurnId: anchors.nativeTurnId } : {}),
+    ...(Array.isArray(anchors.nativeTurnIds)
+      ? { nativeTurnIds: Object.freeze(anchors.nativeTurnIds.filter((id): id is string => typeof id === 'string' && id !== '')) }
+      : {}),
+    ...(Array.isArray(anchors.nativeInputIds)
+      ? { nativeInputIds: Object.freeze(anchors.nativeInputIds.filter((id): id is string => typeof id === 'string' && id !== '')) }
+      : {}),
     ...(typeof anchors.nativeStorage === 'string' && anchors.nativeStorage !== '' ? { nativeStorage: anchors.nativeStorage } : {}) })
 }
 
@@ -104,7 +114,7 @@ export function workerAnchorsOf(result: object): WorkerAnchors | undefined {
  * and never the run's own outcome, so every failure here returns the result
  * exactly as the engine settled it.
  */
-function carryWorkerAnchors(outcome: SubagentResult, anchors: WorkerAnchors | undefined): SubagentResult {
+export function carryWorkerAnchors(outcome: SubagentResult, anchors: WorkerAnchors | undefined): SubagentResult {
   if (anchors === undefined) return outcome
   try {
     const carried: SubagentResult & { readonly [WORKER_ANCHORS]?: WorkerAnchors } = { ...outcome }
@@ -118,14 +128,16 @@ function carryWorkerAnchors(outcome: SubagentResult, anchors: WorkerAnchors | un
 }
 
 /**
- * What one same-turn instruction came to. `submitted` is OAR's own deliberately
- * weak promise: the engine took the input over for the turn it is running, which
- * is not a claim that the model read it, that it landed before the turn ended, or
- * that any outcome followed. `unavailable` carries why nothing was taken over.
+ * What one instruction came to. `submitted` is OAR's own deliberately weak
+ * promise: the input was accepted into the session, not a claim that the model
+ * read it or that it landed in a fixed turn. `unavailable` distinguishes a typed
+ * native refusal from a transport error whose delivery is unknown.
  */
 export type WorkerSteerOutcome =
-  | { readonly kind: 'submitted'; readonly turnId?: string | undefined }
-  | { readonly kind: 'unavailable'; readonly code: RejectionCode | 'error'; readonly reason: string }
+  | { readonly kind: 'submitted'; readonly inputId: string; readonly landed: 'steered' | 'queued' | 'prompted'
+    readonly turnId?: string | undefined }
+  | { readonly kind: 'unavailable'; readonly code: RejectionCode | 'error'; readonly reason: string
+    readonly delivery: 'rejected' | 'unknown' }
 
 /** How long a native turn id may be before this Team refuses to carry it. */
 const WORKER_TURN_ID_MAX_CHARACTERS = 256
@@ -141,13 +153,11 @@ function steeredTurnId(native: unknown): string | undefined {
   return typeof turnId === 'string' && turnId !== '' && turnId.length <= WORKER_TURN_ID_MAX_CHARACTERS ? turnId : undefined
 }
 
-/** One run's live control: add an instruction to the turn its engine is already running. */
-export type WorkerSteer = (instruction: string, inputId: string) => Promise<WorkerSteerOutcome>
-
-/** What a live session offers the Host: a steer channel, or a stated reason there is none. */
-export type WorkerSteerChannel =
-  | { readonly kind: 'session'; readonly steer: WorkerSteer }
-  | { readonly kind: 'unsupported' }
+/** One run's live control: deliver an instruction into the engine's same native session. */
+export type WorkerSteer = ((instruction: string, inputId: string) => Promise<WorkerSteerOutcome>) & {
+  /** Hold the closing window across the Host's durable admission; release exactly once. */
+  readonly hold?: () => (() => void) | undefined
+}
 
 /**
  * The Team-private key one run's steer channel rides on, for the same reason the
@@ -156,7 +166,7 @@ export type WorkerSteerChannel =
  */
 const WORKER_STEER = Symbol('@contexera/dsh-agent-team/worker-steer')
 
-/** One run's steer channel, or nothing when the engine exposes no same-turn control. */
+/** One run's delivery channel, or nothing when its provider published no control. */
 export function workerSteerOf(run: object): WorkerSteer | undefined {
   const carried = (run as { readonly [WORKER_STEER]?: unknown })[WORKER_STEER]
   return typeof carried === 'function' ? carried as WorkerSteer : undefined
@@ -165,11 +175,12 @@ export function workerSteerOf(run: object): WorkerSteer | undefined {
 /**
  * The native record's own path, taken from the frame in which the engine
  * reported it. Codex states it on `thread/start` and repeats it on
- * `thread/started`; a runtime that names no path yields none, and the look-up
- * then says so instead of guessing a location.
+ * `thread/started`, and restates it when `thread/resume` reopens an existing
+ * thread; a runtime that names no path yields none, and the look-up then says
+ * so instead of guessing a location.
  */
 function nativeThreadPath(body: FrameBody): string | undefined {
-  if (body.type !== 'thread/start' && body.type !== 'thread/started') return undefined
+  if (body.type !== 'thread/start' && body.type !== 'thread/started' && body.type !== 'thread/resume') return undefined
   const native = body.native
   if (native === null || typeof native !== 'object') return undefined
   const thread = (native as { readonly thread?: unknown }).thread
@@ -236,33 +247,52 @@ function claudeRecordPath(cwd: string, sessionId: string,
 
 /**
  * Read one open session's anchors off its own record stream, bound to the input
- * this run submitted. Codex's turn is the one span the root agent's records after
- * that input carry: a session that also holds another root turn cannot be tied to
- * this run, so it reports no turn id rather than the last one it saw — a guessed
- * turn would send a later look-up to another run's failure. Claude has no turn
+ * this run submitted. Codex associates each proven root span with an owned input;
+ * without input evidence only a single unambiguous root span is usable. Multiple
+ * unproven spans are not this execution's turns merely because they came later.
+ * Claude has no turn
  * object: its record names the turn by the prompting user message, which OAR
  * writes with the input id this run generated, so that id is the turn anchor.
  */
 function anchorsOf(session: Session, inputSeq: number | undefined, engine: WorkerEngine,
-  cwd: string, inputId: string | undefined, env: Readonly<Record<string, string | undefined>>): WorkerAnchors {
+  cwd: string, inputId: string | undefined, inputIds: readonly string[],
+  env: Readonly<Record<string, string | undefined>>): WorkerAnchors {
   let nativeStorage: string | undefined
   let reportedCwd: string | undefined
-  const turns = new Set<string>()
+  const evidence = new Map<string, Set<string>>()
+  const ownedInputs = new Set(inputIds)
   for (const record of session.records()) {
     if (record.sessionId !== session.id || record.agentPath.length !== 0) continue
     if (record.kind === 'frame') {
       if (engine === 'codex') nativeStorage ??= nativeThreadPath(record.body)
       else reportedCwd ??= nativeClaudeCwd(record.body)
+      for (const event of record.body.events) {
+        if (event.kind !== 'user_message' || event.inputId === undefined || !ownedInputs.has(event.inputId)) continue
+        if (record.spanId === undefined || record.spanId === '') continue
+        const inputs = evidence.get(record.spanId) ?? new Set<string>()
+        inputs.add(event.inputId)
+        evidence.set(record.spanId, inputs)
+      }
     }
-    if (inputSeq === undefined || record.seq <= inputSeq) continue
-    if (record.spanId !== undefined && record.spanId !== '') turns.add(record.spanId)
   }
   if (engine === 'claude') nativeStorage = claudeRecordPath(reportedCwd ?? cwd, session.id, env)
+  const fallbackCodexTurns = new Set<string>()
+  if (engine === 'codex' && inputSeq !== undefined) {
+    for (const record of session.records()) {
+      if (record.sessionId !== session.id || record.agentPath.length !== 0 || record.seq <= inputSeq
+        || record.spanId === undefined || record.spanId === '') continue
+      fallbackCodexTurns.add(record.spanId)
+    }
+  }
+  const nativeTurnIds = engine === 'claude' ? inputIds
+    : evidence.size > 0 ? [...evidence.keys()] : fallbackCodexTurns.size === 1 ? [...fallbackCodexTurns] : []
   const turn = engine === 'claude'
     ? (inputSeq === undefined ? undefined : inputId)
-    : turns.size === 1 ? [...turns][0] : undefined
+    : nativeTurnIds.length === 1 ? nativeTurnIds[0] : undefined
   return Object.freeze({ nativeSessionId: session.id,
     ...(turn === undefined ? {} : { nativeTurnId: turn }),
+    ...(nativeTurnIds.length === 0 ? {} : { nativeTurnIds: Object.freeze(nativeTurnIds) }),
+    ...(inputIds.length === 0 ? {} : { nativeInputIds: Object.freeze([...inputIds]) }),
     ...(nativeStorage === undefined ? {} : { nativeStorage }) })
 }
 
@@ -282,6 +312,8 @@ export interface WorkerRunSpec {
   readonly env: Readonly<Record<string, string | null>>
   /** Native process arguments; OAR validates the ones it owns. */
   readonly launchArgs: readonly string[]
+  /** A previous native session id to resume, used only by an explicit Team continuation. */
+  readonly resume?: string | undefined
   /** Optional turn deadline in milliseconds; OAR starts counting once the session opens. */
   readonly timeoutMs?: number | undefined
   /** Safe summaries only; native causes can carry credentials. */
@@ -333,13 +365,25 @@ function completedTurn(outcome: TurnOutcome, output: readonly ContentBlock[]): S
   }
 }
 
+// Native cleanup must confirm before publication, but cannot pin the Host forever.
+const WORKER_CLEANUP_DEADLINE_MS = 5_000
+
 async function disposeSession(session: Session, spec: WorkerRunSpec): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    await session.dispose()
+    await Promise.race([
+      session.dispose(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => { reject(new Error('Native cleanup did not confirm before its deadline.')) },
+          WORKER_CLEANUP_DEADLINE_MS)
+      }),
+    ])
   } catch (error: unknown) {
     const failure = new WorkerFailure('dispose', 'unknown', { cause: error })
     spec.onError?.(failure, 'error')
     throw failure
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -348,24 +392,100 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
   const stopped = Promise.withResolvers<SubagentResult>()
   const messages = new Map<string, string>()
   let streamedText = ''
-  let phase: 'running' | 'cancelled' | 'timeout' | 'settled' = 'running'
+  let phase: 'running' | 'closing' | 'cancelled' | 'timeout' | 'settled' = 'running'
   let disposal: Promise<void> | undefined
   // The anchors this run owns, captured while its session is still open: an
   // engine closes its record stream as it tears down, so a capture taken after
   // the abort or the cleanup would find nothing left to read.
   let inputSeq: number | undefined
   let promptInputId: string | undefined
-  let anchors: WorkerAnchors | undefined
+  // The native conversation is known as soon as the session opens, even if its
+  // record stream is empty or a later capture fails. Turn and storage evidence
+  // still comes only from `anchorsOf`; neither is guessed from the external id.
+  let anchors: WorkerAnchors | undefined = Object.freeze({ nativeSessionId: session.id })
+  const ownedInputIds: string[] = []
+  const acceptedInputs = new Map<string, { readonly landed: 'steered' | 'queued' | 'prompted'
+    readonly turnId?: string | undefined }>()
+  const inputTurnIds = new Map<string, string>()
+  let latestAcceptedTurnOutcome: TurnOutcome | undefined
+  let followUpFailure: string | undefined
+  let deliveriesInFlight = 0
+  const deliveryWaiters = new Set<() => void>()
   // The environment this run's engine was opened with, read once: the anchors
   // derive Claude's record directory from it after the session is gone.
   const childEnv = effectiveEnvironment(spec.env)
   const captureAnchors = (): void => {
-    if (anchors !== undefined) return
     try {
-      anchors = anchorsOf(session, inputSeq, spec.engine, cwd, promptInputId, childEnv)
+      anchors = anchorsOf(session, inputSeq, spec.engine, cwd, promptInputId, ownedInputIds, childEnv)
     } catch {
       // A session that cannot answer costs the look-up, never the run's ending.
     }
+  }
+  const noteDeliverySettled = (): void => {
+    deliveriesInFlight -= 1
+    if (deliveriesInFlight !== 0) return
+    for (const wake of deliveryWaiters) wake()
+    deliveryWaiters.clear()
+  }
+  const waitForDeliveries = async (): Promise<void> => {
+    if (deliveriesInFlight === 0) return
+    await new Promise<void>(resolve => { deliveryWaiters.add(resolve) })
+  }
+  /**
+   * The public stream is the evidence for which of this execution's inputs the
+   * native turn actually consumed. A steer that landed in the running turn and
+   * one that opened a later turn therefore leave the same kind of receipt.
+   */
+  const consumeInputEvidence = (afterSeq: number): number => {
+    let through = afterSeq
+    for (const record of session.records()) {
+      if (record.seq <= afterSeq || record.sessionId !== session.id || record.agentPath.length !== 0) continue
+      through = Math.max(through, record.seq)
+      if (record.kind !== 'frame') continue
+      for (const event of record.body.events) {
+        if (event.kind === 'user_message' && event.inputId !== undefined) {
+          const accepted = acceptedInputs.get(event.inputId)
+          const turnId = event.turnId ?? record.spanId
+          if (turnId !== undefined) {
+            inputTurnIds.set(event.inputId, turnId)
+            if (accepted !== undefined) acceptedInputs.set(event.inputId, { ...accepted, turnId })
+          }
+          continue
+        }
+        if (event.kind === 'input_dropped') {
+          if (event.inputId !== undefined) acceptedInputs.delete(event.inputId)
+          followUpFailure ??= 'The native session dropped an accepted follow-up instruction.'
+          continue
+        }
+        if (event.kind === 'turn_ended') {
+          let consumedAccepted = false
+          if (event.inputId !== undefined && acceptedInputs.delete(event.inputId)) consumedAccepted = true
+          for (const inputId of event.inputIds ?? []) {
+            if (acceptedInputs.delete(inputId)) consumedAccepted = true
+          }
+          if (record.spanId !== undefined) {
+            for (const [inputId, accepted] of acceptedInputs) {
+              if (accepted.turnId === record.spanId) {
+                acceptedInputs.delete(inputId)
+                consumedAccepted = true
+              }
+            }
+          }
+          if (consumedAccepted) latestAcceptedTurnOutcome = event.outcome
+        }
+      }
+      // Claude reports command lifecycles as native frames even when OAR's
+      // prompt-input projection does not recognize a steer UUID.
+      const native = record.body.native
+      if (native !== null && typeof native === 'object') {
+        const lifecycle = native as { readonly type?: unknown; readonly command_uuid?: unknown; readonly state?: unknown }
+        if (lifecycle.type === 'command_lifecycle' && lifecycle.state === 'cancelled'
+          && typeof lifecycle.command_uuid === 'string' && acceptedInputs.delete(lifecycle.command_uuid)) {
+          followUpFailure ??= 'The native session cancelled an accepted follow-up instruction.'
+        }
+      }
+    }
+    return through
   }
 
   const collectOutput = (): readonly ContentBlock[] => {
@@ -392,27 +512,45 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
   }
   const onAbort = (): void => { interrupt('cancelled') }
   /**
-   * The run's live same-turn control. It never opens a turn, never queues, and
-   * never reaches another session: the engine's own `steer` addresses the turn it
-   * is running right now, and a session that exposes none says so instead of
-   * falling back to a queue. A refusal keeps the engine's own code so the Host can
-   * tell "nothing is running" from "the engine would not take it".
+   * OAR's public delivery chooses steer, queue or a new prompt from the native
+   * status and retries across the status race. Team supplies its own UUID because
+   * the Team request id is not a native identity, and records every accepted id
+   * so the monitor knows which later turn still belongs to this execution.
    */
   const steer: WorkerSteer = async (instruction, inputId) => {
-    if (phase !== 'running') return { kind: 'unavailable', code: 'no_active_turn', reason: 'the run is no longer running' }
-    const control = session.steer
-    if (control === undefined) return { kind: 'unavailable', code: 'unsupported', reason: 'this engine session exposes no same-turn control' }
+    if (phase !== 'running') {
+      return { kind: 'unavailable', code: 'no_active_turn', delivery: 'rejected', reason: 'the run is no longer running' }
+    }
+    deliveriesInFlight += 1
     try {
-      const answer = await control.call(session, instruction, { inputId })
-      if (answer.kind === 'accepted') {
-        const turnId = steeredTurnId(answer.response.body.kind === 'accepted' ? answer.response.body.native : undefined)
-        return { kind: 'submitted', ...(turnId === undefined ? {} : { turnId }) }
+      const answer = await session.deliver(instruction, { inputId, when: 'now', origin: { kind: 'user' } })
+      if (answer.landed !== 'rejected') {
+        if (!ownedInputIds.includes(inputId)) ownedInputIds.push(inputId)
+        const turnId = answer.result.kind === 'accepted'
+          ? steeredTurnId(answer.result.response.body.kind === 'accepted' ? answer.result.response.body.native : undefined)
+          : undefined
+        acceptedInputs.set(inputId, { landed: answer.landed, ...(turnId === undefined ? {} : { turnId }) })
+        return { kind: 'submitted', inputId, landed: answer.landed,
+          ...(turnId === undefined ? {} : { turnId }) }
       }
-      return { kind: 'unavailable', code: answer.code, reason: answer.reason }
+      return { kind: 'unavailable', code: answer.code, delivery: 'rejected', reason: answer.reason }
     } catch (error: unknown) {
-      return { kind: 'unavailable', code: 'error', reason: error instanceof Error ? error.message : String(error) }
+      return { kind: 'unavailable', code: 'error', delivery: 'unknown',
+        reason: error instanceof Error ? error.message : String(error) }
+    } finally {
+      noteDeliverySettled()
     }
   }
+  Object.defineProperty(steer, 'hold', { enumerable: false, value: () => {
+    if (phase !== 'running') return undefined
+    deliveriesInFlight += 1
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      noteDeliverySettled()
+    }
+  } })
   const unsubscribe = session.events((event) => {
     if (event.sessionId !== session.id || event.agentPath.length !== 0 || event.kind !== 'text_delta') return
     streamedText += event.text
@@ -423,6 +561,7 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
   const timer = spec.timeoutMs === undefined ? undefined : setTimeout(() => { interrupt('timeout') }, spec.timeoutMs)
   const runTurn = async (): Promise<SubagentResult> => {
     promptInputId = randomUUID()
+    ownedInputIds.push(promptInputId)
     const admitted = await session.prompt(prompt, { inputId: promptInputId })
     if (admitted.kind === 'rejected') {
       return { output: collectOutput(), stopReason: 'error', diagnostic: new WorkerFailure('turn', admitted.code).message }
@@ -431,9 +570,117 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     // reads the record from here on and never another root turn's span.
     inputSeq = admitted.seq
     const awaitTurnEnd = await awaitTurnEndOf()
-    const outcome = await awaitTurnEnd(session, admitted.seq, promptInputId)
-    // A native handled receipt is not a turn end: keep waiting for the turn it belongs to.
-    const turn = completedTurn(outcome.kind === 'handled' ? await awaitTurnEnd(session, outcome.seq) : outcome, collectOutput())
+    let waitAfter = admitted.seq
+    let evidenceAfter = admitted.seq
+    const turnIdFor = (inputId: string): string | undefined => {
+      const known = inputTurnIds.get(inputId)
+      if (known !== undefined) return known
+      for (const record of session.records()) {
+        if (record.sessionId !== session.id || record.agentPath.length !== 0 || record.kind !== 'frame') continue
+        for (const event of record.body.events) {
+          if (event.kind === 'user_message' && event.inputId === inputId) {
+            const turnId = event.turnId ?? record.spanId
+            if (turnId !== undefined) {
+              inputTurnIds.set(inputId, turnId)
+              return turnId
+            }
+          }
+        }
+      }
+      return undefined
+    }
+    const matchingTurnEnd = (afterSeq: number, inputId: string):
+      { readonly seq: number; readonly outcome: TurnOutcome } | undefined => {
+      const turnId = turnIdFor(inputId)
+      for (const record of session.records()) {
+        if (record.seq <= afterSeq || record.sessionId !== session.id || record.agentPath.length !== 0
+          || record.kind !== 'frame') continue
+        for (const event of record.body.events) {
+          if (event.kind !== 'turn_ended') continue
+          if (event.inputId === inputId || event.inputIds?.includes(inputId) === true
+            || (turnId !== undefined && record.spanId === turnId)) {
+            return { seq: record.seq, outcome: event.outcome }
+          }
+        }
+      }
+      return undefined
+    }
+    const lastTurnEndSeq = (afterSeq: number): number | undefined => {
+      let found: number | undefined
+      for (const record of session.records()) {
+        if (record.seq <= afterSeq || record.sessionId !== session.id || record.agentPath.length !== 0
+          || record.kind !== 'frame') continue
+        if (record.body.events.some(event => event.kind === 'turn_ended')) found = record.seq
+      }
+      return found
+    }
+    const nativeEndReason = (): string | undefined => {
+      for (const record of session.records()) {
+        if (record.seq <= (inputSeq ?? 0) || record.sessionId !== session.id || record.agentPath.length !== 0
+          || record.kind !== 'response') continue
+        if (record.body.kind === 'released') return 'the native session was released'
+        if (record.body.kind === 'exited') return record.body.reason ?? 'the native runtime exited'
+      }
+      return undefined
+    }
+    const awaitEnd = async (inputId: string): Promise<TurnOutcome> => {
+      const already = matchingTurnEnd(waitAfter, inputId)
+      if (already !== undefined) {
+        waitAfter = already.seq
+        return already.outcome
+      }
+      let outcome = await awaitTurnEnd(session, waitAfter, inputId)
+      // A native handled receipt is not a turn end: keep waiting for the turn it belongs to.
+      while (outcome.kind === 'handled') {
+        waitAfter = Math.max(waitAfter, outcome.seq)
+        outcome = await awaitTurnEnd(session, waitAfter, inputId)
+      }
+      const matched = matchingTurnEnd(waitAfter, inputId)
+      if (matched !== undefined) waitAfter = matched.seq
+      else {
+        // Release/exited can end a wait without a native turn frame. Advance over
+        // the last recorded end only when there is no input-scoped match; never
+        // skip a later owned end that was already in the retained log.
+        waitAfter = lastTurnEndSeq(waitAfter) ?? Math.max(waitAfter, session.records().at(-1)?.seq ?? waitAfter)
+      }
+      return outcome
+    }
+    let outcome = await awaitEnd(promptInputId)
+    // Every accepted follow-up is part of this one execution. A turn may have
+    // consumed some in-turn; anything left owns a later native turn.
+    while (phase === 'running') {
+      // Do not await a resolved "nothing in flight" promise here: the check and
+      // the closing assignment below must be one synchronous window. A steer
+      // that starts in the preceding microtask has already incremented the
+      // counter, so it is either awaited or refused after the window closes.
+      if (deliveriesInFlight > 0) {
+        await waitForDeliveries()
+        continue
+      }
+      // Native events can precede their delivery acknowledgment. Do not advance
+      // this cursor until every in-flight input is known: otherwise its ending
+      // could be consumed before acceptedInputs contains the input it completes.
+      evidenceAfter = consumeInputEvidence(evidenceAfter)
+      if (acceptedInputs.size === 0) break
+      const ended = nativeEndReason()
+      if (ended !== undefined) {
+        acceptedInputs.clear()
+        followUpFailure ??= `The native session ended before confirming an accepted follow-up instruction (${ended}).`
+        break
+      }
+      const nextInputId = acceptedInputs.keys().next().value
+      if (nextInputId === undefined) break
+      outcome = await awaitEnd(nextInputId)
+    }
+    // A closing window is the linearization point between the final accepted
+    // turn and a later steer. Once it is taken, no input can be acknowledged
+    // after this execution has decided it has nothing left to await.
+    if (phase === 'running') phase = 'closing'
+    if (latestAcceptedTurnOutcome !== undefined) outcome = latestAcceptedTurnOutcome
+    const turn = completedTurn(outcome, collectOutput())
+    if (followUpFailure !== undefined && turn.stopReason !== 'aborted') {
+      return { output: turn.output, stopReason: 'error', diagnostic: followUpFailure }
+    }
     captureAnchors()
     return turn
   }
@@ -455,29 +702,31 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
   }).finally(() => {
     clearTimeout(timer)
     unsubscribe()
-    if (phase === 'running') phase = 'settled'
+    if (phase === 'running' || phase === 'closing') phase = 'settled'
     // Every settlement path passes here, and it is still before the Harness's
     // teardown: a turn whose own wait threw, a prompt the engine refused, and a
     // transport that failed all keep the native identities the session could
     // still name. The cancel path captured earlier, and this is idempotent.
     captureAnchors()
   })
-  // The Harness hands the parent the result it captured here, and a teardown
-  // failure never edits it. So a cancelled run settles only after disposal had
-  // its say: a failed cleanup rides this one result, keeping the output so far.
+  // The Harness preserves the result even if its later teardown fails. Confirm
+  // cleanup before every terminal result, including natural completion, so a
+  // resumed execution can never trust an ending whose old process may be alive.
   const result = settled.then(async (outcome) => {
-    if (outcome.stopReason !== 'aborted') return outcome
     try {
       await dispose()
       return outcome
     } catch {
-      return { output: outcome.output, stopReason: 'error' as const, diagnostic: WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC }
+      return { output: outcome.output, stopReason: 'error' as const,
+        diagnostic: outcome.diagnostic === undefined
+          ? WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC
+          : `${outcome.diagnostic} ${WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC}` }
     }
   })
   const handle = subprocessRunHandle({
-    // The external child's id is the engine's own session identity: the execution
-    // record reports it, and a later read-only diagnostic can reopen that history.
-    id: SessionId(session.id),
+    // Harness catalog identity belongs to this external execution, not to the
+    // native conversation. A continuation reuses the latter as a new child.
+    id: SessionId(randomUUID()),
     // The snapshot this run took while its session was open rides the result the
     // Harness hands back to the Host; nothing is read after teardown.
     result: result.then(outcome => carryWorkerAnchors(outcome, anchors)),
@@ -511,12 +760,16 @@ export async function withCodexSandbox<T>(env: Readonly<Record<string, string | 
   if (typeof sandbox !== 'string' || sandbox === '') return open()
   const previous = process.env.OAR_CODEX_SANDBOX
   process.env.OAR_CODEX_SANDBOX = sandbox
+  let opened: Promise<T>
   try {
-    return await open()
+    // OAR reads this setting synchronously before its first await. Hold the
+    // overlay only across that call, never across another provider's open.
+    opened = open()
   } finally {
     if (previous === undefined) delete process.env.OAR_CODEX_SANDBOX
     else process.env.OAR_CODEX_SANDBOX = previous
   }
+  return opened
 }
 
 /**
@@ -547,6 +800,7 @@ export async function startWorkerRun(request: ResolvedSubagentStartRequest, spec
     session = await withCodexSandbox(spec.env, () => runtime.session(installation, {
       cwd,
       ...spec.model === undefined ? {} : { model: spec.model },
+      ...spec.resume === undefined ? {} : { resume: spec.resume },
       env: spec.env,
       launchArgs: spec.launchArgs,
     }))
@@ -555,6 +809,13 @@ export async function startWorkerRun(request: ResolvedSubagentStartRequest, spec
     const failure = new WorkerFailure('startup', 'unknown', { cause: error })
     spec.onError?.(failure, 'error')
     throw failure
+  }
+  if (spec.resume !== undefined && session.id !== spec.resume) {
+    const mismatch = new WorkerFailure('startup', 'unsupported', {
+      cause: new Error(`The resumed engine opened native session '${session.id}', not '${spec.resume}'.`),
+    })
+    await disposeSession(session, spec)
+    throw mismatch
   }
   if (request.signal.aborted) {
     await disposeSession(session, spec)
@@ -570,7 +831,7 @@ export async function startWorkerRun(request: ResolvedSubagentStartRequest, spec
  * ending, and one place to look are all the same place.
  */
 export interface WorkerSessionSink {
-  /** The session opened, with the same-turn control it carries or nothing when it has none. */
+  /** The session opened, with the delivery control it carries or nothing when it has none. */
   opened(sessionId: SessionId, steer: WorkerSteer | undefined): void
   /** The session is gone: its run ended, was released, or the provider closed it. */
   closed(sessionId: SessionId): void

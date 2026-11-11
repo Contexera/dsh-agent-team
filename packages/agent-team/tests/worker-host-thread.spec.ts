@@ -22,9 +22,9 @@ import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import AgentTeam from '../src/index.ts'
-import type { Config } from '../src/host-row-settings.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
+import { carryWorkerAnchors } from '../src/worker-runtime.ts'
 import type { AgentTeamMemberActor, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamRequestId,
   AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
 
@@ -33,9 +33,9 @@ const cleanups: Array<() => Promise<void>> = []
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 
 /** A Host row with delegation allowed on Codex, which is what a Human has to switch on first. */
-const workerRow = (): Config => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
+const workerRow = () => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
   engines: { codex: { enabled: true, executable: '', sandbox: 'workspace-write' },
-    claude: { enabled: false, executable: '', sandbox: '' } } } }) as unknown as Config
+    claude: { enabled: false, executable: '', sandbox: '' } } } })
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
@@ -65,7 +65,8 @@ function fakeEngines(): FakeEngines {
         pending.delete(childId)
         open?.resolve({ output: [], stopReason: 'aborted' })
       }
-      return { childId, result: result.promise, dispose } as unknown as SubagentActivation
+      return { childId, result: result.promise.then(outcome => carryWorkerAnchors(outcome, { nativeSessionId: `native:${childId}` })),
+        dispose } as unknown as SubagentActivation
     },
   } as unknown as SubagentRuntime
   return { runtime, starts, pending }
@@ -251,6 +252,40 @@ describe('a delegation through the whole Host', () => {
       threadRef: discussion.threadRef, task: 'x', cwd: process.cwd() })).rejects.toThrow(/Only a current owner/)
     // No refusal reached the engine.
     expect(host.engines.starts).toEqual([])
+  })
+
+  it.each(['discussion', 'task'] as const)('refuses a Project conflicting with a %s target before recording or starting', async (kind) => {
+    const host = await boot(new MemoryMediaPool())
+    const projectRef = await createProject(host)
+    const otherProject = await host.host.createProject({ requestId: requestId('other-project'), workspaceId: alpha,
+      name: 'other', description: 'Other project' })
+    const owner = await addMember(host, projectRef, { owner: true, handle: 'owner' })
+    const thread = await startThread(host, projectRef, kind)
+    const target = kind === 'task' ? { taskRef: thread.taskRef! } : { threadRef: thread.threadRef }
+    await expect(host.host.workerStartForAgent(owner.agent, { requestId: requestId('conflicting-project'),
+      projectRef: otherProject.project.projectRef, ...target, task: 'check the schedule', cwd: process.cwd() }))
+      .rejects.toMatchObject({ code: 'worker_target_conflict' })
+    expect(host.engines.starts).toEqual([])
+    const facts = host.host.threadHistory({ workspaceId: alpha, threadRef: thread.threadRef }).facts
+    expect(facts.filter(fact => fact.kind === 'activity' && fact.activity.kind === 'worker_started')).toEqual([])
+  })
+
+  it.each(['discussion', 'task'] as const)('accepts an agreeing Project and %s target but refuses a contradictory retry', async (kind) => {
+    const host = await boot(new MemoryMediaPool())
+    const projectRef = await createProject(host)
+    const otherProject = await host.host.createProject({ requestId: requestId('other-project'), workspaceId: alpha,
+      name: 'other', description: 'Other project' })
+    const owner = await addMember(host, projectRef, { owner: true, handle: 'owner' })
+    const thread = await startThread(host, projectRef, kind)
+    const target = kind === 'task' ? { taskRef: thread.taskRef! } : { threadRef: thread.threadRef }
+    const request = { requestId: requestId('agreeing-project'), projectRef, ...target,
+      task: 'check the schedule', cwd: process.cwd() }
+    const first = await host.host.workerStartForAgent(owner.agent, request)
+    const again = await host.host.workerStartForAgent(owner.agent, request)
+    expect(again.workerRef).toBe(first.workerRef)
+    await expect(host.host.workerStartForAgent(owner.agent, { ...request,
+      projectRef: otherProject.project.projectRef })).rejects.toMatchObject({ code: 'worker_target_conflict' })
+    expect(host.engines.starts).toHaveLength(1)
   })
 
   // Both terminal Task states, because a run outliving its Task must not depend on

@@ -645,7 +645,7 @@ function WorkerReport({ report, t }: { readonly report: WorkerReportState; reado
     value.native.storage === undefined ? undefined : t('memberWorkerInspectNativeRecord', { path: value.native.storage }),
   ].filter((line): line is string => line !== undefined)
   return (
-    <div className={createCss.reminderFacts} data-worker-report={value.workerRef}>
+    <div className={`${createCss.reminderFacts} ${createCss.workerReport}`} data-worker-report={value.workerRef}>
       <p className={createCss.reportLine}>{`${t('memberWorkerInspectSummary')}: ${value.summary}`}</p>
       {value.stage !== undefined && <p className={createCss.reportLine}>{t('memberWorkerInspectStage', { stage: value.stage })}</p>}
       {native.length === 0

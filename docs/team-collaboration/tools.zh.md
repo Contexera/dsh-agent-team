@@ -209,7 +209,9 @@ create 与 update 的请求身份包含脚本来源、触发选项与 create bas
 
 开关关闭时，`team_worker` 根本不会声明给 Member；打开后在 Member 的下一个 turn 边界出现，关闭后收回。同一开关还决定 `team:project-owner` guidance section 里的 Worker 段落，而该段落每次组装都会重新求值。已在执行的 run 无论开关如何都保留自己的 handle：开关只拦新的委派，而 registry 在关闭时仍然拒绝发起。
 
-以下情况一律在写 started 记录之前、启动任何原生进程之前拒绝：没有给出目标（`worker_target_required`）；指定的 Thread（`worker_thread_unknown`）、Task（`worker_task_unknown`）或 Project（`worker_project_unknown`）不属于本 Team；Task 不在与它一起给出的 Thread 里（`worker_target_conflict`）；调用者当前不是目标所属 Project 的 owner（`worker_owner_required`）。
+以下情况一律在写 started 记录之前、启动任何原生进程之前拒绝：没有给出目标（`worker_target_required`）；指定的 Thread（`worker_thread_unknown`）、Task（`worker_task_unknown`）或 Project（`worker_project_unknown`）不属于本 Team；调用者当前不是目标所属 Project 的 owner（`worker_owner_required`）。
+
+目标必须一致：Task 须属于同时指定的 Thread；显式给出的 Project 也须包含该 Thread 或 Task。矛盾目标按 `worker_target_conflict` 拒绝，重送一个原先合法的请求时也一样，不会静默丢弃显式 Project。
 
 其余拒绝来自设置与这次执行本身：开关关闭（`worker_disabled`）；指定的引擎不是 Worker 引擎（`worker_engine_unknown`）或未启用（`worker_engine_disabled`）；任务文本为空（`worker_task_required`）；无法解析出绝对工作目录（`worker_cwd_required`）；Harness subagent 服务未挂载（`worker_unavailable`）；或该 `requestId` 已被另一个委派用掉（`worker_request_conflict`）。拥有一个 Project 不授予另一个 Project 的授权，Team preset 之外的普通 DSH Session 也不会获得这个工具。
 
@@ -229,24 +231,30 @@ Worker 不持有 Team 身份：它不能发帖、认领、验收或代替成员�
 
 每次执行的记录都是持久的：Thread 读取会报告绑定到它的每次执行，状态为 `running`、`completed`、`failed`、`stopped` 或 `unconfirmed`；只绑定 Project 的执行同样记录这些事实，只是不发布到 Thread。上一个 Host 留在 `running` 的记录读作 `unconfirmed`：结果无法确认，不重跑、不自动重试，也不会为它唤醒任何人。
 
-同一个工具也能按编号只读查看一次执行的诊断：只给 `inspect: <worker:…>`，不给别的。答案包含 Thread 已经承载的摘要、失败发生的阶段、结算时记录的原生标识（引擎自己的会话、这次执行驱动的 turn、其记录的绝对路径），以及进程退出后该记录仍能回答的有界片段；读不到时给出那一个真实原因。原生记录本身从不复制进 Team、不落盘、不发布：Thread 保持原有摘要，详细答案只给发起这次执行的成员与 Human，Human 在「编辑 Agent」弹窗里按行读。
+同一个工具也能按编号只读查看一次执行的诊断：只给 `inspect: <worker:…>`，不给别的。答案包含 Thread 已经承载的摘要、失败发生的阶段、结算时记录的原生标识（引擎自己的会话、本次执行拥有的 turns 与 input ids、其记录的绝对路径），以及进程退出后该记录仍能回答的有界片段；读不到时给出那一个真实原因。原生记录本身从不复制进 Team、不落盘、不发布：Thread 保持原有摘要，详细答案只给发起这次执行的成员与 Human，Human 在「编辑 Agent」弹窗里按行读。
 
 只有发起成员与 Human 能查，其他成员即使现在是该 Project 的 owner 也按 `worker_inspect_forbidden` 拒绝。尚未结束的执行只回答摘要，并说明原生记录在结束后才读取。若执行在引擎记录会话之前就结束，或记录已不存在、不可读、格式不认识、没有与所记 id 对应的 turn，则保留 Team 摘要并说明该原因，而不是返回并不存在的片段。
 
-读取有界且自校验：记录位置必须是引擎自己目录下以 `.jsonl` 结尾的绝对路径——Codex 是 `sessions`，Claude 是 `projects`——超长值整条拒绝，而不是裁成一个没人记录过的路径。Claude 的流里没有记录路径，所以结算时由 CLI 自报的 cwd 与本次执行打开时的环境推导。打开的文件必须就是该位置所指的文件——打开时核对身份，读取后再核对一次——首条记录必须写明所记会话，字节上限在任何分行与解析之前生效。片段只取该 turn 少数结构上安全的字段并逐条限长；命中凭证形状的文本整条不返回，而不是掩码，带引号的 JSON 键值同样如此。每条原因都是一句有界的话，陈述事实而不回显原生值；引擎记录的任何内容都不会写回 Team。
+读取有界且自校验：记录位置必须是引擎自己目录下以 `.jsonl` 结尾的绝对路径——Codex 是 `sessions`，Claude 是 `projects`——超长值整条拒绝，而不是裁成一个没人记录过的路径。Claude 的流里没有记录路径，所以结算时由 CLI 自报的 cwd 与本次执行打开时的环境推导。打开的文件必须就是该位置所指的文件——打开时核对身份，读取后再核对一次——首条记录必须写明所记会话，字节上限在任何分行与解析之前生效。续跑执行会跳过前驱前缀，并在自己的 turns 完成后、或在下一条不是它提交的根 prompt 之前结束。片段只取这些 turn 少数结构上安全的字段并逐条限长；命中凭证形状的文本整条不返回，而不是掩码，带引号的 JSON 键值同样如此。Claude 重复的 turn metadata 会去重，避免后面的失败被挤掉；四个片段上限仍省略事实时会标 `truncated`。每条原因都是一句有界的话，陈述事实而不回显原生值；引擎记录的任何内容都不会写回 Team。
 
 Human 的「编辑 Agent」弹窗给出五行以内：本 Host 仍持有的执行与上一个 Host 留在 `running` 的未确认记录先占座位，按结束时间排序的最近几条已结束执行补满其余——早启动、刚结束的长执行仍在这个窗口内——每条都显示真实终态。
 
 已结束的行提供诊断入口；运行中与未确认的行没有可读的东西，因此不带门。Human 界面只有这一个入口：编号在这个界面上从不显示，所以没有按编号查询的输入框；按编号读取仍是成员工具 `inspect` 的入口。
 
-同一个工具还能给仍在执行的 Worker 补一句指令：给 `steer: <worker:…>` 和 `instruction`，不给别的。
+同一个工具还能向 Worker 的同一个原生会话追加指令：给 `steer: <worker:…>` 和 `instruction`，不给别的。Codex 与 Claude 走同一条路。执行仍在运行时，OAR 把输入送进当前 turn、排队中的 turn，或 idle 会话的下一 turn；执行会等待每个已接受输入结束，后来的回答、失败、停止、超时与部分输出都属于同一个 Team 终态。
 
-这句指令进入引擎正在跑的那一个 turn：不开第二个 turn、不为下一轮排队、也不会到达别的执行。回执只说「已提交」，不说「已收到」——引擎把输入接管进了当前 turn，而 turn 若在下一次模型请求之前结束，指令会随之消失。答案写出时若停止或结束已经发生，回执会把这个状态说出来，因此已接受的补指令不会被报成一次干净的成功。
+回执只说 `submitted`，绝不说模型已经读取或固定落在某一轮。引擎确认过 turn 时回执带上它，并报告写回执这一刻的执行状态，因此期间落地的停止或结束是可见的。
 
-只有发起这次执行的成员能补，其他成员按 `worker_steer_forbidden` 拒绝；这一版 Human 没有补指令入口。已结束的执行按 `worker_steer_ended` 回答它真实的终态；停止在途的执行直接拒绝，不往一个正在收尾的 turn 里投递（`worker_steer_stopping`）；本 Host 已不再持有的执行按 `worker_unconfirmed` 拒绝。这一版只对 Codex 开放，因为它的控制会指明引擎正在驱动的那个 turn；Claude Code 的「接受」覆盖的窗口比当前 turn 更宽，所以按 `worker_steer_unsupported` 拒绝，而不是借一个引擎并不提供的保证。引擎自己不肯接管时，回答它给出的代码与有界原因（`worker_steer_refused`），而不是成功。
+链上最新执行已干净结束时，steer 会恢复它的原生会话，建立一条新的关联执行并返回新的 `worker:` ref 与 `continuedFrom`；旧终态保持不变，新 ref 可继续 stop、inspect 或 steer。干净失败同样可续跑。停止中、清理未确认、Project 已归档、owner 权限已撤、Member 或引擎已关闭、原生记录缺失或不匹配，以及上一个 Host 留下的 `running` 记录都会拒绝。
 
-同一句指令只送一次。用同一 request id 重送，会拿回第一次的回执——执行仍在跑时如此，结束后也如此——且不会再到达引擎；换一个新的 request id 重送同一句话同样如此；用已用过的 request id 送不同指令按 `worker_steer_conflict` 拒绝。
+只有原执行的发起成员能补，其他成员按 `worker_steer_forbidden` 拒绝；Human 没有 steer 入口。续跑会重查当前 Worker 与指定引擎开关、Project 状态与 owner、发起 Member。账本保证一个原生会话至多一条运行中执行、每条执行至多一个直接后继，所以并发续跑会进入已建立的 ref，不会另开原生会话。
 
-这条活动控制归本 Host 的执行注册表所有：引擎会话打开时建立，该执行结束时摘除，Host 释放执行时清空，因此它不跨重启、也不会让任何原生标识变成句柄。补指令不写任何 Team 事实——不改 Thread 记录、不改 Task、不改 Claim——这次执行仍只有原来那一个终态与那一次回传。
+每条指令按其所属执行只送一次。Host 先在账本接纳请求，再触及原生投递；refused、ambiguous 或 submitted 也先记录，才向调用方报告。同一 request id 重送会拿回第一次的回执或拒绝，执行结束或 Host 重建之后也一样，不会再到达引擎。
 
-卸载插件会拒绝新的委派，先取消仍在启动的执行（包括还在写 started 记录的），等待本 Host 仍持有的执行清理并落终态后再关闭存储；到界限仍未确认的执行保留 `running` 记录并封口，关闭存储后不会再写入迟到的终态。
+同一句话的新 request id 会成为该接纳的持久 alias；它不读原生记录，直接返回同一结果，并发的 canonical 与 alias 调用只产生一次投递。用已用过的 request id 送不同指令、换 Member 或换 Worker 按 `worker_steer_conflict` 拒绝。
+
+已接纳但结果始终没进账本的请求读作 `worker_steer_unconfirmed`，不是重送的理由。原生明确拒绝表示什么都没送达，因此可以换新 request id 重试；传输不明保持 ambiguous，绝不重试。后续关联执行可以用新 id 接收同一句话。
+
+活动投递控制归本 Host 的执行注册表所有：引擎会话打开时建立，该执行结束时摘除，Host 释放执行时清空；续跑作为自己的执行持久化。steer 的私有账本回执与续跑都不改 Thread revision、Task、Claim、前驱终态或既有执行；只有续跑会增加自己的 Worker start 与 settle 事实。
+
+卸载插件会拒绝新的委派，先取消仍在启动的执行（包括还在写 started 记录的），活动 steer 调用也共用这段有界启动等待，随后用屏障拒绝迟到的回执写入；再等待本 Host 仍持有的执行清理并落终态后才关闭存储。到界限仍未确认的执行保留 `running` 记录并封口，关闭存储后不会再写入迟到的终态。已经开始的持久写入会在 provider 释放前等待完成；五秒生命周期界限不会取消一个不再回答的存储写入。

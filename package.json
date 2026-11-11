@@ -158,6 +158,10 @@
       "types": "./packages/agent-team/lib/types/human-settings.d.ts",
       "default": "./packages/agent-team/lib/human-settings.js"
     },
+    "./member-tool-grants": {
+      "types": "./packages/agent-team/lib/types/member-tool-grants.d.ts",
+      "default": "./packages/agent-team/lib/member-tool-grants.js"
+    },
     "./worker-settings": {
       "types": "./packages/agent-team/lib/types/worker-settings.d.ts",
       "default": "./packages/agent-team/lib/worker-settings.js"

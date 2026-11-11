@@ -11,7 +11,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 - Agent 的 Thread 与 Main stream read 在 ledger 结果上增加[按上下文调整的呈现](../team-collaboration/tools.zh.md#team_thread)：缺失的近期 Message 背景与已可见正文的省略说明。工具按输出上限选出能渲染的前缀，Thread receipt 以 `selectedThroughSequence` 记录这个界限，旧 receipt 仍按缺省 batch 解释；Host 只提交该前缀。Human read、Remote 参数与 replay 语义均不变，重放不依赖 Session。
 - mutation 进入 Host authority，并提交一条 durable operation。
 - 重放会重算每条记录应有的 Inbox delta 并逐项比较，所以改变既有 kind 校验规则的版本要先写一条 `team/rules-version-adopted`（Host actor，`{ version }`）。每条记录按它之前最新的标记校验；没有标记的 ledger 为版本 1。标记由 `initialize` 在它自己排队的提交里追加，因此早于之后的所有写入，包括启动恢复。标记只升不降，每个版本至多一条；ledger 采用的版本高于本构建实现的版本时拒绝打开。
-- 当前构建实现版本 2：挂载时若 ledger 的最新标记低于它，就追加版本 2 标记；全新 ledger 在 `team/initialized` 之后立即写入该标记。
+- 当前构建实现版本 7。挂载时若 ledger 的最新标记低于它，只追加一次版本 7 标记；全新 ledger 在 `team/initialized` 之后立即写入该标记，已经处于版本 7 的 ledger 重新打开不会再写。下面关于版本 2 规则的内容仍只描述各自的记录段，而不是当前标记。
 - 规则版本 2 起，Host 还会提交 `team/main-message-posted`、`team/main-stream-read` 和 `team/thread-started`，它们在版本 1 的记录段内会被拒绝，而 `team/message-sent` 在版本 2 的记录段内被拒绝。Host 不再写 `team/message-sent`（开 Thread 用 `startThread`），它只在版本 1 的记录段内重放。
 - 0.2.5 预览开关打开过的 ledger 正是落在这条拒绝上：它带版本 2 标记，而它当年开 Thread 走的 `sendMessage` 仍无守卫地写版本 1 的 `team/message-sent`，因此只有当该段内没有这条记录时才能打开。该开关本就只用于一次性的 `DSH_HOME`。
 - inbox delta 可带可选的 `mainMarkers` 列表，使用独立的 marker 形状（`projectRef` 加 `messageRef` 或 `activityRef`）。它只在确有变化时出现，所以版本 1 的记录保持存储字节不变；离开的 Member 的 Main stream marker 随同一 operation 与其他 inbox 状态一起清除。
@@ -114,12 +114,18 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Member capabilities 与 skills
 - Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。`model` 是例外，不可清除，见下面的模型契约。
-- Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留 Team tools（`team_worker` 视开关）与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查和限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
+- Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留 Team tools（`team_worker` 视开关）与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查、回退与限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。
 
-  Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么返回 `deferred:no-live-handle`；两种顺序都让存储的意图在下次 activation 时仍然成立。
+  Host row 里的 profile 级 `extraToolGrants` 是另一份按确切已注册工具名的许可：它可以重新放行 allow-list 省略的继承基线名称，也可准入 Agent scope 注册，但不能重开 Team tools、`working_directory` 或 Worker 开关。Host 在 `turn/start` 同步读取并在该轮冻结，后续回合总读取最新已保存名单。
+
+  每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
+
+  每次边界等待返回后，capability 与 Worker 工具面编辑都同步复查 live handle 和真正 idle。若新一轮已开始，就再次等待，而不是覆盖该轮冻结的许可。shutdown 释放等待，但不会再向退役 context 注册观察器或安装 restriction。
+
+  Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么报告延后应用；两种顺序都让存储的意图在下次 activation 时仍然成立。
 
   等待按类别记日志，带 Member、Session 与时长：等自己的回合是 `stage 'wait-turn'`，等外部执行（例如 Agent 释放自己的 Session 写路径）是 `stage 'wait-external'`。activation 期间的 restriction 失败只表现为这个 Member 的 activation failure。
-- live 应用失败不会放宽面：编辑保留其 ledger commit，旧 restriction 继续生效（新装失败时恢复原状），Remote 调用照常暴露失败。同 requestId 重试会重新应用已存储配置且不产生第二次业务提交。Host 比较的是存储意图与运行时实际已应用的效果，绝不与该次请求自身的历史比较。
+- live 应用 Member capability 失败不会放宽面：编辑保留其 ledger commit，不含额外许可的编辑保留旧 restriction，Remote 调用照常暴露失败。同 requestId 重试会重新应用已存储配置且不产生第二次业务提交。profile 许可策略安装失败则收紧到该 Member 的无额外许可基线，绝不恢复到上一份含许可的 restriction；若该基线也失败，下一步会在模型请求前被拒绝。Host 比较的是存储意图与运行时实际已应用的效果，绝不与该次请求自身的历史比较。
 - 配置编辑把「效果」与「提交」分开回报：`updateMember` 返回 `effect`，取值 `applied`、`already-applied`、`deferred:no-live-handle` 或 `deferred:generation-changed`（先落账、下次激活生效）。失败不进取值——保持响亮拒绝，同时留一条可路由的 `capability-apply` diagnostic。`detail` 带 requestId、operationId、阶段与原因，Session 结构化放在 `sessionId`，日志用同一组关联 id。
 - Member 始终跑一条显式路由。创建必须给出一条，编辑只能替换、不能清除回 Host 默认；写入者只有两个：Human 的编辑（本节）与该 Member 自己的 Session（下条）。在此契约之前写入的账本记录没有 `model`，仍可读取，并按当时 Host 的默认选择唤醒。
 - 模型编辑的落账与回报和其他编辑一样，但新路由是否生效由上游决定：切换后新窗口在压缩之后仍装不下当前 Session 时会被拒绝并保留原路由，pending 选择就等到换回兼容模型为止，而记录在案意图两种情况下都在。
@@ -268,43 +274,57 @@ provider 还保留引擎的原生 session 身份与工作目录，并把只读�
 
 **未绑定**的执行在公开面上保持原样：parent delivery、没有 Thread 事实、不向 Project 发布任何东西。执行记录照样写入——本 Host 启动的每次执行都有 `team/worker-started` 与 `team/worker-settled`——这正是纯 Project 执行之后仍能按 `worker:` 引用查到的原因。
 
-规则版本 6 引入这两个操作：旧 build 打开版本 6 的 ledger 会拒绝并要求更新版本；采纳版本 6 的 Host 会在下次启动时写入这次采纳。
+规则版本 6 引入这两个操作。版本 7 在 started 上增加可选的续跑链接、在终态上增加可选的 native turn / input 数组；不带这些字段的版本 6 Worker 记录仍可原样重放。新字段在版本 6 的记录段内被拒绝，而只实现到版本 6 的 build 会在解析 Worker 操作之前先被版本 7 标记拒绝。
 
 绑定执行的持久状态是派生的，从不存第二份。`threadWorkerStates` 读执行记录而不是某次分页返回的事实，所以长 Thread 上每个绑定的执行都有状态，即使它的事实落在窗口之外。仍标记 `running` 而在本 Host 里没有活跃句柄的记录——运行中被替换的 Host 的签名——读作 `unconfirmed`：结果无法确认，不重跑、不自动重试。`unconfirmed` 不写 marker、不唤醒任何人，只在 Thread 上可见。
 
 停止只有一条事务：成员的 `team_worker` 带 `stop`，与 Human 的 `stopWorker` Remote，进入同一个 `WorkerRegistry.stop`。授权只看打开这次执行的身份——它的 `initiatedBy` 成员，或 Human——刻意不重新套用启动条件，所以 owner 变更、Task 转移或关掉开关都不会左右一次停止。事务先 abort 启动信号（发布之前唯一的取消通道），再 dispose 已发布的 activation，然后等引擎自己的证据决定那一次终态写入。`stopping` 是派生的进程内视图：账本仍只有 `running → 终态`，Thread 读取与 Human 列表在停止进行时加这个词，不为它写任何持久内容。
 
-终态由引擎的结果决定，而不是由请求决定。先到的自然完成或失败保留真实状态，停止回答的就是它。被取消的执行若 dispose 被拒绝，记为 `failed` 并说明清理未确认——绝不报 `stopped`，因为没人确认的停止是 Host 支撑不了的断言。执行已经产出的部分输出随同一份结果走，所以那一次 Inbox 通知把文本与保留意见放在一起。
+终态由引擎的结果决定，而不是由请求决定。先到的自然完成或失败保留真实状态，停止回答的就是它。
 
-卸载是同一事务在 Host 尺度的展开，顺序是：拒绝新委派；取消所有仍在启动的执行——包括还在写 started 记录的那一个，它被封口而不是去开引擎；dispose 已发布的；对每个终态最多等五秒；仍未确认的封口；等挂起的终态写入；最后才释放 provider 注册。被封口的执行保留 `running` 记录、不再接受任何迟到的终态，所以关闭存储不会与一次写入赛跑。
+每个终态结果都会等待原生清理，界限为五秒；清理被拒绝或超过这个界限时，执行记为 `failed` 并说明清理未确认。被取消的执行若 dispose 被拒绝，绝不报 `stopped`，因为没人确认的停止是 Host 支撑不了的断言。执行已经产出的部分输出随同一份结果走，所以那一次 Inbox 通知把文本与保留意见放在一起。
+
+卸载是同一事务在 Host 尺度的展开，顺序是：拒绝新委派与续跑；取消所有仍在启动的执行——包括还在写 started 记录的那一个，它被封口而不是去开引擎——并最多花五秒等待这些启动、续跑准入和活动 steer 调用结束，再 dispose 已发布的。仍在读原生历史或写 opening 记录的续跑，因此要么在存储关闭前完成，要么在重查卸载屏障后不写任何东西。这段启动等待之后，steer 持久化屏障拒绝迟到的 alias 准入和结果写入。对每个终态也最多等五秒；仍未确认的封口；等挂起的终态与 steer 写入；最后才释放 provider 注册。五秒界限不会取消一个已经开始却不再回答的存储写入。被封口的执行保留 `running` 记录、不再接受任何迟到的终态，所以关闭存储不会与一次写入赛跑。
 
 Human 的入口是「编辑 Agent」弹窗，给出该成员五行以内的记录：仍在运行的执行（`running`、`stopping`）与上一个 Host 留在 `running` 的未确认记录先占座位，按结束时间排序的最近几条已结束执行补满其余——早启动、刚结束的长执行仍在这个窗口内——每条都给出 Host 确认的终态，已结束的还各带诊断入口。它的 `stopWorker` 回执是结构化事实而不是要解析的句子：`ended` 给出执行真正到达的状态与 Host 的诊断，`pending` 说明清理仍在进行，`unconfirmed` 说明本 Host 已不再持有句柄。上一个 Host 留下的执行显示为 `unconfirmed`，附说明且不给停止控件；请求本身没有完成的调用只说明这一点，绝不据此判定执行的状态。
 
 ### 只读查看一次执行的诊断
 
-查询所需的锚点随执行的终态一起写入，绝不在事后补采。provider 捕获引擎自己的会话、这次执行驱动的 turn，以及引擎自报的记录绝对路径，并把它们挂在结果对象上——Harness 原样交回该对象，锚点是非枚举属性，而不是模块级映射，所以被封口的执行或迟到的终态不会留下任何待收集的条目。
+查询所需的锚点随执行的终态一起写入，绝不在事后补采。provider 在会话打开时就知道引擎的原生会话，再捕获这次执行接受过的最新 128 个 turn 与原生 input UUID，以及引擎自报的记录绝对路径，并把它们挂在结果对象上——Harness 原样交回该对象，锚点是非枚举属性，而不是模块级映射，所以被封口的执行或迟到的终态不会留下任何待收集的条目。
 
-捕获发生在会话仍然打开的时候：取消或清理开始之前，以及 turn 自己结束之时。引擎在拆除过程中关闭记录流，事后再采只会什么都读不到。turn 绑定到本次执行提交的那条输入——记录里若还有另一个根 turn，就无法与本执行唯一关联，此时报「没有 turn id」，而不是取最后看到的那一个。捕获失败不改变任何结局：终态保留引擎报告的状态、诊断与输出，记录只是没有锚点。
+捕获发生在会话仍然打开的时候：取消或清理开始之前，以及所有已接受输入结束之后。引擎在拆除过程中关闭记录流，事后再采只会什么都读不到。turn 与 input 绑定到本次执行提交的 UUID；恢复出来的会话中更早的 turn 不会被冒认成本次执行的。捕获失败不改变任何结局：终态保留引擎已经确立的状态、诊断、输出与原生会话身份，但没有失败捕获未能确立的 turn 或存储证据。
 
 `readWorkerHistory`（`packages/agent-team/src/worker-inspection.ts`）是唯一的读取方，两个引擎的记录走同一趟有界读取：引擎只决定哪些字段标识会话、turn 与失败，其余规则不变。它拒绝不是引擎自己目录下绝对 `.jsonl` 路径的记录位置——Codex 是 `sessions`，Claude 是 `projects`——超长值整条拒绝，而不是裁成一个没人记录过的路径。
 
-它解析真实路径，把打开句柄的身份与位置所指的文件比对，读取后再核对一次，并要求首条记录写明所记会话：Codex 的 session 头，或 Claude 在第一个 turn 之前写下的 queue 头。本次执行的 turn 是 Codex 为它记录的 span，或 Claude 侧 uuid 等于 OAR 写入的 input id 的那条 prompt user 消息。8 MiB 预算花在读取本身，所以超长单行永远不会被解析。它只返回该次执行自己那个 turn 的记录、逐片段限长，命中凭证形状的文本整条不返回——带引号的 JSON 键值同样如此。Claude 把失败的 turn 记成 `api_error` system 行或合成 assistant 消息，重试会重复同一条失败，所以读取方只报最后一条一次，而不是越堆越长。每条原因都是一句有界的话，陈述事实而不回显原生值。读到的任何内容都不会写回 Team。
+它解析真实路径，把打开句柄的身份与位置所指的文件比对，读取后再核对一次，并要求首条记录写明所记会话：Codex 的 session 头，或 Claude 在第一个 turn 之前写下的 queue 头。本次执行的 turns 是 Codex 绑定到已提交 input 的 span，或 Claude 侧 uuid 属于本次 input ids 的 prompt user 消息。8 MiB 预算花在读取本身，所以超长单行永远不会被解析。
 
-读取在下一条顶层 prompt 处结束，所以日后被继续使用的原生会话不会把后续 turn 的模型或失败借给这次执行。
+它只返回该次执行自己那些 turn 的记录、逐片段限长，命中凭证形状的文本整条不返回——带引号的 JSON 键值同样如此。Claude 重复的 turn metadata 会去重，避免模型步骤挤掉后面的失败；四个片段上限仍省略了事实时，`truncated` 会如实标出。Claude 把失败的 turn 记成 `api_error` system 行或合成 assistant 消息，重试会重复同一条失败，所以读取方只报最后一条一次，而不是越堆越长。每条原因都是一句有界的话，陈述事实而不回显原生值。读到的任何内容都不会写回 Team。
+
+续跑出来的执行会先跳过前驱的 prompt 前缀；读取在本次执行拥有的全部 turn 完成后结束，或在下一条不是它提交的顶层 prompt 之前结束，所以日后被继续使用的原生会话不会把后续 turn 的模型或失败借给这次执行。
 
 报告是分层的。公开 Thread 保持原有摘要；详细答案——失败发生的阶段、原生标识、有界片段，或记录无法回答的那一个原因（`missing`、`unreadable`、`unpersisted`、`unsupported`、`unmatched`）——只给发起成员与 Human。尚未结束的执行只回答摘要，并说明记录在结束后才读取；在记录会话之前就结束的执行如实说明这一点，而不会声称引擎从未打开会话。
 
-### 给正在执行的 turn 补一句指令
+### 给 Worker 追加指令或续跑
 
-补指令用的是引擎自己的同轮输入，不是 Team 发明的机制。Host 通过 OAR 的 `session.steer` 转发，它发出运行时的 `turn/steer`，带上 OAR 当前正在驱动的 turn id，因此指令进入的正是正在跑的那一个 turn：不开第二个 turn、不为下一轮排队、也不会到达别的执行。发布版 CLI 的契约——工具执行中提交的指令会进入同一 turn 的下一次模型请求，turn 结束后提交则被拒绝——由 `artifacts/probe-05-steer.mjs` 对着真实二进制与一个 loopback Responses 端点实证。
+两个引擎共用同一个 `team_worker` steer 形状。执行仍在运行时，Host 调用 OAR 公开的 `Session.deliver(..., { when: 'now' })`，并传入与 Team request id 不同的原生 input UUID。OAR 按会话状态选择 steer、queue 或新的 prompt，并跨这个状态竞争重试。`prompted` 同样是本次执行的输入：runtime 会一直保持执行到所有已接受输入都被消费，再原子关闭继续接收的窗口并只结算一次。Host 在持久准入首次等待存储之前就取得这个关闭窗口的占用，并在记录结果后释放，因此落账延迟不会让空闲的原生会话在投递前关闭。不会因为最初那个原生 turn 已结束就丢弃已接受输入。
 
-这条活动控制归执行注册表所有。`WorkerRegistry` 为每个打开的引擎会话保留一个条目，`TeamWorkerProvider` 通过 `WorkerSessionSink` 在会话打开与关闭时上报；该执行的 result 结算时摘除该条目，Host 释放执行时整表清空。没有模块级表，也没有第二个状态所有者：本 Host 不再持有的会话没有可到达的控制，重启也不带任何条目过去。
+回执写 `submitted`，绝不说模型已经读取或遵循。已知落点时它报告 OAR 把输入放进了哪里，并报告写回执这一刻的执行状态。原生拒绝、停止中的执行、上一个 Host 留下且未确认的执行、不可用的会话一律拒绝，而不是猜测绕过。
 
-授权就是打开这次执行的身份——它的 `initiatedBy` 成员。其他成员按 `worker_steer_forbidden` 拒绝；这一版 Human 没有入口，所以 Human 能读一次执行的诊断，但不往它的 turn 里加东西。是否仍在运行由持久记录决定；上一个 Host 留在 `running` 的记录按 `worker_unconfirmed` 拒绝，而不是照发。这一版只对 Codex 开放：它的控制会指明正在驱动的那个 turn；Claude Code 的「接受」覆盖的窗口比当前 turn 更宽——工具结果待处理或最终文本仍在流式时都会接受，可能落进下一个 turn——所以它按 `worker_steer_unsupported` 拒绝，而不是借一个引擎并不提供的保证。
+链上最新执行已干净结束且 handle 已释放时，steer 通过 `SessionOptions.resume` 恢复所记录的原生会话，并写一条新执行，其 `continuedFrom` 指向前驱。旧终态不可变。新执行固定原引擎、cwd、Project、Thread、Task 与发起 Member，以 steer 指令作为开场输入，而不是重发完整旧任务。
 
-幂等回答先于所有状态检查。`RunEntry.steers` 按 request id 保留一份回执，所以执行仍在跑时和结束后，重送都拿回第一次的回执，且不会再到达引擎；换一个新的 request id 重送同一句话同样如此；用已用过的 request id 送不同指令按 `worker_steer_conflict` 拒绝。已结束的执行、停止在途的执行，以及没有同轮控制能力的引擎会话，各自给出自己的拒绝，而不是发出任何东西。
+每次激活都为 Harness catalog 与活动控制生成新的外部 `SubagentRun.id`；稳定的原生 session id 则独立随结果锚点传递，用于续跑、结算与诊断，因此两条关联执行不会成为重复的 catalog child。干净失败同样可以这样续跑；停止中、清理未确认、原生记录缺失或不匹配、上一个 Host 留下的 `running` 记录都会拒绝。若最近一次失败续跑没有建立自己的原生会话，之后显式续跑会继承最近可读的前驱锚点，同时仍把这次失败执行记为直接前驱。
 
-回执与诊断一样是分层的。`submitted` 是 OAR 有意做出的弱承诺：引擎把输入接管进了当前 turn，这不等于模型读过它、也不等于它在 turn 结束前落地、更不等于有任何结果。答案带上引擎确认过的那个 turn，以及写出答案这一刻执行的状态，所以期间落地的停止是可见的。补指令不写任何账本操作：它不是终态事实、不跨重启，这次执行仍只有原来那一个终态与那一次回传。
+续跑会重查当前 Worker 开关、指定引擎开关、Project 是否 active、当前 Project owner 与发起 Member 的 enabled 状态，绝不沿用旧授权。账本保证一个原生会话至多一条运行中执行、每条执行至多一个直接后继，所以并发续跑会并入已建立的执行，不会分叉原生会话。通过旧 ref 发起的 steer 沿不可变链定位最新执行。
+
+授权仍是发起 Member；其他成员按 `worker_steer_forbidden` 拒绝，Human 没有 steer 入口。活动投递表归 `WorkerRegistry`，会话关闭时摘除，Host 释放执行时清空。续跑产生的新执行是持久记录，可继续用自己的 ref 停止、查看或 steer。
+
+幂等回答先于状态检查。每次 steer 在抵达原生投递之前，先作为私有账本 operation 被接纳；它的 refused、ambiguous 或 submitted 结果也先记录，Host 才向调用方报告。同一 request id 重送会返回第一次的回执或拒绝，执行结束或 Host 重建之后也一样；同一 id 换指令、Member 或 Worker 按 `worker_steer_conflict` 拒绝。
+
+同一句话的新 request id 会持久登记为 canonical admission 的 alias，直接返回其结果，不读原生记录也不再次投递；并发的 canonical 与 alias 调用并入同一次接纳。
+
+已接纳却没有确认结果的请求读作 `worker_steer_unconfirmed`，绝不自动重送。原生明确拒绝表示什么都没送到，因此同一句话可以换新 request id 重试；传输不明保持 ambiguous，不重试。后续关联执行可以用新 id 接收同一句话。续跑的 request id 与关联执行都持久化，因此同一决定跨 Host 重启仍然成立。
+
+steer 的 admission 与结果都是私有账本状态：它们不发布 Thread 事实、不推进 Thread revision、不创建 Task 或 Claim，也不改前驱或既有执行记录。续跑另外写自己的 `team/worker-started` 与 `team/worker-settled`。没有 steer 回执或续跑锚点的旧账本可原样回放，历史上的活动 steer 也不能事后补出回执。
 
 ## Composer attachments（cache，不是 archive）
 
@@ -331,9 +351,15 @@ Human 的显示名与头像引用存放在 Team Host row 自己的 Config。sett
 
 只有 Host row 有这条迁移路径：profile patch 用改名前的 id（`wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}`）覆盖其余五行之一的，会被跳过——没有 loader entry 认这个 id，Team 回落到该行的出厂值。手改过 Team preset 或 preset 注册表 `default` 的，升级后要重新应用一次。
 
-`humanProfile` 返回姓名、头像引用、版本脚注，以及绑定本次 Host 实例和设置版本的写入令牌。改名、更换和移除都要求令牌。旧窗口或重连到新 Host 的窗口须先重读。头像读取只接受存储生成的引用，且只读取头像目录内的普通文件。图片与附件共用 10 MB 上传上限。
+设置页由五个 Agent Team typed Remote 服务。`humanProfile` 提供名字、头像引用与版本脚注 facts，以及绑定本次 Host 实例和设置版本的写入令牌。`putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` 只收图片，与 attachments 共用 10 MB 上限。已删除的条目读取时抛错，Client 回退到首字母。`toolCatalog` 提供跨全局注册与 live Agent scope 注册的工具名发现视图。
+
+改名、更换和移除都要求令牌。旧窗口或重连到新 Host 的窗口须先重读。头像读取只接受存储生成的引用，且只读取头像目录内的普通文件。图片与附件共用 10 MB 上传上限。
 
 Host 先保存完整图片，再提交替换引用。移除写入显式空值，防止继承层或旧配置迁移恢复头像。被替换或移除的图片仍供共用存储的其他 profile 读取。只可清理确认从未提交的新文件；设置写入结果不确定时保留图片。
+
+许可编辑器经公开 settings Remote 读写 Team Host row 的 `extraToolGrants`，携带其 revision，并且只写该字段的一条 `set` operation。它从不使用 `unset`，所以显式 `[]` 是真正撤销，而不是回落到下层。名单读取失败时不能按空名单保存。目录与 Human 身份读取互相独立：目录失败仍可移除已读取的名称，身份失败也不会收起许可组。
+
+settings 表单与运行时归一化共用 `member-tool-grants.ts` 的结构 schema：由保持确切拼写的非空字符串组成的数组。Team 不另加名称语法、长度上限或许可数量配额；消费者合并重复名称，目录不列保留名。schema 不含 transform 回调，因此 Host 重建可编辑 schema、再序列化给浏览器后仍保留校验，包括缺省与空名单。
 
 脚注携带本 Host 实际运行的那份 bundle 的版本，以及 repository 链接。版本从已安装包自己的 manifest 读取，因此陈述的是 profile 真正装上的版本，而不是每次发版都得记得改的字符串。当后台检查观察到更新的已发布 release，再多一条点名这个版号的更新 tip。
 

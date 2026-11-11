@@ -46,6 +46,7 @@ const WORKER = `# Local Workers
 
 - \`team_worker\` runs one self-contained piece on a local Worker engine. Its own description carries the parameters, the engine and directory rules, and what a run publishes; what belongs here is the judgment.
 - Hand over work you can define completely, and pick the engine that can do what the task needs. A Worker holds no Team identity — it cannot claim, accept, or answer for you — so the Claim stays yours and you still verify the result yourself.
+- A steer is one more input to that Worker's same native session: a live run may take it now or in a later turn, and a cleanly ended run continues as a linked execution with a new ref. The receipt says submitted or continued, never that the model has read it.
 - Stop a run you no longer need instead of ignoring it, and read its diagnostic before concluding that a failure was the engine's.`
 
 /** The section text for one assembly; empty while the Member owns no Project. */

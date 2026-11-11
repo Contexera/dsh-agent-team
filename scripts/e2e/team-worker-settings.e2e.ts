@@ -1,6 +1,7 @@
 import { afterEach, it, expect } from 'vitest'
+import z from '@deepseek-ai/schemastery'
 import type { Locator, Page } from 'playwright'
-import { UI09_SHOTS, acknowledgeReloadConnectionLoss, closeScenario, maxHorizontalScroll, openSettings, openTeamPage, settleLayout } from './__external-agent-team-support.ts'
+import { UI09_SHOTS, acknowledgeReloadConnectionLoss, closeScenario, maxHorizontalScroll, openSettings, openTeamPage, scaffold, settleLayout } from './__external-agent-team-support.ts'
 import { join } from 'node:path'
 
 afterEach(async () => { await closeScenario() })
@@ -34,6 +35,10 @@ async function expand(group: Locator): Promise<void> {
 
 it('configures the Worker delegation group on the Team settings page', async () => {
   const { page, consoleWatch } = await openTeamPage({ stayInOrdinaryMode: true })
+  const hostView = scaffold!.ctx.settings.describe({ redactSecrets: true }).find(view => view.ns === 'contexera-agent-team-host')
+  expect(hostView).toBeDefined()
+  const wireView = JSON.parse(JSON.stringify(hostView))
+  expect(() => new z(wireView.schema)(wireView.value)).not.toThrow()
 
   const { panel, group } = await openWorkerGroup(page)
   // Closed, the group costs one line and says what it is set to.

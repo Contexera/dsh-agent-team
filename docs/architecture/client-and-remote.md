@@ -51,6 +51,10 @@ Team navigation mode, Workspace selection, the last Project/Thread, and the Inbo
 
 The Team sidebar keeps Projects/Agents ordering as a Host-row setting (`sidebarOrder`, beside the Human profile), merged over Remote defaults and cached per browser: one drag writes the Host once, and a browser that lost its cache reads the same order back.
 
+The Team settings grant editor consumes `toolCatalog` for discovery and injects `remote.settings` for the accepted list. It writes only `extraToolGrants` with the revision read at the start of the edit. It does not use the shared configuration form's mutation adapter because that adapter reduces every failure to a boolean; the editor must distinguish `settings/conflict`, `settings/rejected`, and transport failure.
+
+Its accepted list, Human identity, and catalog have independent loading and failure states. A conflict keeps the local draft, rereads the latest committed list, and requires explicit review before another save; it never replays the stale draft. A failed accepted-list read cannot become `[]`.
+
 An embedded Member Session uses the shipped composer unmodified: the Team registers no member-session composer surface — no seat shadow, no trigger sources, no dock strip. rc.1 moved the trigger-menu overlay into `conversation.composer.bar`'s children, where a shadowing entry would inherit — and strand — the overlay. The Team's own command/member reference entry points carried no irreplaceable value over the shipped vocabulary, so they were removed together.
 
 Ordinary and member sessions share the same composer and vocabulary. Reuse public primitives and `--dsw-*` tokens, keep CSS in CSS Modules, and preserve Team mode restoration and narrow layouts.

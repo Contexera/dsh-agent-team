@@ -17,7 +17,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { renderInboxNotice } from '../src/inbox-notice.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_RULES_VERSION, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation,
   AgentTeamOperationId, AgentTeamProjectRef, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef,
@@ -33,7 +33,7 @@ afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => clea
 type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
 
 /** A ledger with one Project, one owner Member who delegates, and one taskless Thread. */
-async function seed() {
+async function seed(rulesVersion = AGENT_TEAM_RULES_VERSION) {
   const pool = new MemoryMediaPool()
   const ctx = new Context()
   await ctx.plugin(Storage)
@@ -43,7 +43,7 @@ async function seed() {
   ctx.provide('storageDomain', facility)
   cleanups.push(async () => { await facility.closeAll() })
   const table = await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as Table
-  const ledger = new AgentTeamLedger(table)
+  const ledger = new AgentTeamLedger(table, { rulesVersion })
   await ledger.initialize()
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha,
     name: 'delivery', description: '', memberIds: [] })).value.project.projectRef
@@ -74,6 +74,10 @@ async function openTableOver(pool: MemoryMediaPool): Promise<Table> {
   ctx.provide('storageDomain', facility)
   cleanups.push(async () => { await facility.closeAll() })
   return await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as Table
+}
+
+async function closeAll(): Promise<void> {
+  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
 }
 
 /** Every operation the ledger holds, for the cases that assert on a record's own payload. */
@@ -112,6 +116,13 @@ async function settleRun(team: Seeded, workerRef: string, overrides: Record<stri
   return team.ledger.recordWorkerSettled({ requestId: requestId(`settle-${workerRef}`),
     settlement: { workerRef: workerRef as AgentTeamWorkerRef, state: 'failed' as const, ...overrides } })
 }
+
+const startContinuationOf = (team: Seeded, workerRef: string, continuedFrom: AgentTeamWorkerRef,
+  overrides: Record<string, unknown> = {}) => team.ledger.recordWorkerStarted({
+  requestId: requestId(`continue-${workerRef}`), actor: team.actor, workspaceId: alpha,
+  execution: record(workerRef, { projectRef: team.projectRef, initiatedBy: team.memberId,
+    continuedFrom, ...overrides }),
+})
 
 describe('a Worker run bound to a Thread', () => {
   it('writes its opening as one Thread fact carrying the binding', async () => {
@@ -210,6 +221,145 @@ describe('a Worker run bound to a Thread', () => {
       { workerRef: 'worker:nine', state: 'running' },
     ])
     expect(team.ledger.threadWorkerStates(team.taskThreadRef)).toEqual([])
+  })
+})
+
+describe('a continued Worker execution', () => {
+  const startContinuation = (team: Seeded, workerRef: string, continuedFrom: AgentTeamWorkerRef,
+    overrides: Record<string, unknown> = {}) => startContinuationOf(team, workerRef, continuedFrom, overrides)
+
+  it('links one new execution without changing the predecessor ending', async () => {
+    const team = await seed()
+    const sourceRef = 'worker:continued-source' as AgentTeamWorkerRef
+    await startRun(team, { workerRef: sourceRef })
+    await settleRun(team, sourceRef, { state: 'completed', nativeSessionId: 'session:continued',
+      nativeStorage: '/fake/sessions/2026/11/10/rollout-continued.jsonl' })
+    const before = team.ledger.workerExecution(sourceRef)
+
+    const nextRef = 'worker:continued-next' as AgentTeamWorkerRef
+    await startContinuation(team, nextRef, sourceRef, { cwd: '/tmp/checkout', task: 'continue the work' })
+    expect(team.ledger.workerSuccessor(sourceRef)?.workerRef).toBe(nextRef)
+    expect(team.ledger.workerExecution(sourceRef)).toEqual(before)
+
+    await settleRun(team, nextRef, { state: 'completed', nativeSessionId: 'session:continued',
+      nativeTurnIds: ['turn:continued'], nativeInputIds: ['00000000-0000-4000-8000-000000000101'],
+      nativeStorage: '/fake/sessions/2026/11/10/rollout-continued.jsonl' })
+    await expect(startContinuation(team, 'worker:continued-duplicate', sourceRef))
+      .rejects.toThrow(/already has continuation/)
+  })
+
+  it('refuses a second running execution in one native conversation', async () => {
+    const team = await seed()
+    const firstRoot = 'worker:native-first' as AgentTeamWorkerRef
+    await startRun(team, { workerRef: firstRoot })
+    await settleRun(team, firstRoot, { state: 'completed', nativeSessionId: 'session:shared-native' })
+    await startContinuation(team, 'worker:native-live', firstRoot)
+
+    const secondRoot = 'worker:native-second' as AgentTeamWorkerRef
+    await startRun(team, { workerRef: secondRoot })
+    await settleRun(team, secondRoot, { state: 'completed', nativeSessionId: 'session:shared-native' })
+    await expect(startContinuation(team, 'worker:native-fork', secondRoot))
+      .rejects.toThrow(/already has a running Worker/)
+  })
+
+  it('records a continuation that failed before opening its native session', async () => {
+    const team = await seed()
+    const sourceRef = 'worker:continuation-start-failed-source' as AgentTeamWorkerRef
+    await startRun(team, { workerRef: sourceRef })
+    await settleRun(team, sourceRef, { state: 'completed', nativeSessionId: 'session:start-failed' })
+    const nextRef = 'worker:continuation-start-failed' as AgentTeamWorkerRef
+    await startContinuation(team, nextRef, sourceRef)
+    await settleRun(team, nextRef, { state: 'failed', stage: 'startup',
+      diagnostic: 'The resumed engine could not open the recorded native session.' })
+    expect(team.ledger.workerExecution(nextRef)).toMatchObject({ state: 'failed', stage: 'startup',
+      continuedFrom: sourceRef })
+  })
+
+  it('replays optional continuation and ownership anchors while old records stay unchanged', async () => {
+    const team = await seed()
+    const sourceRef = 'worker:replay-source' as AgentTeamWorkerRef
+    await startRun(team, { workerRef: sourceRef })
+    await settleRun(team, sourceRef, { state: 'completed', nativeSessionId: 'session:replay' })
+    const nextRef = 'worker:replay-next' as AgentTeamWorkerRef
+    await startContinuation(team, nextRef, sourceRef)
+    await settleRun(team, nextRef, { state: 'failed', nativeSessionId: 'session:replay',
+      nativeTurnIds: ['turn:one', 'turn:two'], nativeInputIds: ['input:one', 'input:two'] })
+
+    const table = await openTableOver(team.pool)
+    const replay = new AgentTeamLedger(table)
+    await replay.initialize()
+    expect(() => replay.validate()).not.toThrow()
+    expect(replay.workerExecution(nextRef)).toMatchObject({ continuedFrom: sourceRef,
+      nativeTurnIds: ['turn:one', 'turn:two'], nativeInputIds: ['input:one', 'input:two'] })
+    expect(replay.workerExecution(sourceRef)?.continuedFrom).toBeUndefined()
+    expect(replay.workerExecution(sourceRef)?.nativeInputIds).toBeUndefined()
+  })
+})
+
+describe('rules version 7 Worker compatibility', () => {
+  it('replays a legal version 6 Worker and adopts version 7 once', async () => {
+    const team = await seed(6)
+    const sourceRef = 'worker:v6-compatible' as AgentTeamWorkerRef
+    await startRun(team, { workerRef: sourceRef, threadRef: team.threadRef })
+    await settleRun(team, sourceRef, { state: 'completed', nativeSessionId: 'session:v6',
+      nativeStorage: '/fake/sessions/2026/11/10/rollout-v6.jsonl' })
+    const before = team.ledger.workerExecution(sourceRef)
+    await closeAll()
+
+    const table = await openTableOver(team.pool)
+    const upgraded = new AgentTeamLedger(table)
+    await upgraded.initialize()
+    expect(() => upgraded.validate()).not.toThrow()
+    expect(upgraded.workerExecution(sourceRef)).toEqual(before)
+    expect((await storedOperations(table)).filter(operation => operation.kind === 'team/rules-version-adopted')
+      .map(operation => operation.data)).toEqual([{ version: 6 }, { version: 7 }])
+    await closeAll()
+
+    const reopenedTable = await openTableOver(team.pool)
+    const reopened = new AgentTeamLedger(reopenedTable)
+    await reopened.initialize()
+    expect((await storedOperations(reopenedTable)).filter(operation => operation.kind === 'team/rules-version-adopted'))
+      .toHaveLength(2)
+  })
+
+  it('refuses continuation data inside a version 6 segment', async () => {
+    const team = await seed(6)
+    const sourceRef = 'worker:v6-continuation-source' as AgentTeamWorkerRef
+    await startRun(team, { workerRef: sourceRef })
+    await settleRun(team, sourceRef, { state: 'completed', nativeSessionId: 'session:v6-continuation' })
+
+    await expect(team.ledger.recordWorkerStarted({
+      requestId: requestId('v6-continuation'),
+      actor: team.actor,
+      workspaceId: alpha,
+      execution: record('worker:v6-continuation', {
+        projectRef: team.projectRef, initiatedBy: team.memberId, continuedFrom: sourceRef,
+      }),
+    })).rejects.toThrow(/continued Worker .* needs rules version 7/u)
+  })
+
+  it('refuses native anchor arrays inside a version 6 segment', async () => {
+    const team = await seed(6)
+    const sourceRef = 'worker:v6-anchor-source' as AgentTeamWorkerRef
+    await startRun(team, { workerRef: sourceRef })
+
+    await expect(settleRun(team, sourceRef, { state: 'completed', nativeSessionId: 'session:v6-anchor',
+      nativeTurnIds: ['turn:v6'], nativeInputIds: ['00000000-0000-4000-8000-000000000201'] }))
+      .rejects.toThrow(/native Worker anchors .* need rules version 7/u)
+  })
+
+  it('makes a version 6 reader reject a version 7 ledger at the marker before Worker parsing', async () => {
+    const team = await seed()
+    const sourceRef = 'worker:v7-marker-source' as AgentTeamWorkerRef
+    await startRun(team, { workerRef: sourceRef })
+    await settleRun(team, sourceRef, { state: 'completed', nativeSessionId: 'session:v7-marker' })
+    await startContinuationOf(team, 'worker:v7-marker-next', sourceRef)
+    await settleRun(team, 'worker:v7-marker-next', { state: 'completed', nativeSessionId: 'session:v7-marker',
+      nativeTurnIds: ['turn:v7'], nativeInputIds: ['00000000-0000-4000-8000-000000000202'] })
+
+    const table = await openTableOver(team.pool)
+    expect(() => new AgentTeamLedger(table, { rulesVersion: 6 }))
+      .toThrow(/adopted rules version 7, but this build implements up to 6; open it with a newer release/u)
   })
 })
 
@@ -350,14 +500,14 @@ describe('a Worker event at the Thread tail', () => {
 })
 
 describe('a ledger an older build opens', () => {
-  it('refuses it and asks for a newer release, because the segment adopted version 6', async () => {
+  it('refuses it and asks for a newer release, because the segment adopted version 7', async () => {
     const team = await seed()
     await startRun(team, { workerRef: 'worker:eleven', threadRef: team.threadRef })
     // The same medium, read by a build that only implements version 5: the
     // adoption record the Worker kinds arrived with is what it refuses.
     const table = await openTableOver(team.pool)
     expect(() => new AgentTeamLedger(table, { rulesVersion: 5 }))
-      .toThrow(/adopted rules version 6, but this build implements up to 5; open it with a newer release/)
+      .toThrow(/adopted rules version 7, but this build implements up to 5; open it with a newer release/)
   })
 })
 

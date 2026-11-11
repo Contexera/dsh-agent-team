@@ -33,6 +33,7 @@ const own = {
   '@contexera/dsh-agent-team/time-format': ['./packages/agent-team/src/time-format.ts'],
   '@contexera/dsh-agent-team/mentions': ['./packages/agent-team/src/mentions.ts'],
   '@contexera/dsh-agent-team/human-settings': ['./packages/agent-team/src/human-settings.ts'],
+  '@contexera/dsh-agent-team/member-tool-grants': ['./packages/agent-team/src/member-tool-grants.ts'],
   '@contexera/dsh-agent-team/worker-settings': ['./packages/agent-team/src/worker-settings.ts'],
   '@contexera/dsh-agent-team/recovery-hints': ['./packages/agent-team/src/recovery-hints.ts'],
   '@contexera/dsh-agent-team/member-skills': ['./packages/agent-team/src/member-skills.ts'],
@@ -86,6 +87,7 @@ const buildOwn = {
   '@contexera/dsh-agent-team/mentions': ['./packages/agent-team/lib/types/mentions.d.ts'],
   '@contexera/dsh-agent-team/human-settings': ['./packages/agent-team/lib/types/human-settings.d.ts'],
   '@contexera/dsh-agent-team/member-skills': ['./packages/agent-team/lib/types/member-skills.d.ts'],
+  '@contexera/dsh-agent-team/member-tool-grants': ['./packages/agent-team/lib/types/member-tool-grants.d.ts'],
   '@contexera/dsh-agent-team/tools': ['./packages/tool-agent-team/lib/types/index.d.ts'],
   '@contexera/dsh-agent-team/client': ['./packages/client-agent-team/lib/types/client/index.d.ts'],
 }

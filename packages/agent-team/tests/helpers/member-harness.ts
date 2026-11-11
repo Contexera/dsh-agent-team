@@ -54,6 +54,7 @@ import { MEMBER_COMPACT_TOKENS } from '../../src/member-compaction.ts'
 import { RECOVERY_DELAY_MS } from '../../src/recovery.ts'
 import type { AgentTeamProjectRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../../src/types.ts'
 import { MemoryStorageBackend } from './memory-backend.ts'
+import { SqliteStorageBackend } from '../../src/vendor/storage-sqlite/index.ts'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 
 /** The ENOENT shape the JSONL backend raises when a walk hits a win32 staging directory mid-rename. */
@@ -174,6 +175,7 @@ export function acceptanceReminders(agent: NonNullable<ReturnType<Context['agent
 }
 
 export type PersistenceBackend = 'jsonl'
+export type LedgerBackend = 'memory' | 'sqlite'
 
 export class TestablePresets extends AgentPresetRegistry {
   readonly orphaned = new WeakSet<Context>()
@@ -196,6 +198,7 @@ export async function realHarness(
   reopen?: { readonly root: string },
   realCompaction = false,
   seed?: (ctx: Context, workspaceId: WorkspaceId) => Promise<void>,
+  ledgerBackend: LedgerBackend = 'memory',
 ): Promise<{
   readonly ctx: Context
   readonly workspaceId: WorkspaceId
@@ -277,8 +280,11 @@ export async function realHarness(
   await ctx.plugin(TestablePresets, { default: 'team-member' })
   await ctx.plugin(AgentPresetPlugin, { id: 'team-member', plugins: teamMemberPlugins })
   await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend())
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
+  const backend = ledgerBackend === 'sqlite'
+    ? new SqliteStorageBackend({ path: join(root, 'agent-team.sqlite'), journalMode: 'delete' })
+    : undefined
+  ctx.storage.backend.register(ledgerBackend, backend ?? new MemoryStorageBackend())
+  const facility = new DomainFacility(ctx, { backend: ledgerBackend, routes: {} })
   ctx.storage.mount('domain', facility)
   ctx.provide('storageDomain', facility)
   const workspaceId = WorkspaceId('workspace:member-test')
@@ -301,7 +307,12 @@ export async function realHarness(
   // A spec that replays a ledger an older build wrote seeds the domain here, before Team boots over it.
   if (seed !== undefined) await seed(ctx, workspaceId)
   const teamFiber = await ctx.plugin(AgentTeam)
-  cleanups.push(async () => { await ctx.fiber.dispose(); await facility.closeAll(); await rm(root, { recursive: true, force: true }) })
+  cleanups.push(async () => {
+    await ctx.fiber.dispose()
+    await facility.closeAll()
+    await backend?.close()
+    await rm(root, { recursive: true, force: true })
+  })
   return { ctx, workspaceId, root, checkout, workspaces, teamFiber, archived, archiveFailures, presets: ctx.agentPresets as TestablePresets, pressureState, jobsState }
 }
 

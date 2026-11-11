@@ -53,8 +53,12 @@ export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './s
 export { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
 import { carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY, type TeamContextProjectionState } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
-import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, isReservedToolName, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import {
+  EXTRA_TOOL_GRANTS_FIELD, extraToolGrantsFrom, sanitizeExtraToolGrants,
+} from './member-tool-grants.ts'
 import { PROJECT_OWNER_SECTION, projectOwnerGuidance } from './project-owner-guidance.ts'
+import { TOOL_AVAILABILITY_SECTION, toolAvailabilityGuidance } from './tool-availability-guidance.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
 import { newestEndedRuns, WorkerRefusal, WorkerRegistry, workerTaskPreview, WORKER_RUN_LIST_LIMIT, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
@@ -114,6 +118,8 @@ import type {
   AgentTeamCreateProjectResult,
   AgentTeamEnvironmentRequest,
   AgentTeamEnvironmentResult,
+  AgentTeamToolCatalogRequest,
+  AgentTeamToolCatalogResult,
   AgentTeamGetAttachmentRequest,
   AgentTeamGetAttachmentResult,
   AgentTeamGetHumanAvatarRequest,
@@ -279,7 +285,8 @@ import { admissionAttemptRequestId, admissionDeliveryRef, admissionKey, admissio
 export type * from './types.ts'
 export { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from './ledger.ts'
 export { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName } from './human-profile.ts'
-export { DEFAULT_WEBHOOK_CONFIG, HOST_ROW_FIELDS, MEMBER_COMPACTION_SETTINGS_SCHEMA, TEAM_HOST_ROW_SETTINGS_SCHEMA, WAKE_RECYCLE_SETTINGS_SCHEMA, WEBHOOK_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowField, type HostRowWrite, type WebhookConfig } from './host-row-settings.ts'
+export { DEFAULT_WEBHOOK_CONFIG, EXTRA_TOOL_GRANTS_SETTINGS_SCHEMA, HOST_ROW_FIELDS, MEMBER_COMPACTION_SETTINGS_SCHEMA, TEAM_HOST_ROW_SETTINGS_SCHEMA, WAKE_RECYCLE_SETTINGS_SCHEMA, WEBHOOK_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowField, type HostRowWrite, type WebhookConfig } from './host-row-settings.ts'
+export { EXTRA_TOOL_GRANTS_FIELD, extraToolGrantsFrom, sanitizeExtraToolGrants } from './member-tool-grants.ts'
 export { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 export { humanAvatarsRoot } from './human-avatar.ts'
 export { AGENT_TEAM_TOOL_NAMES } from './member-runtime.ts'
@@ -549,6 +556,12 @@ export default class AgentTeam extends TypertRemoteService {
   private readonly workerRegistry = new WorkerRegistry(this.ctx, {
     config: () => this.config.worker.get(),
     projectExists: projectRef => this.requireLedger().hasProject(projectRef),
+    projectActive: projectRef => {
+      const project = this.requireLedger().getProject(projectRef)
+      return project !== undefined && project.state !== 'archived'
+    },
+    projectWorkspace: projectRef => this.requireLedger().getProject(projectRef)?.workspaceId,
+    memberEnabled: memberId => this.requireLedger().getMember(memberId)?.state === 'enabled',
     projectOwners: projectRef => this.requireLedger().projectOwnerIds(projectRef),
     recordStarted: async write => {
       const result = await this.requireLedger().recordWorkerStarted(write)
@@ -561,6 +574,13 @@ export default class AgentTeam extends TypertRemoteService {
       const result = await this.requireLedger().recordWorkerSettled(write)
       if (result.committed) this.emitCommitted(result.value.receipt)
     },
+    recordSteerAdmitted: async write => (await this.requireLedger().recordWorkerSteerAdmitted(write)).value,
+    recordSteerRecorded: async write => { await this.requireLedger().recordWorkerSteerRecorded(write) },
+    steerRequest: requestId => this.requireLedger().workerSteerRequest(requestId),
+    steerOutcome: requestId => this.requireLedger().workerSteerOutcome(requestId),
+    steerAdmissionsForText: query => this.requireLedger().workerSteerAdmissionsForText(query),
+    workerStartedByRequest: requestId => this.requireLedger().workerStartedByRequest(requestId),
+    workerResumeAnchors: workerRef => this.requireLedger().workerResumeAnchors(workerRef),
     warn: message => { this.ctx.logger.warn(`agent-team: ${message}`) },
   })
   /** Team notice ids waiting for a turn boundary, keyed by the live Agent message id. */
@@ -882,6 +902,11 @@ export default class AgentTeam extends TypertRemoteService {
     return this.config.worker.get().enabled
   }
 
+  /** The profile's exact extra tool-name grants, read at a turn start before tool resolution. */
+  private extraToolGrants(): readonly string[] {
+    return sanitizeExtraToolGrants(this.config[EXTRA_TOOL_GRANTS_FIELD].get())
+  }
+
   /**
    * Follow the Worker switch on the live surfaces. The loader event fires for any
    * volatile row update, so the switch is compared before anything is applied;
@@ -905,10 +930,16 @@ export default class AgentTeam extends TypertRemoteService {
       const member = this.requireLedger().getMember(memberId)
       if (member === undefined) return
       try {
-        const boundary = await this.memberRuntime.awaitTurnBoundary(handle)
+        let boundary = await this.memberRuntime.awaitTurnBoundary(handle)
+        // A turn may start in the gap between the boundary event and this
+        // continuation. Wait again so a delayed apply never replaces that
+        // turn's frozen grants after its turn/start.
+        while (this.accepting && this.handles.get(memberId) === handle && this.runningAgents.has(handle.agent.id)) {
+          boundary = await this.memberRuntime.awaitTurnBoundary(handle)
+        }
         // A suspend, removal, or restart during the wait replaced the surface this
         // apply targeted; the replacement reads the switch on its own activation.
-        if (this.handles.get(memberId) !== handle) return
+        if (!this.accepting || this.handles.get(memberId) !== handle) return
         // A second flip while this one waited supersedes it: the newer sync owns
         // the surface, and applying this value now would undo the newer one.
         if (this.workerEnabled() !== enabled) return
@@ -916,7 +947,7 @@ export default class AgentTeam extends TypertRemoteService {
         // the accepted intent now rather than restoring a pre-wait snapshot.
         const member = this.requireLedger().getMember(memberId)
         if (member === undefined) return
-        this.memberRuntime.reapplyMemberToolPolicy(member, enabled)
+        this.memberRuntime.reapplyMemberToolPolicy(member, enabled, this.extraToolGrants())
         // The swap released the applied-capability record; the stored intent is
         // in force again, so the roster must not read as pending after a toggle.
         this.memberRuntime.recordAppliedCapabilities(memberId, member.capabilities)
@@ -1854,14 +1885,22 @@ export default class AgentTeam extends TypertRemoteService {
   private async applyCapabilityEdit(active: AgentHandle, stored: AgentTeamAgentMember): Promise<'applied' | 'deferred:generation-changed'> {
     const memberId = stored.memberId
     const started = Date.now()
-    const boundary = await this.memberRuntime.awaitTurnBoundary(active)
+    let boundary = await this.memberRuntime.awaitTurnBoundary(active)
+    // A new turn can start after the boundary resolves but before this
+    // continuation. Apply only once the Member is still idle immediately
+    // before the synchronous swap, preserving that turn's frozen grants.
+    while (this.accepting && this.handles.get(memberId) === active && this.runningAgents.has(active.agent.id)) {
+      boundary = await this.memberRuntime.awaitTurnBoundary(active)
+    }
     if (boundary === 'waited') {
       // Only real waits are logged: an edit applied to an already-idle Member
       // spends no time here and would only add noise.
       this.ctx.logger.info(`agent-team: member '${stored.handle}' session '${stored.sessionId}' stage 'wait-turn' waited ${Date.now() - started}ms for its turn boundary before applying the stored configuration`)
     }
-    if (this.generationSwappedDuringWait(memberId, active, boundary)) return 'deferred:generation-changed'
-    this.memberRuntime.reapplyMemberToolPolicy(stored, this.workerEnabled())
+    // Shutdown releases boundary waits before disposing the active handles;
+    // it must not install another observer or apply to that retiring scope.
+    if (!this.accepting || this.generationSwappedDuringWait(memberId, active, boundary)) return 'deferred:generation-changed'
+    this.memberRuntime.reapplyMemberToolPolicy(stored, this.workerEnabled(), this.extraToolGrants())
     this.memberRuntime.swapSkillSelection(memberId, stored.capabilities?.skills?.allow)
     this.memberRuntime.recordAppliedCapabilities(memberId, stored.capabilities)
     return 'applied'
@@ -2057,6 +2096,26 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('environment')
   environmentForClient(_request: AgentTeamEnvironmentRequest): AgentTeamEnvironmentResult {
     return Object.freeze(reportEnvironment())
+  }
+
+  /**
+   * Foreign global and Agent-scoped tool names a Human could grant. Activated
+   * preset baselines and Team-owned names are absent; discovery is not a
+   * per-Member admission snapshot and cannot reopen protected controls.
+   */
+  @Remote('toolCatalog')
+  toolCatalogForClient(_request: AgentTeamToolCatalogRequest): AgentTeamToolCatalogResult {
+    const scoped = this.ctx.agents.list().flatMap((agent) => {
+      const scope = scopeOf(agent.ctx)
+      return scope === undefined ? [] : this.ctx.tools.schemas(scope)
+    })
+    const baseline = this.memberRuntime.baselineToolNames()
+    const names = [...new Set([...this.ctx.tools.schemas(), ...scoped]
+      .map(tool => tool.name)
+      .filter(name => !baseline.has(name) && !isReservedToolName(name)
+        && extraToolGrantsFrom([name]) !== undefined))]
+      .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+    return Object.freeze({ names: Object.freeze(names) })
   }
 
   /**
@@ -3019,6 +3078,15 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
+  /** Own-scope foreign tools cannot be masked by the current restriction API; make their denied status explicit instead. */
+  private installToolAvailabilityGuidance(agentCtx: Context, member: AgentTeamAgentMember): void {
+    agentCtx.systemPrompt.section({
+      name: TOOL_AVAILABILITY_SECTION,
+      order: agentCtx.systemPrompt.getSectionOrder('TEAM_POLICY'),
+      text: () => toolAvailabilityGuidance(this.memberRuntime.visibleUngrantedToolNames(agentCtx, member.memberId)),
+    })
+  }
+
   private async activateMember(member: AgentTeamAgentMember, knownWorkspacePath?: string, knownSessions?: ReadonlySet<SessionId>, forkedFrom?: SessionId, options?: { readonly deferNotify?: boolean }): Promise<void> {
     if (this.handles.has(member.memberId)) return
     let created: AgentHandle | undefined
@@ -3047,7 +3115,7 @@ export default class AgentTeam extends TypertRemoteService {
       const setup = async (agentCtx: Context, agent: Agent) => {
         try {
           await this.ctx.agentPresets.mount(agentCtx, member.presetId)
-          this.memberRuntime.applyMemberToolPolicy(agentCtx, member, this.workerEnabled())
+          this.memberRuntime.applyMemberToolPolicy(agentCtx, member, this.workerEnabled(), this.extraToolGrants())
           this.validateMemberPreset(agentCtx)
         } catch (error) {
           // Tag composition failures with their own class: the activation
@@ -3059,6 +3127,12 @@ export default class AgentTeam extends TypertRemoteService {
         if (persisted) this.applyConfiguredRoute(agent, selection)
         installModelSelection(agentCtx)
         this.installProjectOwnerGuidance(agentCtx, member)
+        this.installToolAvailabilityGuidance(agentCtx, member)
+        this.memberRuntime.observeMemberToolPolicyTurns(agentCtx, agent, member.memberId, () => {
+          const current = this.requireLedger().getMember(member.memberId)
+          if (current === undefined) throw new Error(`Member '${member.memberId}' is no longer in the Team ledger`)
+          return { member: current, workerEnabled: this.workerEnabled(), grants: this.extraToolGrants() }
+        })
         agentCtx.on('session/event', (session, event) => {
           if (session !== agent.session || event.type !== 'request/header') return
           this.adoptMemberRouteFromRequest(member.memberId, agent, session.id, event)
@@ -3070,7 +3144,18 @@ export default class AgentTeam extends TypertRemoteService {
         agentCtx.on('agent/pre-step', async ({ agent }, next) => {
           // The original inbox insertion is the durable replay source even if
           // this driver already claimed it; requeueing can reorder later input.
-          return this.retiringAgents.has(agent) ? { kind: 'reject' as const } : next()
+          if (this.retiringAgents.has(agent)) return { kind: 'reject' as const }
+          // The Harness resolves tools and assembles the prompt before this
+          // waterfall. Refresh here so a failed baseline is still rejected
+          // before the model request; a late registration reaches the next
+          // step's resolution without ever running after this gate.
+          this.memberRuntime.refreshMemberToolPolicyForStep(agentCtx, member.memberId)
+          const policyFailure = this.memberRuntime.turnToolPolicyFailure(member.memberId)
+          if (policyFailure !== undefined) {
+            this.ctx.logger.warn(`agent-team: refusing a Member turn before any model request: ${policyFailure}`)
+            return { kind: 'reject' as const }
+          }
+          return next()
         })
         return {
           commit: () => {
@@ -3932,6 +4017,8 @@ export default class AgentTeam extends TypertRemoteService {
         throw new WorkerRefusal('worker_task_unknown', `${target.taskRef} is not a Task in this Team.`)
       case 'target-conflict':
         throw new WorkerRefusal('worker_target_conflict', `Task ${target.taskRef} is not in Thread ${target.threadRef}.`)
+      case 'project-conflict':
+        throw new WorkerRefusal('worker_target_conflict', `Project ${target.projectRef} does not contain Thread ${target.threadRef}.`)
     }
   }
 
@@ -3966,30 +4053,100 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * One Member's instruction to a run it delegated, added to the turn that run is
-   * already executing. The durable record decides whether the run is still
-   * running; the live registry decides whether this Host can still reach its
-   * engine session. Nothing is written: a steer is not a terminal fact, it does
-   * not survive a restart, and its receipt is the tool's own answer.
+   * One Member's instruction to an execution it delegated. A live execution
+   * takes it now; an ended execution is resumed as a new linked execution in
+   * the same native conversation. The immutable chain and ledger decide which
+   * execution owns the next turn, never a process-local native id.
    */
   async workerSteerForAgent(agent: Agent, request: AgentTeamWorkerSteerRequest): Promise<AgentTeamWorkerSteerResult> {
     const actor = this.memberActor(agent)
-    const execution = this.requireLedger().workerExecution(request.workerRef)
+    const ledger = this.requireLedger()
+    const execution = ledger.workerExecution(request.workerRef)
     if (execution === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${request.workerRef}' was started by this Team.`)
+    const instruction = request.instruction.trim()
+    if (instruction === '') throw new WorkerRefusal('worker_steer_required', 'A steer needs the instruction the Worker should take on.')
+    const normalized = { requestId: request.requestId, instruction }
+    const chain = this.workerChain(execution)
+    const chainTail = chain.at(-1)!
+    const nativeSessionId = chain.findLast(item => item.nativeSessionId !== undefined)?.nativeSessionId
+    const knownTail = nativeSessionId === undefined ? undefined : ledger.workerLatestInNativeSession(nativeSessionId)
+    const target = knownTail ?? chainTail
+    const receiptRefs = new Set<AgentTeamWorkerRef>([...chain.map(item => item.workerRef), target.workerRef])
+    // Request-id identity comes before authorization or state: another Member's
+    // reuse is a collision, not an instruction this Member may apply anywhere.
+    const priorReceipt = await this.workerRegistry.steerReceipt([...receiptRefs], actor, normalized)
+    if (priorReceipt !== undefined) return priorReceipt
+    const durable = ledger.workerStartedByRequest(request.requestId)
+    if (durable !== undefined) {
+      const sameConversation = nativeSessionId !== undefined
+        && ledger.workerNativeSessionOf(durable.workerRef) === nativeSessionId
+      if (durable.task !== instruction || durable.initiatedBy !== actor.memberId
+        || durable.continuedFrom === undefined
+        || (!this.workerChainContains(durable, execution.workerRef) && !sameConversation)) {
+        throw new WorkerRefusal('worker_steer_conflict', `Request id '${request.requestId}' already started another execution; `
+          + 'use a new request id for this instruction.')
+      }
+      if (durable.state === 'running' && this.workerRegistry.get(durable.workerRef) === undefined) {
+        throw new WorkerRefusal('worker_unconfirmed', `Worker '${durable.workerRef}' was started by a Host that no longer holds its `
+          + 'handle, so it cannot be steered.')
+      }
+      return Object.freeze({ workerRef: durable.workerRef, engine: durable.engine, state: 'started' as const,
+        ...(durable.continuedFrom === undefined ? {} : { continuedFrom: durable.continuedFrom }),
+        runState: this.workerRegistry.liveState(durable.workerRef) ?? durable.state })
+    }
     if (execution.initiatedBy !== actor.memberId) {
       throw new WorkerRefusal('worker_steer_forbidden', `Only the Member who delegated Worker '${request.workerRef}' may add an `
         + 'instruction to it.')
     }
-    if (this.workerRegistry.get(request.workerRef) === undefined) {
-      if (execution.state === 'running') {
-        throw new WorkerRefusal('worker_unconfirmed', `Worker '${request.workerRef}' was started by a Host that no longer holds its `
+    // Same-text dedupe is durable and tied to the receiving execution. Checking
+    // it here, before a running-without-handle refusal or an ended-tail resume,
+    // makes a fresh alias answer the original receipt without native history.
+    const textAlias = await this.workerRegistry.steerTextAlias(actor, normalized, {
+      workerRef: target.workerRef,
+      initiatedBy: target.initiatedBy,
+      continuedFrom: target.workerRef,
+      allowSubmitted: target.state === 'running',
+    })
+    if (textAlias !== undefined) return textAlias
+    if (target.state === 'running') {
+      if (this.workerRegistry.get(target.workerRef) === undefined) {
+        throw new WorkerRefusal('worker_unconfirmed', `Worker '${target.workerRef}' was started by a Host that no longer holds its `
           + 'handle, so this Host cannot reach its engine session; its result stays unconfirmed.')
       }
-      throw new WorkerRefusal('worker_steer_ended', `Worker '${request.workerRef}' already ended: ${execution.state}; there is no turn `
-        + 'to add to.')
+      return this.workerRegistry.steer(target.workerRef, actor,
+        normalized)
     }
-    return this.workerRegistry.steer(request.workerRef, actor,
-      { requestId: request.requestId, instruction: request.instruction })
+    return this.workerRegistry.continueFrom({ actor, parent: agent }, target,
+      normalized)
+  }
+
+  /** Follow the immutable `continuedFrom` chain from a caller's ref to its newest execution. */
+  private workerChain(start: AgentTeamWorkerExecution): readonly AgentTeamWorkerExecution[] {
+    const ledger = this.requireLedger()
+    const chain: AgentTeamWorkerExecution[] = []
+    let current = start
+    const seen = new Set<AgentTeamWorkerRef>()
+    while (!seen.has(current.workerRef)) {
+      seen.add(current.workerRef)
+      chain.push(current)
+      const next = ledger.workerSuccessor(current.workerRef)
+      if (next === undefined) return Object.freeze(chain)
+      current = next
+    }
+    throw new WorkerRefusal('worker_unknown', `Worker '${start.workerRef}' has a cyclic continuation chain.`)
+  }
+
+  /** Whether one execution belongs to the chain rooted at a caller's requested ref. */
+  private workerChainContains(execution: AgentTeamWorkerExecution, workerRef: AgentTeamWorkerRef): boolean {
+    const ledger = this.requireLedger()
+    let current: AgentTeamWorkerExecution | undefined = execution
+    const seen = new Set<AgentTeamWorkerRef>()
+    while (current !== undefined && !seen.has(current.workerRef)) {
+      if (current.workerRef === workerRef) return true
+      seen.add(current.workerRef)
+      current = current.continuedFrom === undefined ? undefined : ledger.workerExecution(current.continuedFrom)
+    }
+    return false
   }
 
   /** One run's shape for the Human's list, whichever record of it is being read. */
@@ -4179,6 +4336,8 @@ export default class AgentTeam extends TypertRemoteService {
       native: Object.freeze({
         ...(execution.nativeSessionId === undefined ? {} : { threadId: execution.nativeSessionId }),
         ...(execution.nativeTurnId === undefined ? {} : { turnId: execution.nativeTurnId }),
+        ...(execution.nativeTurnIds === undefined ? {} : { turnIds: execution.nativeTurnIds }),
+        ...(execution.nativeInputIds === undefined ? {} : { inputIds: execution.nativeInputIds }),
         ...(execution.nativeStorage === undefined ? {} : { storage: execution.nativeStorage }),
       }),
       history,

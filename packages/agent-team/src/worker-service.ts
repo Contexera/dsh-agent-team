@@ -26,11 +26,16 @@ import type {
   AgentTeamTaskRef,
   AgentTeamThreadRef,
   AgentTeamWorkerRef,
+  AgentTeamWorkerExecution,
   AgentTeamWorkerSettlement,
   AgentTeamWorkerStage,
   AgentTeamWorkerStartRecord,
   AgentTeamWorkerStartWrite,
+  AgentTeamWorkerSteerAdmission,
+  AgentTeamWorkerSteerAdmissionWrite,
   AgentTeamWorkerSteerResult,
+  AgentTeamWorkerSteerRequestState,
+  AgentTeamWorkerSteerStoredOutcome,
   AgentTeamWorkerSettleWrite,
 } from './types.ts'
 import { truncateToCharacters } from './text.ts'
@@ -45,6 +50,8 @@ import {
   type WorkerRunSpec,
   type WorkerSteer,
 } from './worker-runtime.ts'
+import { readWorkerHistory } from './worker-inspection.ts'
+import type { WorkerResumeAnchor } from './ledger.ts'
 
 export interface WorkerEngineConfig {
   readonly enabled: boolean
@@ -72,6 +79,9 @@ export const DEFAULT_WORKER_CONFIG: WorkerConfig = Object.freeze({
   timeoutMs: 0,
 })
 
+/** The settlement schema bounds these anchor arrays; keep the newest evidence when a very long run exceeds it. */
+const WORKER_NATIVE_ANCHOR_LIMIT = 128
+
 export interface AgentTeamWorkerRun {
   readonly workerRef: AgentTeamWorkerRef
   readonly projectRef: AgentTeamProjectRef
@@ -89,6 +99,8 @@ export interface AgentTeamWorkerRun {
   readonly diagnostic?: string | undefined
   /** The Member whose delegation opened this run: the only Member who may stop it. */
   readonly initiatedBy: AgentTeamMemberId
+  /** Present when this execution resumed an earlier execution's native conversation. */
+  readonly continuedFrom?: AgentTeamWorkerRef | undefined
 }
 
 /**
@@ -134,6 +146,12 @@ export interface WorkerRegistryDeps {
   readonly config: () => WorkerConfig
   /** Whether the named Project exists; the ledger re-checks it on write. */
   readonly projectExists: (projectRef: AgentTeamProjectRef) => boolean
+  /** Whether the Project is still active enough to receive a newly opened execution. */
+  readonly projectActive: (projectRef: AgentTeamProjectRef) => boolean
+  /** The Workspace the Project belongs to, for the continuation start write. */
+  readonly projectWorkspace: (projectRef: AgentTeamProjectRef) => WorkspaceId | undefined
+  /** Whether the initiating Member is still enabled, independently of this Host's live handle. */
+  readonly memberEnabled: (memberId: AgentTeamMemberId) => boolean
   /** Resolve a Project's current Agent owners. */
   readonly projectOwners: (projectRef: AgentTeamProjectRef) => readonly string[]
   /**
@@ -143,6 +161,27 @@ export interface WorkerRegistryDeps {
   readonly recordStarted: (write: AgentTeamWorkerStartWrite) => Promise<AgentTeamWorkerStartRecord>
   /** Write a run's one terminal fact. */
   readonly recordSettled: (write: AgentTeamWorkerSettleWrite) => Promise<void>
+  /** Admit one steer request before any native input is sent. */
+  readonly recordSteerAdmitted: (write: AgentTeamWorkerSteerAdmissionWrite) => Promise<AgentTeamWorkerSteerAdmission>
+  /** Store one steer outcome before the Host reports it. */
+  readonly recordSteerRecorded: (write: { readonly admissionRequestId: AgentTeamRequestId
+    readonly outcome: AgentTeamWorkerSteerStoredOutcome }) => Promise<void>
+  /** What a request id already means for steering, if anything. */
+  readonly steerRequest: (requestId: AgentTeamRequestId) => AgentTeamWorkerSteerRequestState | undefined
+  /** The effective outcome of an admission, following an alias to its canonical request. */
+  readonly steerOutcome: (requestId: AgentTeamRequestId) => AgentTeamWorkerSteerStoredOutcome | undefined
+  /**
+   * Canonical admissions for one exact text on one receiving execution. A
+   * continuation admission names its not-yet-recorded execution, so its source
+   * is the durable identity a retry can still match after reconstruction.
+   */
+  readonly steerAdmissionsForText: (query: { readonly workerRef?: AgentTeamWorkerRef | undefined
+    readonly instruction: string; readonly initiatedBy: AgentTeamMemberId
+    readonly continuedFrom?: AgentTeamWorkerRef | undefined }) => readonly AgentTeamWorkerSteerAdmission[]
+  /** The execution one request id already opened, if any. */
+  readonly workerStartedByRequest: (requestId: AgentTeamRequestId) => AgentTeamWorkerExecution | undefined
+  /** Complete native-record anchors in one execution's continuation chain, nearest first. */
+  readonly workerResumeAnchors: (workerRef: AgentTeamWorkerRef) => readonly WorkerResumeAnchor[]
   /** Log one safe line; the native cause never reaches it. */
   readonly warn: (message: string) => void
 }
@@ -253,12 +292,6 @@ interface RunEntry {
   stop?: Promise<void> | undefined
   /** The engine session this run opened, once the activation published one. */
   sessionId?: SessionId | undefined
-  /**
-   * Instructions this run already took, by request id, so a resend answers with the
-   * first one's receipt instead of entering the turn twice.
-   */
-  readonly steers: Map<AgentTeamRequestId, { readonly instruction: string
-    readonly outcome: Promise<AgentTeamWorkerSteerResult> }>
   activation?: SubagentActivation | undefined
   /** After the Host released a run it could not clean up, a late ending must not reach closed storage. */
   sealed: boolean
@@ -280,17 +313,47 @@ export class WorkerRegistry {
   /** The start each request id is opening right now, so a concurrent resend joins it. */
   private readonly starting = new Map<AgentTeamRequestId, { readonly delegation: DelegationShape
     readonly started: Promise<AgentTeamWorkerRun> }>()
+  /**
+   * One in-flight resumption per native conversation. The ledger remains the
+   * durable authority; this map only joins calls that arrive before the first
+   * successor's opening record exists.
+   */
+  private readonly continuations = new Map<string, { readonly requestId: AgentTeamRequestId
+    readonly instruction: string; readonly started: Promise<AgentTeamWorkerSteerResult> }>()
+  /**
+   * A continuation's opening promise by its new execution. A request that reaches
+   * the linked execution after its record exists but before its native handle
+   * opens waits for that same opening instead of refusing a transient state.
+   */
+  private readonly continuationOpenings = new Map<AgentTeamWorkerRef, Promise<AgentTeamWorkerSteerResult>>()
   private readonly providers = new Map<WorkerEngine, { readonly release: () => void
     readonly provider: TeamWorkerProvider }>()
   /**
-   * The same-turn control of every session this Host still holds, by the engine's
+   * The delivery control of every session this Host still holds, by the engine's
    * own session id. This is live state, not a record: an entry exists only while
    * its session does, it is removed when that run ends, and unloading clears what
    * is left. Nothing outside this registry can reach an engine session.
    */
   private readonly sessions = new Map<SessionId, WorkerSteer | undefined>()
-  /** Terminal writes still in flight, so unloading the Host waits for them. */
+  /** Durable writes still in flight, so unloading the Host waits for them. */
   private readonly writes = new Set<Promise<void>>()
+  /**
+   * Live joins for steer requests whose durable admission or outcome is still
+   * being written. The ledger remains the authority; these maps only keep two
+   * calls that arrive together from each sending native input.
+   */
+  private readonly steeringByRequest = new Map<AgentTeamRequestId, {
+    readonly instruction: string
+    readonly workerRef: AgentTeamWorkerRef
+    readonly initiatedBy: AgentTeamMemberId
+    readonly outcome: Promise<AgentTeamWorkerSteerResult>
+  }>()
+  private readonly steeringByText = new Map<string, { readonly requestId: AgentTeamRequestId
+    readonly outcome: Promise<AgentTeamWorkerSteerResult> }>()
+  /** Every steer call still deciding, admitting, delivering, or persisting its outcome. */
+  private readonly steerCalls = new Set<Promise<unknown>>()
+  /** Set once unloading lets go of persistence; no steer admission or outcome may start after it. */
+  private steerPersistenceClosed = false
   private stopped = false
 
   constructor(
@@ -388,6 +451,9 @@ export class WorkerRegistry {
     readonly provider: TeamWorkerProvider
     readonly subagents: SubagentRuntime
     readonly delegation: DelegationShape
+    readonly continuedFrom?: AgentTeamWorkerRef | undefined
+    /** Re-runs the continuation's current admission after each asynchronous boundary while opening. */
+    readonly assertAdmitted?: (() => void) | undefined
   }): Promise<AgentTeamWorkerRun> {
     const { workerRef, engine, cwd, provider, subagents } = admitted
     // Written before the process opens: a Host that dies here leaves a run the
@@ -397,7 +463,8 @@ export class WorkerRegistry {
       execution: Object.freeze({ workerRef, projectRef: request.projectRef,
         ...(request.threadRef === undefined ? {} : { threadRef: request.threadRef }),
         ...(request.taskRef === undefined ? {} : { taskRef: request.taskRef }),
-        initiatedBy: caller.actor.memberId, engine, task: request.task, cwd, startedAt: nowIso() }),
+        initiatedBy: caller.actor.memberId, engine, task: request.task, cwd, startedAt: nowIso(),
+        ...(admitted.continuedFrom === undefined ? {} : { continuedFrom: admitted.continuedFrom }) }),
     })
     const entry: RunEntry = {
       settleRequestId: `${request.requestId}:settled` as AgentTeamRequestId,
@@ -407,11 +474,11 @@ export class WorkerRegistry {
       stopping: false,
       sealed: false,
       cleanupUnconfirmed: false,
-      steers: new Map(),
       run: Object.freeze({ workerRef, projectRef: started.projectRef, engine, state: 'running' as const,
         startedAt: started.startedAt, cwd: started.cwd, initiatedBy: started.initiatedBy,
         ...(started.threadRef === undefined ? {} : { threadRef: started.threadRef }),
-        ...(started.taskRef === undefined ? {} : { taskRef: started.taskRef }) }),
+        ...(started.taskRef === undefined ? {} : { taskRef: started.taskRef }),
+        ...(started.continuedFrom === undefined ? {} : { continuedFrom: started.continuedFrom }) }),
     }
     this.runs.set(workerRef, entry)
     this.byRequest.set(request.requestId, workerRef)
@@ -422,7 +489,14 @@ export class WorkerRegistry {
       this.seal(entry)
       throw new WorkerRefusal('worker_unavailable', 'The Team released this Worker before it opened its engine.')
     }
+    let admissionFailureStage: AgentTeamWorkerStage | undefined
     try {
+      try {
+        admitted.assertAdmitted?.()
+      } catch (error: unknown) {
+        admissionFailureStage = 'startup'
+        throw error
+      }
       const activation = await subagents.startActivation({
         provider: provider.name,
         label: `${engine} worker`,
@@ -437,29 +511,33 @@ export class WorkerRegistry {
       if (entry.sealed) {
         // The Host released this run before its engine opened: clean the late
         // handle up and never let it publish a start the Host no longer holds.
-        void activation.dispose().catch(() => {})
+        const disposal = entry.stopDisposal ??= activation.dispose()
+        void disposal.catch(() => {})
         throw new WorkerRefusal('worker_unavailable', 'The Team released this Worker while it was still starting.')
       }
       entry.activation = activation
-      // The engine's own session id is what its live control is keyed by; a run
-      // whose activation never published one has nothing to steer.
+      try {
+        admitted.assertAdmitted?.()
+      } catch (error: unknown) {
+        admissionFailureStage = 'startup'
+        await this.discardActivationBeforeStart(entry, activation, error)
+      }
+      // Live controls belong to this external activation. The native conversation
+      // identity is separate evidence carried by its result, including on resume.
       entry.sessionId = activation.childId
       if (entry.stopping) {
-        const disposal = activation.dispose()
-        entry.stopDisposal ??= disposal
+        const disposal = entry.stopDisposal ??= activation.dispose()
         void disposal.catch(() => {})
       }
-      // An external child's id is the engine's own session identity, which is what
-      // the record reports and a later read-only diagnostic reopens.
-      const nativeSessionId = String(activation.childId)
       void activation.result.then(
-        (result) => this.finish(entry, result, nativeSessionId),
+        (result) => this.finish(entry, result),
         (error: unknown) => this.finish(entry, { output: [], stopReason: 'error',
-          diagnostic: error instanceof WorkerFailure ? error.message : 'The Worker ended with an unreported failure.' }, nativeSessionId),
+          diagnostic: error instanceof WorkerFailure ? error.message : 'The Worker ended with an unreported failure.' }),
       )
       return this.require(workerRef)
     } catch (error: unknown) {
-      await this.finishFromStartFailure(entry, error)
+      const stage = error instanceof WorkerFailure ? undefined : admissionFailureStage
+      await this.finishFromStartFailure(entry, error, stage)
       // A start cancelled by its own stop answers with the run it recorded
       // instead of an error: the caller asked for this ending and needs the ref.
       if (entry.stopping && entry.run.state !== 'running') return entry.run
@@ -500,85 +578,506 @@ export class WorkerRegistry {
   }
 
   /**
-   * Add one instruction to the turn a run is already executing. Only the Member
-   * who delegated the run may ask; nothing here opens a turn, queues an input, or
+   * Deliver one instruction to a run's same native session. Only the Member who
+   * delegated the run may ask; nothing here opens another native session or
    * reaches another run. A run that ended, is stopping, or has not opened its
    * engine session answers with that state instead of sending anything, and a
    * resent request id answers with the receipt the first call produced.
    */
   async steer(workerRef: AgentTeamWorkerRef, steerer: AgentTeamActor,
     request: { readonly requestId: AgentTeamRequestId; readonly instruction: string }): Promise<AgentTeamWorkerSteerResult> {
-    const entry = this.runs.get(workerRef)
-    if (entry === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${workerRef}' was started by this Host.`)
-    this.assertMaySteer(entry, steerer)
     const instruction = request.instruction.trim()
     if (instruction === '') throw new WorkerRefusal('worker_steer_required', 'A steer needs the instruction the Worker should take on.')
     // The idempotency answer comes before the state checks: a resend answers with
     // the receipt the first call produced whether the run is still going or has
-    // ended, and a changed instruction under that id is refused either way. Only a
-    // request this run has never seen can reach the engine.
-    const admitted = entry.steers.get(request.requestId)
-    if (admitted !== undefined) {
-      if (admitted.instruction !== instruction) {
-        throw new WorkerRefusal('worker_steer_conflict', `Request id '${request.requestId}' already carried another instruction `
-          + 'to this Worker; send a changed instruction under a new request id.')
-      }
-      return admitted.outcome
+    // ended, and a changed instruction, another Member, or another Worker under
+    // that id is refused either way.
+    if (this.steeringByRequest.has(request.requestId) || this.deps.steerRequest(request.requestId) !== undefined) {
+      const receipt = await this.steerReceipt([workerRef], steerer, request)
+      if (receipt !== undefined) return receipt
     }
-    // The same sentence is one instruction: a retry that arrives under a fresh
-    // request id must not enter the live turn a second time.
-    for (const previous of entry.steers.values()) {
-      if (previous.instruction === instruction) return previous.outcome
+    const entry = this.runs.get(workerRef)
+    if (entry === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${workerRef}' was started by this Host.`)
+    this.assertMaySteer(entry, steerer)
+    if (this.stopped) throw new WorkerRefusal('worker_unavailable', 'The Team is unloading, so nothing was sent to the Worker.')
+    const work = this.steerNew(entry, steerer, request, instruction)
+    this.steerCalls.add(work)
+    try {
+      return await work
+    } finally {
+      this.steerCalls.delete(work)
+    }
+  }
+
+  private async steerNew(entry: RunEntry, steerer: AgentTeamActor,
+    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
+    instruction: string): Promise<AgentTeamWorkerSteerResult> {
+    const workerRef = entry.run.workerRef
+    const opening = entry.sessionId === undefined ? this.continuationOpenings.get(workerRef) : undefined
+    if (opening !== undefined) await opening
+    const textKey = this.steerTextKey(workerRef, entry.run.initiatedBy, instruction)
+    const pendingText = this.steeringByText.get(textKey)
+    if (pendingText !== undefined) {
+      if (pendingText.requestId === request.requestId) return pendingText.outcome
+      const joined = await this.joinPendingText(steerer, request, pendingText.requestId, pendingText.outcome)
+      if (joined !== undefined) return joined
+    }
+    const alias = await this.steerTextAlias(steerer, request,
+      { workerRef, initiatedBy: entry.run.initiatedBy, allowSubmitted: true })
+    if (alias !== undefined) return alias
+    // The durable alias read may yield. A call that registered its canonical
+    // admission in the meantime is the one native intent this text gets.
+    const nowPending = this.steeringByText.get(textKey)
+    if (nowPending !== undefined) {
+      if (nowPending.requestId === request.requestId) return nowPending.outcome
+      const joined = await this.joinPendingText(steerer, request, nowPending.requestId, nowPending.outcome)
+      if (joined !== undefined) return joined
     }
     if (entry.run.state !== 'running') {
-      throw new WorkerRefusal('worker_steer_ended', `Worker '${workerRef}' already ended: ${entry.run.state}; there is no turn to add to.`)
+      throw new WorkerRefusal('worker_steer_ended', `Worker '${workerRef}' already ended: ${entry.run.state}; there is no live native `
+        + 'session to deliver to.')
     }
     if (entry.stopping) {
       throw new WorkerRefusal('worker_steer_stopping', `Worker '${workerRef}' is stopping, so nothing was sent: a turn that is ending `
         + 'will not carry another instruction.')
     }
-    const outcome = this.steerRun(entry, instruction, request.requestId)
-    entry.steers.set(request.requestId, { instruction, outcome })
-    return outcome
+    const outcome = this.steerCanonical(entry, steerer, instruction, request.requestId)
+    const pending = { instruction, workerRef, initiatedBy: entry.run.initiatedBy, outcome }
+    this.steeringByRequest.set(request.requestId, pending)
+    this.steeringByText.set(textKey, { requestId: request.requestId, outcome })
+    try {
+      return await outcome
+    } finally {
+      if (this.steeringByRequest.get(request.requestId) === pending) this.steeringByRequest.delete(request.requestId)
+      if (this.steeringByText.get(textKey)?.requestId === request.requestId) this.steeringByText.delete(textKey)
+    }
   }
 
   /**
-   * The one steer transaction: ask the control this Host holds for that session,
-   * then report what the engine took over and how the run stood at that moment.
+   * The receipt one request already earned somewhere in a continuation chain.
+   * This is checked before deciding whether an ended tail should continue, so a
+   * request-id retry answers the original submission and a changed instruction
+   * still conflicts instead of accidentally opening a successor. Text dedupe
+   * stays on the target execution: a fresh request id may intentionally repeat
+   * an instruction in a later linked execution.
    */
-  private async steerRun(entry: RunEntry, instruction: string, requestId: AgentTeamRequestId): Promise<AgentTeamWorkerSteerResult> {
+  async steerReceipt(workerRefs: readonly AgentTeamWorkerRef[], steerer: AgentTeamActor,
+    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string }): Promise<AgentTeamWorkerSteerResult | undefined> {
+    const instruction = request.instruction.trim()
+    const pending = this.steeringByRequest.get(request.requestId)
+    if (pending !== undefined) {
+      if (pending.instruction !== instruction) throw this.steerConflict(request.requestId)
+      if (steerer.kind !== 'member' || steerer.memberId !== pending.initiatedBy
+        || !workerRefs.includes(pending.workerRef)) throw this.steerConflict(request.requestId)
+      return pending.outcome
+    }
+    const durable = this.deps.steerRequest(request.requestId)
+    if (durable === undefined) return undefined
+    if (durable.kind === 'conflict') throw this.steerConflict(request.requestId)
+    const memberId = steerer.kind === 'member' ? steerer.memberId : undefined
+    if (durable.instruction !== instruction || durable.initiatedBy !== memberId
+      || (!workerRefs.includes(durable.workerRef)
+        && (durable.continuedFrom === undefined || !workerRefs.includes(durable.continuedFrom)))) {
+      throw this.steerConflict(request.requestId)
+    }
+    const outcome = this.deps.steerOutcome(request.requestId)
+    if (outcome?.kind === 'submitted') return outcome.result
+    if (outcome?.kind === 'refused' || outcome?.kind === 'ambiguous') {
+      throw new WorkerRefusal(outcome.refusal.code, outcome.refusal.message)
+    }
+    throw new WorkerRefusal('worker_steer_unconfirmed', `Request id '${request.requestId}' was admitted, but no steer outcome `
+      + 'was confirmed before that Host ended. It will not be sent again automatically; start a new Worker if the instruction '
+      + 'must run.')
+  }
+
+  private steerConflict(requestId: AgentTeamRequestId): WorkerRefusal {
+    return new WorkerRefusal('worker_steer_conflict', `Request id '${requestId}' already carried another instruction `
+      + 'to this Worker; send a changed instruction under a new request id.')
+  }
+
+  /**
+   * Join an admitted instruction on one execution or one continuation source
+   * under a fresh request id. This is the replay path: it reserves the alias in
+   * the ledger and never reads native history or reaches an engine.
+   */
+  async steerTextAlias(steerer: AgentTeamActor,
+    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
+    query: { readonly workerRef?: AgentTeamWorkerRef | undefined; readonly initiatedBy: AgentTeamMemberId
+      readonly continuedFrom?: AgentTeamWorkerRef | undefined; readonly allowSubmitted: boolean
+    }): Promise<AgentTeamWorkerSteerResult | undefined> {
+    const instruction = request.instruction.trim()
+    const canonical = this.deps.steerAdmissionsForText({ ...query, instruction })
+      .find(admission => admission.outcome === undefined || admission.outcome.kind === 'ambiguous'
+        || (query.allowSubmitted && admission.outcome.kind === 'submitted'))
+    if (canonical === undefined) return undefined
+    if (steerer.kind !== 'member' || steerer.memberId !== canonical.initiatedBy) {
+      throw this.steerConflict(request.requestId)
+    }
+    const pending = this.steeringByRequest.get(canonical.requestId)?.outcome
+      ?? this.continuationOpenings.get(canonical.workerRef)
+    if (pending !== undefined) {
+      return this.joinPendingText(steerer, request, canonical.requestId, pending)
+    }
+    return this.aliasDurable(canonical.workspaceId, steerer, { requestId: request.requestId, instruction }, canonical)
+  }
+
+  private steerTextKey(workerRef: AgentTeamWorkerRef, initiatedBy: AgentTeamMemberId, instruction: string): string {
+    return JSON.stringify([workerRef, initiatedBy, instruction])
+  }
+
+  /**
+   * Join a live same-text admission and reserve this request id as its durable
+   * alias. An explicit refusal took nothing, so the caller may fall through and
+   * make a fresh canonical admission under its own id.
+   */
+  private async joinPendingText(steerer: AgentTeamActor,
+    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
+    canonicalRequestId: AgentTeamRequestId, outcome: Promise<AgentTeamWorkerSteerResult>): Promise<AgentTeamWorkerSteerResult | undefined> {
+    try {
+      await outcome
+    } catch {
+      const canonical = this.deps.steerRequest(canonicalRequestId)
+      if (canonical === undefined || canonical.kind === 'conflict') return undefined
+      if (this.deps.steerOutcome(canonicalRequestId)?.kind === 'refused') return undefined
+      return this.aliasDurable(canonical.workspaceId, steerer, request, canonical)
+    }
+    const canonical = this.deps.steerRequest(canonicalRequestId)
+    if (canonical === undefined || canonical.kind === 'conflict') return undefined
+    return this.aliasDurable(canonical.workspaceId, steerer, request, canonical)
+  }
+
+  /** Reserve a same-text request id as a durable alias; this path never reaches the engine. */
+  private async aliasDurable(workspaceId: WorkspaceId, steerer: AgentTeamActor,
+    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
+    canonical: AgentTeamWorkerSteerAdmission): Promise<AgentTeamWorkerSteerResult> {
+    let alias: AgentTeamWorkerSteerAdmission
+    try {
+      alias = await this.admitSteer({
+        requestId: request.requestId,
+        actor: steerer as AgentTeamMemberActor,
+        workspaceId,
+        workerRef: canonical.workerRef,
+        instruction: canonical.instruction,
+        initiatedBy: canonical.initiatedBy,
+        ...(canonical.continuedFrom === undefined ? {} : { continuedFrom: canonical.continuedFrom }),
+        aliasOf: canonical.requestId,
+      })
+    } catch (error) {
+      if (error instanceof WorkerRefusal) throw error
+      throw this.admissionFailure(request.requestId, canonical.instruction, canonical.workerRef, canonical.initiatedBy,
+        `Request id '${request.requestId}' could not be recorded as an alias of the earlier steer; `
+        + 'nothing was sent again.')
+    }
+    const outcome = this.deps.steerOutcome(alias.requestId) ?? this.deps.steerOutcome(canonical.requestId)
+    if (outcome?.kind === 'submitted') return outcome.result
+    if (outcome?.kind === 'refused' || outcome?.kind === 'ambiguous') {
+      throw new WorkerRefusal(outcome.refusal.code, outcome.refusal.message)
+    }
+    throw new WorkerRefusal('worker_steer_unconfirmed', `Request id '${request.requestId}' now aliases steer `
+      + `'${canonical.requestId}', whose outcome was not confirmed before that Host ended. It will not be sent again automatically.`)
+  }
+
+  /**
+   * Resume one cleanly ended execution as a new linked execution. This is the
+   * only path that opens a native session after the source process is gone, and
+   * it rechecks every current permission instead of inheriting the old grant.
+   */
+  async continueFrom(caller: WorkerCaller, source: AgentTeamWorkerExecution,
+    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string }): Promise<AgentTeamWorkerSteerResult> {
+    this.assertContinuationAllowed(caller, source)
+    const resumeAnchors = this.deps.workerResumeAnchors(source.workerRef)
+    if (resumeAnchors.length === 0) {
+      throw new WorkerRefusal('worker_continuation_unavailable', `Worker '${source.workerRef}' recorded no resumable native session.`)
+    }
+    const key = resumeAnchors[0]!.nativeSessionId
+    const existing = this.continuations.get(key)
+    if (existing !== undefined) {
+      if (existing.requestId === request.requestId && existing.instruction !== request.instruction) {
+        throw new WorkerRefusal('worker_steer_conflict', `Request id '${request.requestId}' already started a continuation with another `
+          + 'instruction.')
+      }
+      const joined = await existing.started
+      if (existing.requestId === request.requestId) return joined
+      return this.steer(joined.workerRef, caller.actor, request)
+    }
+    const workerRef = `worker:${randomUUID()}` as AgentTeamWorkerRef
+    const opening = this.continueFromAdmitted(caller, source, request, workerRef, resumeAnchors)
+    // Registered before the first await. Unload waits this promise even while
+    // history is still being read or the opening record is still being written.
+    this.continuationOpenings.set(workerRef, opening)
+    this.continuations.set(key, { requestId: request.requestId, instruction: request.instruction, started: opening })
+    try {
+      return await opening
+    } finally {
+      if (this.continuations.get(key)?.started === opening) this.continuations.delete(key)
+      if (this.continuationOpenings.get(workerRef) === opening) this.continuationOpenings.delete(workerRef)
+    }
+  }
+
+  /** Recheck the continuation's whole current grant after every asynchronous opening boundary. */
+  private assertContinuationAllowed(caller: WorkerCaller, source: AgentTeamWorkerExecution): void {
+    if (this.stopped) throw new WorkerRefusal('worker_unavailable', 'The Team is unloading, so no Worker can continue.')
+    const config = this.deps.config()
+    if (!config.enabled) throw new WorkerRefusal('worker_disabled', 'Worker delegation is switched off in the Team settings.')
+    if (!this.deps.projectExists(source.projectRef)) {
+      throw new WorkerRefusal('worker_project_unknown', `${source.projectRef} is not a Project in this Team.`)
+    }
+    if (!this.deps.projectActive(source.projectRef)) {
+      throw new WorkerRefusal('worker_project_archived', `${source.projectRef} is archived, so it cannot receive a continued Worker.`)
+    }
+    if (!this.deps.memberEnabled(caller.actor.memberId)) {
+      throw new WorkerRefusal('worker_member_unavailable', `Member '${caller.actor.memberId}' is not enabled, so it cannot continue a Worker.`)
+    }
+    if (!this.deps.projectOwners(source.projectRef).includes(caller.actor.memberId)) {
+      throw new WorkerRefusal('worker_owner_required', `Only a current owner of ${source.projectRef} may continue Worker `
+        + `'${source.workerRef}'.`)
+    }
+    const engineConfig = config.engines[source.engine]
+    if (!engineConfig.enabled) {
+      throw new WorkerRefusal('worker_engine_disabled', `Engine '${source.engine}' is not enabled in the Team settings.`)
+    }
+    if (source.state === 'running') {
+      throw new WorkerRefusal('worker_unconfirmed', `Worker '${source.workerRef}' has no live handle in this Host, so its ending is `
+        + 'unconfirmed and it cannot be continued.')
+    }
+    if (source.stage === 'dispose' || source.diagnostic?.includes(WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC) === true) {
+      throw new WorkerRefusal('worker_continuation_unclean', `Worker '${source.workerRef}' did not confirm its cleanup, so its native `
+        + 'session cannot be resumed safely.')
+    }
+  }
+
+  private async continueFromAdmitted(caller: WorkerCaller, source: AgentTeamWorkerExecution,
+    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
+    workerRef: AgentTeamWorkerRef, resumeAnchors: readonly WorkerResumeAnchor[]): Promise<AgentTeamWorkerSteerResult> {
+    let resumeAnchor: WorkerResumeAnchor | undefined
+    let historyKind: string | undefined
+    for (const anchor of resumeAnchors) {
+      const history = await readWorkerHistory({ engine: source.engine, ...anchor })
+      historyKind = history.kind
+      if (history.kind === 'read') {
+        resumeAnchor = anchor
+        break
+      }
+    }
+    if (resumeAnchor === undefined) {
+      throw new WorkerRefusal('worker_continuation_unavailable', `Worker '${source.workerRef}' has no readable native record with `
+        + `the expected session and turn (${historyKind ?? 'unpersisted'}).`)
+    }
+    const nativeSessionId = resumeAnchor.nativeSessionId
+    this.assertContinuationAllowed(caller, source)
+    const existingRequest = this.deps.workerStartedByRequest(request.requestId)
+    if (existingRequest !== undefined) {
+      if (existingRequest.continuedFrom !== source.workerRef || existingRequest.task !== request.instruction
+        || existingRequest.initiatedBy !== caller.actor.memberId) {
+        throw new WorkerRefusal('worker_steer_conflict', `Request id '${request.requestId}' already started another execution; `
+          + 'use a new request id for this instruction.')
+      }
+      const live = this.runs.get(existingRequest.workerRef)
+      if (live === undefined && existingRequest.state === 'running') {
+        throw new WorkerRefusal('worker_unconfirmed', `Worker '${existingRequest.workerRef}' was started by a Host that no longer `
+          + 'holds its handle, so it cannot be steered.')
+      }
+      return Object.freeze({ workerRef: existingRequest.workerRef, engine: existingRequest.engine, state: 'started' as const,
+        continuedFrom: source.workerRef, runState: live === undefined ? existingRequest.state : this.liveState(existingRequest.workerRef) ?? existingRequest.state })
+    }
+
+    const workspaceId = this.deps.projectWorkspace(source.projectRef)
+    if (workspaceId === undefined) {
+      throw new WorkerRefusal('worker_project_unknown', `${source.projectRef} is not a Project in this Workspace.`)
+    }
+    const subagents = this.subagents()
+    if (subagents === undefined) throw new WorkerRefusal('worker_unavailable', 'The Harness subagent service is not mounted, so no Worker can continue.')
+    // No await may separate this final admission from registering the provider
+    // and publishing the opening promise, so unload sees one or the other.
+    this.assertContinuationAllowed(caller, source)
+    let admission: AgentTeamWorkerSteerAdmission
+    try {
+      admission = await this.admitSteer({
+        requestId: request.requestId, actor: caller.actor, workspaceId, workerRef, instruction: request.instruction,
+        initiatedBy: caller.actor.memberId, continuedFrom: source.workerRef,
+      })
+    } catch (error) {
+      if (error instanceof WorkerRefusal) throw error
+      throw this.admissionFailure(request.requestId, request.instruction, workerRef, caller.actor.memberId,
+        `Request id '${request.requestId}' could not be admitted durably, so the native session was not resumed.`)
+    }
+    if (this.stopped) {
+      await this.recordSteerRefusal(admission.requestId, 'worker_unavailable',
+        'The Team began unloading before the native session could be resumed; nothing was delivered.')
+    }
+    let provider: TeamWorkerProvider
+    let providerRelease: () => void
+    try {
+      this.assertContinuationAllowed(caller, source)
+      const providerName = `${WORKER_PROVIDER_NAMES[source.engine]}:resume:${randomUUID()}`
+      provider = new TeamWorkerProvider(providerName,
+        () => ({ ...workerRunSpec(source.engine, this.deps.config(), this.deps.warn), resume: nativeSessionId }),
+        { opened: (sessionId, steer) => { this.sessions.set(sessionId, steer) },
+          closed: (sessionId) => { this.sessions.delete(sessionId) } })
+      providerRelease = subagents.registerProvider(provider)
+    } catch (error) {
+      const code = error instanceof WorkerRefusal ? error.code : 'worker_unavailable'
+      const message = error instanceof Error
+        ? truncateToCharacters(error.message, 2000)
+        : 'The resumed Worker could not be prepared; nothing was delivered.'
+      return this.recordSteerRefusal(admission.requestId, code, message)
+    }
+    const startRequest: WorkerStartRequest = { requestId: request.requestId, workspaceId,
+      projectRef: source.projectRef, ...(source.threadRef === undefined ? {} : { threadRef: source.threadRef }),
+      ...(source.taskRef === undefined ? {} : { taskRef: source.taskRef }), engine: source.engine,
+      task: request.instruction, cwd: source.cwd }
+    const delegation: DelegationShape = { initiator: caller.actor.memberId, workspaceId, projectRef: source.projectRef,
+      ...(source.threadRef === undefined ? {} : { threadRef: source.threadRef }),
+      ...(source.taskRef === undefined ? {} : { taskRef: source.taskRef }), engine: source.engine,
+      task: request.instruction, cwd: source.cwd }
+    const opened = this.open(caller, startRequest, { workerRef, engine: source.engine, cwd: source.cwd,
+      provider, subagents, delegation, continuedFrom: source.workerRef,
+      assertAdmitted: () => this.assertContinuationAllowed(caller, source),
+    }).finally(providerRelease)
+    const started = opened.then(async run => {
+        const result = Object.freeze({ workerRef: run.workerRef, engine: run.engine, state: 'started' as const,
+          continuedFrom: source.workerRef, runState: this.liveState(run.workerRef) ?? run.state })
+        await this.recordSteerOutcome(admission.requestId, { kind: 'submitted', result })
+        return result
+      }, async error => {
+        const message = error instanceof Error
+          ? truncateToCharacters(error.message, 2000)
+          : 'The resumed Worker did not confirm whether its opening instruction was delivered.'
+        await this.recordSteerOutcome(admission.requestId, { kind: 'ambiguous',
+          refusal: { code: 'worker_steer_unconfirmed', message } })
+        throw error
+      })
+    this.continuationOpenings.set(workerRef, started)
+    try {
+      const result = await started
+      return result
+    } finally {
+      if (this.continuationOpenings.get(workerRef) === started) this.continuationOpenings.delete(workerRef)
+    }
+  }
+
+  /**
+   * The one live steer transaction: durable admission, then native input, then
+   * durable outcome. A failure to store the outcome is reported as unconfirmed
+   * even when the engine said it accepted, because a later Host must not send
+   * the same instruction again on the strength of a lost receipt.
+   */
+  private async steerCanonical(entry: RunEntry, steerer: AgentTeamActor, instruction: string,
+    requestId: AgentTeamRequestId): Promise<AgentTeamWorkerSteerResult> {
     const { workerRef, engine } = entry.run
-    const sessionId = entry.sessionId
-    // This version opens same-turn steering for Codex only: its control carries
-    // the turn the engine is driving, which is what makes the receipt's turn id
-    // and the "current turn" claim checkable. Claude's control accepts while the
-    // turn is still open, and its input can still be scheduled as the next turn,
-    // so that path waits for its own ticket rather than borrowing this guarantee.
-    if (engine !== 'codex') {
-      throw new WorkerRefusal('worker_steer_unsupported', `Worker '${workerRef}' runs on an engine whose same-turn control `
-        + 'this Team does not open yet, so no instruction was sent.')
+    const workspaceId = this.deps.projectWorkspace(entry.run.projectRef)
+    if (workspaceId === undefined) throw new WorkerRefusal('worker_project_unknown',
+      `${entry.run.projectRef} is not a Project in this Workspace.`)
+    // Durable admission may yield while the native turn is closing. Hold that
+    // closing window before the first ledger await; delivery still happens only
+    // after admission, and the hold is released on every outcome path.
+    const initialSteer = entry.sessionId === undefined ? undefined : this.sessions.get(entry.sessionId)
+    const releaseHold = initialSteer?.hold?.()
+    try {
+      let admission: AgentTeamWorkerSteerAdmission
+      try {
+        admission = await this.admitSteer({ requestId, actor: steerer as AgentTeamMemberActor,
+          workspaceId, workerRef, instruction, initiatedBy: entry.run.initiatedBy })
+      } catch (error) {
+        if (error instanceof WorkerRefusal) throw error
+        throw this.admissionFailure(requestId, instruction, workerRef, entry.run.initiatedBy,
+          `Request id '${requestId}' could not be admitted durably, so nothing was sent to the Worker.`)
+      }
+      if (this.stopped) {
+        return this.recordSteerRefusal(admission.requestId, 'worker_unavailable',
+          'The Team began unloading before the instruction could be sent; nothing was delivered.')
+      }
+      if (!held(entry) || entry.run.state !== 'running') {
+        return this.recordSteerRefusal(admission.requestId, 'worker_steer_ended',
+          `Worker '${workerRef}' ended before the admitted instruction could be sent; nothing was delivered.`)
+      }
+      const sessionId = entry.sessionId
+      if (sessionId === undefined) {
+        return this.recordSteerRefusal(admission.requestId, 'worker_steer_not_ready',
+          `Worker '${workerRef}' has not opened its engine session yet, so nothing was delivered.`)
+      }
+      if (!this.sessions.has(sessionId)) {
+        return this.recordSteerRefusal(admission.requestId, 'worker_steer_no_active_turn',
+          `Worker '${workerRef}' holds no live engine session any more, so nothing was delivered.`)
+      }
+      const steer = this.sessions.get(sessionId)
+      if (steer === undefined) {
+        return this.recordSteerRefusal(admission.requestId, 'worker_steer_unavailable',
+          `Worker '${workerRef}' has no live delivery control, so nothing was delivered.`)
+      }
+      if (this.stopped) {
+        return this.recordSteerRefusal(admission.requestId, 'worker_unavailable',
+          'The Team began unloading before the instruction could be sent; nothing was delivered.')
+      }
+      const outcome = await steer(instruction, randomUUID())
+      if (outcome.kind === 'unavailable') {
+        const reason = boundedSteerReason(outcome.reason)
+        const message = `Worker '${workerRef}' did not take the instruction over (${outcome.code}): ${reason}`
+        if (outcome.delivery === 'unknown') {
+          return this.recordSteerAmbiguous(admission.requestId, message)
+        }
+        return this.recordSteerRefusal(admission.requestId, 'worker_steer_refused', message)
+      }
+      const result: AgentTeamWorkerSteerResult = Object.freeze({ workerRef, engine, state: 'submitted' as const, landed: outcome.landed,
+        ...(outcome.turnId === undefined ? {} : { turnId: outcome.turnId }),
+        runState: this.liveState(workerRef) ?? entry.run.state })
+      await this.recordSteerOutcome(admission.requestId, { kind: 'submitted', result })
+      return result
+    } finally {
+      releaseHold?.()
     }
-    if (sessionId === undefined) {
-      throw new WorkerRefusal('worker_steer_not_ready', `Worker '${workerRef}' has not opened its engine session yet, so it has no `
-        + 'turn to add to; try again once it is running.')
+  }
+
+  private async recordSteerRefusal(admissionRequestId: AgentTeamRequestId, code: string, message: string): Promise<never> {
+    await this.recordSteerOutcome(admissionRequestId, { kind: 'refused', refusal: { code, message } })
+    throw new WorkerRefusal(code, message)
+  }
+
+  /** Distinguish a request-id collision found by a failed admission from a storage failure. */
+  private admissionFailure(requestId: AgentTeamRequestId, instruction: string, workerRef: AgentTeamWorkerRef,
+    initiatedBy: AgentTeamMemberId, message: string): WorkerRefusal {
+    const existing = this.deps.steerRequest(requestId)
+    if (existing?.kind === 'conflict' || (existing !== undefined
+      && (existing.instruction !== instruction || existing.workerRef !== workerRef
+        || existing.initiatedBy !== initiatedBy))) return this.steerConflict(requestId)
+    return new WorkerRefusal('worker_unavailable', message)
+  }
+
+  private async recordSteerAmbiguous(admissionRequestId: AgentTeamRequestId, message: string): Promise<never> {
+    await this.recordSteerOutcome(admissionRequestId, { kind: 'ambiguous',
+      refusal: { code: 'worker_steer_unconfirmed', message } })
+    throw new WorkerRefusal('worker_steer_unconfirmed', message)
+  }
+
+  private async recordSteerOutcome(admissionRequestId: AgentTeamRequestId,
+    outcome: AgentTeamWorkerSteerStoredOutcome): Promise<void> {
+    if (this.steerPersistenceClosed) {
+      throw new WorkerRefusal('worker_steer_unconfirmed', `Steer '${admissionRequestId}' could not be recorded before `
+        + 'the Host closed its storage; its outcome is unconfirmed.')
     }
-    if (!this.sessions.has(sessionId)) {
-      throw new WorkerRefusal('worker_steer_no_active_turn', `Worker '${workerRef}' holds no live engine session any more, so there is `
-        + 'no turn to add to.')
+    try {
+      await this.trackWrite(this.deps.recordSteerRecorded({ admissionRequestId, outcome }))
+    } catch {
+      throw new WorkerRefusal('worker_steer_unconfirmed', `Steer '${admissionRequestId}' may have reached the engine, but `
+        + 'its outcome could not be recorded; it will not be sent again automatically.')
     }
-    const steer = this.sessions.get(sessionId)
-    if (steer === undefined) {
-      throw new WorkerRefusal('worker_steer_unsupported', `Worker '${workerRef}' runs on an engine session that exposes no same-turn `
-        + 'control, so this Team cannot add an instruction to it.')
+  }
+
+  /** Admit one steer before its native side effect, but never after unloading closes persistence. */
+  private admitSteer(write: AgentTeamWorkerSteerAdmissionWrite): Promise<AgentTeamWorkerSteerAdmission> {
+    if (this.steerPersistenceClosed) {
+      return Promise.reject(new WorkerRefusal('worker_unavailable',
+        'The Team began unloading before the steer could be admitted durably; nothing was delivered.'))
     }
-    const outcome = await steer(instruction, requestId)
-    if (outcome.kind === 'unavailable') {
-      throw new WorkerRefusal('worker_steer_refused', `Worker '${workerRef}' did not take the instruction over (${outcome.code}): `
-        + boundedSteerReason(outcome.reason))
-    }
-    return Object.freeze({ workerRef, engine, state: 'submitted' as const,
-      ...(outcome.turnId === undefined ? {} : { turnId: outcome.turnId }),
-      runState: this.liveState(workerRef) ?? entry.run.state })
+    return this.trackWrite(this.deps.recordSteerAdmitted(write))
+  }
+
+  /** Keep one durable write visible to unload until it settles, whatever its verdict. */
+  private trackWrite<T>(write: Promise<T>): Promise<T> {
+    const tracked = write.then(() => undefined, () => undefined)
+    this.writes.add(tracked)
+    void tracked.finally(() => { this.writes.delete(tracked) })
+    return write
   }
 
   /** Refuse a steer by anyone but the Member who delegated the run. */
@@ -600,10 +1099,20 @@ export class WorkerRegistry {
     // A start still writing its opening record is not in `runs` yet, so the
     // request is made twice: once now, and once after those writes land.
     this.requestStops()
-    // Let starts that are already opening reach their own rollback first: a late
-    // handle must be disposed while the providers are still registered.
-    const opening = [...this.starting.values()].map(start => start.started)
+    // A continuation's history read or opening-record write is an admission
+    // boundary too. Wait those promises with ordinary starts so every late
+    // handle is disposed while its provider is still registered and no durable
+    // opening or ending is written after this Host closes storage.
+    const opening = [
+      ...[...this.starting.values()].map(start => start.started),
+      ...this.continuationOpenings.values(),
+      ...[...this.steeringByRequest.values()].map(pending => pending.outcome),
+      ...this.steerCalls,
+    ]
     await within(Promise.allSettled(opening), WORKER_SETTLE_DEADLINE_MS)
+    // A steer call that outlasted the wait is left unconfirmed: from here no
+    // later outcome may begin a write before storage closes below.
+    this.steerPersistenceClosed = true
     this.requestStops()
     // A start that lands after this snapshot is sealed by `open` itself: it opens
     // no engine, so it needs no disposal here.
@@ -612,8 +1121,7 @@ export class WorkerRegistry {
       if (entry.run.state !== 'running' || entry.sealed) continue
       const activation = entry.activation
       if (activation !== undefined) {
-        const disposal = activation.dispose()
-        entry.stopDisposal ??= disposal
+        const disposal = entry.stopDisposal ??= activation.dispose()
         void disposal.catch(() => {})
       }
       const ended = await within(entry.terminated.promise.then(() => true), WORKER_SETTLE_DEADLINE_MS)
@@ -653,8 +1161,7 @@ export class WorkerRegistry {
     entry.startup.abort()
     const activation = entry.activation
     if (activation !== undefined) {
-      const disposal = activation.dispose()
-      entry.stopDisposal ??= disposal
+      const disposal = entry.stopDisposal ??= activation.dispose()
       // The result handler awaits this same promise for its verdict; a natural
       // ending that landed first does not need to surface it a second time.
       void disposal.catch(() => {})
@@ -679,7 +1186,7 @@ export class WorkerRegistry {
    * real state.
    */
   private async finish(entry: RunEntry, result: { readonly output: readonly { readonly type: string; readonly text?: string | undefined }[]
-    readonly stopReason: SubagentStopReason; readonly diagnostic?: string | undefined }, nativeSessionId: string): Promise<void> {
+    readonly stopReason: SubagentStopReason; readonly diagnostic?: string | undefined }): Promise<void> {
     if (entry.sealed) {
       entry.terminated.resolve()
       return
@@ -690,10 +1197,11 @@ export class WorkerRegistry {
     let diagnostic = result.stopReason === 'completed' || typeof result.diagnostic !== 'string' ? undefined : result.diagnostic
     // The engine opened a session here, so a failure is either the turn itself or
     // the cleanup that followed it — never a start that never happened.
+    const cleanupUnconfirmed = diagnostic?.includes(WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC) === true
     let stage: AgentTeamWorkerStage | undefined = state === 'failed'
-      ? diagnostic === WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC ? 'dispose' : 'turn'
+      ? cleanupUnconfirmed ? 'dispose' : 'turn'
       : undefined
-    if (diagnostic === WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC) entry.cleanupUnconfirmed = true
+    if (cleanupUnconfirmed) entry.cleanupUnconfirmed = true
     if (state === 'stopped' && entry.stopping && await this.disposalFailed(entry)) {
       state = 'failed'
       stage = 'dispose'
@@ -708,8 +1216,10 @@ export class WorkerRegistry {
     // this write leaves nothing behind to collect.
     const anchors = workerAnchorsOf(result)
     await this.settle(entry, state, {
-      nativeSessionId,
+      ...(anchors?.nativeSessionId === undefined ? {} : { nativeSessionId: anchors.nativeSessionId }),
       ...(anchors?.nativeTurnId === undefined ? {} : { nativeTurnId: anchors.nativeTurnId }),
+      ...(anchors?.nativeTurnIds === undefined ? {} : { nativeTurnIds: anchors.nativeTurnIds }),
+      ...(anchors?.nativeInputIds === undefined ? {} : { nativeInputIds: anchors.nativeInputIds }),
       ...(anchors?.nativeStorage === undefined ? {} : { nativeStorage: anchors.nativeStorage }),
       ...(stage === undefined ? {} : { stage }),
       ...(output === undefined ? {} : { output }),
@@ -718,7 +1228,7 @@ export class WorkerRegistry {
   }
 
   /** Decide the ending of a run whose engine never published: a cancelled start is a stop, everything else its real failure. */
-  private async finishFromStartFailure(entry: RunEntry, error: unknown): Promise<void> {
+  private async finishFromStartFailure(entry: RunEntry, error: unknown, stage?: AgentTeamWorkerStage): Promise<void> {
     if (entry.sealed) {
       entry.terminated.resolve()
       return
@@ -733,15 +1243,19 @@ export class WorkerRegistry {
     // The manager can reject with the abort reason after rolling back a start it
     // owns; the engine may have opened, so a stop is not confirmed from that alone.
     const uncertain = entry.stopping && aborted
+    if (uncertain) entry.cleanupUnconfirmed = true
     // The ending carries no native identity — a start that failed this way is
     // never handed one — so it names the stage it came apart in. A read can then
     // say the record holds no native session instead of guessing one back out of
     // the sentence, and it never claims the engine opened nothing.
+    const failureStage = uncertain ? { stage: 'dispose' as const }
+      : stage !== undefined ? { stage }
+        : error instanceof WorkerFailure ? { stage: error.stage } : {}
     await this.settle(entry, 'failed', {
-      ...(error instanceof WorkerFailure ? { stage: error.stage } : {}),
+      ...failureStage,
       diagnostic: uncertain
         ? `${diagnostic} The stop was requested while the Worker was starting, but the Host could not confirm `
-          + 'the engine stopped. Check the engine\'s process before starting another task.'
+          + `the engine stopped. ${WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC}`
         : diagnostic,
     })?.catch(() => {})
   }
@@ -758,6 +1272,23 @@ export class WorkerRegistry {
     }
   }
 
+  /** Dispose an activation this execution may not keep, preserving a cleanup failure as its own verdict. */
+  private async discardActivationBeforeStart(entry: RunEntry, activation: SubagentActivation,
+    reason: unknown): Promise<never> {
+    const disposal = entry.stopDisposal ??= activation.dispose()
+    void activation.result.catch(() => {})
+    const cleanupFailure = await disposal.then(() => undefined, (error: unknown) => error)
+    this.sessions.delete(activation.childId)
+    if (cleanupFailure !== undefined) {
+      entry.cleanupUnconfirmed = true
+      throw new WorkerFailure('dispose', 'unknown', { cause: new AggregateError([
+        reason instanceof Error ? reason : new Error(String(reason)),
+        cleanupFailure,
+      ]) })
+    }
+    throw reason
+  }
+
   /**
    * Record one run's ending: the live view first, so the run stops reading as
    * live immediately, then the durable fact. A failed write leaves the record
@@ -766,6 +1297,8 @@ export class WorkerRegistry {
   private settle(entry: RunEntry, state: Exclude<AgentTeamWorkerRun['state'], 'running' | 'unconfirmed'>, facts: {
     readonly nativeSessionId?: string | undefined
     readonly nativeTurnId?: string | undefined
+    readonly nativeTurnIds?: readonly string[] | undefined
+    readonly nativeInputIds?: readonly string[] | undefined
     readonly nativeStorage?: string | undefined
     readonly stage?: AgentTeamWorkerStage | undefined
     readonly output?: string | undefined
@@ -784,6 +1317,8 @@ export class WorkerRegistry {
     const anchors = {
       ...facts.nativeSessionId === undefined ? {} : { nativeSessionId: facts.nativeSessionId },
       ...facts.nativeTurnId === undefined ? {} : { nativeTurnId: facts.nativeTurnId },
+      ...facts.nativeTurnIds === undefined ? {} : { nativeTurnIds: Object.freeze([...facts.nativeTurnIds].slice(-WORKER_NATIVE_ANCHOR_LIMIT)) },
+      ...facts.nativeInputIds === undefined ? {} : { nativeInputIds: Object.freeze([...facts.nativeInputIds].slice(-WORKER_NATIVE_ANCHOR_LIMIT)) },
       ...facts.nativeStorage === undefined ? {} : { nativeStorage: facts.nativeStorage },
       ...facts.stage === undefined ? {} : { stage: facts.stage },
     }

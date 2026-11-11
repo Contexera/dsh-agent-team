@@ -4,6 +4,7 @@ import type {
   AgentTeamAgentMember,
   AgentTeamProject,
   AgentTeamProjectRef,
+  AgentTeamRequestId,
   AgentTeamContextCheckpointRef,
   AgentTeamHostActor,
   AgentTeamOperationBase,
@@ -35,7 +36,11 @@ import type {
   AgentTeamOwnerActivity,
   AgentTeamReminderRef,
 } from "./entities.ts"
-import type { AgentTeamCreateSubscriptionRequestIntent, AgentTeamSubscriptionRequestIntent } from "./requests-results.ts"
+import type {
+  AgentTeamCreateSubscriptionRequestIntent,
+  AgentTeamSubscriptionRequestIntent,
+  AgentTeamWorkerSteerStoredOutcome,
+} from "./requests-results.ts"
 import type { SubscriptionEvent } from "../subscriptions.ts"
 
 /** The first durable operation in every Agent Team ledger. */
@@ -565,6 +570,38 @@ export interface AgentTeamWorkerSettledOperation extends AgentTeamOperationBase 
   }
 }
 
+/**
+ * Durable admission of one steer request id before any native input is sent.
+ * An alias binds a fresh request id to the canonical request that already
+ * submitted the same instruction, so a same-text retry never reaches the
+ * engine again. These records are private and publish no Thread fact.
+ */
+export interface AgentTeamWorkerSteerAdmittedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/worker-steer-admitted'
+  readonly data: {
+    readonly requestId: AgentTeamRequestId
+    readonly workspaceId: WorkspaceId
+    readonly workerRef: AgentTeamWorkerRef
+    readonly instruction: string
+    readonly initiatedBy: AgentTeamMemberId
+    readonly continuedFrom?: AgentTeamWorkerRef | undefined
+    readonly aliasOf?: AgentTeamRequestId | undefined
+  }
+}
+
+/**
+ * The one durable outcome of an admitted steer request. Its own envelope uses
+ * an internal request id; `admissionRequestId` names the caller's id. A
+ * submitted result must be this record before the Host can report success.
+ */
+export interface AgentTeamWorkerSteerRecordedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/worker-steer-recorded'
+  readonly data: {
+    readonly admissionRequestId: AgentTeamRequestId
+    readonly outcome: AgentTeamWorkerSteerStoredOutcome
+  }
+}
+
 /** Durable creation of one Project subscription, with the Main stream line that announces it. */
 export interface AgentTeamSubscriptionCreatedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/subscription-created'
@@ -742,6 +779,8 @@ export type AgentTeamOperation =
   | AgentTeamDmSentOperation
   | AgentTeamWorkerStartedOperation
   | AgentTeamWorkerSettledOperation
+  | AgentTeamWorkerSteerAdmittedOperation
+  | AgentTeamWorkerSteerRecordedOperation
   | AgentTeamSubscriptionCreatedOperation
   | AgentTeamSubscriptionUpdatedOperation
   | AgentTeamSubscriptionPausedOperation

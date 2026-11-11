@@ -28,7 +28,10 @@ Client 使用以下 Host 接口：
 - `loadSubscriptions` / `loadSubscriptionLogs` / `testSubscriptionDraft` / `createSubscription` / `updateSubscription` / `pauseSubscription` / `resumeSubscription` / `deleteSubscription` / `resetSubscriptionWebhook` / `loadSubscriptionDeliveries` / `replaySubscriptionDelivery` 支撑 Project 的订阅标签页：所有 durable 写入都不做乐观更新，`保存` 要等这一份表单在 Host 试运行通过，webhook 地址只显示一次，重放可选当前版本或接收时版本。
 - `archiveMember`：把 Agent 从所有面收起，会话日志与私有记忆保留（暂无恢复入口）。
 - Human 资料和头像编辑由 Host 检查设置版本。设置页在确认保存后重读；保存结果不确定时，须先重读再修改。
+Team 设置通过 `toolCatalog` 发现名称，并经公开 settings Remote 仅读写 Host row 的 `extraToolGrants`。已保存名单、草稿与目录独立于 Human 身份。保存使用读取的 revision；版本冲突保留草稿，要求核对最新名单。重读期间不能取消回旧值，不可读的成功响应也不冒充保存成功。目录或身份失败不阻碍撤销。详见[设置契约](../../docs/frontend-design/components.zh.md#团队设置页团队)。
 Host Remote 仍提供 `threadObservations` 和 `changeAttention`；两个 Thread 面都渲染关注控件，观察历史仍不作渲染。`changes` 是按 scope 订阅的流式 Remote，通过 Harness `ctx.remote.$stream()` 消费。每个页面内同 scope 共享一个逻辑订阅，Harness 将其复用到该页面的共享 WebSocket，因此多个 Team 页面不会因通知长期占用普通 HTTP 连接。每次开场或重连基线都触发重新读取 Host，包括版本未变化的情况；最后一个订阅者离开时取消该 scope。打开 Thread 时并行完成首次读取，允许基线到达后补读，但私有已读确认不会形成共享通知循环。scope 与恢复契约见[架构文档](../../docs/architecture/host-authority.zh.md)。
+
+Worker 诊断的布局和展开报告的浏览器检查见[组件契约](../../docs/frontend-design/components.zh.md#agent-编辑器里的-worker-诊断)。
 
 浏览器持久化 Team mode、当前 Workspace，以及最后选中的 Project 或 Thread，返回 Team 时会恢复之前的位置。Attention、未读数量、revision、observations 和 Thread facts 始终由 Host 管理。持久化操作提交或拒绝后，Client 会重新读取 Host 投影。
 

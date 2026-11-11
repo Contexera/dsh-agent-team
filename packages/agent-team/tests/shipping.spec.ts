@@ -205,7 +205,7 @@ describe('Agent Team shipping contract', () => {
     // volatile node, so a write lands without a remount and the settings
     // service can derive it at all.
     const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
-    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'sidebarOrder', 'wakeRecycle', 'webhook', 'worker'])
+    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'extraToolGrants', 'memberCompaction', 'name', 'sidebarOrder', 'wakeRecycle', 'webhook', 'worker'])
     expect(rowFields.wakeRecycle?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.wakeRecycle?.dict ?? {}).sort()).toEqual(['enabled', 'idleMs', 'minContextTokens'])
     expect(Object.values(rowFields.wakeRecycle?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
@@ -227,6 +227,10 @@ describe('Agent Team shipping contract', () => {
     expect(rowFields.webhook?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.webhook?.dict ?? {}).sort()).toEqual(['publicOrigin'])
     expect(rowFields.webhook?.dict?.publicOrigin?.meta.default).toBe('')
+    // Profile-wide extra tool names are one volatile leaf list: a save reaches
+    // running Hosts without a remount and the next Member turn reads it.
+    expect(rowFields.extraToolGrants?.meta.volatile).toBe(true)
+    expect(rowFields.extraToolGrants?.meta.default).toEqual([])
 
     expect(preset).toContain("name: '@contexera/dsh-agent-team/tools'")
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-tool-presentation'")

@@ -468,6 +468,107 @@ describe('readWorkerHistory (Claude)', () => {
     expect(JSON.stringify(read)).not.toContain('first refusal')
   })
 
+  it('deduplicates repeated turn metadata instead of dropping a later failure', async () => {
+    const sessionId = 'claude-session-many-assistants'
+    const turnId = 'prompt-uuid-many-assistants'
+    const path = await claudeRecordPath(sessionId)
+    await writeFile(path, queue(sessionId) + prompt(sessionId, turnId)
+      + assistant(sessionId, { uuid: 'assistant-1' })
+      + assistant(sessionId, { uuid: 'assistant-2' })
+      + assistant(sessionId, { uuid: 'assistant-3' })
+      + apiError(sessionId, 'failure after three model steps'))
+    const read = await readWorkerHistory({ engine: 'claude', nativeSessionId: sessionId,
+      nativeTurnId: turnId, nativeStorage: path })
+    expect(read.kind).toBe('read')
+    if (read.kind !== 'read') return
+    expect(read.fragments.map(fragment => fragment.kind)).toEqual(['session', 'turn', 'failure'])
+    expect(read.fragments.at(-1)?.text).toBe('Native turn failed: failure after three model steps')
+    expect(read.truncated).toBe(false)
+  })
+
+  it('keeps the failure in a full report and marks what it displaced as truncated', async () => {
+    const sessionId = 'claude-session-overflow'
+    const turnId = 'prompt-uuid-overflow'
+    const path = await claudeRecordPath(sessionId)
+    await writeFile(path, queue(sessionId) + prompt(sessionId, turnId)
+      + ['one', 'two', 'three', 'four'].map((model, index) =>
+        assistant(sessionId, { uuid: `assistant-${index}`, requestedModel: model })).join('')
+      + apiError(sessionId, 'the retained failure'))
+    const read = await readWorkerHistory({ engine: 'claude', nativeSessionId: sessionId,
+      nativeTurnId: turnId, nativeStorage: path })
+    expect(read.kind).toBe('read')
+    if (read.kind !== 'read') return
+    expect(read.fragments.length).toBe(WORKER_HISTORY_MAX_FRAGMENTS)
+    expect(read.fragments.at(-1)?.text).toBe('Native turn failed: the retained failure')
+    expect(read.truncated).toBe(true)
+  })
+
+  it('reads only the Worker-owned follow-up turns before an external continuation', async () => {
+    const sessionId = 'claude-session-owned-followups'
+    const turnId = 'prompt-uuid-initial'
+    const steerId = 'steer-uuid-owned'
+    const path = await claudeRecordPath(sessionId)
+    const steerPrompt = prompt(sessionId, steerId, {
+      parentUuid: 'assistant-1', promptId: 'prompt-steer',
+      turnPosition: { promptIndex: 1, turnIndex: 2 },
+    })
+    const external = prompt(sessionId, 'prompt-uuid-external', {
+      parentUuid: 'assistant-2', promptId: 'prompt-external',
+      message: { role: 'user', content: 'continue it outside the Worker' },
+      turnPosition: { promptIndex: 2, turnIndex: 3 },
+    })
+    await writeFile(path, queue(sessionId) + prompt(sessionId, turnId)
+      + assistant(sessionId, { uuid: 'assistant-1', requestedModel: 'initial-model' })
+      + steerPrompt
+      + assistant(sessionId, { uuid: 'assistant-2', requestedModel: 'steer-model' })
+      + apiError(sessionId, 'failure owned by the steer turn')
+      + external
+      + assistant(sessionId, { uuid: 'assistant-3', requestedModel: 'external-model' })
+      + apiError(sessionId, 'failure after the Worker ended'))
+    const read = await readWorkerHistory({ engine: 'claude', nativeSessionId: sessionId,
+      nativeTurnId: turnId, nativeInputIds: [turnId, steerId], nativeStorage: path })
+    expect(read.kind).toBe('read')
+    if (read.kind !== 'read') return
+    expect(read.fragments.map(fragment => fragment.text)).toEqual(expect.arrayContaining([
+      `Native turn ${turnId}: model initial-model · effort high`,
+      `Native turn ${steerId}: model steer-model · effort high`,
+      'Native turn failed: failure owned by the steer turn',
+    ]))
+    expect(JSON.stringify(read)).not.toContain('external-model')
+    expect(JSON.stringify(read)).not.toContain('failure after the Worker ended')
+  })
+
+  it('skips the predecessor prefix when a continued execution owns a later prompt', async () => {
+    const sessionId = 'claude-session-resumed'
+    const previousId = 'prompt-uuid-previous'
+    const resumedId = 'prompt-uuid-resumed'
+    const externalId = 'prompt-uuid-after-resume'
+    const path = await claudeRecordPath(sessionId)
+    await writeFile(path, queue(sessionId)
+      + prompt(sessionId, previousId)
+      + assistant(sessionId, { uuid: 'assistant-previous', requestedModel: 'previous-model' })
+      + apiError(sessionId, 'failure owned by the previous execution')
+      + prompt(sessionId, resumedId, {
+        parentUuid: 'assistant-previous', promptId: 'prompt-resumed',
+        turnPosition: { promptIndex: 1, turnIndex: 2 },
+      })
+      + assistant(sessionId, { uuid: 'assistant-resumed', requestedModel: 'resumed-model' })
+      + prompt(sessionId, externalId, {
+        parentUuid: 'assistant-resumed', promptId: 'prompt-external',
+        turnPosition: { promptIndex: 2, turnIndex: 3 },
+      })
+      + assistant(sessionId, { uuid: 'assistant-external', requestedModel: 'external-model' }))
+    const read = await readWorkerHistory({ engine: 'claude', nativeSessionId: sessionId,
+      nativeTurnId: resumedId, nativeInputIds: [resumedId], nativeStorage: path })
+    expect(read.kind).toBe('read')
+    if (read.kind !== 'read') return
+    expect(read.fragments.map(fragment => fragment.text)).toContain(
+      `Native turn ${resumedId}: model resumed-model · effort high`)
+    expect(JSON.stringify(read)).not.toContain('previous-model')
+    expect(JSON.stringify(read)).not.toContain('failure owned by the previous execution')
+    expect(JSON.stringify(read)).not.toContain('external-model')
+  })
+
   it('ignores an earlier turn and a subagent sidechain', async () => {
     const sessionId = 'claude-session-scope'
     const turnId = 'prompt-uuid-scope'

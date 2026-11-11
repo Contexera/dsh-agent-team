@@ -22,6 +22,14 @@ Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都�
 
 由 Agent Team 创建和管理的 Member。Member 在某个 workspace 中创建。这个 workspace 就是 Member 创建记录所载之处。之后通过 Workspace Participation 加入更多 workspace。本轮 Member 仍只运行一个 live Session。它扎根于创建 workspace。按参与切分 Session 血统（每个 workspace 一条、可切换）是后续工作。普通 session 与 fork 不自动获得成员身份。
 
+## Worker Execution
+
+Team 拥有的一次原生 Codex 或 Claude 会话执行，以不可变的 `worker:` ref 标识。它记录发起 Member、Project、可选 Thread 与 Task、引擎、cwd、开始时刻、唯一终态、结果，以及 Host 观察到的原生 session、turn 与 input 锚点。Worker 不持有 Team 身份，不能代替发起者认领、验收或作答。
+
+steer 是送进同一原生会话的输入。执行运行期间，OAR 可以把它放进当前 turn、排队到下一 turn，或在 idle 会话上开启下一 turn；在全部已接受输入结束前，它仍只是同一条 Team 执行。回执只表示已提交，不表示模型读过，也不保证固定落在哪一轮。
+
+一条原生会话链上的最新执行干净结束后，steer 可以恢复该原生会话，建立一条新执行，并以 `continuedFrom` 指向前驱；前驱的终态记录永不改变。若一次续跑在建立自己的原生会话前失败，之后仍可从最近可读的前驱记录再次续跑，但这次失败执行仍是新记录的直接前驱。一个原生会话至多有一条运行中的 Team 执行，每条执行至多有一个直接后继；并发续跑会进入已建立的执行，不会分叉原生会话。
+
 ## Member Capabilities
 
 写在 Member 实体上的持久能力意图（可选 `capabilities` 字段：`tools.allow` 与 `skills.allow`），随全部 lifecycle operation 原样流转，Host restart 后重放恢复。它只是意图（intent）：allow-list 里的名字在 commit 时不做白名单校验。Harness 升级改名或删除工具，都不能让旧 ledger 失去重放能力。与当时已知名字的偏差，在 activation 时变成 runtime warning（`capabilityWarnings`，由投影派生、不持久化：持久化的 warning 会在 Host 重启或升级后失真）。

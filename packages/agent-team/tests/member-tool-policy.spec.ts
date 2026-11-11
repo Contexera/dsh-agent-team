@@ -1,4 +1,4 @@
-import { mkdir, realpath, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -8,13 +8,18 @@ import { ToolCallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { defineContentToolFixture, executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import {
+  defineContentToolFixture, executeModelToolFixture, executeToolFixture,
+} from '@deepseek-ai/dsh-tool-testkit'
+import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import { TeamService as OfficialTeamService } from '@deepseek-ai/dsh-experimental-agent-team'
 import * as OfficialTeamTools from '@deepseek-ai/dsh-experimental-tool-agent-team'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
+import { TOOL_AVAILABILITY_SECTION } from '../src/tool-availability-guidance.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
+import { cleanups as realHarnessCleanups, realHarness } from './helpers/member-harness.ts'
 
 const sharedCleanups: Array<() => Promise<void>> = []
 /** Per-test disposers (LLM adapter registrations, ordinary sessions): drained after each test. */
@@ -138,15 +143,41 @@ function waitForRunning(ctx: Context, agent: Agent): Promise<void> {
 }
 
 /**
+ * Replace only the live extra-tool list, the same seam the volatile settings
+ * row exposes. The Host reads it synchronously at each `turn/start`; no loader
+ * event is needed because this feature deliberately does not wake Member turns.
+ */
+function useExtraToolGrants(ctx: Context, initial: readonly string[]): (names: readonly string[]) => void {
+  const config = ctx.agentTeam.config as unknown as { extraToolGrants: { get(): readonly string[] } }
+  const original = config.extraToolGrants
+  testCleanups.push(() => { config.extraToolGrants = original })
+  const set = (names: readonly string[]): void => {
+    config.extraToolGrants = { get: () => [...names] }
+  }
+  set(initial)
+  return set
+}
+
+function stopResponse(text: string): StreamChunk[] {
+  return [
+    { type: 'block-start', index: 0, blockType: 'text' },
+    { type: 'text-delta', index: 0, text },
+    { type: 'block-end', index: 0, block: { type: 'text', text } },
+    { type: 'usage', usage: { inputTokens: 10, outputTokens: 4 } },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ]
+}
+
+/**
  * File-shared harness: booted once in `beforeAll`, torn down once in
  * `afterAll`. The ledger is append-only, so tests stay isolated through unique
  * handles/requestIds (see the invariant below); the LLM adapter is the one
  * per-test registration because `registerAdapter` throws on duplicate routes —
  * each test registers its own and `afterEach` disposes it.
  */
-function buildSharedHarness() {
+function buildSharedHarness(cleanups: Array<() => Promise<void>> = sharedCleanups) {
   return mountTeamMemberHost({
-    cleanups: sharedCleanups,
+    cleanups,
     prepare: provideQuietTokenMeter,
     // The distinguishable-tool fixture is a real module beside this spec,
     // where its own imports resolve.
@@ -343,6 +374,7 @@ describe('Agent Team member tool policy', () => {
       await ctx.plugin(OfficialTeamService)
       await ctx.plugin(OfficialTeamTools)
     }
+    expect(ctx.agentTeam.toolCatalogForClient({}).names).toContain('list_agents')
     const denied = await executeToolFixture(ctx, {
       signal: new AbortController().signal, agent, name: 'list_agents', arguments: {}, callId: ToolCallId('t20-foreign'),
     })
@@ -361,11 +393,17 @@ describe('Agent Team member tool policy', () => {
       expect([...AGENT_TEAM_TOOL_NAMES.filter(name => name !== 'team_worker'), 'ordinary_tool', 'spare_tool'].every(name => declared.has(name))).toBe(true)
       expect(declared.has('list_agents')).toBe(true)
     }
+    const memberAssembly = await agent.ctx.systemPrompt.assemble({ scope: agent })
+    const guidance = memberAssembly.sections.find(section => section.name === TOOL_AVAILABILITY_SECTION)?.text ?? ''
+    expect(guidance).toContain('`list_agents`')
+    expect(guidance).toContain('Do not invoke them while they are ungranted')
+    expect(guidance).toContain('Schema visibility is not execution permission')
     const ordinary = await ctx.agents.create({ sessionId: SessionId('t20-ordinary') })
     testCleanups.push(async () => { await ordinary.dispose() })
     expect(toolNames(ctx, ordinary.agent)).toContain('spawn_teammate')
     const assembly = await ordinary.agent.ctx.systemPrompt.assemble({ scope: ordinary.agent })
     expect(assembly.contexts.find(context => context.name === 'team:identity')?.text).toContain('Team Lead')
+    expect(assembly.sections.map(section => section.name)).not.toContain(TOOL_AVAILABILITY_SECTION)
     await ctx.agentTeam.suspendMember({ requestId: requestId('t20-suspend'), memberId: member.memberId })
     const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('t20-resume'), memberId: member.memberId })
     expect(resumed.status.availability).toBe('active')
@@ -380,6 +418,39 @@ describe('Agent Team member tool policy', () => {
     const resumedDeclared = new Set(adapter.requests.at(-1)?.tools?.map(tool => tool.name))
     expect([...AGENT_TEAM_TOOL_NAMES.filter(name => name !== 'team_worker'), 'ordinary_tool', 'spare_tool'].every(name => resumedDeclared.has(name))).toBe(true)
     expect(resumedDeclared.has('list_agents')).toBe(true)
+    const resumedAssembly = await resumedAgent.ctx.systemPrompt.assemble({ scope: resumedAgent })
+    expect(resumedAssembly.sections.find(section => section.name === TOOL_AVAILABILITY_SECTION)?.text).toContain('`list_agents`')
+  })
+
+  it('admits an official Agent-scoped tool behind a profile grant', async () => {
+    const cleanups: Array<() => Promise<void>> = []
+    testCleanups.push(async () => { for (const cleanup of cleanups) await cleanup() })
+    const { ctx, workspaceId } = await mountTeamMemberHost({
+      cleanups, prepare: provideQuietTokenMeter,
+      presetPlugins: [{ id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href }],
+    })
+    const adapter = new ScriptedAdapter()
+    ctx.llm.registerAdapter(['mock'], adapter)
+    ctx.provide('subagents', {})
+    await ctx.plugin(OfficialTeamService)
+    await ctx.plugin(OfficialTeamTools)
+    useExtraToolGrants(ctx, ['list_agents'])
+    const member = await addMember(ctx, workspaceId, 't20-official-grant')
+    const agent = liveAgent(ctx, member)
+
+    expect(ctx.agentTeam.toolCatalogForClient({}).names).toContain('list_agents')
+    const assembly = await agent.ctx.systemPrompt.assemble({ scope: agent })
+    const guidance = assembly.sections.find(section => section.name === TOOL_AVAILABILITY_SECTION)?.text ?? ''
+    expect(guidance).not.toContain('`list_agents`')
+    expect(guidance).toContain('`spawn_teammate`')
+    const signal = new AbortController().signal
+    const toolSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'mock', model: 'mock' }, signal })
+    testCleanups.push(() => { toolSet.dispose() })
+    const granted = await executeModelToolFixture(ctx, {
+      signal, agent, toolSet, name: 'list_agents', arguments: {}, callId: ToolCallId('t20-official-granted'),
+    })
+    expect(granted.isError, JSON.stringify(granted)).not.toBe(true)
+    expect(JSON.stringify(granted)).toContain('lead')
   })
 
   it('restricts each Member to its own allow-list without affecting siblings', async () => {
@@ -847,6 +918,780 @@ describe('Agent Team member tool policy', () => {
     await turnDone
     expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta'])
     ctx.agentTeam.validateLedger()
+  })
+})
+
+describe('profile extra tool-name grants', () => {
+  it('declares a granted global tool, executes it as the Member, and withdraws it on the next turn', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const body = vi.fn(async () => [{ type: 'text' as const, text: 'granted execution' }])
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't23_foreign', description: 'foreign', parameters: {}, execute: body,
+    })))
+    const setGrants = useExtraToolGrants(ctx, [])
+    const member = await addMember(ctx, workspaceId, 't23-granted')
+    const agent = liveAgent(ctx, member)
+
+    expect(toolNames(ctx, agent)).not.toContain('t23_foreign')
+    setGrants(['t23_foreign'])
+    const noAdmission = await executeToolFixture(ctx, {
+      signal: new AbortController().signal, callId: ToolCallId('t23-no-admission'),
+      name: 't23_foreign', arguments: {}, agent,
+    })
+    expect(noAdmission.isError).toBe(true)
+    expect(body).not.toHaveBeenCalled()
+
+    adapter.enqueue(toolCallResponse('t23-model-call', 't23_foreign', {}))
+    adapter.enqueue(stopResponse('granted run complete'))
+    const grantedIdle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'use the granted tool' }], source: { kind: 'user' } }))
+    await grantedIdle
+    expect(adapter.requests[0]?.tools?.map(tool => tool.name)).toContain('t23_foreign')
+    expect(body).toHaveBeenCalledTimes(1)
+
+    setGrants([])
+    adapter.enqueue(stopResponse('withdrawn'))
+    const withdrawnIdle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'run without it' }], source: { kind: 'user' } }))
+    await withdrawnIdle
+    expect(adapter.requests.at(-1)?.tools?.map(tool => tool.name)).not.toContain('t23_foreign')
+    const withdrawn = await executeToolFixture(ctx, {
+      signal: new AbortController().signal, callId: ToolCallId('t23-withdrawn'),
+      name: 't23_foreign', arguments: {}, agent,
+    })
+    expect(withdrawn.isError).toBe(true)
+  })
+
+  it('reopens a baseline name omitted by the Member allow-list without reopening the Worker switch', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const setGrants = useExtraToolGrants(ctx, [])
+    const member = await addMember(ctx, workspaceId, 't23b-reopen', {
+      tools: { allow: ['spare_tool'] },
+    })
+    const agent = liveAgent(ctx, member)
+    expect(toolNames(ctx, agent)).not.toContain('ordinary_tool')
+    expect(toolNames(ctx, agent)).not.toContain('team_worker')
+
+    setGrants(['ordinary_tool', 'team_worker', 'working_directory'])
+    adapter.enqueue(stopResponse('allow-list reopened'))
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'use the reopened tool' }], source: { kind: 'user' } }))
+    await idle
+    const declared = adapter.requests.at(-1)?.tools?.map(tool => tool.name) ?? []
+    expect(declared).toContain('ordinary_tool')
+    expect(declared).toContain('working_directory')
+    expect(declared).not.toContain('team_worker')
+
+    const signal = new AbortController().signal
+    const toolSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'mock', model: 'mock' }, signal })
+    testCleanups.push(() => { toolSet.dispose() })
+    const reopened = await executeModelToolFixture(ctx, {
+      signal, callId: ToolCallId('t23b-reopened'), name: 'ordinary_tool', arguments: {}, agent, toolSet,
+    })
+    expect(reopened.isError).not.toBe(true)
+  })
+
+  it('uses the same grant list after create and suspend/resume reactivation', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't23c_reactivated', description: 'reactivated', parameters: {},
+      execute: async () => [{ type: 'text', text: 'ok' }],
+    })))
+    useExtraToolGrants(ctx, ['t23c_reactivated'])
+    const member = await addMember(ctx, workspaceId, 't23c-reactivation')
+    expect(toolNames(ctx, liveAgent(ctx, member))).toContain('t23c_reactivated')
+
+    await ctx.agentTeam.suspendMember({ requestId: requestId('t23c-suspend'), memberId: member.memberId })
+    const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('t23c-resume'), memberId: member.memberId })
+    expect(resumed.status.availability).toBe('active')
+    const agent = liveAgent(ctx, member)
+    expect(toolNames(ctx, agent)).toContain('t23c_reactivated')
+
+    adapter.enqueue(stopResponse('resumed grant'))
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'continue' }], source: { kind: 'user' } }))
+    await idle
+    expect(adapter.requests.at(-1)?.tools?.map(tool => tool.name)).toContain('t23c_reactivated')
+  })
+
+  it('reapplies the profile grant to a swapped-in generation', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
+      const adapter = new ScriptedAdapter()
+      const host = await realHarness(adapter)
+      testCleanups.push(async () => {
+        for (const cleanup of realHarnessCleanups.splice(0)) await cleanup()
+      })
+      const { ctx, workspaceId, pressureState } = host
+      const body = vi.fn(async () => [{ type: 'text' as const, text: 'successor grant' }])
+      testCleanups.push(ctx.tools.register(defineContentToolFixture({
+        name: 't23d_successor', description: 'successor generation', parameters: {}, execute: body,
+      })))
+      useExtraToolGrants(ctx, ['t23d_successor'])
+      const project = await ctx.agentTeam.createProject({
+        requestId: requestId('t23d-project'), workspaceId, name: 'engineering', description: 'Generation swap',
+      })
+      const added = await ctx.agentTeam.addMember({
+        requestId: requestId('t23d-add'), workspaceId, handle: 't23d-generation',
+        description: 'Policy member', presetId: 'team-member',
+        projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' },
+      })
+      const member = {
+        memberId: added.status.member.memberId,
+        sessionId: added.status.member.sessionId,
+        model: { provider: 'mock' as const, model: 'mock' as const },
+        privateMemoryPath: added.status.member.privateMemoryPath,
+      }
+      const first = liveAgent(ctx, member)
+      expect(toolNames(ctx, first)).toContain('t23d_successor')
+      adapter.enqueue(stopResponse('first generation'))
+      const firstIdle = waitForIdle(ctx, first)
+      first.followup(createUserMessage({ content: [{ type: 'text', text: 'open the generation' }], source: { kind: 'user' } }))
+      await firstIdle
+
+      pressureState.bySession.set(member.sessionId, 130_000)
+      await vi.advanceTimersByTimeAsync(61 * 60_000)
+      adapter.enqueue(toolCallResponse('t23d-successor-call', 't23d_successor', {}))
+      adapter.enqueue(stopResponse('successor complete'))
+      await ctx.agentTeam.startThread({
+        kind: 'discussion', requestId: requestId('t23d-wake'), workspaceId,
+        projectRef: project.project.projectRef, body: '@t23d-generation continue here',
+      })
+      const successorId = await vi.waitFor(() => {
+        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === member.memberId)
+        if (current === undefined || current.member.sessionId === member.sessionId) throw new Error('swap not applied yet')
+        return current.member.sessionId
+      }, { timeout: 20_000 })
+      const successor = await vi.waitFor(() => {
+        const live = ctx.agents.get(successorId)
+        if (live === undefined) throw new Error('successor not live yet')
+        return live
+      }, { timeout: 20_000 })
+      // A new generation is idle before its wake arrives; wait for actual work first.
+      await vi.waitFor(() => {
+        expect(adapter.requests.some(request => request.sessionId === successorId)).toBe(true)
+      }, { timeout: 20_000 })
+      for (let index = 0; index < 1000 && successor.status !== 'idle'; index += 1) {
+        await vi.advanceTimersByTimeAsync(10)
+      }
+      expect(
+        successor.status,
+        `successor status; requests=${adapter.requests.map(request => request.sessionId).join(',')}`,
+      ).toBe('idle')
+
+      const successorRequests = adapter.requests.filter(request => request.sessionId === successorId)
+      expect(successorRequests).not.toHaveLength(0)
+      expect(successorRequests[0]?.tools?.map(tool => tool.name)).toContain('t23d_successor')
+      expect(body).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 60_000)
+
+  it('uses the latest grants for a second turn that starts without an idle boundary', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't24_next_turn', description: 'next turn', parameters: {}, execute: async () => [{ type: 'text', text: 'ok' }],
+    })))
+    const setGrants = useExtraToolGrants(ctx, [])
+    const member = await addMember(ctx, workspaceId, 't24-consecutive')
+    const agent = liveAgent(ctx, member)
+    const statuses: string[] = []
+    const observeStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
+      if (subject === agent) statuses.push(status)
+    })
+    testCleanups.push(() => { observeStatus() })
+
+    const firstRequest = Promise.withResolvers<void>()
+    const baseStream = adapter.stream.bind(adapter)
+    vi.spyOn(adapter, 'stream').mockImplementation(async function* (options) {
+      const requestNumber = adapter.requests.length + 1
+      if (requestNumber === 1) firstRequest.resolve()
+      yield* baseStream(options)
+    })
+    adapter.enqueue(stopResponse('first'))
+    adapter.enqueue(stopResponse('second'))
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'first' }], source: { kind: 'user' } }))
+    await firstRequest.promise
+    setGrants(['t24_next_turn'])
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'second' }], source: { kind: 'user' } }))
+    await idle
+
+    expect(adapter.requests).toHaveLength(2)
+    expect(adapter.requests[0]?.tools?.map(tool => tool.name)).not.toContain('t24_next_turn')
+    expect(adapter.requests[1]?.tools?.map(tool => tool.name)).toContain('t24_next_turn')
+    // Both turns ran under one continuous running phase; the queued next-turn
+    // message never materialized an idle boundary between them.
+    expect(statuses.filter(status => status === 'running')).toHaveLength(1)
+    expect(statuses.filter(status => status === 'idle')).toHaveLength(1)
+  })
+
+  it('does not let a delayed boundary apply overwrite the grants frozen by a new turn', async () => {
+    const adapter = new GatedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const executedA = vi.fn(async () => [{ type: 'text' as const, text: 'a' }])
+    const executedB = vi.fn(async () => [{ type: 'text' as const, text: 'b' }])
+    const executedC = vi.fn(async () => [{ type: 'text' as const, text: 'c' }])
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't32_frozen_a', description: 'frozen a', parameters: {}, execute: executedA,
+    })))
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't32_frozen_b', description: 'frozen b', parameters: {}, execute: executedB,
+    })))
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't32_frozen_c', description: 'frozen c', parameters: {}, execute: executedC,
+    })))
+    const setGrants = useExtraToolGrants(ctx, ['t32_frozen_a'])
+    const member = await addMember(ctx, workspaceId, 't32-frozen-turn')
+    const agent = liveAgent(ctx, member)
+    const service = ctx.agentTeam as unknown as { applyWorkerExposure(enabled: boolean): Promise<void> }
+    const config = ctx.agentTeam.config as unknown as { worker: { get(): { enabled: boolean } } }
+    const originalWorker = config.worker
+    testCleanups.push(() => { config.worker = originalWorker })
+    const currentWorker = config.worker.get()
+    config.worker = { get: () => ({ ...currentWorker, enabled: true }) }
+
+    const running = waitForRunning(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'hold the first turn' }], source: { kind: 'user' } }))
+    await running
+    const applying = service.applyWorkerExposure(true)
+    let scheduled = false
+    const observe = ctx.on('agent/status', ({ agent: subject, status }) => {
+      if (subject !== agent || status !== 'idle' || scheduled) return
+      scheduled = true
+      setGrants(['t32_frozen_b'])
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'start the frozen turn' }], source: { kind: 'user' } }))
+      // The new turn has already frozen B at its turn/start. A delayed boundary
+      // apply now reads C; it must not replace that turn's frozen list.
+      setGrants(['t32_frozen_c'])
+    })
+    testCleanups.push(() => { observe() })
+
+    adapter.enqueue(stopResponse('first turn complete'))
+    adapter.enqueue(toolCallResponse('t32-frozen-b', 't32_frozen_b', {}))
+    adapter.enqueue(stopResponse('second turn complete'))
+    adapter.release()
+    await vi.waitFor(() => {
+      expect(scheduled).toBe(true)
+      expect(adapter.requests).toHaveLength(4)
+    })
+    await applying
+
+    const frozenTurnRequest = adapter.requests[2]
+    expect(frozenTurnRequest?.tools?.map(tool => tool.name)).toContain('t32_frozen_b')
+    expect(frozenTurnRequest?.tools?.map(tool => tool.name)).not.toContain('t32_frozen_c')
+    expect(executedA).not.toHaveBeenCalled()
+    expect(executedB).toHaveBeenCalledTimes(1)
+    expect(executedC).not.toHaveBeenCalled()
+  })
+
+  it('does not let a delayed capability apply overwrite the grants frozen by a new turn', async () => {
+    const adapter = new GatedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const executedA = vi.fn(async () => [{ type: 'text' as const, text: 'a' }])
+    const executedB = vi.fn(async () => [{ type: 'text' as const, text: 'b' }])
+    const executedC = vi.fn(async () => [{ type: 'text' as const, text: 'c' }])
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't34_edit_a', description: 'edit a', parameters: {}, execute: executedA,
+    })))
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't34_edit_b', description: 'edit b', parameters: {}, execute: executedB,
+    })))
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't34_edit_c', description: 'edit c', parameters: {}, execute: executedC,
+    })))
+    const setGrants = useExtraToolGrants(ctx, ['t34_edit_a'])
+    const member = await addMember(ctx, workspaceId, 't34-edit-turn', { tools: { allow: ['ordinary_tool'] } })
+    const agent = liveAgent(ctx, member)
+
+    const running = waitForRunning(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'hold the first turn' }], source: { kind: 'user' } }))
+    await running
+    const editing = ctx.agentTeam.updateMember({
+      requestId: requestId('t34-edit'), memberId: member.memberId, handle: 't34-edit-turn',
+      description: 'Policy member', capabilities: { tools: { allow: ['spare_tool'] } },
+    })
+    let scheduled = false
+    const observe = ctx.on('agent/status', ({ agent: subject, status }) => {
+      if (subject !== agent || status !== 'idle' || scheduled) return
+      scheduled = true
+      setGrants(['t34_edit_b'])
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'start the frozen turn' }], source: { kind: 'user' } }))
+      // The capability apply may resume only after the new turn has frozen B.
+      // Its delayed grant read C must not replace B in that turn.
+      setGrants(['t34_edit_c'])
+    })
+    testCleanups.push(() => { observe() })
+
+    adapter.enqueue(stopResponse('first turn complete'))
+    adapter.enqueue(toolCallResponse('t34-edit-b', 't34_edit_b', {}))
+    adapter.enqueue(stopResponse('second turn complete'))
+    adapter.release()
+    await vi.waitFor(() => {
+      expect(scheduled).toBe(true)
+      expect(adapter.requests).toHaveLength(4)
+    })
+    const settled = await editing
+
+    const frozenTurnRequest = adapter.requests[2]
+    expect(frozenTurnRequest?.tools?.map(tool => tool.name)).toContain('t34_edit_b')
+    expect(frozenTurnRequest?.tools?.map(tool => tool.name)).not.toContain('t34_edit_c')
+    expect(executedA).not.toHaveBeenCalled()
+    expect(executedB).toHaveBeenCalledTimes(1)
+    expect(executedC).not.toHaveBeenCalled()
+    expect(settled.effect).toBe('applied')
+    expect(settled.status.member.capabilities?.tools?.allow).toEqual(['spare_tool'])
+  })
+
+  it.each(['capability', 'worker'] as const)('releases a pending %s boundary apply when the Host shuts down', async (kind) => {
+    const cleanups: Array<() => Promise<void>> = []
+    testCleanups.push(async () => {
+      for (const cleanup of cleanups.reverse()) await cleanup()
+    })
+    const host = await buildSharedHarness(cleanups)
+    const adapter = new GatedAdapter()
+    testCleanups.push(host.ctx.llm.registerAdapter(['mock'], adapter))
+    const member = await addMember(host.ctx, host.workspaceId, `t35-shutdown-${kind}`)
+    const agent = liveAgent(host.ctx, member)
+    const service = host.ctx.agentTeam as unknown as {
+      applyWorkerExposure(enabled: boolean): Promise<void>
+      memberRuntime: {
+        turnWaitResolvers: Set<unknown>
+        awaitTurnBoundary(active: unknown): Promise<string>
+      }
+    }
+    const boundaries = vi.spyOn(service.memberRuntime, 'awaitTurnBoundary')
+    const running = waitForRunning(host.ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'keep this request pending' }], source: { kind: 'user' } }))
+    await running
+    const applying = kind === 'worker'
+      ? service.applyWorkerExposure(false)
+      : host.ctx.agentTeam.updateMember({
+        requestId: requestId('t35-shutdown-edit'), memberId: member.memberId,
+        handle: `t35-shutdown-${kind}`, description: 'Changed while running', capabilities: { tools: { allow: ['spare_tool'] } },
+      })
+    let settled = false
+    let failure: unknown
+    const observed = applying.then(
+      () => { settled = true },
+      (error: unknown) => { failure = error; settled = true },
+    )
+    await vi.waitFor(() => expect(service.memberRuntime.turnWaitResolvers.size).toBe(1))
+    const disposing = host.teamFiber.dispose()
+    try {
+      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 1000 })
+      expect(failure).toBeUndefined()
+      expect(boundaries).toHaveBeenCalledTimes(1)
+    } finally {
+      adapter.release()
+      await observed
+      await disposing
+      boundaries.mockRestore()
+    }
+  })
+
+  it('keeps the selected registration’s when condition, Member identity, and step admission', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const activationAgents: Agent[] = []
+    const body = vi.fn(async () => [{ type: 'text' as const, text: 'admitted' }])
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't25_conditioned', description: 'conditioned', parameters: {}, execute: body,
+    }), {
+      when: ({ agent }) => {
+        activationAgents.push(agent)
+        return true
+      },
+    }))
+    const hiddenBody = vi.fn(async () => [{ type: 'text' as const, text: 'must not run' }])
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't25_hidden', description: 'hidden', parameters: {}, execute: hiddenBody,
+    }), { when: () => false }))
+    const guardedBody = vi.fn(async () => [{ type: 'text' as const, text: 'must not run' }])
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't25_pre_execute_denied', description: 'plugin guard', parameters: {}, execute: guardedBody,
+    })))
+    useExtraToolGrants(ctx, ['t25_conditioned', 't25_hidden', 't25_pre_execute_denied'])
+    const member = await addMember(ctx, workspaceId, 't25-admission')
+    const agent = liveAgent(ctx, member)
+    const preExecuteDeny = ctx.on('tools/pre-execute', async (execution, next) => {
+      if (execution.agent === agent && execution.name === 't25_pre_execute_denied') {
+        return { kind: 'deny' as const, reason: 'plugin-owned execution guard' }
+      }
+      return next()
+    })
+    testCleanups.push(() => { preExecuteDeny() })
+
+    adapter.enqueue(stopResponse('conditioned'))
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'prepare a step' }], source: { kind: 'user' } }))
+    await idle
+    const declared = adapter.requests.at(-1)?.tools?.map(tool => tool.name) ?? []
+    expect(declared).toContain('t25_conditioned')
+    expect(declared).toContain('t25_pre_execute_denied')
+    expect(declared).not.toContain('t25_hidden')
+    expect(activationAgents).toContain(agent)
+
+    const signal = new AbortController().signal
+    const toolSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'mock', model: 'mock' }, signal })
+    testCleanups.push(() => { toolSet.dispose() })
+    const admitted = await executeModelToolFixture(ctx, {
+      signal, callId: ToolCallId('t25-admitted'), name: 't25_conditioned', arguments: {}, agent, toolSet,
+    })
+    expect(admitted.isError).not.toBe(true)
+    expect(body).toHaveBeenCalledTimes(1)
+    let nested: Awaited<ReturnType<typeof executeToolFixture>> | undefined
+    const nestedCall = ctx.on('tools/pre-execute', async (execution, next) => {
+      if (execution.agent === agent && execution.name === 'ordinary_tool' && nested === undefined) {
+        nested = await executeToolFixture(ctx, {
+          signal, callId: ToolCallId('t25-nested'), name: 't25_conditioned', arguments: {}, agent,
+          parent: execution.token, toolSet,
+        })
+      }
+      return next()
+    })
+    testCleanups.push(() => { nestedCall() })
+    const outer = await executeModelToolFixture(ctx, {
+      signal, callId: ToolCallId('t25-outer'), name: 'ordinary_tool', arguments: {}, agent, toolSet,
+    })
+    expect(outer.isError).not.toBe(true)
+    expect(nested?.isError).not.toBe(true)
+    expect(body).toHaveBeenCalledTimes(2)
+    const hidden = await executeModelToolFixture(ctx, {
+      signal, callId: ToolCallId('t25-hidden'), name: 't25_hidden', arguments: {}, agent, toolSet,
+    })
+    expect(hidden.isError).toBe(true)
+    expect(hiddenBody).not.toHaveBeenCalled()
+    const guarded = await executeModelToolFixture(ctx, {
+      signal, callId: ToolCallId('t25-pre-execute'), name: 't25_pre_execute_denied', arguments: {}, agent, toolSet,
+    })
+    expect(guarded.isError).toBe(true)
+    expect(guardedBody).not.toHaveBeenCalled()
+
+    const ordinary = await ctx.agents.create({ sessionId: SessionId('t25-ordinary') })
+    testCleanups.push(async () => { await ordinary.dispose() })
+    const foreign = await executeModelToolFixture(ctx, {
+      signal, callId: ToolCallId('t25-foreign'), name: 't25_conditioned', arguments: {}, agent: ordinary.agent, toolSet,
+    })
+    expect(foreign.isError).toBe(true)
+    expect(body).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a nearer same-definition registration independent of a farther when:false', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const body = vi.fn(async () => [{ type: 'text' as const, text: 'near registration' }])
+    const definition = defineContentToolFixture({
+      name: 't25b_near_shadow', description: 'same definition near', parameters: {}, execute: body,
+    })
+    const far = ctx.tools.register(definition, { when: () => false })
+    testCleanups.push(() => { far() })
+    const setGrants = useExtraToolGrants(ctx, [])
+    const member = await addMember(ctx, workspaceId, 't25b-shadow')
+    const agent = liveAgent(ctx, member)
+    const whenAgents: Agent[] = []
+    const near = agent.ctx.tools.register(definition, {
+      when: ({ agent: subject }) => {
+        whenAgents.push(subject)
+        return true
+      },
+    })
+    testCleanups.push(() => { near() })
+    setGrants(['t25b_near_shadow'])
+
+    adapter.enqueue(stopResponse('near shadow'))
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'use the near registration' }], source: { kind: 'user' } }))
+    await idle
+    expect(adapter.requests.at(-1)?.tools?.map(tool => tool.name)).toContain('t25b_near_shadow')
+    expect(whenAgents).toContain(agent)
+
+    const signal = new AbortController().signal
+    const toolSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'mock', model: 'mock' }, signal })
+    testCleanups.push(() => { toolSet.dispose() })
+    const admitted = await executeModelToolFixture(ctx, {
+      signal, callId: ToolCallId('t25b-near'), name: 't25b_near_shadow', arguments: {}, agent, toolSet,
+    })
+    expect(admitted.isError).not.toBe(true)
+    expect(body).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['same', 'different'] as const)(
+    'invalidates step admission after a %s-object re-registration and admits the replacement next step',
+    async kind => {
+      const adapter = new ScriptedAdapter()
+      useAdapter(adapter)
+      const { ctx, workspaceId } = shared
+      const calls: string[] = []
+      const definition = defineContentToolFixture({
+        name: 't26_replaceable', description: 'replaceable', parameters: {},
+        execute: async () => {
+          calls.push('definition')
+          return [{ type: 'text', text: 'definition' }]
+        },
+      })
+      let unregister = ctx.tools.register(definition)
+      testCleanups.push(() => { unregister() })
+      useExtraToolGrants(ctx, ['t26_replaceable'])
+      const member = await addMember(ctx, workspaceId, `t26-${kind}`)
+      const agent = liveAgent(ctx, member)
+
+      adapter.enqueue(stopResponse('granted'))
+      const idle = waitForIdle(ctx, agent)
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'grant it' }], source: { kind: 'user' } }))
+      await idle
+      const signal = new AbortController().signal
+      const staleSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'mock', model: 'mock' }, signal })
+      testCleanups.push(() => { staleSet.dispose() })
+
+      unregister()
+      const replacement = kind === 'same' ? definition : defineContentToolFixture({
+        name: 't26_replaceable', description: 'replacement', parameters: {},
+        execute: async () => {
+          calls.push('replacement')
+          return [{ type: 'text', text: 'replacement' }]
+        },
+      })
+      unregister = ctx.tools.register(replacement)
+      const stale = await executeModelToolFixture(ctx, {
+        signal, callId: ToolCallId(`t26-stale-${kind}`), name: 't26_replaceable', arguments: {}, agent, toolSet: staleSet,
+      })
+      expect(stale.isError).toBe(true)
+      expect(calls).toEqual([])
+
+      const freshSet = await ctx.tools.resolve({ agent, modelSelection: { provider: 'mock', model: 'mock' }, signal })
+      testCleanups.push(() => { freshSet.dispose() })
+      const fresh = await executeModelToolFixture(ctx, {
+        signal, callId: ToolCallId(`t26-fresh-${kind}`), name: 't26_replaceable', arguments: {}, agent, toolSet: freshSet,
+      })
+      expect(fresh.isError).not.toBe(true)
+      expect(calls).toEqual([kind === 'same' ? 'definition' : 'replacement'])
+    },
+  )
+
+  it('materializes a selected name registered after turn start into the next step declaration', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const lateBody = vi.fn(async () => [{ type: 'text' as const, text: 'late executed' }])
+    useExtraToolGrants(ctx, ['t27_late'])
+    const member = await addMember(ctx, workspaceId, 't27-late-granted')
+    const agent = liveAgent(ctx, member)
+    const executed: string[] = []
+    const observeExecution = agent.ctx.on('tools/pre-execute', async (execution, next) => {
+      if (execution.agent === agent) executed.push(execution.name)
+      return next()
+    })
+    testCleanups.push(() => { observeExecution() })
+    let unregisterLate: (() => void) | undefined
+    const observe = agent.ctx.on('session/event', (session, event) => {
+      if (session !== agent.session || event.type !== 'turn/start' || unregisterLate !== undefined) return
+      unregisterLate = ctx.tools.register(defineContentToolFixture({
+        name: 't27_late', description: 'late', parameters: {}, execute: lateBody,
+      }))
+    })
+    testCleanups.push(() => {
+      observe()
+      unregisterLate?.()
+    })
+
+    adapter.enqueue(toolCallResponse('t27-first-step', 'ordinary_tool', {}))
+    adapter.enqueue(toolCallResponse('t27-late-step', 't27_late', {}))
+    adapter.enqueue(stopResponse('late complete'))
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'run two steps' }], source: { kind: 'user' } }))
+    await idle
+    expect(adapter.requests).toHaveLength(3)
+    expect(adapter.requests[0]?.tools?.map(tool => tool.name)).not.toContain('t27_late')
+    expect(adapter.requests[1]?.tools?.map(tool => tool.name)).toContain('t27_late')
+    expect(executed).toEqual(['ordinary_tool', 't27_late'])
+    expect(lateBody).toHaveBeenCalledTimes(1)
+  })
+
+  it('tightens to the no-grant baseline when a grant install fails, then retries the saved grant next turn', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't28_fragile', description: 'fragile', parameters: {}, execute: async () => [{ type: 'text', text: 'ok' }],
+    })))
+    useExtraToolGrants(ctx, ['t28_fragile'])
+    const member = await addMember(ctx, workspaceId, 't28-fallback')
+    const agent = liveAgent(ctx, member)
+    const originalRestrict = agent.ctx.tools.restrict.bind(agent.ctx.tools)
+    const restrict = vi.spyOn(agent.ctx.tools, 'restrict').mockImplementation((filter) => {
+      if (filter.allow?.includes('t28_fragile') === true) throw new Error('t28 grant install failed')
+      return originalRestrict(filter)
+    })
+
+    adapter.enqueue(stopResponse('fallback baseline'))
+    const fallbackIdle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'fallback' }], source: { kind: 'user' } }))
+    await fallbackIdle
+    expect(adapter.requests.at(-1)?.tools?.map(tool => tool.name)).not.toContain('t28_fragile')
+    expect(toolNames(ctx, agent)).toEqual(expect.arrayContaining([...MEMBER_TOOL_NAMES, 'ordinary_tool']))
+    restrict.mockRestore()
+
+    adapter.enqueue(stopResponse('retry'))
+    const retryIdle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'retry' }], source: { kind: 'user' } }))
+    await retryIdle
+    expect(adapter.requests.at(-1)?.tools?.map(tool => tool.name)).toContain('t28_fragile')
+  })
+
+  it('spends no model request when even the no-grant baseline cannot be established, then retries normally', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't29_retry', description: 'retry', parameters: {}, execute: async () => [{ type: 'text', text: 'ok' }],
+    })))
+    useExtraToolGrants(ctx, ['t29_retry'])
+    const member = await addMember(ctx, workspaceId, 't29-zero-request')
+    const agent = liveAgent(ctx, member)
+    const restrict = vi.spyOn(agent.ctx.tools, 'restrict').mockImplementation(() => {
+      throw new Error('t29 every restriction failed')
+    })
+
+    const blockedIdle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'must not reach the model' }], source: { kind: 'user' } }))
+    await blockedIdle
+    expect(adapter.requests).toHaveLength(0)
+    expect(agent.session.ownEvents().filter(event => event.type === 'turn/start')).toHaveLength(1)
+    expect(agent.session.ownEvents().filter(event => event.type === 'step/start')).toHaveLength(0)
+
+    restrict.mockRestore()
+    adapter.enqueue(stopResponse('recovered'))
+    const retryIdle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'retry normally' }], source: { kind: 'user' } }))
+    await retryIdle
+    expect(adapter.requests).toHaveLength(1)
+    expect(adapter.requests[0]?.tools?.map(tool => tool.name)).toContain('t29_retry')
+  })
+
+  it('refuses the step before a model request when its pre-step refresh cannot restore even the baseline', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const body = vi.fn(async () => [{ type: 'text' as const, text: 'must not execute' }])
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't33_refresh_fragile', description: 'fragile refresh', parameters: {}, execute: body,
+    })))
+    useExtraToolGrants(ctx, ['t33_refresh_fragile'])
+    const member = await addMember(ctx, workspaceId, 't33-refresh-failure')
+    const agent = liveAgent(ctx, member)
+    const originalRestrict = agent.ctx.tools.restrict.bind(agent.ctx.tools)
+    let restrictCalls = 0
+    const restrict = vi.spyOn(agent.ctx.tools, 'restrict').mockImplementation(filter => {
+      restrictCalls += 1
+      if (restrictCalls === 1) return originalRestrict(filter)
+      throw new Error('t33 refresh restriction failed')
+    })
+
+    try {
+      adapter.enqueue(toolCallResponse('t33-model', 't33_refresh_fragile', {}))
+      adapter.enqueue(stopResponse('must not reach the model'))
+      const idle = waitForIdle(ctx, agent)
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'refresh must fail closed' }], source: { kind: 'user' } }))
+      await idle
+
+      expect(restrictCalls).toBe(3)
+      expect(adapter.requests).toHaveLength(0)
+      expect(body).not.toHaveBeenCalled()
+      expect(agent.session.ownEvents().filter(event => event.type === 'step/start')).toHaveLength(0)
+      expect(agent.session.ownEvents().filter(event => event.type === 'turn/end').at(-1)?.data.reason.kind).toBe('blocked')
+    } finally {
+      restrict.mockRestore()
+    }
+  })
+
+  it('lists exact grant candidates outside activated baselines and protected controls', async () => {
+    const { ctx } = shared
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 'team_worker', description: 'not the Team switch', parameters: {}, execute: async () => [{ type: 'text', text: 'never' }],
+    })))
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't30_catalogued', description: 'catalogued', parameters: {}, execute: async () => [{ type: 'text', text: 'ok' }],
+    })))
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: 't30_not a grant name', description: 'registered with a space', parameters: {}, execute: async () => [{ type: 'text', text: 'never' }],
+    })))
+    const catalog = ctx.agentTeam.toolCatalogForClient({})
+    expect(catalog.names).toContain('t30_catalogued')
+    expect(catalog.names).toContain('t30_not a grant name')
+    expect(catalog.names).not.toContain('ordinary_tool')
+    expect(catalog.names).not.toContain('spare_tool')
+    expect(catalog.names).not.toContain('team_worker')
+    expect(catalog.names).not.toContain('working_directory')
+    for (const name of AGENT_TEAM_TOOL_NAMES) expect(catalog.names).not.toContain(name)
+    expect(catalog.names).toEqual([...catalog.names].sort())
+  })
+})
+
+describe('a production plugin behind a profile grant', () => {
+  it('resolves a production plugin’s relative target against the Member checkout', async () => {
+    const cleanups: Array<() => Promise<void>> = []
+    testCleanups.push(async () => {
+      for (const cleanup of cleanups.reverse()) await cleanup()
+    })
+    const host = await mountTeamMemberHost({
+      cleanups,
+      prepare: provideQuietTokenMeter,
+      presetPlugins: [{ id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href }],
+      workingDirectory: 'real',
+    })
+    const adapter = new ScriptedAdapter()
+    const disposeAdapter = host.ctx.llm.registerAdapter(['mock'], adapter)
+    testCleanups.push(() => { disposeAdapter() })
+    const member = await addMember(host.ctx, host.workspaceId, 't31-production-plugin')
+    const agent = liveAgent(host.ctx, member)
+    // The plugin is a real production package, mounted globally after Member
+    // activation: the next turn's grant has to expose the late registration.
+    const plugin = await host.ctx.plugin(ToolFs, {
+      read: false, readImage: false, write: true, edit: false, applyPatch: false,
+    })
+    testCleanups.push(async () => { await plugin.dispose() })
+    useExtraToolGrants(host.ctx, ['write'])
+    expect(host.ctx.agentTeam.toolCatalogForClient({}).names).toContain('write')
+
+    const checkout = join(host.root, 'checkout')
+    const target = 'pr83-production.txt'
+    const callers: Agent[] = []
+    const observe = host.ctx.on('tools/pre-execute', async (execution, next) => {
+      if (execution.name === 'write') callers.push(execution.agent!)
+      return next()
+    })
+    testCleanups.push(() => { observe() })
+    adapter.enqueue(toolCallResponse('t31-create', 'write', {
+      file_path: target,
+      content: 'written through the production plugin\n',
+    }))
+    adapter.enqueue(stopResponse('created'))
+    const idle = waitForIdle(host.ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'create the file' }], source: { kind: 'user' } }))
+    await idle
+
+    expect(adapter.requests[0]?.tools?.map(tool => tool.name)).toContain('write')
+    expect(callers).toEqual([agent])
+    expect(await realpath(host.ctx.workingDirectory.get(agent.session)!)).toBe(await realpath(checkout))
+    expect(await readFile(join(checkout, target), 'utf8')).toBe('written through the production plugin\n')
+    // This certifies one named production package, not the unknown plugin that
+    // originally motivated issue #82.
+    expect(String(ToolFs.name)).toBe('tool-fs')
   })
 })
 

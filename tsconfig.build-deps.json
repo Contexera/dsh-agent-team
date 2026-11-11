@@ -59,6 +59,9 @@
       "@contexera/dsh-agent-team/member-skills": [
         "./packages/agent-team/lib/types/member-skills.d.ts"
       ],
+      "@contexera/dsh-agent-team/member-tool-grants": [
+        "./packages/agent-team/lib/types/member-tool-grants.d.ts"
+      ],
       "@contexera/dsh-agent-team/tools": [
         "./packages/tool-agent-team/lib/types/index.d.ts"
       ],
