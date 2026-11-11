@@ -3,7 +3,9 @@
 [English](storage-and-delivery.md) | 中文
 
 ## Team ledger 存储路由
-Team Host 为 `agent_team` 自己持有 SQLite backend 与 `DomainFacility`，介质为 `$DSH_HOME/storages/agent_team.sqlite`；其余域保持 Host 的 JSON 默认路由。这里刻意不使用 `storage-domain` route override：开关 bundle 时修改该全局行会重建无关的 storage consumers，并可能让 Session controller 启动两次，造成 file-upload resolver 重复注册。
+Team Host 为 `agent_team` 和 `agent_team_subscriptions` 自己持有 SQLite backend 与 `DomainFacility`，介质为 `$DSH_HOME/storages/agent_team.sqlite`。无关的域保持 Host 的默认路由。这里刻意不使用 `storage-domain` route override：开关 bundle 时修改该全局行会重建无关的 storage consumers，并可能让 Session controller 启动两次，造成 file-upload resolver 重复注册。
+
+订阅单元写入 v5 格式，打开 v1–v4 时不改版本。首次实际修改会在同一事务升级版本，启动后的后台任务也可能发起该修改。ledger 单元的版本独立。升级前停止所有共用数据库的 Host 并备份。订阅单元升级后，旧构建会拒绝打开；回退须恢复备份，备份之后的写入会丢失。
 
 - 该后端是 vendored fork（MIT，上游 `dsh-storage-sqlite` 0.1.5-rc.2，见 `packages/agent-team/src/vendor/storage-sqlite/`），而非对上游包的依赖。DSH Desktop generation 安装器会删掉 `@deepseek-ai/*` 拷贝，而没有任何已发布 host closure 提供上游包，因此 loader 行若指名它会阻断启动（GitHub issue #28）。fork 保留上游 `sqlite` backend 名与 config 形状，既有介质无需迁移；上游包只保留为 devDependency，用作字节兼容 fixture 参照。三个检查锁住这一面：`packages/agent-team/tests/storage-sqlite-compat.spec.ts` 在真实 ledger descriptor 下证明双向可读，`shipping.spec.ts` 把全部可达运行时根钉在 host closure 内，`node scripts/verify-desktop-strip-boot.mjs` 对删包后的 generation 重放一次真实 Loader 启动。每次 DSH 兼容认证都要把 fork 与上游文件对一遍 diff。
 - 首次打开创建新的空 SQLite 介质；旧 `agent_team.json` 不被读取也不迁移，由使用者自行搬移或删除。

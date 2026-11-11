@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 
@@ -133,9 +133,8 @@ describe('attachment cache', () => {
     expect(stored.byteSize).toBe(7)
     expect(stored.path).toBe(join(root, id, 'report final.pdf'))
     const readBack = await readAttachment(root, id)
-    expect(readBack?.name).toBe('report final.pdf')
-    expect(readBack?.mediaType).toBe('application/pdf')
-    expect(readBack?.bytes.toString('utf8')).toBe('payload')
+    expect(readBack).toMatchObject({ kind: 'found', attachment: { name: 'report final.pdf', mediaType: 'application/pdf' } })
+    if (readBack.kind === 'found') expect(readBack.attachment.bytes.toString('utf8')).toBe('payload')
     expect(await readFile(join(root, id, 'meta.json'), 'utf8')).toContain('uploadedAt')
   })
 
@@ -146,8 +145,8 @@ describe('attachment cache', () => {
     const stored = await writeAttachment(root, id, 'meta.json', 'application/json', Buffer.from('payload'))
     expect(stored.name).toBe('_meta.json')
     const readBack = await readAttachment(root, id)
-    expect(readBack?.name).toBe('_meta.json')
-    expect(readBack?.bytes.toString('utf8')).toBe('payload')
+    expect(readBack).toMatchObject({ kind: 'found', attachment: { name: '_meta.json' } })
+    if (readBack.kind === 'found') expect(readBack.attachment.bytes.toString('utf8')).toBe('payload')
     expect(JSON.parse(await readFile(join(root, id, 'meta.json'), 'utf8'))).toMatchObject({ name: '_meta.json' })
   })
 
@@ -158,8 +157,8 @@ describe('attachment cache', () => {
     const stored = await writeAttachment(root, id, 'aux.txt', 'text/plain', Buffer.from('payload'))
     expect(stored.name).toBe('_aux.txt')
     const readBack = await readAttachment(root, id)
-    expect(readBack?.name).toBe('_aux.txt')
-    expect(readBack?.bytes.toString('utf8')).toBe('payload')
+    expect(readBack).toMatchObject({ kind: 'found', attachment: { name: '_aux.txt' } })
+    if (readBack.kind === 'found') expect(readBack.attachment.bytes.toString('utf8')).toBe('payload')
   })
 
   it('sweeps orphans after 24h and referenced uploads only after 72h', async () => {
@@ -181,8 +180,8 @@ describe('attachment cache', () => {
     // 24h and `fresh` is past its 72h consumption window; `old` survives.
     const removed = await sweepAttachmentCache(root, new Set([old, fresh]), now)
     expect([...removed].sort()).toEqual([orphan, fresh].sort())
-    await expect(readAttachment(root, old)).resolves.toBeDefined()
-    await expect(readAttachment(root, fresh)).resolves.toBeUndefined()
+    await expect(readAttachment(root, old)).resolves.toMatchObject({ kind: 'found' })
+    await expect(readAttachment(root, fresh)).resolves.toEqual({ kind: 'missing' })
     // A later sweep with `old` still referenced leaves it alone.
     const later = await sweepAttachmentCache(root, new Set([old]), now + 60 * 60 * 1000)
     expect(later).toEqual([])
@@ -191,9 +190,8 @@ describe('attachment cache', () => {
 })
 
 describe('Agent Team attachment remotes', () => {
-  it('uploads, reads back, and rejects oversized or empty payloads', async () => {
+  it('reads valid attachments and keeps invalid, unreadable, and missing entries distinct', async () => {
     const { ctx } = await harness()
-    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const uploaded = await ctx.agentTeam.putAttachment({
       requestId: requestId('put-upload'), workspaceId: alpha,
       name: 'design.png', mediaType: 'image/png', bytesBase64: Buffer.from('png-bytes').toString('base64'),
@@ -218,15 +216,55 @@ describe('Agent Team attachment remotes', () => {
     const missing = newAttachmentId()
     await expect(ctx.agentTeam.getAttachment({ attachmentId: missing }))
       .rejects.toMatchObject({ name: 'RemoteError', code: 'team/attachment-not-found', details: { attachmentId: missing } })
-    // An entry whose payload never landed is equally settled: same code, so
-    // the Client cannot tell the two apart — and does not need to.
-    const invalid = newAttachmentId()
-    await mkdir(join(attachmentsRoot(), invalid), { recursive: true })
-    await writeFile(join(attachmentsRoot(), invalid, 'meta.json'),
-      JSON.stringify({ name: 'half.png', mediaType: 'image/png', uploadedAt: new Date().toISOString() }), 'utf8')
-    await expect(ctx.agentTeam.getAttachment({ attachmentId: invalid }))
-      .rejects.toMatchObject({ name: 'RemoteError', code: 'team/attachment-not-found', details: { attachmentId: invalid } })
-    void project
+
+    // Invalid ids cannot escape the cache and are not reported as a confirmed miss.
+    for (const invalidId of ['../outside', '/tmp/outside', 'nested/file', 'a\\b', 'meta.json', 'not-a-uuid', 'CON', 'con.txt', 'report.', 'report ', '.', '..']) {
+      const error = await ctx.agentTeam.getAttachment({ attachmentId: invalidId as never }).catch(failure => failure)
+      expect(error).toBeInstanceOf(Error)
+      expect(error).not.toMatchObject({ code: 'team/attachment-not-found' })
+    }
+
+    // An existing directory without a sidecar is incomplete, not a confirmed miss.
+    const incomplete = newAttachmentId()
+    await mkdir(join(attachmentsRoot(), incomplete), { recursive: true })
+    await writeFile(join(attachmentsRoot(), incomplete, 'shot.png'), 'png')
+    await expect(ctx.agentTeam.getAttachment({ attachmentId: incomplete }))
+      .rejects.toMatchObject({ name: 'AttachmentCacheInvalidError', message: expect.stringMatching(/no metadata sidecar/) })
+
+    const payloadMissing = newAttachmentId()
+    await mkdir(join(attachmentsRoot(), payloadMissing), { recursive: true })
+    await writeFile(join(attachmentsRoot(), payloadMissing, 'meta.json'),
+      JSON.stringify({ name: 'shot.png', mediaType: 'image/png', uploadedAt: new Date().toISOString() }), 'utf8')
+    await expect(ctx.agentTeam.getAttachment({ attachmentId: payloadMissing }))
+      .rejects.toMatchObject({ name: 'AttachmentCacheInvalidError', message: expect.stringMatching(/does not contain exactly the payload/) })
+
+    // Malformed metadata and an unreadable metadata entry are failures, not expiry.
+    const malformed = newAttachmentId()
+    await mkdir(join(attachmentsRoot(), malformed), { recursive: true })
+    await writeFile(join(attachmentsRoot(), malformed, 'shot.png'), 'png')
+    await writeFile(join(attachmentsRoot(), malformed, 'meta.json'), '{not-json', 'utf8')
+    await expect(ctx.agentTeam.getAttachment({ attachmentId: malformed }))
+      .rejects.toMatchObject({ name: 'AttachmentCacheInvalidError', message: expect.stringMatching(/metadata is not valid JSON/) })
+
+    const unreadable = newAttachmentId()
+    await mkdir(join(attachmentsRoot(), unreadable, 'meta.json'), { recursive: true })
+    await writeFile(join(attachmentsRoot(), unreadable, 'shot.png'), 'png')
+    await expect(ctx.agentTeam.getAttachment({ attachmentId: unreadable }))
+      .rejects.toMatchObject({ name: 'AttachmentCacheInvalidError', message: expect.stringMatching(/not a regular file/) })
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects a cache entry redirected outside the attachment root', async () => {
+    const { ctx } = await harness()
+    const outside = await mkdtemp(join(tmpdir(), 'dsh-attachment-outside-'))
+    cleanups.push(async () => { await rm(outside, { recursive: true, force: true }) })
+    await writeFile(join(outside, 'shot.png'), 'png')
+    await writeFile(join(outside, 'meta.json'), JSON.stringify({ name: 'shot.png', mediaType: 'image/png', uploadedAt: new Date().toISOString() }), 'utf8')
+    const attachmentId = newAttachmentId()
+    await mkdir(attachmentsRoot(), { recursive: true })
+    await symlink(outside, join(attachmentsRoot(), attachmentId), 'dir')
+    cleanups.push(async () => { await rm(join(attachmentsRoot(), attachmentId), { recursive: true, force: true }) })
+    await expect(ctx.agentTeam.getAttachment({ attachmentId }))
+      .rejects.toMatchObject({ name: 'AttachmentCacheInvalidError', message: expect.stringMatching(/does not name a cache directory/) })
   })
 
   it('stores message attachment metadata, appends prompt lines, and replays old ledgers unchanged', async () => {
@@ -261,6 +299,20 @@ describe('Agent Team attachment remotes', () => {
       requestId: requestId('send-unknown'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'missing', attachments: [newAttachmentId()],
     })).rejects.toThrow(/not in the upload cache/)
+    const incomplete = newAttachmentId()
+    await mkdir(join(attachmentsRoot(), incomplete), { recursive: true })
+    await writeFile(join(attachmentsRoot(), incomplete, 'shot.png'), 'png')
+    await expect(ctx.agentTeam.startThread({ kind: 'task',
+      requestId: requestId('send-incomplete'), workspaceId: alpha, projectRef: project.project.projectRef,
+      body: 'incomplete', attachments: [incomplete],
+    })).rejects.toThrow(/no metadata sidecar/)
+    const unreadable = newAttachmentId()
+    await mkdir(join(attachmentsRoot(), unreadable, 'meta.json'), { recursive: true })
+    await writeFile(join(attachmentsRoot(), unreadable, 'shot.png'), 'png')
+    await expect(ctx.agentTeam.startThread({ kind: 'task',
+      requestId: requestId('send-unreadable'), workspaceId: alpha, projectRef: project.project.projectRef,
+      body: 'unreadable', attachments: [unreadable],
+    })).rejects.toThrow(/not a regular file/)
 
     // A cold replay over the same table accepts the new-format record and the
     // projection carries the metadata; the live service serves the history.
@@ -335,15 +387,24 @@ describe('Agent Team attachment remotes', () => {
 
   it('converges a half-written request-scoped entry instead of colliding', async () => {
     const { ctx } = await harness()
-    const attachmentId = requestScopedAttachmentId('put-half-written')
-    const dir = join(attachmentsRoot(), attachmentId)
-    await mkdir(dir, { recursive: true })
+    const payloadOnlyId = requestScopedAttachmentId('put-half-written-payload')
+    const payloadOnlyDir = join(attachmentsRoot(), payloadOnlyId)
+    await mkdir(payloadOnlyDir, { recursive: true })
     // A payload without its metadata sidecar is unreadable state the retry repairs.
-    await writeFile(join(dir, 'design.png'), Buffer.from('png-bytes'))
-    const stored = await ctx.agentTeam.putAttachment({ requestId: requestId('put-half-written'), workspaceId: alpha,
+    await writeFile(join(payloadOnlyDir, 'design.png'), Buffer.from('png-bytes'))
+    const payloadOnly = await ctx.agentTeam.putAttachment({ requestId: requestId('put-half-written-payload'), workspaceId: alpha,
       name: 'design.png', mediaType: 'image/png', bytesBase64: Buffer.from('png-bytes').toString('base64') })
-    expect(stored.attachmentId).toBe(attachmentId)
-    expect(await readAttachment(attachmentsRoot(), attachmentId)).toMatchObject({ name: 'design.png', mediaType: 'image/png', byteSize: 9 })
+    expect(payloadOnly.attachmentId).toBe(payloadOnlyId)
+    expect(await readAttachment(attachmentsRoot(), payloadOnlyId)).toMatchObject({ kind: 'found', attachment: { name: 'design.png', mediaType: 'image/png', byteSize: 9 } })
+
+    const metadataOnlyId = requestScopedAttachmentId('put-half-written-metadata')
+    const metadataOnlyDir = join(attachmentsRoot(), metadataOnlyId)
+    await mkdir(metadataOnlyDir, { recursive: true })
+    await writeFile(join(metadataOnlyDir, 'meta.json'), JSON.stringify({ name: 'design.png', mediaType: 'image/png', uploadedAt: new Date().toISOString() }), 'utf8')
+    const metadataOnly = await ctx.agentTeam.putAttachment({ requestId: requestId('put-half-written-metadata'), workspaceId: alpha,
+      name: 'design.png', mediaType: 'image/png', bytesBase64: Buffer.from('png-bytes').toString('base64') })
+    expect(metadataOnly.attachmentId).toBe(metadataOnlyId)
+    expect(await readAttachment(attachmentsRoot(), metadataOnlyId)).toMatchObject({ kind: 'found', attachment: { name: 'design.png', mediaType: 'image/png', byteSize: 9 } })
   })
 
   it('resolves Human reply attachments from the upload cache and replays them', async () => {

@@ -24,6 +24,9 @@ const checkpointSchema = z.object({
   subscriptionRef: subscriptionRefSchema,
   dueAt: z.number().int().nonnegative().optional(),
   consecutiveFailures: z.number().int().nonnegative(),
+  failureResumeSequence: z.number().int().nonnegative().optional(),
+  failureSuccessEpoch: z.number().int().nonnegative().optional(),
+  countedAdmissionRef: z.string().regex(/^admission:[^:]+$/).optional(),
   lastSuccessAt: z.string().datetime().optional(),
   publishWindowMinute: z.number().int().nonnegative().optional(),
   publishedInWindow: z.number().int().nonnegative(),
@@ -141,19 +144,21 @@ const admissionSchema = z.object({
   nextAttemptAt: z.string().datetime().optional(),
   lastError: z.string().optional(),
   heldEvents: z.array(heldEventSchema).optional(),
-}).strict().refine(value => value.state !== 'exhausted' ||
-  (value.lastError !== undefined && value.nextAttemptAt === undefined && value.heldEvents === undefined))
+  failureStreak: z.object({
+    resumeSequence: z.number().int().nonnegative(),
+    successEpoch: z.number().int().nonnegative(),
+  }).strict().optional(),
+}).strict().refine(value => value.state === 'exhausted'
+  ? value.lastError !== undefined && value.nextAttemptAt === undefined && value.heldEvents === undefined
+  : value.failureStreak === undefined)
   .transform((value): SubscriptionAdmissionRecord => Object.freeze(value as unknown as SubscriptionAdmissionRecord))
 
 export const subscriptionDomainSpec = defineDomain({
   name: 'agent_team_subscriptions',
-  // Version 2 added the run history and the failed deliveries; version 3 adds
-  // the replay index that makes a request id a whole idempotency key; version 4
-  // adds the webhook admission queue, which must survive a restart to keep a 202
-  // honest. An older document only lacks tables, and the current schemas still
-  // accept its rows.
-  version: 4,
-  compatibleVersions: [1, 2, 3],
+  // Released v4 readers reject exhausted admissions. Older rows remain valid
+  // in a mixed store; they do not need a rewrite before the first v5 write.
+  version: 5,
+  compatibleVersions: [1, 2, 3, 4],
   tables: {
     checkpoints: domainTable<AgentTeamSubscriptionRef, SubscriptionCheckpoint>(checkpointSchema),
     runs: domainTable<string, SubscriptionRunRecord>(runSchema),

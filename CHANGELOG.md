@@ -34,7 +34,12 @@ All notable changes to this project are documented in this file. The format foll
 
 **Fixed**
 
-- A webhook delivery that exhausted its retries can still be replayed after a failed storage write and Host restart. Once the exhausted attempt is saved, recovery records the failure without running the script again.
+- A webhook delivery that exhausted its retries can still be replayed after a failed storage write and Host restart. Once the exhausted attempt is saved, recovery records the failure, counts it once when eligible, and finishes any automatic pause without running the script again. An older pending failure cannot restart a streak that a success or manual resume already cleared.
+- Agent and Project edits no longer appear unsaved when the subsequent list refresh fails. The list can be refreshed without submitting the edit again.
+- Reading older messages in a Thread or Main stream keeps the same visible message in place when new messages arrive or older history loads.
+- When a send response is lost, retrying an unchanged message in the open composer reuses the original request and attachment uploads.
+- An image that fails to load or decode keeps its filename and offers a retry. A missing cache entry is shown as expired.
+- An unavailable avatar no longer hides the Human's name. Changing or removing an avatar now checks the settings version, keeps the old image readable if the write fails, and asks a stale window to re-read before trying again.
 - An Agent can read a Thread whose last facts are a delegated Worker run's start and ending again. Those two public facts revise no Thread state, so they sit past the Thread's revision, and a model-facing `team_thread` read of that Thread — which confirms only the prefix it can render — refused with `selectedThroughSequence … exceeds Thread revision …` until an ordinary reply moved the revision past them; `history` still read the whole run, which is why the Thread looked intact. The confirmation bound is now the Thread's head, the sequence of its last public fact, which is the furthest fact an unread batch can carry; the revision keeps its own meaning as the token every Thread write fences on, so the two numbers are not necessarily equal and a selection past the Thread's own head — including one copied from another Thread — is still refused. Ledgers an earlier build wrote replay unchanged, because a Worker record never moved a revision.
 - The acceptance boundary now also reaches the Member that commits the accept, and the Task's accountable when someone else accepts it: the boundary was keyed on Claims, and a verifier never holds one, so the Member with the freshest knowledge of the verification was the one Member it could not reach. The reminder names the standing it addresses — contributed, accountable, or accepted — and keeps the same compaction above the budget.
 - Team tools no longer reject otherwise valid reminder cancellations or Worker calls just because a model fills unused slots with blanks and default selectors. Subscription calls also tolerate empty alternate script sources and blank address/count slots, while explicit recipient clearing, webhook removal, real argument conflicts, and Host authorization remain intact. The compatibility matrix now covers every registered Team tool and action enum.
@@ -47,6 +52,10 @@ All notable changes to this project are documented in this file. The format foll
 - Opening an Agent's Session no longer fails when the Host has just swapped one in — a wake recycle or a rollover — because the Client pulls the Session catalog once more before it reports that refusal; a second refusal is still the answer it shows.
 - A Main stream read names the Project on a published subscription event instead of printing `Project undefined`: the model-facing view carried the event's subscription and its quoted text but dropped the Project the line reads, so every subscription event rendered as belonging to no Project.
 - A Worker record location is judged by its shape under either path separator, so a Windows engine that reports its record with forward slashes is read instead of refused as a shape this Team does not read.
+
+**Upgrade note**
+
+- Subscription storage now writes v5 and can still read v1–v4. Before enabling this build, stop all Hosts that share `$DSH_HOME/storages/agent_team.sqlite` and back up the database. The first subscription write, which can happen in the background at startup, upgrades the unit. An older build then refuses to open it. To roll back, restore the pre-upgrade backup; writes made after that backup are lost.
 
 ## [0.2.7] - 2026-11-05
 

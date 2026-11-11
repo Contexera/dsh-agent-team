@@ -116,9 +116,9 @@ The avatar row draws a 40px identity circle (`border-radius: 50%` with `corner-s
 
 Both avatar seats draw the picture only while those bytes decode. The Host accepts an avatar by its declared media type rather than by decoding it, so a phone photo in HEIC or a payload damaged on the way in is stored and handed back as a data URL that renders nothing. `useAvatarImage` keys that answer by URL, so a seat shows the initial exactly as it does for a removed avatar and a new upload retries on its own. The footnote states the bundle version and links the repository; an update line appears only when the Host reports one.
 
-`human-identity.ts` is the one reader of that profile. `TeamHumanIdentity` shares a single in-flight read between subscribers, reuses the avatar it already decoded while the reference is unchanged, keeps the last accepted value when a later read fails, and refreshes after every accepted write. Only a never-loaded profile becomes unavailable, rendering as `role="alert"` with its own retry.
+`human-identity.ts` shares one profile read between subscribers and keeps the last accepted value after a failed profile refresh. If the profile loads but the avatar request fails, the name and initial remain visible and the next refresh can retry that reference. Only a never-loaded profile becomes unavailable, rendering as `role="alert"` with its own retry.
 
-Its writes go through the Team Remote's own `setHumanProfile` and avatar calls, which own the profile entry: the Client never writes the settings document for the identity fields, so it never has to name them.
+The Team Remote owns each profile write. A read that started before the write cannot replace its follow-up read. A confirmed save with a failed refresh offers a re-read; a stale or uncertain save asks the Human to re-read before making a new change.
 
 `team-config.ts` is the one reader and writer of the threshold. The shared settings form addresses a namespace's top-level fields only, while the threshold lives inside the row's `memberCompaction` group, so a small `SettingsFormScope` adapter flattens that group for the form and maps its edits back onto child paths.
 

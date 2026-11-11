@@ -119,6 +119,7 @@ function harness(options: {
     },
     pauseForFailures: async entry => { paused.push(entry.subscriptionRef) },
     checkpoint: ref => checkpoints.get(ref) ?? { subscriptionRef: ref, ...INITIAL_CHECKPOINT },
+    timerReady: () => true,
     save: async (ref, change) => {
       if (control.holdSaves !== undefined) await control.holdSaves
       if (control.saveThrows) throw new Error('injected checkpoint failure')

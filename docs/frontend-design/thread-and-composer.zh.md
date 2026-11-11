@@ -6,7 +6,7 @@
 - 策略：读者停留在底部（距底 <48px 视为 pinned）时跟随新内容；不在底部时不打扰。
 - 确认合同：Thread 打开期间到达的事实一律自动做持久 `readThread` 确认。pinned 读者当场看见，滚离底部的读者由纯跳转提示引导回底。确认失败时回退为既有 error surface。不存在任何手动读取动作。
 - 打开即清零：打开 Thread 直接滚动到最后一条。有界批次若返回剩余未读，Client 以串行循环自动续读（每轮 mint 新 requestId 复用 Host 幂等缓存语义）。连续 50 轮未清零视为异常并显示错误提示。
-- 前插更早历史时按 scrollHeight 差值补偿 scrollTop，视口内容不跳动。
+- 读者离开底部时，补页、新消息到达或图片载入都保持一条可见 Message 相对视口的位置。浏览器已保持位置时不再补偿；主动跳转优先。
 - 更旧 facts 由时间线自己的「加载更早消息」入口翻页，首绘的历史读取决定它是否出现。读取被拒或抛错时该入口保持存在，从屏上最旧的 fact 往回翻，并由它自己的 error surface 报告失败，而不是让更旧的 facts 永远卡在一个不会出现的控件后面。
 - 跳转：`scrollToBottom` 立即滚到底部；「↓ N 条新更新」提示按钮只滚到底、无读取语义，读者回到底部即消失。
 - contentKey 必须随渲染事实变化（当前用 `长度:末位factKey` 组合串）。
@@ -36,6 +36,7 @@
 - Project composer 发到 Main stream，工具区是 `讨论/任务` 开关。它是 pressed button；打开后出现原生复选框 `作为任务`。关闭时发 `postMainMessage`（引用 Main 消息时带 `replyToMessageRef`）；打开时发 `startThread`，勾选则建 Task，否则建讨论；Task 提交后页面切到 `看板` 页签并把焦点放上去。引用会关掉开关，打开开关会丢掉引用，因为新 Thread 没有引用目标。Host 返回 `main_unread_required` 时保留草稿，刷新并读取主对话，用状态行提示 Human 先看一下再发；重发是新的 operation。版本 2 的回复不再要求确认；Main stream 与 Thread composer 都不提供 `@all`，也不把它展开为 recipients，手打的 `@all` 就是普通文本。
 - 文件有三条进草稿的路，落进同一份列表：选择器、携带文件的粘贴、拖到 composer 上。携带文件的拖动先用 composer 自己的状态行说明松开会发生什么；落下时取消浏览器默认，所以在 composer 旁边松手也不会把页面导航到那个文件。
 - 草稿缓存：草稿内容不在页面局部，按 `project:<projectRef>` / `thread:<threadRef>` 键存放。每 Client 上下文存一份 `TeamDraftStore`（`drafts.ts`）。它用单一 localStorage 键 `dsh.agent-team.drafts.v1`，写穿持久化，按 savedAt 淘汰最旧 ~50 条，每条只存正文与保存时刻。切换视图或刷新后草稿原样恢复。发送提交成功即清除对应键，失败保留。旧版草稿里残留的 `recipientIds` 字段在读取时直接忽略，不做迁移。Project 的「作为任务」意图不进入草稿缓存：默认关闭，成功提交后再次复位关闭。
+- 发送结果不确定时，打开的编辑器用原请求重试未改动的提交，保留 Thread 原修订和附件顺序，复用每个文件的上传请求与已取得的附件引用。Host 明确拒绝未读或旧修订时，仍先读取，再由用户重发。重新打开编辑器只恢复草稿。
 - taskless Thread 的「转为任务」是 Human-only durable mutation，不做乐观 overlay。成功后重新读取 Thread 与补充 Project/Member 投影；unread/stale fence 时保留 Host 返回错误并重新读取相关事实。
 
 ## 引用一条 Message

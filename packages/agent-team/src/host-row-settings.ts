@@ -12,6 +12,7 @@ import { DEFAULT_WORKER_CONFIG, type WorkerConfig } from './worker-service.ts'
 import { DEFAULT_WORKER_SANDBOX } from './worker-settings.ts'
 import { DEFAULT_WAKE_RECYCLE, type WakeRecycleConfig } from './wake-recycle.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_SETTINGS_SCHEMA, assertValidHumanName } from './human-profile.ts'
+import { HUMAN_AVATAR_NONE } from './human-settings.ts'
 import { SIDEBAR_ORDER_SETTINGS_SCHEMA, SIDEBAR_ORDER_VALUE_SCHEMA, type SidebarOrderConfig } from './sidebar-order.ts'
 
 /**
@@ -33,7 +34,7 @@ export const DEFAULT_WEBHOOK_CONFIG: WebhookConfig = Object.freeze({ publicOrigi
  */
 export interface Config {
   name: Volatile<string>
-  avatarRef: Volatile<string | undefined>
+  avatarRef: Volatile<string | null | undefined>
   wakeRecycle: Volatile<WakeRecycleConfig>
   memberCompaction: Volatile<MemberCompactionConfig>
   worker: Volatile<WorkerConfig>
@@ -119,7 +120,8 @@ export type HostRowField = typeof HOST_ROW_FIELDS[number]
 
 /** The values one migration writes into the current namespace; a field is present only when it must be written. */
 export type HostRowWrite = {
-  readonly [K in HostRowField]?: K extends 'name' | 'avatarRef' ? string
+  readonly [K in HostRowField]?: K extends 'name' ? string
+    : K extends 'avatarRef' ? string | null
     : K extends 'wakeRecycle' ? WakeRecycleConfig
       : K extends 'memberCompaction' ? MemberCompactionConfig
         : K extends 'worker' ? WorkerConfig
@@ -166,6 +168,7 @@ function carriedField(field: HostRowField, raw: unknown): unknown {
     }
   }
   if (field === 'avatarRef') {
+    if (raw === HUMAN_AVATAR_NONE) return HUMAN_AVATAR_NONE
     return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
   }
   const schema = field === 'wakeRecycle' ? WAKE_RECYCLE_VALUE

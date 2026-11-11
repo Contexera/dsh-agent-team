@@ -14,25 +14,52 @@ export function bytesToBase64(bytes: Uint8Array): string {
 /** The slot's Remote result union without importing the slots module. */
 export type GetAttachment = (request: AgentTeamGetAttachmentRequest) => Promise<RemoteResult<AgentTeamGetAttachmentResult>>
 
-/** Session-wide cache. Only a settled answer is cached: a gone entry resolves to `null` (expired label); an unknown failure caches nothing so a later mount retries. */
-const dataUrlCache = new Map<AgentTeamAttachmentId, string | null>()
+export type AttachmentPreviewOutcome =
+  | { readonly kind: 'ready'; readonly dataUrl: string }
+  | { readonly kind: 'not-previewable' }
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'failed' }
 
-export function cachedAttachmentDataUrl(attachmentId: AgentTeamAttachmentId): string | null | undefined {
+/** Session-wide cache for usable bytes only. Missing and failed reads stay retryable. */
+const dataUrlCache = new Map<AgentTeamAttachmentId, string>()
+const inFlight = new Map<AgentTeamAttachmentId, Promise<AttachmentPreviewOutcome>>()
+
+export function cachedAttachmentDataUrl(attachmentId: AgentTeamAttachmentId): string | undefined {
   return dataUrlCache.get(attachmentId)
 }
 
-export async function loadAttachmentDataUrl(getAttachment: GetAttachment, attachment: { attachmentId: AgentTeamAttachmentId; mediaType: string }): Promise<string | null> {
+export function invalidateAttachmentDataUrl(attachmentId: AgentTeamAttachmentId): void {
+  dataUrlCache.delete(attachmentId)
+}
+
+async function readAttachmentPreview(getAttachment: GetAttachment, attachment: { attachmentId: AgentTeamAttachmentId; mediaType: string }): Promise<AttachmentPreviewOutcome> {
   const cached = dataUrlCache.get(attachment.attachmentId)
-  if (cached !== undefined) return cached
-  const result = await getAttachment({ attachmentId: attachment.attachmentId })
-  if (!result.ok) {
-    // Discriminate by code, never by message: only the not-found code is settled; everything else is transient.
-    if (result.error.code === 'team/attachment-not-found') dataUrlCache.set(attachment.attachmentId, null)
-    return null
+  if (cached !== undefined) return { kind: 'ready', dataUrl: cached }
+  let result: RemoteResult<AgentTeamGetAttachmentResult>
+  try {
+    result = await getAttachment({ attachmentId: attachment.attachmentId })
+  } catch {
+    return { kind: 'failed' }
   }
-  const url = attachment.mediaType.startsWith('image/') ? `data:${attachment.mediaType};base64,${result.value.bytesBase64}` : null
-  dataUrlCache.set(attachment.attachmentId, url)
-  return url
+  if (!result.ok) {
+    return { kind: result.error.code === 'team/attachment-not-found' ? 'missing' : 'failed' }
+  }
+  if (!attachment.mediaType.startsWith('image/')) return { kind: 'not-previewable' }
+  const dataUrl = `data:${attachment.mediaType};base64,${result.value.bytesBase64}`
+  dataUrlCache.set(attachment.attachmentId, dataUrl)
+  return { kind: 'ready', dataUrl }
+}
+
+export async function loadAttachmentPreview(getAttachment: GetAttachment, attachment: { attachmentId: AgentTeamAttachmentId; mediaType: string }): Promise<AttachmentPreviewOutcome> {
+  const cached = dataUrlCache.get(attachment.attachmentId)
+  if (cached !== undefined) return { kind: 'ready', dataUrl: cached }
+  const pending = inFlight.get(attachment.attachmentId)
+  if (pending !== undefined) return pending
+  const request = readAttachmentPreview(getAttachment, attachment).finally(() => {
+    inFlight.delete(attachment.attachmentId)
+  })
+  inFlight.set(attachment.attachmentId, request)
+  return request
 }
 
 export function formatByteSize(byteSize: number): string {

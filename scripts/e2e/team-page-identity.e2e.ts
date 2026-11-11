@@ -1,7 +1,7 @@
 import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
 import type { Browser, Page } from 'playwright'
-import { CHROME, HOME, ONE_PIXEL_PNG, STAGED_BUNDLE, UI09_SHOTS, closeScenario, connectFreshWorkspaceZh, focusRing, installLocalBundle, launchWebScaffold, openSettings, openTeamPage, scaffold, settleLayout, watchConsole } from './__external-agent-team-support.ts'
+import { CHROME, HOME, ONE_PIXEL_PNG, STAGED_BUNDLE, UI09_SHOTS, browser, closeScenario, connectFreshWorkspaceZh, focusRing, installLocalBundle, launchWebScaffold, openSettings, openTeamPage, scaffold, settleLayout, watchConsole } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -40,6 +40,7 @@ it('configures the Team page identity from Settings in real Web', async () => {
   // page draws what the browser can decode.
   const avatarPath = join(HOME, 'ada-avatar.png')
   await writeFile(avatarPath, Buffer.from(ONE_PIXEL_PNG, 'base64'))
+  await expect.poll(() => panel.getByRole('button', { name: '上传头像', exact: true }).isEnabled()).toBe(true)
   await panel.locator('input[type="file"]').setInputFiles(avatarPath)
   const preview = panel.locator('img').first()
   await preview.waitFor()
@@ -149,10 +150,75 @@ it('configures the Team page identity from Settings in real Web', async () => {
   expect(await panel.locator('img').count()).toBe(0)
   await page.screenshot({ path: join(UI09_SHOTS, 'team-page-undecodable-avatar.png'), fullPage: true })
 
+  const previousAvatar = scaffold!.ctx.agentTeam.humanProfile().avatarRef!
+  const staleContext = await browser!.newContext({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
+  const stalePage = await staleContext.newPage()
+  await stalePage.goto(scaffold!.authenticatedUrl)
+  await openSettings(stalePage)
+  const stalePanel = stalePage.getByRole('dialog')
+  await stalePanel.getByRole('button', { name: '团队', exact: true }).click()
+  await stalePanel.getByRole('button', { name: '移除头像' }).waitFor()
+  await stalePage.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(stalePage)
+
   await panel.getByRole('button', { name: '移除头像' }).click()
   await expect.poll(async () => await panel.locator('img').count()).toBe(0)
   await expect.poll(() => scaffold!.ctx.agentTeam.humanProfile().avatarRef).toBeUndefined()
   await expect.poll(async () => await panel.getByRole('button', { name: '上传头像' }).count()).toBe(1)
+  await expect(scaffold!.ctx.agentTeam.getHumanAvatar({ avatarRef: previousAvatar })).resolves.toMatchObject({ name: 'broken.png' })
+
+  await stalePanel.locator('input[type="file"]').setInputFiles(avatarPath)
+  await stalePanel.getByText('资料已在别处更新，请重新读取后再试。').waitFor()
+  expect(scaffold!.ctx.agentTeam.humanProfile().avatarRef).toBeUndefined()
+  await stalePage.screenshot({ path: join(UI09_SHOTS, 'avatar-conflict-narrow.png'), fullPage: true })
+  await stalePanel.getByRole('button', { name: '重新读取', exact: true }).press('Enter')
+  await expect.poll(() => stalePanel.getByRole('button', { name: '上传头像' }).isEnabled()).toBe(true)
+
+  // Let the Host commit this upload, then drop its reply at the public gateway.
+  // The page must report uncertainty and keep writes blocked until the user re-reads.
+  const lostAvatarRequests: unknown[] = []
+  const lostAvatarResponses: unknown[] = []
+  await page.route('**/agentTeam/putHumanAvatar', async route => {
+    const { rpcId: _transportId, ...request } = route.request().postDataJSON() as { rpcId: string }
+    lostAvatarRequests.push(request)
+    const response = await route.fetch()
+    const envelope = await response.json() as { result: unknown }
+    lostAvatarResponses.push(envelope.result)
+    if (lostAvatarRequests.length === 1) await route.abort('failed')
+    else await route.fulfill({ response })
+  })
+  await panel.locator('input[type="file"]').setInputFiles(avatarPath)
+  const uncertain = panel.getByRole('alert').filter({ hasText: '保存结果未确认' })
+  await uncertain.waitFor()
+  expect(lostAvatarRequests).toHaveLength(1)
+  expect(lostAvatarResponses[0]).toMatchObject({ ok: true, value: { avatarRef: expect.any(String) } })
+  const lostWriteAvatar = scaffold!.ctx.agentTeam.humanProfile().avatarRef
+  expect(lostWriteAvatar).toBeDefined()
+  await expect.poll(async () => await panel.locator('img').count()).toBe(1)
+
+  // The other window still holds the pre-write fence. Its refused upload proves
+  // stale CAS; after its own explicit re-read it removes the committed avatar,
+  // leaving the first window behind with its uncertainty notice.
+  await stalePanel.locator('input[type="file"]').setInputFiles(avatarPath)
+  await stalePanel.getByText('资料已在别处更新，请重新读取后再试。').waitFor()
+  expect(scaffold!.ctx.agentTeam.humanProfile().avatarRef).toBe(lostWriteAvatar)
+  await stalePanel.getByRole('button', { name: '重新读取', exact: true }).press('Enter')
+  await stalePanel.getByRole('button', { name: '移除头像' }).waitFor()
+  await stalePanel.getByRole('button', { name: '移除头像' }).click()
+  await expect.poll(() => scaffold!.ctx.agentTeam.humanProfile().avatarRef).toBeUndefined()
+  expect(await uncertain.isVisible()).toBe(true)
+  expect(await panel.locator('img').count()).toBe(1)
+  expect(lostAvatarRequests).toHaveLength(1)
+  await page.screenshot({ path: join(UI09_SHOTS, 'avatar-uncertain-after-other-window.png'), fullPage: true })
+
+  await uncertain.getByRole('button', { name: '重新读取', exact: true }).press('Enter')
+  await expect.poll(async () => await panel.locator('img').count()).toBe(0)
+  await expect.poll(async () => await panel.locator('[data-avatar="initial"]').textContent()).toBe('A')
+  await expect.poll(async () => await panel.getByRole('alert').count()).toBe(0)
+  await expect.poll(async () => await panel.getByRole('button', { name: '上传头像' }).isEnabled()).toBe(true)
+  expect(lostAvatarRequests).toHaveLength(1)
+  await staleContext.close()
+
   // Restore readable bytes: the Inbox leg below draws the compact stack from the
   // same profile and needs a picture.
   await panel.locator('input[type="file"]').setInputFiles(avatarPath)

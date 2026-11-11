@@ -52,6 +52,24 @@ async function startTask(team: Seeded, actor: AgentTeamHumanActor | AgentTeamMem
 async function readTask(team: Seeded, task: AgentTeamTask, actor: AgentTeamMemberActor | typeof human) {
   return (await team.ledger.readThread({ requestId: requestId('read'), actor, workspaceId: alpha, taskRef: task.taskRef })).value
 }
+
+function taskPublicState(ledger: AgentTeamLedger, actor: AgentTeamHumanActor | AgentTeamMemberActor, taskRef: AgentTeamTask['taskRef']) {
+  const history = ledger.threadHistory(actor, { workspaceId: alpha, taskRef })
+  return {
+    task: history.task,
+    claims: history.claims,
+    activities: history.facts.flatMap(fact => fact.kind === 'activity' ? [fact.activity] : []),
+    attention: ledger.attentionStatus(actor, { workspaceId: alpha, taskRef }).attention,
+  }
+}
+
+function expectColdReplayMatches(team: Seeded, taskRef: AgentTeamTask['taskRef']) {
+  const cold = new AgentTeamLedger(team.table, { rulesVersion: 2 })
+  for (const actor of [human, team.owner.actor, team.reviewer.actor]) {
+    expect(taskPublicState(cold, actor, taskRef)).toEqual(taskPublicState(team.ledger, actor, taskRef))
+  }
+}
+
 async function claim(team: Seeded, task: AgentTeamTask, actor: AgentTeamMemberActor, state: 'active' | 'done' | 'released' = 'active') {
   const read = await readTask(team, task, actor)
   const created = await team.ledger.changeClaim({ requestId: requestId('claim'), actor, workspaceId: alpha, taskRef: task.taskRef,
@@ -126,6 +144,90 @@ describe('Task accountability in final rules version 2', () => {
     const facts = team.ledger.threadHistory(human, { workspaceId: alpha, taskRef: second.task.taskRef }).facts
     expect(facts.at(-1)).toMatchObject({ kind: 'activity', activity: { kind: 'transfer', from: team.owner.memberId, to: AGENT_TEAM_HUMAN_MEMBER_ID } })
     new AgentTeamLedger(team.table, { rulesVersion: 2 }).validate()
+  })
+
+  it('derives the same Task, Claim, activity and Attention outcomes on write and cold replay', async () => {
+    const team = await seed()
+
+    const direct = await startTask(team, human, team.owner.memberId)
+    const directAcceptedResult = await team.ledger.changeTask({ requestId: requestId('direct-accept'), actor: human, workspaceId: alpha,
+      taskRef: direct.task.taskRef, action: 'accept', baseRevision: direct.thread.revision })
+    if (directAcceptedResult.value.kind !== 'committed') throw new Error('direct acceptance did not commit')
+    expect(directAcceptedResult.value).toMatchObject({
+      task: { resolution: 'accepted', status: 'done' }, claims: [],
+      activity: { kind: 'accept', acceptedClaimRefs: [] },
+    })
+    expect(directAcceptedResult.value.activity.completedClaimRefs).toBeUndefined()
+    expectColdReplayMatches(team, direct.task.taskRef)
+
+    const early = await startTask(team, team.owner.actor)
+    const earlyClaim = await claim(team, early.task, team.owner.actor)
+    const earlyAcceptedResult = await team.ledger.changeTask({ requestId: requestId('early-accept'), actor: human, workspaceId: alpha,
+      taskRef: early.task.taskRef, action: 'accept', baseRevision: earlyClaim.thread.revision })
+    if (earlyAcceptedResult.value.kind !== 'committed') throw new Error('early acceptance did not commit')
+    expect(earlyAcceptedResult.value).toMatchObject({
+      task: { resolution: 'accepted', status: 'done' },
+      claims: [expect.objectContaining({ claimRef: earlyClaim.claim.claimRef, state: 'done' })],
+      activity: { kind: 'accept', completedClaimRefs: [earlyClaim.claim.claimRef], acceptedClaimRefs: [earlyClaim.claim.claimRef] },
+    })
+    expectColdReplayMatches(team, early.task.taskRef)
+
+    const normal = await startTask(team, team.reviewer.actor)
+    const normalDone = await claim(team, normal.task, team.reviewer.actor, 'done')
+    const normalReview = await readTask(team, normalDone.task, human)
+    const normalAcceptedResult = await team.ledger.changeTask({ requestId: requestId('normal-accept'), actor: human, workspaceId: alpha,
+      taskRef: normal.task.taskRef, action: 'accept', baseRevision: normalReview.thread.revision })
+    if (normalAcceptedResult.value.kind !== 'committed') throw new Error('normal acceptance did not commit')
+    expect(normalAcceptedResult.value).toMatchObject({
+      task: { resolution: 'accepted', status: 'done' },
+      claims: [expect.objectContaining({ claimRef: normalDone.claim.claimRef, state: 'done' })],
+      activity: { kind: 'accept', acceptedClaimRefs: [normalDone.claim.claimRef] },
+    })
+    expect(normalAcceptedResult.value.activity.completedClaimRefs).toBeUndefined()
+    expectColdReplayMatches(team, normal.task.taskRef)
+
+    const reopenedResult = await team.ledger.changeTask({ requestId: requestId('reopen'), actor: human, workspaceId: alpha,
+      taskRef: normal.task.taskRef, action: 'reopen', baseRevision: normalAcceptedResult.value.thread.revision })
+    if (reopenedResult.value.kind !== 'committed') throw new Error('reopen did not commit')
+    expect(reopenedResult.value).toMatchObject({
+      task: { resolution: 'open', status: 'in_review' },
+      claims: [expect.objectContaining({ claimRef: normalDone.claim.claimRef, state: 'done' })],
+      activity: { kind: 'reopen' },
+    })
+    expectColdReplayMatches(team, normal.task.taskRef)
+
+    const closing = await startTask(team, team.owner.actor)
+    const closingClaim = await claim(team, closing.task, team.owner.actor)
+    const closedResult = await team.ledger.changeTask({ requestId: requestId('close'), actor: human, workspaceId: alpha,
+      taskRef: closing.task.taskRef, action: 'close', baseRevision: closingClaim.thread.revision })
+    if (closedResult.value.kind !== 'committed') throw new Error('close did not commit')
+    expect(closedResult.value).toMatchObject({
+      task: { resolution: 'closed', status: 'closed' },
+      claims: [expect.objectContaining({ claimRef: closingClaim.claim.claimRef, state: 'released' })],
+      activity: { kind: 'close', releasedClaimRefs: [closingClaim.claim.claimRef] },
+    })
+    expectColdReplayMatches(team, closing.task.taskRef)
+  })
+
+  it('rejects a recorded Task status that disagrees with its lifecycle action', async () => {
+    const team = await seed()
+    const started = await startTask(team, human, team.owner.memberId)
+    const acceptedResult = await team.ledger.changeTask({ requestId: requestId('tampered-accept'), actor: human, workspaceId: alpha,
+      taskRef: started.task.taskRef, action: 'accept', baseRevision: started.thread.revision })
+    if (acceptedResult.value.kind !== 'committed') throw new Error('acceptance did not commit')
+    const accepted = acceptedResult.value
+
+    const records = team.pool.media.get('agent_team')!.tables.get('operations')!
+    const acceptedRecord = [...records.entries()].flatMap(([key, operation]) => {
+      const typed = operation as AgentTeamOperation
+      return typed.kind === 'team/task-changed' && typed.data.activity.activityRef === accepted.activity.activityRef
+        ? [[key as AgentTeamOperationId, typed] as const] : []
+    })[0]
+    if (acceptedRecord === undefined) throw new Error('accepted Task operation was not recorded')
+    const [key, operation] = acceptedRecord
+    await team.table.put(key, { ...operation, data: { ...operation.data, task: { ...operation.data.task, status: 'todo' } } } as AgentTeamOperation)
+
+    expect(() => new AgentTeamLedger(team.table, { rulesVersion: 2 })).toThrow(/invalid Task state transition/)
   })
 
   it('bars a released executor from accepting, gates close on the accountable, and refuses invalid transfer targets', async () => {

@@ -33,6 +33,12 @@ export interface SubscriptionCheckpoint {
   readonly dueAt?: number | undefined
   /** Failed runs in a row. Independent of the run records, which are diagnostics. */
   readonly consecutiveFailures: number
+  /** The latest ledger resume this count reflects; absent on legacy checkpoints. */
+  readonly failureResumeSequence?: number | undefined
+  /** A success can clear the streak without appending a ledger fact. */
+  readonly failureSuccessEpoch?: number | undefined
+  /** Only one spent admission settles at a time per subscription; its count and proof commit together. */
+  readonly countedAdmissionRef?: string | undefined
   /** When this subscription's output was last accepted. */
   readonly lastSuccessAt?: string | undefined
   /** The publish rate window: the minute it counts and how many events left the queue inside it. */
@@ -69,6 +75,8 @@ export interface SubscriptionRuntimePorts {
   /** Stop a subscription after repeated failures; the reason is the ledger's own. */
   readonly pauseForFailures: (subscription: AgentTeamSubscription) => Promise<void>
   readonly checkpoint: (subscriptionRef: AgentTeamSubscriptionRef) => SubscriptionCheckpoint
+  /** A due timer must wait for the failure accounting of a spent Webhook. */
+  readonly timerReady: (subscriptionRef: AgentTeamSubscriptionRef) => boolean
   /**
    * Change one checkpoint. `change` receives the record as it stands *at the
    * moment of the write*, under the subscription's write lock, and the settled
@@ -281,6 +289,7 @@ export class SubscriptionScheduler {
       // A subscription deleted or paused while it waited loses its turn: the
       // terminal barrier is checked again at admission, not only at enqueue.
       if (live.state !== 'active' || !this.ports.projectActive(live)) continue
+      if (!this.ports.timerReady(live.subscriptionRef)) continue
       this.track(this.launchTimer(live, next.orderAt))
     }
   }

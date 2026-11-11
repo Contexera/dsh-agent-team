@@ -3,19 +3,24 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import type { AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
-async function openSeededProject(options?: Parameters<typeof runtimeWithTeam>[0]) {
+async function openSeededProject(
+  options?: Parameters<typeof runtimeWithTeam>[0],
+  beforeOpen?: (fixture: Awaited<ReturnType<typeof runtimeWithTeam>>) => void,
+) {
   const b = await runtimeWithTeam({
     initialProjects: true,
     seedsAsMainMessages: true,
     seededMessages: [{ body: 'human note', occurredAt: '2026-08-21T10:00:00.000Z', sender: 'human' }],
     ...options,
   })
+  beforeOpen?.(b)
   fireEvent.click(b.view.getByRole('button', { name: '团队' }))
   fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
   const page = await waitFor(() => {
@@ -43,6 +48,24 @@ describe('Human identity in the Team surfaces', () => {
     const { b, page } = await openSeededProject({ humanProfile: { name: 'Ada', avatarRef: 'avatar:1' } })
     await waitFor(() => { expect(page.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AAAA') })
     expect(b.getHumanAvatar).toHaveBeenCalledWith({ avatarRef: 'avatar:1' })
+  })
+
+  it.each(['Remote error', 'carrier rejection'] as const)('keeps the Human name and initial after an avatar %s', async failure => {
+    const profile = { name: 'Ada', avatarRef: 'avatar:temporarily-unavailable' }
+    const { b, page } = await openSeededProject({ humanProfile: profile }, fixture => {
+      if (failure === 'carrier rejection') fixture.getHumanAvatar.mockRejectedValueOnce(new Error('connection lost'))
+      else fixture.getHumanAvatar.mockResolvedValueOnce({
+        ok: false, error: new RemoteError('gateway/internal', 'could not read the avatar', {}),
+      } as never)
+    })
+    await waitFor(() => { expect(within(page).getByText('Ada')).toBeTruthy() })
+    expect(b.getHumanAvatar).toHaveBeenCalledWith({ avatarRef: profile.avatarRef })
+    expect(page.querySelector('[data-avatar="initial"]')?.textContent).toBe('A')
+    expect(page.querySelector('img')).toBeNull()
+
+    b.view.unmount()
+    const reopened = await openSeededProject({ humanProfile: profile })
+    await waitFor(() => { expect(reopened.page.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AAAA') })
   })
 
   it('keeps the initial in the message seat when those bytes do not decode', async () => {

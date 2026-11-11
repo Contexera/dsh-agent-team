@@ -5,7 +5,7 @@ English | [中文](thread-and-composer.zh.md)
 ## Timeline scrolling
 When the reader is within 48px of the bottom, follow new content; away from the bottom, do not disturb. Every arrival while a Thread is open is acknowledged durably right away, whether or not the reader is pinned. A scrolled-away reader gets only the pure “↓ N new update(s)” jump hint, which scrolls to the tail without any read semantics and clears when the reader returns to the bottom.
 
-Opening a Thread scrolls to the latest fact, and a bounded read with a remaining unread count continues automatically: a serial drain loop issues fresh-requestId reads until the remainder is zero (50-round cap surfaces an error). Compensate `scrollTop` by the `scrollHeight` delta when prepending history. Rendering keys change with facts; a current length plus last fact key is used.
+Opening a Thread scrolls to the latest fact, and a bounded read with a remaining unread count continues automatically: a serial drain loop issues fresh-requestId reads until the remainder is zero (50-round cap surfaces an error). Away from the bottom, preserve a visible Message's offset when older history, new messages, or image loading change the timeline. If the browser already preserved the offset, no adjustment is needed. A deliberate jump takes priority.
 
 Older facts are paged by the timeline's own 「加载更早消息」 action, so the first paint's history read is what decides whether it is offered. A read that was refused or rejected leaves the action standing, paging back from the oldest fact on screen under its own error surface, rather than stranding older facts behind a control that never appears.
 
@@ -39,6 +39,8 @@ Only the enrolment group carries weight: its name drops to the secondary label a
 A quiet recipient notice shows who will be notified: the `@Handle` names typed into the body (`mentionedMemberIds`, matched on the Host's own case-insensitive ASCII word boundaries), plus the quoted Message's author on a reply. The body is the sole delivery authority — no explicit recipient list travels with the request — so the notice and the send read the same set. A recipient the Project does not yet carry is named there as joining it.
 
 Drafts are stored per Project/Thread in the bounded `TeamDraftStore`; a legacy `recipientIds` field in an old entry is ignored on load, successful sends clear the draft and failures preserve it.
+
+When delivery is uncertain, an unchanged submission in the open composer retries the same request. It keeps the original Thread revision and attachment order, and reuses each file's upload request and any returned attachment reference. A definite unread or stale revision refusal follows the usual read and resend flow. Reopening the composer restores the draft, not a pending submission.
 
 The 「作为任务」 intent is not persisted and resets off after success. The mode chip keeps its word label at every width and narrows the toolbar gap below 560px rather than hiding the word.
 

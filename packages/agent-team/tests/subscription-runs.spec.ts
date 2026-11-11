@@ -22,7 +22,9 @@ import { MemoryMediaPool, MemoryStorageBackend, type MemoryWriteFault } from './
 import { addLedgerMember, ledgerAtBoot, makeOwner, requestId } from './helpers/host-harness.ts'
 import AgentTeam from '../src/index.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, agentTeamHumanActor } from '../src/ledger.ts'
+import { admissionKey, type SubscriptionAdmissionRecord } from '../src/subscription-admissions.ts'
 import { subscriptionDomainSpec } from '../src/subscription-store.ts'
+import { webhookStdin } from '../src/subscription-webhook.ts'
 import type { SubscriptionCheckpoint } from '../src/subscription-runtime.ts'
 import {
   deliveryExpiresAt, deliveryKey, deliveryRecordOf, replayKey, SUBSCRIPTION_DELIVERY_LIMIT, SUBSCRIPTION_RUN_HISTORY_LIMIT,
@@ -163,6 +165,10 @@ function deliveriesTable(booted: Booted): KvTable<string, unknown> {
   return booted.facility.get('agent_team_subscriptions')!.table('deliveries') as KvTable<string, unknown>
 }
 
+function admissionsTable(booted: Booted): KvTable<string, SubscriptionAdmissionRecord> {
+  return booted.facility.get('agent_team_subscriptions')!.table('admissions') as KvTable<string, SubscriptionAdmissionRecord>
+}
+
 function checkpointsTable(booted: Booted): KvTable<AgentTeamSubscriptionRef, SubscriptionCheckpoint> {
   return booted.facility.get('agent_team_subscriptions')!.table('checkpoints') as KvTable<AgentTeamSubscriptionRef, SubscriptionCheckpoint>
 }
@@ -185,6 +191,9 @@ interface HostSeams {
   clearSubscriptionFailuresLocked(subscriptionRef: AgentTeamSubscriptionRef, accepted: boolean,
     sourceRevision: number): Promise<void>
   recordFailedDelivery(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<void>
+  recordFailedDeliveryLocked(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<boolean>
+  retryOrFailWebhookAdmission(subscription: AgentTeamSubscription, record: SubscriptionAdmissionRecord, failure: string,
+    retryable: boolean, failureStreak: { readonly resumeSequence: number; readonly successEpoch: number }): Promise<void>
   recordReplayIntent(subscription: AgentTeamSubscription, record: SubscriptionDeliveryRecord,
     requestId: AgentTeamRequestId, version: AgentTeamSubscriptionReplayVersion): Promise<void>
   subscriptionLogs(actor: AgentTeamActor, request: AgentTeamSubscriptionLogsRequest): AgentTeamSubscriptionLogsResult
@@ -752,6 +761,51 @@ describe('failed deliveries', () => {
     expect(seam.checkpointFor(subscription.subscriptionRef).consecutiveFailures).toBe(1)
     expect(deliveriesOf(booted, projectRef, subscription.subscriptionRef)).toHaveLength(1)
     expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!.subscription.state).toBe('active')
+  })
+
+  it('counts a fresh provider redelivery after expiry, but keeps an unfinished admission record', async () => {
+    const pool = new MemoryMediaPool()
+    const booted = keep(await boot(pool, fakeShell({ stdout: '{"id":"a","title":"A"}\n' })))
+    const projectRef = await project(booted)
+    const subscription = await created(booted, projectRef, 'printf events\n')
+    const seam = seams(booted)
+    const deliveryRef = 'delivery:provider-expired'
+    const oldReceivedAt = Date.now() - 8 * 24 * 60 * 60_000
+    const oldBody = 'old-payload'
+    const newBody = 'new-payload'
+    const old = deliveryRecordOf(subscription, deliveryInput(subscription, {
+      deliveryRef, admissionRef: 'admission:old', receivedAt: oldReceivedAt, body: oldBody,
+    }), undefined)
+    await deliveriesTable(booted).put(deliveryKey(subscription.subscriptionRef, deliveryRef), old)
+
+    const freshReceivedAt = Date.now()
+    const freshAdmission: SubscriptionAdmissionRecord = Object.freeze({
+      admissionRef: 'admission:new', subscriptionRef: subscription.subscriptionRef, projectRef: subscription.projectRef,
+      deliveryRef, receivedRevision: subscription.revision, receivedScriptHash: subscription.script.sha256,
+      script: subscription.script, credentials: subscription.credentials, headers: Object.freeze({}), body: newBody,
+      receivedAt: new Date(freshReceivedAt).toISOString(), attempts: 0, state: 'queued',
+    })
+    await admissionsTable(booted).put(admissionKey(subscription.subscriptionRef, freshAdmission.admissionRef), freshAdmission)
+    await seam.retryOrFailWebhookAdmission(subscription, freshAdmission, 'the script failed', false,
+      { resumeSequence: 0, successEpoch: 0 })
+
+    const fresh = deliveriesTable(booted).get(deliveryKey(subscription.subscriptionRef, deliveryRef)) as SubscriptionDeliveryRecord
+    expect(fresh).toMatchObject({ admissionRef: 'admission:new', body: webhookStdin({}, newBody),
+      expiresAt: deliveryExpiresAt(freshReceivedAt) })
+    expect(seam.checkpointFor(subscription.subscriptionRef).consecutiveFailures).toBe(1)
+
+    const sameAdmission = 'admission:same'
+    const sameOld = deliveryRecordOf(subscription, deliveryInput(subscription, {
+      deliveryRef, admissionRef: sameAdmission, receivedAt: oldReceivedAt, body: oldBody,
+    }), undefined)
+    await deliveriesTable(booted).put(deliveryKey(subscription.subscriptionRef, deliveryRef), sameOld)
+    const kept = await seam.recordFailedDeliveryLocked(subscription, deliveryInput(subscription, {
+      deliveryRef, admissionRef: sameAdmission, receivedAt: Date.now(), body: newBody,
+    }))
+    expect(kept, 'the same unfinished admission is not a fresh provider delivery').toBe(false)
+    const retained = deliveriesTable(booted).get(deliveryKey(subscription.subscriptionRef, deliveryRef)) as SubscriptionDeliveryRecord
+    expect(retained).toMatchObject({ admissionRef: sameAdmission, body: oldBody, expiresAt: deliveryExpiresAt(oldReceivedAt) })
+    expect(seam.checkpointFor(subscription.subscriptionRef).consecutiveFailures).toBe(1)
   })
 
   it('clears the private state of every subscription when the Project is archived', async () => {

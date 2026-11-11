@@ -65,7 +65,8 @@
 - 默认引擎是独立的选择器；它点名的引擎没启用时，提示行直接说出来，因为不带引擎的委派会被拒绝。单次时限仍是这一行的字段，这一页不渲染。
 - 只有保存会写，而且写的是叶子路径（`worker.engines.codex.executable`，绝不写组对象），所以这一行的其它组、以及各组自己没动过的开关都还在。把控件暂存回它原本显示的值不产生写入，所以开关开一下再关回去，行是干净的。
 - 引擎清单是一个无依赖模块，两半都 import（`worker-settings`），因为 Client bundle 不能把 Host 的引擎代码拖进来。于是这一页不可能提供一个 Host 不会运行的引擎。
-- `human-identity.ts` 是这份资料的唯一读取方。`TeamHumanIdentity` 在多个订阅者之间共用一次在途读取。引用未变时复用已经解码好的头像。后续读取失败时保留上一次已接受的值。只有从未加载成功才是 unavailable。这时整面 `role="alert"` 并自带重试。它还在每次写入被接受后刷新。写入走 Team Remote 自己的 `setHumanProfile` 与头像调用，由它们拥有 profile 条目：Client 从不替身份字段写 settings 文档，所以也不必给那些字段起名。
+- `human-identity.ts` 在多个订阅者之间共用一次资料读取。后续资料读取失败时保留上一次已接受的值。资料读到而头像读取失败时，姓名与首字母仍可见，下次刷新可重试该引用。只有从未加载成功时，整面以 `role="alert"` 提示并提供重试。
+- Team Remote 负责每次资料写入。写入前发出的读取不能取代写入后的重读。已确认保存但刷新失败时提供重读；旧窗口或保存结果不确定时，提示 Human 先重读再修改。
 - `team-config.ts` 是阈值的唯一读写方。共享设置表单只寻址命名空间的顶层字段，而阈值住在这一行的 `memberCompaction` 组里，所以一层小小的 `SettingsFormScope` 适配器把该组摊平给表单，再把表单的编辑映射回子路径。`TeamConfigController` 把这层适配器包进 `SettingsFormModel`，对外发布页面渲染的那一份快照。Client 注入 `configForms`——每个设置消费方都在用的 shipped 服务——并在每个 Client 上构造一次控制器；服务缺席时整组不渲染，控制器随其余 navigation 服务一起销毁。
 - 写入被拒绝时绝不把「正在保存…」晾着。身份行在原位置显示 Host 的 message；配置组就是 shipped 表单，部署拒绝的保存会保留草稿，并在保存按钮旁给出共享的「本部署没有接受这些值」一行。
 - 名字行是一个 form：36×200px 输入框，主色「保存」按钮持有 submit。脏字段里按 Enter 即保存，Tab 的下一站就是「保存」按钮。头像行画 40px 身份圆（`border-radius: 50%` 配 `corner-shape: round`）呈现图片或首字母。一个「更换头像」按钮驱动视觉隐藏的 `input[type="file"] accept="image/*"`，上限 10MB。只有在存有 `avatarRef` 时才多出「移除头像」。两处头像座位只在**这些字节真的能解码**时才画图。Host 按声明的 media type 收头像，不解码内容。手机拍的 HEIC 或传入途中损坏的字节会被存下来，再以画不出任何东西的 data URL 交回。`useAvatarImage` 按 URL 记住字节能否解码。画不出就与「已移除」一样显示首字母；而新上传的字节是另一个 URL，会自动重试。

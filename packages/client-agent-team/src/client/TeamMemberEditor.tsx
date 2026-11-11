@@ -728,7 +728,7 @@ export function AgentEditorDialog({ status, updateMember, loadModels, loadMember
       <form id="team-agent-edit-form" className={createCss.form} onSubmit={event => { void submit(event) }}>
         <label className={createCss.field}>
           <span>{t('agentName')}</span>
-          <Input className={createCss.input!} value={handle} onChange={event => { setHandle(event.target.value); invalidate() }} disabled={saving} autoFocus />
+          <Input className={createCss.input!} value={handle} onChange={event => { setHandle(event.target.value); invalidate() }} disabled={saving} data-modal-autofocus />
         </label>
         <label className={createCss.field}>
           <span>{t('agentDescription')}{t('optionalSuffix')}</span>

@@ -735,6 +735,9 @@
   cursor: zoom-in;
   padding: 0;
 }
+.attachmentThumb:disabled {
+  cursor: progress;
+}
 .attachmentThumb img {
   border-radius: var(--dsw-radius-sm, 8px);
   display: block;
@@ -852,6 +855,7 @@
   gap: 6px;
   max-width: 100%;
   padding: 3px 8px;
+  position: relative;
 }
 
 .attachmentChipName {
@@ -867,4 +871,30 @@
   font-size: 11px;
   line-height: 17px;
   white-space: nowrap;
+}
+
+.attachmentDecodeProbe {
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 1px;
+}
+
+.attachmentRetry {
+  background: none;
+  border: 0;
+  color: var(--dsw-alias-state-business-primary);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 17px;
+  margin: -3px -2px;
+  padding: 3px 2px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.attachmentRetry:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
 }

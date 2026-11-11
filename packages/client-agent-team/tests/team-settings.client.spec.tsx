@@ -21,6 +21,7 @@ const readFailure = (message: string): RemoteResult<AgentTeamHumanProfileResult>
 
 const PROFILE = {
   name: 'Ada',
+  settingsFence: 'fixture-host:4',
   version: '0.1.13',
   repoUrl: 'https://github.com/Contexera/dsh-agent-team',
 }
@@ -105,7 +106,10 @@ describe('Team settings page: identity', () => {
   })
 
   it('keeps a refused rename in the field and reports the Host reason', async () => {
-    const saveName = vi.fn(async () => "human name 'Ada' collides with an existing Member handle")
+    const saveName = vi.fn(async () => ({
+      kind: 'rejected' as const,
+      message: "human name 'Ada' collides with an existing Member handle",
+    }))
     renderSection({ saveName })
     const field = await screen.findByLabelText('名字')
     fireEvent.change(field, { target: { value: 'Ada Lovelace' } })
@@ -114,6 +118,31 @@ describe('Team settings page: identity', () => {
     expect(screen.getByRole('alert').textContent).toBe("名字没保存上：human name 'Ada' collides with an existing Member handle")
     // Non-optimistic: the typed value survives the refusal.
     expect((screen.getByLabelText('名字') as HTMLInputElement).value).toBe('Ada Lovelace')
+  })
+
+  it('blocks another write after a stale fence until the page re-reads', async () => {
+    const loadProfile = vi.fn(async () => ({ ok: true as const, value: PROFILE }))
+    const identity = new TeamHumanIdentity({ loadProfile, loadAvatarUrl: async () => null })
+    const saveName = vi.fn(async () => ({ kind: 'conflict' as const, message: 'changed elsewhere' }))
+    renderSection({ identity, saveName })
+    const field = await screen.findByLabelText('名字')
+    fireEvent.change(field, { target: { value: 'Ada Lovelace' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toContain(zh.humanSettingsProfileConflict) })
+    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: zh.humanSettingsReread }))
+    await waitFor(() => { expect(screen.queryByRole('alert')).toBeNull() })
+    expect(loadProfile).toHaveBeenCalledTimes(2)
+  })
+
+  it('describes an uncertain avatar result as unconfirmed and offers a re-read', async () => {
+    const uploadAvatar = vi.fn(async () => ({ kind: 'uncertain' as const, message: 'transport closed' }))
+    renderSection({ uploadAvatar })
+    await screen.findByLabelText('名字')
+    const picker = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(picker, { target: { files: [new File(['x'], 'avatar.png', { type: 'image/png' })] } })
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toContain('保存结果未确认') })
+    expect(screen.getByRole('button', { name: zh.humanSettingsReread })).not.toBeNull()
   })
 
   it('clears the draft once the Host accepts the rename', async () => {

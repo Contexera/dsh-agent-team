@@ -117,11 +117,15 @@ function sectionOp(op: SettingsFormPathOp): SettingsPathOpView {
  * @param form - the Host row's configuration form.
  * @returns the same document seen as the group's single field.
  */
-export function teamConfigScope(form: ConfigForm<TeamConfigSection>): SettingsFormScope<TeamConfigValues> {
+export function teamConfigScope(form: ConfigForm<TeamConfigSection>, onSaved?: () => void): SettingsFormScope<TeamConfigValues> {
   return {
     getSnapshot: () => flatten(form.getSnapshot()),
     subscribe: listener => form.subscribe(listener),
-    mutate: (ops, expectedRevision) => form.mutate(ops.map(sectionOp), expectedRevision),
+    mutate: async (ops, expectedRevision) => {
+      const accepted = await form.mutate(ops.map(sectionOp), expectedRevision)
+      if (accepted) onSaved?.()
+      return accepted
+    },
   }
 }
 
@@ -242,7 +246,7 @@ function workerOp(op: SettingsFormPathOp): SettingsPathOpView {
  * @param form - the Host row's configuration form.
  * @returns the same document seen as the Worker group's fields.
  */
-export function workerConfigScope(form: ConfigForm<TeamConfigSection>): SettingsFormScope<WorkerConfigValues> {
+export function workerConfigScope(form: ConfigForm<TeamConfigSection>, onSaved?: () => void): SettingsFormScope<WorkerConfigValues> {
   return {
     getSnapshot: () => {
       const snapshot = form.getSnapshot()
@@ -256,7 +260,11 @@ export function workerConfigScope(form: ConfigForm<TeamConfigSection>): Settings
       }
     },
     subscribe: listener => form.subscribe(listener),
-    mutate: (ops, expectedRevision) => form.mutate(ops.map(workerOp), expectedRevision),
+    mutate: async (ops, expectedRevision) => {
+      const accepted = await form.mutate(ops.map(workerOp), expectedRevision)
+      if (accepted) onSaved?.()
+      return accepted
+    },
   }
 }
 

@@ -48,6 +48,7 @@ export type SubscriptionAdmissionRecord = {
       readonly heldEvents?: readonly SubscriptionEvent[] | undefined
       /** The failure the last attempt reported; `undefined` until one does. */
       readonly lastError?: string | undefined
+      readonly failureStreak?: undefined
     }
   | {
       readonly state: 'exhausted'
@@ -59,6 +60,8 @@ export type SubscriptionAdmissionRecord = {
       readonly nextAttemptAt?: undefined
       readonly heldEvents?: undefined
       readonly lastError: string
+      /** Absent for legacy settlements or a delivery that does not count. */
+      readonly failureStreak?: { readonly resumeSequence: number; readonly successEpoch: number } | undefined
     }
 )
 

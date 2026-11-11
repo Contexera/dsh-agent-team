@@ -1,4 +1,5 @@
 import { RemoteStream, RemoteStreamCarrierError } from '@deepseek-ai/dsh-api-gateway/client'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamChangesRequest } from '@contexera/dsh-agent-team/types'
 import { afterEach, expect, vi } from 'vitest'
 import { fireEvent, type RenderResult } from '@testing-library/react'
@@ -71,6 +72,7 @@ function BaselineSettings() { return <div data-baseline-settings>设置</div> }
 interface HumanProfileSeed {
   readonly name?: string
   readonly avatarRef?: string
+  readonly settingsFence?: string
   readonly version?: string
   readonly repoUrl?: string
   readonly latestVersion?: string
@@ -343,7 +345,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   }))
   let putAttachmentCounter = 0
   const getAttachment = vi.fn(async (request: { attachmentId: string }) => {
-    if (request.attachmentId === 'attachment:2') return { ok: false as const, error: new Error('no longer cached') }
+    if (request.attachmentId === 'attachment:2') return { ok: false as const, error: new RemoteError('team/attachment-not-found', 'no longer cached', { attachmentId: request.attachmentId as never }) }
     return { ok: true as const, value: { name: 'x', mediaType: 'image/png', byteSize: 8, bytesBase64: 'aGVsbG8=' } }
   })
   // Seeded Threads reach the Main stream as the cards the Host would draw for them, so a spec that seeds a Thread reads it from the stream.
@@ -789,8 +791,9 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // draws the Human read the same Remotes, and the Host writes the page makes
   // land in the same seeded value — so one rename visibly moves the page, the
   // timeline, and the member refs together.
-  let humanProfileValue: { name: string; avatarRef?: string; version: string; repoUrl: string; latestVersion?: string } = {
+  let humanProfileValue: { name: string; avatarRef?: string; settingsFence?: string; version: string; repoUrl: string; latestVersion?: string } = {
     name: 'human',
+    settingsFence: 'fixture-host:0',
     version: '0.1.13',
     repoUrl: 'https://github.com/Contexera/dsh-agent-team',
     ...options?.humanProfile,
@@ -806,23 +809,25 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     ok: true as const,
     value: { name: 'avatar.png', mediaType: 'image/png', byteSize: 3, bytesBase64: 'AAAA' },
   }))
-  const putHumanAvatar = vi.fn(async (_request: { name: string; mediaType?: string; bytesBase64: string }) => ({
-    ok: true as const,
-    value: { avatarRef: 'avatar:1', path: '/human/v1/avatar:1/avatar.png', name: 'avatar.png', byteSize: 3, mediaType: 'image/png' },
-  }))
-  const removeHumanAvatar = vi.fn(async (_request: { avatarRef: string }) => ({ ok: true as const, value: { removed: true } }))
+  const putHumanAvatar = vi.fn(async (request: { name: string; mediaType?: string; bytesBase64: string; expectedFence: string }) => {
+    humanProfileValue = { ...humanProfileValue, avatarRef: 'avatar:1', settingsFence: `${request.expectedFence}:next` }
+    return {
+      ok: true as const,
+      value: { name: humanProfileValue.name, avatarRef: 'avatar:1', settingsFence: humanProfileValue.settingsFence },
+    }
+  })
+  const removeHumanAvatar = vi.fn(async (request: { expectedFence: string }) => {
+    const { avatarRef: _avatarRef, ...rest } = humanProfileValue
+    humanProfileValue = { ...rest, settingsFence: `${request.expectedFence}:next` }
+    return { ok: true as const, value: { name: humanProfileValue.name, settingsFence: humanProfileValue.settingsFence } }
+  })
   // The Host owns the profile write and answers with the resolved name +
   // avatarRef, so the bench refuses exactly where the Host refuses: before
   // anything is stored.
-  const setHumanProfile = vi.fn(async (request: { name?: string; avatarRef?: string | null }) => {
+  const setHumanProfile = vi.fn(async (request: { name: string; expectedFence: string }) => {
     if (humanProfileWriteFailure !== undefined) return { ok: false as const, error: { message: humanProfileWriteFailure } }
-    if (typeof request.name === 'string') humanProfileValue = { ...humanProfileValue, name: request.name }
-    if (request.avatarRef === null) {
-      const { avatarRef: _avatarRef, ...rest } = humanProfileValue
-      humanProfileValue = rest
-    } else if (typeof request.avatarRef === 'string') humanProfileValue = { ...humanProfileValue, avatarRef: request.avatarRef }
-    const { version: _version, repoUrl: _repoUrl, latestVersion: _latestVersion, ...profile } = humanProfileValue
-    return { ok: true as const, value: profile }
+    humanProfileValue = { ...humanProfileValue, name: request.name, settingsFence: `${request.expectedFence}:next` }
+    return { ok: true as const, value: { name: request.name, settingsFence: humanProfileValue.settingsFence } }
   })
   /** Seed the Human profile every identity read answers with. */
   const seedHumanProfile = (next: Partial<typeof humanProfileValue>): void => {

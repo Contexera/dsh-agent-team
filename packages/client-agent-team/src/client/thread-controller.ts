@@ -6,6 +6,7 @@ import type {
   AgentTeamMemberId,
   AgentTeamMessageRef,
   AgentTeamOperationReceipt,
+  AgentTeamReplyRequest,
   AgentTeamRequestId,
   AgentTeamStaleRevision,
   AgentTeamTask,
@@ -25,7 +26,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/clie
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import type { ReplyTarget } from './TeamComposer.tsx'
-import { mintRequestId, uploadComposerFiles } from './requests.ts'
+import { isUncertainRemoteFailure, mergeSettledComposerUploads, mintRequestId, reconcileComposerUploads, sameComposerFiles, uploadComposerFiles, type ComposerUpload } from './requests.ts'
 import { useTimelineScroll, type TimelineScroll } from './timeline-scroll.ts'
 import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRefs, useResolvedMessageRefVersion } from './refs.ts'
 import { factKey, mergeFacts, messageFact, minSequence } from './thread-facts.ts'
@@ -34,6 +35,25 @@ import { mentionedMemberIds } from './team-formatters.ts'
 // A bounded read acknowledges at most 20 unread facts and reads never self-wake a change scope,
 // so larger backlogs need continuation reads; the cap stops a feed that outpaces reading.
 const MAX_AUTO_READ_ROUNDS = 50
+
+interface ReplySendIntent {
+  readonly requestId: AgentTeamRequestId
+  readonly body: string
+  readonly taskRef?: AgentTeamTaskRef | undefined
+  readonly replyToMessageRef?: AgentTeamMessageRef | undefined
+  readonly baseRevision: number
+  readonly uploads: readonly ComposerUpload[]
+  readonly request?: AgentTeamReplyRequest | undefined
+}
+
+const matchesReplySend = (
+  intent: ReplySendIntent,
+  body: string,
+  taskRef: AgentTeamTaskRef | undefined,
+  replyToMessageRef: AgentTeamMessageRef | undefined,
+  files: readonly File[],
+): boolean => intent.body === body && intent.taskRef === taskRef
+  && intent.replyToMessageRef === replyToMessageRef && sameComposerFiles(intent.uploads, files)
 
 export interface TeamThreadControllerOptions {
   readonly workspaceId: WorkspaceId
@@ -152,8 +172,7 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
   // The draft cache outlives this page across view switches; the composer owns the subscription so typing never re-renders the timeline.
   const draftKey: TeamDraftKey = `thread:${threadRef}`
-  const [replyRequestId, setReplyRequestId] = useState<AgentTeamRequestId>()
-  const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
+  const [replyTarget, setReplyTargetState] = useState<AgentTeamMessageRef>()
   const [flashedMessage, setFlashedMessage] = useState<AgentTeamMessageRef>()
   // The Message this opening lands on, held until its row exists: the jump is
   // decided from the first read, and rows render a paint later.
@@ -171,6 +190,18 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   const readRequestIdRef = useRef<AgentTeamRequestId>(mintRequestId())
   const projectionRef = useRef<AgentTeamThreadReadResult>()
   const mutationRequests = useRef(new Map<string, AgentTeamRequestId>())
+  const sending = useRef(false)
+  const replySendIntent = useRef<ReplySendIntent>()
+  const uploads = useRef<readonly ComposerUpload[]>([])
+  const setReplyTarget = useCallback((next: AgentTeamMessageRef | undefined): void => {
+    replySendIntent.current = undefined
+    setReplyTargetState(next)
+  }, [])
+  const changePendingFiles = useCallback((files: readonly File[]): void => {
+    uploads.current = reconcileComposerUploads(files, uploads.current)
+    replySendIntent.current = undefined
+    setPendingFiles(files)
+  }, [])
   const threadLastFact = currentFacts[currentFacts.length - 1]
   const timeline = useTimelineScroll(`${currentFacts.length}:${olderFacts.length}:${threadLastFact === undefined ? '' : factKey(threadLastFact)}`)
   // The hook returns a fresh object per render, but this callback is stable: the
@@ -471,33 +502,63 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   // Every setter returns the same state when there is nothing to clear, so a keystroke does not re-render the timeline.
   // Editing invalidates the retained requestId.
   const clearSendState = useCallback((): void => {
-    setReplyRequestId(current => current === undefined ? current : undefined)
+    replySendIntent.current = undefined
   }, [])
 
   const sendReply = async (): Promise<void> => {
     // Read at send time: neither face subscribes to the draft.
     const { draft } = drafts.getSnapshot(draftKey)
     const activeProjection = projectionRef.current
-    if (pending || activeProjection === undefined || draft.trim() === '') return
+    if (sending.current || pending || activeProjection === undefined || draft.trim() === '') return
+    sending.current = true
     const thread = activeProjection.thread
     const task = activeProjection.task
-    const id = replyRequestId ?? mintRequestId()
-    setReplyRequestId(id)
+    const body = draft.trim()
+    const currentUploads = reconcileComposerUploads(pendingFiles, uploads.current)
+    uploads.current = currentUploads
+    let intent = replySendIntent.current
+    if (intent === undefined || !matchesReplySend(intent, body, task?.taskRef, replyTarget, pendingFiles)) {
+      intent = {
+        requestId: mintRequestId(), body, ...(task === undefined ? {} : { taskRef: task.taskRef }),
+        ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), baseRevision: thread.revision, uploads: currentUploads,
+      }
+      replySendIntent.current = intent
+    }
     setPending(true)
     setError(undefined)
     try {
-      const upload = await uploadComposerFiles(putAttachment, workspaceId, pendingFiles)
+      const upload = await uploadComposerFiles(putAttachment, workspaceId, intent.uploads)
+      const stillCurrent = replySendIntent.current?.requestId === intent.requestId
+      uploads.current = stillCurrent ? upload.uploads : mergeSettledComposerUploads(uploads.current, upload.uploads)
+      if (!stillCurrent) return
+      intent = { ...intent, uploads: upload.uploads }
+      replySendIntent.current = intent
       if (!upload.ok) {
         setError(upload.error)
         return
       }
-      const attachmentIds = upload.attachmentIds
-      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }) })
+      const request = intent.request ?? {
+        requestId: intent.requestId, workspaceId, threadRef,
+        ...(intent.taskRef === undefined ? {} : { taskRef: intent.taskRef }),
+        ...(intent.replyToMessageRef === undefined ? {} : { replyToMessageRef: intent.replyToMessageRef }),
+        body: intent.body, baseRevision: intent.baseRevision,
+        ...(upload.attachmentIds.length === 0 ? {} : { attachments: upload.attachmentIds }),
+      }
+      replySendIntent.current = { ...intent, request }
+      const result = await reply(request)
+      const ownsIntent = replySendIntent.current?.requestId === intent.requestId
       if (!result.ok) {
-        setError(result.error.message)
+        if (ownsIntent) {
+          if (!isUncertainRemoteFailure(result.error)) replySendIntent.current = undefined
+          setError(result.error.message)
+        }
         return
       }
       if (result.value.kind === 'committed') {
+        if (ownsIntent) {
+          replySendIntent.current = undefined
+          uploads.current = []
+        }
         const committed = result.value as Extract<typeof result.value, { kind: 'committed' }>
         // Hand-typed `@Handle` delivers directly; committed facts replace this row on arrival.
         const optimisticMentions = mentionedMemberIds(draft, options.projectMembers())
@@ -506,24 +567,34 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
           currentFactsRef.current = merged
           return merged
         })
-        setProjection(current => current === undefined ? current : { ...current, ...(committed.task === undefined ? {} : { task: committed.task }), thread: committed.thread })
-        drafts.clear(draftKey)
-        setReplyTarget(undefined)
-        setPendingFiles([])
-        setReplyRequestId(undefined)
+        setProjection(current => current === undefined || committed.thread.revision < current.thread.revision
+          ? current
+          : { ...current, ...(committed.task === undefined ? {} : { task: committed.task }), thread: committed.thread })
+        if (ownsIntent) {
+          drafts.clear(draftKey)
+          setReplyTarget(undefined)
+          setPendingFiles([])
+        }
         await options.afterWrite?.()
       } else if (result.value.kind === 'unread_required') {
-        setError(t('unreadRequired', { count: result.value.unreadCount }))
-        setReplyRequestId(undefined)
+        if (ownsIntent) {
+          setError(t('unreadRequired', { count: result.value.unreadCount }))
+          replySendIntent.current = undefined
+        }
         await refreshAfterFence()
       } else if (result.value.kind === 'stale_revision') {
-        setError(t('staleRevision'))
-        setReplyRequestId(undefined)
+        if (ownsIntent) {
+          setError(t('staleRevision'))
+          replySendIntent.current = undefined
+        }
         await refreshPassiveFacts()
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally { setPending(false) }
+      if (replySendIntent.current?.requestId === intent.requestId) setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      sending.current = false
+      setPending(false)
+    }
   }
 
   const retryAutoRead = useCallback((): void => {
@@ -573,7 +644,7 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
     jumpToNewest,
     flashMessage: setFlashedMessage,
     setReplyTarget,
-    setPendingFiles,
+    setPendingFiles: changePendingFiles,
     clearSendState,
     reportError: setError,
     sendReply,

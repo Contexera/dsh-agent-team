@@ -5,7 +5,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { AgentTeamProjectRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamMessageRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import type { TeamConversationProps } from './slots.ts'
 import type { ResolvedMemberRef } from './refs.ts'
-import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
+import { cachedAttachmentDataUrl, formatByteSize, invalidateAttachmentDataUrl, loadAttachmentPreview } from './attachment-preview.ts'
 import { copyText } from './clipboard.ts'
 import { cachedResolvedTaskRef, resolveUnknownTaskRefs, useResolvedTaskRefVersion, type ResolvedTaskRef } from './refs.ts'
 import { cachedResolvedThreadRef, resolveUnknownThreadRefs, useResolvedThreadRefVersion, type ResolvedThreadRef } from './refs.ts'
@@ -514,43 +514,91 @@ function TeamAttachmentStrip({ attachments, loadAttachment, t }: {
   readonly loadAttachment?: TeamConversationProps['getAttachment'] | undefined
   readonly t?: TeamConversationProps['t'] | undefined
 }) {
-  const [zoomed, setZoomed] = useState<AgentTeamMessageAttachment>()
+  const [zoomed, setZoomed] = useState<{ readonly attachment: AgentTeamMessageAttachment; readonly dataUrl: string }>()
   return <div className={css.attachmentStrip}>
     {attachments.map(attachment => <TeamAttachment
       key={attachment.attachmentId}
       attachment={attachment}
       {...(loadAttachment === undefined ? {} : { loadAttachment })}
       {...(t === undefined ? {} : { t })}
-      onZoom={setZoomed}
+      onZoom={(dataUrl) => { setZoomed({ attachment, dataUrl }) }}
     />)}
-    {zoomed !== undefined && <Modal open {...(css.attachmentModal === undefined ? {} : { className: css.attachmentModal })} title={zoomed.name} closeLabel={t?.('close') ?? 'Close'} onClose={() => { setZoomed(undefined) }}>
-      <img className={css.attachmentZoom} src={cachedAttachmentDataUrl(zoomed.attachmentId) ?? undefined} alt={zoomed.name} />
+    {zoomed !== undefined && <Modal open {...(css.attachmentModal === undefined ? {} : { className: css.attachmentModal })} title={zoomed.attachment.name} closeLabel={t?.('close') ?? 'Close'} onClose={() => { setZoomed(undefined) }}>
+      <img className={css.attachmentZoom} src={zoomed.dataUrl} alt={zoomed.attachment.name} />
     </Modal>}
   </div>
 }
+
+type AttachmentPreviewState =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'decoding'; readonly dataUrl: string }
+  | { readonly kind: 'ready'; readonly dataUrl: string }
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'failed' }
 
 function TeamAttachment({ attachment, loadAttachment, t, onZoom }: {
   readonly attachment: AgentTeamMessageAttachment
   readonly loadAttachment?: TeamConversationProps['getAttachment'] | undefined
   readonly t?: TeamConversationProps['t'] | undefined
-  readonly onZoom: (attachment: AgentTeamMessageAttachment) => void
+  readonly onZoom: (dataUrl: string) => void
 }) {
   const wantsPreview = loadAttachment !== undefined && attachment.mediaType.startsWith('image/')
-  const [dataUrl, setDataUrl] = useState<string | null | undefined>(wantsPreview ? cachedAttachmentDataUrl(attachment.attachmentId) : null)
+  const cached = wantsPreview ? cachedAttachmentDataUrl(attachment.attachmentId) : undefined
+  const [preview, setPreview] = useState<AttachmentPreviewState>(() => cached === undefined ? { kind: 'loading' } : { kind: 'decoding', dataUrl: cached })
+  const chipRef = useRef<HTMLSpanElement>(null)
+  const thumbRef = useRef<HTMLButtonElement>(null)
+  const retryRef = useRef<HTMLButtonElement>(null)
+  const retryPending = useRef(false)
   useEffect(() => {
-    if (!wantsPreview || dataUrl !== undefined) return
+    if (!wantsPreview || preview.kind !== 'loading') return
     let mounted = true
-    void loadAttachmentDataUrl(loadAttachment, attachment).then(url => { if (mounted) setDataUrl(url) })
+    void loadAttachmentPreview(loadAttachment, attachment).then(outcome => {
+      if (!mounted) return
+      setPreview(outcome.kind === 'ready' ? { kind: 'decoding', dataUrl: outcome.dataUrl } : outcome.kind === 'missing' ? { kind: 'missing' } : { kind: 'failed' })
+    })
     return () => { mounted = false }
-  }, [wantsPreview, dataUrl, loadAttachment, attachment])
+  }, [attachment, loadAttachment, preview.kind, wantsPreview])
+  useEffect(() => {
+    if (!retryPending.current) return
+    if (preview.kind === 'ready') {
+      retryPending.current = false
+      thumbRef.current?.focus()
+    } else if (preview.kind === 'failed') {
+      retryPending.current = false
+      retryRef.current?.focus()
+    } else if (preview.kind === 'missing') {
+      retryPending.current = false
+      chipRef.current?.focus()
+    } else if (preview.kind === 'loading' || preview.kind === 'decoding') {
+      chipRef.current?.focus()
+    }
+  }, [preview.kind])
   const expired = t?.('attachmentExpired') ?? 'File no longer cached'
-  if (wantsPreview && dataUrl !== null) {
-    return <button type="button" className={css.attachmentThumb} aria-label={t?.('viewImage', { name: attachment.name }) ?? attachment.name} title={attachment.name} onClick={() => { onZoom(attachment) }}>
-      <img src={dataUrl} alt={attachment.name} />
+  if (wantsPreview && preview.kind === 'ready') {
+    return <button ref={thumbRef} type="button" className={css.attachmentThumb} aria-label={t?.('viewImage', { name: attachment.name }) ?? attachment.name} title={attachment.name} onClick={() => { onZoom(preview.dataUrl) }}>
+      <img src={preview.dataUrl} alt={attachment.name} onError={() => {
+        invalidateAttachmentDataUrl(attachment.attachmentId)
+        retryPending.current = true
+        setPreview({ kind: 'failed' })
+      }} />
     </button>
   }
-  return <span className={css.attachmentChip} title={wantsPreview ? expired : `${attachment.name} · ${formatByteSize(attachment.byteSize)}`}>
+  const imageStatus = preview.kind === 'missing'
+    ? expired
+    : preview.kind === 'failed'
+      ? t?.('attachmentUnavailable') ?? 'Image unavailable'
+      : t?.('attachmentLoading') ?? 'Loading image'
+  return <span ref={chipRef} tabIndex={wantsPreview ? -1 : undefined} aria-live={wantsPreview ? 'polite' : undefined} className={css.attachmentChip} title={wantsPreview ? `${attachment.name} · ${imageStatus}` : `${attachment.name} · ${formatByteSize(attachment.byteSize)}`}>
     <span className={css.attachmentChipName}>{attachment.name}</span>
-    <span className={css.attachmentChipSize}>{wantsPreview ? expired : formatByteSize(attachment.byteSize)}</span>
+    <span className={css.attachmentChipSize}>{wantsPreview ? imageStatus : formatByteSize(attachment.byteSize)}</span>
+    {preview.kind === 'decoding' && <img className={css.attachmentDecodeProbe} src={preview.dataUrl} alt="" aria-hidden onLoad={() => { setPreview({ kind: 'ready', dataUrl: preview.dataUrl }) }} onError={() => {
+      invalidateAttachmentDataUrl(attachment.attachmentId)
+      retryPending.current = true
+      setPreview({ kind: 'failed' })
+    }} />}
+    {preview.kind === 'failed' && <button ref={retryRef} type="button" className={css.attachmentRetry} onClick={() => {
+      retryPending.current = true
+      setPreview({ kind: 'loading' })
+    }}>{t?.('attachmentRetry') ?? 'Retry reading'}</button>}
   </span>
 }
