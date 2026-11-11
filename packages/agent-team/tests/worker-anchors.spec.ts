@@ -375,9 +375,10 @@ describe('the anchors one run\'s ending carries', () => {
     expect(executionOf(ctx.agentTeam, run.workerRef)?.state).toBe('stopped')
   }, 60_000)
 
-  // The sqlite arms pay a durable commit per ledger write. On the windows lane
-  // the memory arms settle around 1.2s while both sqlite arms crossed the 5s
-  // default (run #235), so this reconstruction round trip needs headroom.
+  // The sqlite arms pay a durable commit per ledger write, and that cost varies
+  // wildly on the windows lane: run #235 crossed the 5s default on both arms
+  // while the memory arms settled around 1.2s, and the next run settled at
+  // 506ms and 534ms. The budget is 60s rather than the default.
   it.each([
     { ledgerBackend: 'memory' as const, alias: false },
     { ledgerBackend: 'memory' as const, alias: true },
