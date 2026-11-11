@@ -399,10 +399,18 @@
 }
 
 .notice {
+  align-items: center;
   color: var(--dsw-alias-state-error-primary);
+  display: flex;
+  flex-wrap: wrap;
   font-size: 12px;
+  gap: 8px;
   line-height: 18px;
   margin: 0;
+}
+
+.noticeSaved {
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .state {

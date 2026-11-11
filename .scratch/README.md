@@ -21,6 +21,7 @@
 
 | 月 | 工作项 | 一句话结论 | 链接 |
 | --- | --- | --- | --- |
+| 2026-11 | implicit-state-machines | Webhook 耗尽可恢复、订阅存储升到 v5、Task 写入与重放共享状态推导；编辑、发送、头像、附件与时间线的故障恢复通过 Web 验收。 | [README](archive/2026-11/implicit-state-machines/README.md) |
 | 2026-11 | member-host-tools | Team 设置按 profile 放行额外宿主工具名，下一轮生效；过滤 preset 基线候选，自有 scope 的可见未许可工具由动态 prompt 列名且执行 guard 拒绝，#143/#147 已验收。 | [README](archive/2026-11/member-host-tools/README.md) |
 | 2026-11 | domain-owners-and-workers | 本机 Codex／Claude Worker、owner 常驻引导与开关隔离收口；完整组合和浏览器独立验收通过，Claude 同轮追加指令按原生能力阻塞关闭、不宣称完成。 | [README](archive/2026-11/domain-owners-and-workers/README.md) |
 | 2026-11 | dsh-0.2.2-adaptation | DSH `0.2.2-rc.1` 适配与认证：peer 移到 `>=0.2.2-rc.1 <0.2.3`，四处上游契约变化（设置图标官方槽位、窄屏 drawer、outline inset shadow、paint inset）适配完成，2022 用例与 13 条浏览器旅程全绿，独立验收判绿，随 0.2.7 发布。 | [README](archive/2026-11/dsh-0.2.2-adaptation/README.md) |

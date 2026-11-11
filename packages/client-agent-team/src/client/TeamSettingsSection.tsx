@@ -3,7 +3,11 @@ import type { ReactNode } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { Button, IconChevronDownOutlineRegular, Input, SettingsForm, SettingsValueField, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { HUMAN_AVATAR_MAX_BYTES } from '@contexera/dsh-agent-team/human-settings'
-import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
+import {
+  useHumanIdentity,
+  type TeamHumanIdentityFace,
+  type TeamHumanProfileActionOutcome,
+} from './human-identity.ts'
 import {
   useExtraToolGrants, type ExtraToolGrantsFace,
 } from './extra-tool-grants.ts'
@@ -23,10 +27,10 @@ export interface TeamSettingsInjected {
   /** The shared Human identity projection: profile facts plus post-write refresh. */
   identity: TeamHumanIdentityFace
   /** Persist one renamed display name; the failure message when the Host refuses it. */
-  saveName: (name: string) => Promise<string | undefined>
+  saveName: (name: string) => Promise<TeamHumanProfileActionOutcome>
   /** Upload one image file, persist its reference; the failure message when it does not stick. */
-  uploadAvatar: (file: File) => Promise<string | undefined>
-  removeAvatar: () => Promise<string | undefined>
+  uploadAvatar: (file: File) => Promise<TeamHumanProfileActionOutcome>
+  removeAvatar: () => Promise<TeamHumanProfileActionOutcome>
   environment: TeamEnvironmentSource
   /** The Host row's compaction threshold; absent when the settings service is. */
   teamConfig?: TeamConfigFace | undefined
@@ -41,13 +45,19 @@ export type TeamSettingsProps =
   & PropsLocale<'team'>
   & TeamSettingsInjected
 
-/** A rejected Remote call (a dropped carrier) is a failure like any other; otherwise the field would sit on "saving" forever. */
-async function failureOf(action: () => Promise<string | undefined>): Promise<string | undefined> {
+/** A local file-read failure is a refusal; Remote uncertainty is classified by the shared writer. */
+async function outcomeOf(action: () => Promise<TeamHumanProfileActionOutcome>): Promise<TeamHumanProfileActionOutcome> {
   try {
     return await action()
   } catch (error) {
-    return error instanceof Error ? error.message : String(error)
+    return { kind: 'rejected', message: error instanceof Error ? error.message : String(error) }
   }
+}
+
+interface SettingsNotice {
+  readonly message: string
+  readonly tone: 'error' | 'saved'
+  readonly reread: boolean
 }
 
 function avatarInitial(name: string | undefined): string {
@@ -452,7 +462,9 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
   const [draft, setDraft] = useState<NameDraft>({ kind: 'follow' })
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [removing, setRemoving] = useState(false)
+  const [rereading, setRereading] = useState(false)
+  const [notice, setNotice] = useState<SettingsNotice | null>(null)
   const filePicker = useRef<HTMLInputElement | null>(null)
 
   const name = draft.kind === 'editing' ? draft.text : profile.name ?? ''
@@ -460,41 +472,73 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
   const emptyName = draft.kind === 'editing' && draft.text.trim() === ''
   const hasAvatar = profile.avatarRef !== undefined
   const avatar = useAvatarImage(profile.avatarUrl)
+  const writesAvailable = profile.settingsFence !== undefined
+  const writesBlocked = notice?.reread === true
 
-  const submitName = async (): Promise<void> => {
-    if (!dirty || emptyName || saving) return
-    setSaving(true)
-    setNotice(null)
-    const failure = await failureOf(() => props.saveName(name.trim()))
-    setSaving(false)
-    if (failure !== undefined) {
-      setNotice(t('humanSettingsNameFailed', { message: failure }))
+  const report = (outcome: TeamHumanProfileActionOutcome, rejected: (message: string) => string): void => {
+    if (outcome === undefined) {
+      setNotice(null)
       return
     }
-    setDraft({ kind: 'follow' })
+    if (outcome.kind === 'saved') {
+      setNotice({ message: t('humanSettingsSavedRefreshFailed', { message: outcome.warning }), tone: 'saved', reread: true })
+      return
+    }
+    if (outcome.kind === 'conflict') {
+      setNotice({ message: t('humanSettingsProfileConflict'), tone: 'error', reread: true })
+      return
+    }
+    if (outcome.kind === 'uncertain') {
+      setNotice({ message: t('humanSettingsResultUnconfirmed', { message: outcome.message }), tone: 'error', reread: true })
+      return
+    }
+    setNotice({ message: rejected(outcome.message), tone: 'error', reread: false })
+  }
+
+  const rereadProfile = async (): Promise<void> => {
+    setRereading(true)
+    await identity.refreshAfterWrite()
+    setRereading(false)
+    const error = identity.getSnapshot().error
+    setNotice(error === undefined ? null : {
+      message: t('humanSettingsRereadFailed', { message: error }), tone: 'error', reread: true,
+    })
+  }
+
+  const submitName = async (): Promise<void> => {
+    if (!dirty || emptyName || saving || writesBlocked || !writesAvailable) return
+    setSaving(true)
+    setNotice(null)
+    const outcome = await outcomeOf(() => props.saveName(name.trim()))
+    setSaving(false)
+    report(outcome, message => t('humanSettingsNameFailed', { message }))
+    if (outcome === undefined) setDraft({ kind: 'follow' })
   }
 
   const pickAvatar = async (file: File | undefined): Promise<void> => {
-    if (file === undefined) return
+    if (file === undefined || writesBlocked || !writesAvailable) return
     setNotice(null)
     if (!file.type.startsWith('image/')) {
-      setNotice(t('humanSettingsAvatarNotImage'))
+      setNotice({ message: t('humanSettingsAvatarNotImage'), tone: 'error', reread: false })
       return
     }
     if (file.size > HUMAN_AVATAR_MAX_BYTES) {
-      setNotice(t('humanSettingsAvatarTooLarge'))
+      setNotice({ message: t('humanSettingsAvatarTooLarge'), tone: 'error', reread: false })
       return
     }
     setUploading(true)
-    const failure = await failureOf(() => props.uploadAvatar(file))
+    const outcome = await outcomeOf(() => props.uploadAvatar(file))
     setUploading(false)
-    if (failure !== undefined) setNotice(t('humanSettingsAvatarFailed', { message: failure }))
+    report(outcome, message => t('humanSettingsAvatarFailed', { message }))
   }
 
   const removeAvatar = async (): Promise<void> => {
+    if (removing || writesBlocked || !writesAvailable) return
     setNotice(null)
-    const failure = await failureOf(() => props.removeAvatar())
-    if (failure !== undefined) setNotice(t('humanSettingsAvatarFailed', { message: failure }))
+    setRemoving(true)
+    const outcome = await outcomeOf(() => props.removeAvatar())
+    setRemoving(false)
+    report(outcome, message => t('humanSettingsAvatarFailed', { message }))
   }
 
   // Every state, including a failed read, must say whose Team this is and where a change applies.
@@ -530,10 +574,10 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
               aria-label={t('humanSettingsName')}
               aria-invalid={emptyName || undefined}
               value={name}
-              disabled={saving}
+              disabled={saving || rereading || writesBlocked}
               onChange={(event) => { setDraft({ kind: 'editing', text: event.target.value }) }}
             />
-            <Button type="submit" variant="primary" disabled={saving || !dirty || emptyName}>
+            <Button type="submit" variant="primary" disabled={saving || rereading || writesBlocked || !writesAvailable || !dirty || emptyName}>
               {saving ? t('humanSettingsSaving') : t('humanSettingsSave')}
             </Button>
           </form>
@@ -561,12 +605,12 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
             />
             <Button
               variant="outline"
-              disabled={uploading}
+              disabled={uploading || removing || rereading || writesBlocked || !writesAvailable}
               onClick={() => { filePicker.current?.click() }}
             >
               {uploading ? t('humanSettingsUploading') : hasAvatar ? t('humanSettingsReplace') : t('humanSettingsUpload')}
             </Button>
-            {hasAvatar && <Button disabled={uploading} onClick={() => { void removeAvatar() }}>{t('humanSettingsRemoveAvatar')}</Button>}
+            {hasAvatar && <Button disabled={uploading || removing || rereading || writesBlocked || !writesAvailable} onClick={() => { void removeAvatar() }}>{removing ? t('humanSettingsRemovingAvatar') : t('humanSettingsRemoveAvatar')}</Button>}
           </div>
         </div>
       </div>
@@ -574,6 +618,13 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
   return <div className={css.section}>
     {pageHeader}
     {identityContent}
+    {emptyName && <p className={css.notice}>{t('humanSettingsNameEmpty')}</p>}
+    {notice === null ? null : <div className={`${css.notice} ${notice.tone === 'saved' ? css.noticeSaved : ''}`} role={notice.tone === 'saved' ? 'status' : 'alert'}>
+      <span>{notice.message}</span>
+      {notice.reread && <Button variant="outline" disabled={rereading} onClick={() => { void rereadProfile() }}>
+        {rereading ? t('humanSettingsRereading') : t('humanSettingsReread')}
+      </Button>}
+    </div>}
     {props.extraToolGrants === undefined ? null : <ExtraToolGrantsSettings t={t} face={props.extraToolGrants} />}
     {props.teamConfig === undefined ? null : <ContextSettings t={t} face={props.teamConfig} />}
     {props.workerConfig === undefined ? null : <WorkerSettings t={t} face={props.workerConfig} />}
@@ -595,7 +646,5 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
             rel="noreferrer"
           >{t('humanSettingsUpdateAvailable', { version: profile.latestVersion })}</a>}
     </div>}
-    {emptyName && <p className={css.notice}>{t('humanSettingsNameEmpty')}</p>}
-    {notice === null ? null : <p className={css.notice} role="alert">{notice}</p>}
   </div>
 }

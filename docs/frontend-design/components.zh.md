@@ -65,7 +65,8 @@
 - 默认引擎是独立的选择器；它点名的引擎没启用时，提示行直接说出来，因为不带引擎的委派会被拒绝。单次时限仍是这一行的字段，这一页不渲染。
 - 只有保存会写，而且写的是叶子路径（`worker.engines.codex.executable`，绝不写组对象），所以这一行的其它组、以及各组自己没动过的开关都还在。把控件暂存回它原本显示的值不产生写入，所以开关开一下再关回去，行是干净的。
 - 引擎清单是一个无依赖模块，两半都 import（`worker-settings`），因为 Client bundle 不能把 Host 的引擎代码拖进来。于是这一页不可能提供一个 Host 不会运行的引擎。
-- `human-identity.ts` 是这份资料的唯一读取方。`TeamHumanIdentity` 在多个订阅者之间共用一次在途读取。引用未变时复用已经解码好的头像。后续读取失败时保留上一次已接受的值。只有从未加载成功才是 unavailable；此时身份块以 `role="alert"` 呈现并自带重试，但不收起额外工具或其他设置组。它还在每次写入被接受后刷新。写入走 Team Remote 自己的 `setHumanProfile` 与头像调用，由它们拥有 profile 条目：Client 从不替身份字段写 settings 文档，所以也不必给那些字段起名。
+- `human-identity.ts` 是这份资料的唯一读取方。`TeamHumanIdentity` 在多个订阅者之间共用一次在途读取。引用未变时复用已经解码好的头像。后续读取失败时保留上一次已接受的值。资料读到而头像读取失败时，姓名与首字母仍可见，下次刷新可重试该引用。只有从未加载成功才是 unavailable；此时身份块以 `role="alert"` 呈现并自带重试，但不收起额外工具或其他设置组。它还在每次写入被接受后刷新。写入走 Team Remote 自己的 `setHumanProfile` 与头像调用，由它们拥有 profile 条目：Client 从不替身份字段写 settings 文档，所以也不必给那些字段起名。
+- Team Remote 负责每次资料写入。写入前发出的读取不能取代写入后的重读。已确认保存但刷新失败时提供重读；旧窗口或保存结果不确定时，提示 Human 先重读再修改。
 - `team-config.ts` 是阈值的唯一读写方。共享设置表单只寻址命名空间的顶层字段，而阈值住在这一行的 `memberCompaction` 组里，所以一层小小的 `SettingsFormScope` 适配器把该组摊平给表单，再把表单的编辑映射回子路径。`TeamConfigController` 把这层适配器包进 `SettingsFormModel`，对外发布页面渲染的那一份快照。Client 注入 `configForms`——每个设置消费方都在用的 shipped 服务——并在每个 Client 上构造一次控制器；服务缺席时整组不渲染，控制器随其余 navigation 服务一起销毁。
 - 额外工具组件在 `TeamSettingsSection.tsx`，控制器在 `extra-tool-grants.ts`。`toolCatalog` 提供跨全局注册与 live Agent scope 注册、但排除已激活 Member preset 基线的发现列表，不是 Member 的过滤快照，也不推断插件来源。文案区分选择／撤销与执行许可，以及宿主注册与实际执行。settings namespace 提供已保存名单与 revision；控制器分别保存 committed 名称、draft、名单与目录的加载/失败状态、写入结果。身份状态由 `TeamHumanIdentity` 独立拥有。
 - 名称保持确切且区分大小写。搜索只收窄发现范围；目录里缺失的已选名称仍保持选中并可移除，目录失败也不会挡住撤销已读取的选择。显式清空写入 `[]`，不用删除字段来继承下层。名单读取失败会阻塞保存，而不是显示成空名单；身份区读取失败也不收起这一组。已选计数只在名单读成功之后出现，没读到就不写成 0。

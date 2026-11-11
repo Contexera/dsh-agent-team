@@ -97,6 +97,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
+  const [savedRefreshFailed, setSavedRefreshFailed] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [importing, setImporting] = useState(false)
   const [handle, setHandle] = useState('')
@@ -120,26 +121,49 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
 
   const loadedRef = useRef(false)
   const mountedRef = useRef(false)
+  const editAwaitingRefresh = useRef(false)
+  // Workspace and presence wakes can overlap; only the newest issuance may update the roster or its error.
+  const refreshSequenceRef = useRef(0)
   const refresh = useCallback(async () => {
+    const sequence = refreshSequenceRef.current + 1
+    refreshSequenceRef.current = sequence
     if (!loadedRef.current) setLoading(true)
-    const result = await loadMembers({ workspaceId })
-    // A panel the user already left changes nothing; the key-remounted successor owns the roster state now.
-    if (!mountedRef.current) return
-    if (result.ok) {
-      const next = result.value.filter(status => status.member.state !== 'inactive' && status.member.state !== 'archived')
-      setMembers(next)
-      followRollover(next)
-      setError(undefined)
-      loadedRef.current = true
-    } else {
-      setError(result.error.message)
+    try {
+      const result = await loadMembers({ workspaceId })
+      // A panel the user already left changes nothing; the key-remounted successor owns the roster state now.
+      if (!mountedRef.current || sequence !== refreshSequenceRef.current) return
+      if (result.ok) {
+        const next = result.value.filter(status => status.member.state !== 'inactive' && status.member.state !== 'archived')
+        setMembers(next)
+        followRollover(next)
+        setError(undefined)
+        setSavedRefreshFailed(false)
+        editAwaitingRefresh.current = false
+        loadedRef.current = true
+      } else {
+        setError(result.error.message)
+        setSavedRefreshFailed(editAwaitingRefresh.current)
+      }
+    } catch (cause) {
+      if (mountedRef.current && sequence === refreshSequenceRef.current) {
+        setError(cause instanceof Error ? cause.message : String(cause))
+        setSavedRefreshFailed(editAwaitingRefresh.current)
+      }
+    } finally {
+      if (mountedRef.current && sequence === refreshSequenceRef.current) setLoading(false)
     }
-    setLoading(false)
   }, [loadMembers, workspaceId, followRollover])
+  const refreshAfterCommit = useCallback(() => {
+    editAwaitingRefresh.current = true
+    return refresh()
+  }, [refresh])
 
   useEffect(() => {
     mountedRef.current = true
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+      refreshSequenceRef.current += 1
+    }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
   // Mount-scoped, not per refresh: presence wakes must not refetch the catalog.
@@ -147,6 +171,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
   useEffect(() => subscribeChanges({ kind: 'workspace', workspaceId }, update => {
     if (update.type === 'failed') {
       setError(update.message)
+      setSavedRefreshFailed(editAwaitingRefresh.current)
       return
     }
     void refresh()
@@ -155,6 +180,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
   useEffect(() => subscribeChanges({ kind: 'presence', workspaceId }, update => {
     if (update.type === 'failed') {
       setError(update.message)
+      setSavedRefreshFailed(editAwaitingRefresh.current)
       return
     }
     void refresh()
@@ -170,6 +196,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
     setCreating(true)
     onCreatingChange(request, true)
     setError(undefined)
+    setSavedRefreshFailed(false)
     setRetryRequest(request)
     try {
       const result = await addMember(request)
@@ -257,7 +284,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
         onToggle={open => { setSidebarSectionOpen(workspaceId, 'agents', open) }}
         actions={(
           <Tooltip label={t('addAgent')} delayMs={500}>
-            <button ref={triggerRef} type="button" className={css.iconButton} aria-label={t('addAgent')} onClick={() => { setError(undefined); setImporting(false); setFormOpen(true) }}>
+            <button ref={triggerRef} type="button" className={css.iconButton} aria-label={t('addAgent')} onClick={() => { setError(undefined); setSavedRefreshFailed(false); setImporting(false); setFormOpen(true) }}>
               <IconPlusOutlineRegular size={14} />
             </button>
           </Tooltip>
@@ -268,22 +295,25 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
         <div className={css.agentList}>
           {orderedMembers.map(status => (
             <SortableRow key={status.member.memberId} drag={drag} orderKey={status.member.memberId}>
-              <AgentRow workspaceId={workspaceId} leaveWorkspace={leaveWorkspace} status={status} {...(memberSessionId === undefined ? {} : { current: status.member.sessionId === memberSessionId })} updateMember={updateMember} recoverMember={recoverMember} archiveMember={archiveMember} loadModels={loadModels} loadMemberReminders={loadMemberReminders} cancelMemberReminder={cancelMemberReminder} loadWorkerRuns={loadWorkerRuns} stopWorker={stopWorker} inspectWorker={inspectWorker} openMemberSession={openMemberSession} onUpdated={refresh} t={t} />
+              <AgentRow workspaceId={workspaceId} leaveWorkspace={leaveWorkspace} status={status} {...(memberSessionId === undefined ? {} : { current: status.member.sessionId === memberSessionId })} updateMember={updateMember} recoverMember={recoverMember} archiveMember={archiveMember} loadModels={loadModels} loadMemberReminders={loadMemberReminders} cancelMemberReminder={cancelMemberReminder} loadWorkerRuns={loadWorkerRuns} stopWorker={stopWorker} inspectWorker={inspectWorker} openMemberSession={openMemberSession} onUpdated={refresh} onEditCommitted={refreshAfterCommit} t={t} />
             </SortableRow>
           ))}
         </div>
       </TeamSidebarSection>
       {!formOpen && error !== undefined && (
         <div className={css.retryError} role="alert">
-          <span>{error}</span>
-          {retryRequest !== undefined && <button type="button" className={css.textButton} disabled={creating} onClick={() => { setFormOpen(true) }}>{t('retry')}</button>}
+          <span>{savedRefreshFailed ? t('editSavedRefreshFailed', { message: error }) : error}</span>
+          <button type="button" className={css.textButton} disabled={creating} onClick={() => {
+            if (savedRefreshFailed || retryRequest === undefined) void refresh()
+            else setFormOpen(true)
+          }}>{savedRefreshFailed ? t('editRefreshRetry') : t('retry')}</button>
         </div>
       )}
     </div>
   )
 }
 
-function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, recoverMember, archiveMember, loadModels, loadMemberReminders, cancelMemberReminder, loadWorkerRuns, stopWorker, inspectWorker, openMemberSession, onUpdated, t }: {
+function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, recoverMember, archiveMember, loadModels, loadMemberReminders, cancelMemberReminder, loadWorkerRuns, stopWorker, inspectWorker, openMemberSession, onUpdated, onEditCommitted, t }: {
   readonly workspaceId: WorkspaceId
   readonly leaveWorkspace: TeamSidebarProps['leaveWorkspace']
   readonly status: AgentTeamClientMemberStatus
@@ -300,6 +330,7 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
   readonly inspectWorker: TeamSidebarProps['inspectWorker']
   readonly openMemberSession: TeamSidebarProps['openMemberSession']
   readonly onUpdated: () => Promise<void> | void
+  readonly onEditCommitted: () => Promise<void> | void
   readonly t: TeamSidebarProps['t']
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -307,6 +338,8 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
   const [archiving, setArchiving] = useState(false)
   const [rowAlert, setRowAlert] = useState<string>()
   const [archivePending, setArchivePending] = useState(false)
+  const rowRef = useRef<HTMLDivElement>(null)
+  const selectRef = useRef<HTMLButtonElement>(null)
   const archiveRequest = useRef<ReturnType<typeof mintRequestId>>()
   const withdrawing = workspaceId !== status.member.workspaceId
   // The Host steers a live session, rebuilds an orphaned composition, or re-runs a failed activation.
@@ -354,8 +387,8 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
   }
   return (
     <>
-      <div className={css.agentRow} data-agent-row data-menu-open={menuOpen || undefined}>
-        <button type="button" className={css.agentSelect} aria-label={t('openAgentSession', { name: status.member.handle })} aria-current={current ? 'page' : undefined} disabled={status.availability !== 'active'} onClick={() => {
+      <div ref={rowRef} tabIndex={-1} className={css.agentRow} data-agent-row data-menu-open={menuOpen || undefined}>
+        <button ref={selectRef} type="button" className={css.agentSelect} aria-label={t('openAgentSession', { name: status.member.handle })} aria-current={current ? 'page' : undefined} disabled={status.availability !== 'active'} onClick={() => {
           // The message below belongs to the attempt that produced it: a later click that opens must not leave it behind.
           setRowAlert(undefined)
           openMemberSession(status.member.sessionId, message => {
@@ -374,8 +407,12 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
               { id: 'archive', label: t(withdrawing ? 'withdrawAgent' : 'archiveAgent'), icon: <IconArchiveOutlineRegular size={16} />, danger: true },
             ]}
             onSelect={(id) => {
-              if (id === 'edit') setEditing(true)
-              else if (id === 'archive') setArchiving(true)
+              if (id === 'edit') {
+                // The menu item disappears; the modal needs a persistent return target.
+                const target = selectRef.current?.disabled === true ? rowRef.current : selectRef.current
+                target?.focus({ preventScroll: true })
+                setEditing(true)
+              } else if (id === 'archive') setArchiving(true)
               else void recover()
             }}
             onOpenChange={setMenuOpen}
@@ -410,7 +447,7 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
           loadWorkerRuns={loadWorkerRuns}
           stopWorker={stopWorker}
           inspectWorker={inspectWorker}
-          onCommitted={onUpdated}
+          onCommitted={onEditCommitted}
           onClose={() => { setEditing(false) }}
           t={t}
         />

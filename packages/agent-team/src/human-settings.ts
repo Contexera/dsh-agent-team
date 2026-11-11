@@ -17,3 +17,6 @@ export const LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE = 'wowyuarm-agent-team-host
 
 /** Largest avatar payload the Host stores; the page refuses larger files before upload. */
 export const HUMAN_AVATAR_MAX_BYTES = 10 * 1024 * 1024
+
+/** Stored in the Host row's user layer to suppress an avatar supplied by inheritance. */
+export const HUMAN_AVATAR_NONE = null

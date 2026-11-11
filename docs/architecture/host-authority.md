@@ -233,7 +233,9 @@ The entry answers 202 only after the row is written, so a restart before the ans
 
 A failed run keeps the row and waits 1, 5, and 30 minutes; the fourth failure turns it into the `deliveries` row an owner replays, and a batch that alone passes the ceiling goes straight there, because retrying it would print the same output again. A retry that succeeds ends the delivery without spending a failure on it.
 
-The Host records that retries are exhausted on the admission before writing the replayable failure. If either writing the failure or removing the admission is interrupted, the next queue pass finishes those writes without running the script again. A pause still permits this cleanup; deletion and Project archival still discard outstanding work.
+The Host records that retries are exhausted and whether the delivery belongs to the current failure streak before writing the replayable failure. If settlement is interrupted, the next queue pass completes it without running the script again. An eligible delivery increments the count once; if it reaches the threshold, the ledger records one automatic pause. A pause still permits settlement; deletion and Project archival discard outstanding work.
+
+A committed resume starts a new failure streak even if the checkpoint write must be retried. A later success or resume prevents an older pending settlement from counting again. A definition edit also prevents the old settlement from counting or pausing the new definition; it keeps failures already counted. An overdue timer waits while its subscription has a pending failure count or pause to settle.
 
 A reset mints a new token for the same subscription and moves `generation` by one without moving the revision: accepted deliveries keep the version they arrived under, and the address the caller receives is the only copy in the clear, since the ledger keeps a hash.
 
@@ -395,7 +397,9 @@ The retired `agent-team-human` section is no longer an authority: the rc.1 setti
 
 Only the Host row has this migration path: a profile patch that addresses one of the other five renamed rows by its pre-rename id — `wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}` — is skipped, because no loader entry answers to that id, so Team falls back to that row's shipped values. A hand edit to the Team preset or to the preset registry's `default` has to be re-applied after upgrading.
 
-Five Agent Team typed Remotes serve the settings page: `humanProfile` (name, avatar reference, and version footnote facts), `putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` (images only, 10 MB cap shared with attachments; a removed entry throws and the Client falls back to the initial), and `toolCatalog` (discovery across global and live Agent-scoped tool registrations).
+Five Agent Team typed Remotes serve the settings page: `humanProfile` (name, avatar reference, version footnote facts, and a write token tied to this Host instance and settings revision), `putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` (images only, 10 MB cap shared with attachments; a removed entry throws and the Client falls back to the initial), and `toolCatalog` (discovery across global and live Agent-scoped tool registrations).
+
+The Host stores a replacement image before committing its reference. Removal writes an explicit empty value so an inherited or migrated avatar cannot reappear. Replaced and removed images remain available to other profiles sharing the store. Only a new file known never to have been committed can be discarded; an uncertain settings write keeps its bytes.
 
 The grant editor reads and writes the Team Host row's `extraToolGrants` through the public settings Remote, carrying its revision and writing exactly one `set` operation for that field. It never uses `unset`, so an explicit `[]` is a real revocation rather than a fallback to a lower layer. A failed list read cannot be saved as an empty list. The catalog and the Human identity read are independent: a directory failure still permits removing loaded names, and an identity failure leaves the grant group available.
 

@@ -1,6 +1,7 @@
 import z from '@deepseek-ai/schemastery'
 import { isCollection, isMap, isPair, isScalar, isSeq, parse, parseDocument } from 'yaml'
 import { bundleVersionOf, readInstalledManifest } from './installed-manifest.ts'
+import { HUMAN_AVATAR_NONE } from './human-settings.ts'
 
 /** Fallback display name before any user override is stored. */
 export const HUMAN_PROFILE_DEFAULT_NAME = 'human'
@@ -14,9 +15,9 @@ export const HUMAN_PROFILE_VERSION = bundleVersionOf(readInstalledManifest())
 /** Schemastery schema of the Human profile (the Team Host row's Config). Both fields are volatile so edits reach the running Host without remounting. */
 export const HUMAN_PROFILE_SETTINGS_SCHEMA = z.object({
   name: z.string().default(HUMAN_PROFILE_DEFAULT_NAME).volatile(),
-  // Schemastery fields are optional unless `.required()`: a missing avatarRef
-  // simply resolves absent, which the profile reads as "no custom avatar".
-  avatarRef: z.string().volatile(),
+  // A missing field may inherit an avatar; explicit `null` is the Human's choice
+  // to show no avatar and must shadow every inherited layer.
+  avatarRef: z.union([z.string(), z.const(HUMAN_AVATAR_NONE)]).volatile(),
 })
 
 /** Normalize one candidate display name the way Member handles normalize. */
@@ -36,7 +37,7 @@ export const LEGACY_HUMAN_PROFILE_SECTION = 'agent-team-human'
 /** Fields recoverable from the legacy section; either may be absent. */
 export interface LegacyHumanProfileFields {
   readonly name?: string
-  readonly avatarRef?: string
+  readonly avatarRef?: string | null
 }
 
 /** Reads the legacy section from a legacy settings document. An unparsable document or missing section means nothing to adopt; each field is validated independently. */
@@ -137,9 +138,11 @@ export function readProfileFields(fields: Record<string, unknown>): LegacyHumanP
       name = undefined
     }
   }
-  const avatarRef = typeof fields.avatarRef === 'string' && fields.avatarRef.trim() !== ''
-    ? fields.avatarRef.trim()
-    : undefined
+  const avatarRef = fields.avatarRef === HUMAN_AVATAR_NONE
+    ? HUMAN_AVATAR_NONE
+    : typeof fields.avatarRef === 'string' && fields.avatarRef.trim() !== ''
+      ? fields.avatarRef.trim()
+      : undefined
   if (name === undefined && avatarRef === undefined) return undefined
   return { ...(name === undefined ? {} : { name }), ...(avatarRef === undefined ? {} : { avatarRef }) }
 }

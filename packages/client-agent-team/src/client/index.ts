@@ -65,7 +65,7 @@ import { TeamSettingsSection } from './TeamSettingsSection.tsx'
 import {
   TeamConfigController, WorkerConfigController, teamConfigScope, workerConfigScope, type TeamConfigSection,
 } from './team-config.ts'
-import { TeamHumanIdentity } from './human-identity.ts'
+import { TeamHumanIdentity, TeamHumanProfileWriter } from './human-identity.ts'
 import { ExtraToolGrantsController } from './extra-tool-grants.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
@@ -399,6 +399,22 @@ function applyUi(ctx: ClientContext): void {
       return `data:${result.value.mediaType};base64,${result.value.bytesBase64}`
     },
   })
+  const humanProfileWriter = new TeamHumanProfileWriter(humanIdentity, {
+    setHumanName: (name, expectedFence) => ctx.remote.agentTeam.setHumanProfile({ name, expectedFence }),
+    replaceAvatar: (request, expectedFence) => ctx.remote.agentTeam.putHumanAvatar({ ...request, expectedFence }),
+    removeAvatar: expectedFence => ctx.remote.agentTeam.removeHumanAvatar({ expectedFence }),
+  })
+  let settingsRowRefresh: Promise<void> = Promise.resolve()
+  const refreshSettingsRowFence = (): void => {
+    settingsRowRefresh = humanIdentity.refreshAfterWrite()
+    void settingsRowRefresh
+  }
+  const currentSettingsFence = async (): Promise<string> => {
+    await settingsRowRefresh
+    const fence = humanIdentity.getSnapshot().settingsFence
+    if (fence === undefined) throw new Error('the Human profile settings are unavailable')
+    return fence
+  }
   // The sidebar row order is a Host preference (the row's `sidebarOrder` setting) cached in
   // this browser; the panels persist through these two calls without threading props.
   attachSidebarOrderHost({
@@ -415,8 +431,8 @@ function applyUi(ctx: ClientContext): void {
   // threshold never restates the sibling fields beside it, and saving a Worker
   // setting never restates the group's own siblings either.
   const rowForm = ctx.configForms?.get<TeamConfigSection>(HUMAN_PROFILE_SETTINGS_NAMESPACE)
-  const teamConfig = rowForm === undefined ? undefined : new TeamConfigController(teamConfigScope(rowForm))
-  const workerConfig = rowForm === undefined ? undefined : new WorkerConfigController(workerConfigScope(rowForm))
+  const teamConfig = rowForm === undefined ? undefined : new TeamConfigController(teamConfigScope(rowForm, refreshSettingsRowFence))
+  const workerConfig = rowForm === undefined ? undefined : new WorkerConfigController(workerConfigScope(rowForm, refreshSettingsRowFence))
   // The extra-tool editor writes the settings namespace directly. The shared
   // ConfigForm loses the conflict/rejection distinction and also reloads before
   // the Human can review a stale draft.
@@ -544,34 +560,16 @@ function applyUi(ctx: ClientContext): void {
       teamConfig,
       workerConfig,
       extraToolGrants,
-      saveName: async (name: string) => {
-        const saved = await ctx.remote.agentTeam.setHumanProfile({ name })
-        if (!saved.ok) return saved.error.message
-        await humanIdentity.refresh()
-        return undefined
-      },
+      saveName: async (name: string) => humanProfileWriter.setName(name, await currentSettingsFence()),
       uploadAvatar: async (file: File) => {
-        const put = await ctx.remote.agentTeam.putHumanAvatar({
+        const expectedFence = await currentSettingsFence()
+        return humanProfileWriter.replaceAvatar({
           name: file.name,
           ...(file.type === '' ? {} : { mediaType: file.type }),
           bytesBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
-        })
-        if (!put.ok) return put.error.message
-        const saved = await ctx.remote.agentTeam.setHumanProfile({ avatarRef: put.value.avatarRef })
-        if (!saved.ok) return saved.error.message
-        await humanIdentity.refresh()
-        return undefined
+        }, expectedFence)
       },
-      removeAvatar: async () => {
-        const { avatarRef } = humanIdentity.getSnapshot()
-        if (avatarRef === undefined) return undefined
-        // Bytes first: a failed clear leaves a readable avatar rather than a reference to unloadable bytes.
-        await ctx.remote.agentTeam.removeHumanAvatar({ avatarRef })
-        const cleared = await ctx.remote.agentTeam.setHumanProfile({ avatarRef: null })
-        if (!cleared.ok) return cleared.error.message
-        await humanIdentity.refresh()
-        return undefined
-      },
+      removeAvatar: async () => humanProfileWriter.removeAvatar(await currentSettingsFence()),
     }),
   }, TeamSettingsSection as never))
 

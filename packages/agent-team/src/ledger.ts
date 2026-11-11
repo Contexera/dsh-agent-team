@@ -759,6 +759,7 @@ interface Projection {
    * not in here never existed.
    */
   readonly subscriptionScriptHistory: Map<AgentTeamSubscriptionRef, Map<number, string>>
+  readonly subscriptionResumeSequences: Map<AgentTeamSubscriptionRef, number>
   /** Delegated Worker runs by ref: the private execution records, materialized from their two durable writes. */
   readonly workerExecutions: Map<AgentTeamWorkerRef, AgentTeamWorkerExecution>
   /**
@@ -802,6 +803,16 @@ interface MainUnreadItem {
 
 /** Entries a Main stream read answers with; the read still acknowledges everything through its sequence. */
 const MAIN_READ_PAGE_SIZE = 20
+
+/** The Task lifecycle actions that resolve a Task and derive its visible status. */
+function taskResolutionForAction(action: AgentTeamTaskActivity['kind']): AgentTeamTask['resolution'] {
+  switch (action) {
+    case 'accept': return 'accepted'
+    case 'close': return 'closed'
+    case 'reopen': return 'open'
+    default: throw new Error(`invalid Task change action '${action}'`)
+  }
+}
 
 /** One Main stream entry before projection into a timeline entry. A Thread source is a card; `unreadable` marks the v2 discussion anchors that count as unread. */
 type MainSource =
@@ -862,7 +873,7 @@ function emptyProjection(): Projection {
     directMarkersByMember: new Map(), activityMarkersByMember: new Map(), reminderMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map(),
     mainSourcesByProject: new Map(), mainSourceByRef: new Map(), mainMarkers: new Map(), mainMarkersByMember: new Map(), mainAttention: new Map(), humanMainWatermarks: new Map(),
     subscriptions: new Map(), subscriptionsByProject: new Map(), subscriptionBaselines: new Map(), subscriptionEvents: new Map(), acceptedEventsBySequence: new Map(),
-    subscriptionScriptHistory: new Map(), workerExecutions: new Map(), workerSteerRequests: new Map() }
+    subscriptionScriptHistory: new Map(), subscriptionResumeSequences: new Map(), workerExecutions: new Map(), workerSteerRequests: new Map() }
 }
 
 /** Exhaustiveness guard for the closed operation union: adding a kind must update every dispatch. */
@@ -1781,6 +1792,10 @@ export class AgentTeamLedger {
 
   subscription(subscriptionRef: AgentTeamSubscriptionRef): AgentTeamSubscription | undefined {
     return this.state.subscriptions.get(subscriptionRef)
+  }
+
+  subscriptionResumeSequence(subscriptionRef: AgentTeamSubscriptionRef): number {
+    return this.state.subscriptionResumeSequences.get(subscriptionRef) ?? 0
   }
 
   /**
@@ -3590,9 +3605,8 @@ export class AgentTeamLedger {
       const acceptedClaims = request.action === 'accept'
         ? claims.filter(claim => claim.state === 'done').sort((left, right) => left.claimRef.localeCompare(right.claimRef))
         : []
-      const resolution = request.action === 'reopen' ? 'open' as const : request.action === 'accept' ? 'accepted' as const : 'closed' as const
-      const status = resolution === 'accepted' ? 'done' as const : resolution === 'closed' ? 'closed' as const
-        : this.deriveTaskStatus(task.taskRef, claims)
+      const resolution = taskResolutionForAction(request.action)
+      const status = this.deriveResolvedTaskStatus({ taskRef: task.taskRef, resolution }, claims)
       const nextTask: AgentTeamTask = Object.freeze({ ...task, resolution, status })
       const nextThread: AgentTeamThread = Object.freeze({ ...thread, revision: sequence })
       const activity: AgentTeamTaskActivity = Object.freeze({ activityRef: this.ref('activity'), kind: request.action,
@@ -5626,9 +5640,8 @@ export class AgentTeamLedger {
         if (activity.kind === 'accept' && !this.canVerifyTaskFrom(projection, task, actor)) throw new Error('invalid Agent acceptance authority')
         if (activity.kind !== 'accept' && task.accountable !== actor) throw new Error('invalid accountable Task authority')
       }
-      const expectedResolution = activity.kind === 'accept' ? 'accepted' : activity.kind === 'close' ? 'closed' : 'open'
-      const expectedStatus = expectedResolution === 'accepted' ? 'done' : expectedResolution === 'closed' ? 'closed'
-        : this.deriveTaskStatus(task.taskRef, operation.data.claims)
+      const expectedResolution = taskResolutionForAction(activity.kind)
+      const expectedStatus = this.deriveResolvedTaskStatus({ taskRef: task.taskRef, resolution: expectedResolution }, operation.data.claims)
       const expectedCompletedClaimRefs = operation.data.claims
         .filter(claim => projection.claims.get(claim.claimRef)?.state === 'active' && claim.state === 'done')
         .map(claim => claim.claimRef)
@@ -6741,6 +6754,9 @@ export class AgentTeamLedger {
         target.subscriptionsByProject.set(subscription.projectRef, refs)
       }
       target.subscriptions.set(subscription.subscriptionRef, subscription)
+      if (operation.kind === 'team/subscription-resumed') {
+        target.subscriptionResumeSequences.set(subscription.subscriptionRef, operation.sequence)
+      }
       const history = target.subscriptionScriptHistory.get(subscription.subscriptionRef) ?? new Map<number, string>()
       history.set(subscription.revision, subscription.script.sha256)
       target.subscriptionScriptHistory.set(subscription.subscriptionRef, history)
@@ -8390,7 +8406,7 @@ export class AgentTeamLedger {
     return [...projection.claims.values()].some(claim => claim.owner === memberId && claim.taskRef === taskRef && claim.state === 'active')
   }
 
-  private deriveResolvedTaskStatus(task: AgentTeamTask, claims: Iterable<AgentTeamClaim>): AgentTeamTask['status'] {
+  private deriveResolvedTaskStatus(task: Pick<AgentTeamTask, 'taskRef' | 'resolution'>, claims: Iterable<AgentTeamClaim>): AgentTeamTask['status'] {
     return task.resolution === 'accepted' ? 'done' : task.resolution === 'closed' ? 'closed' : this.deriveTaskStatus(task.taskRef, claims)
   }
 

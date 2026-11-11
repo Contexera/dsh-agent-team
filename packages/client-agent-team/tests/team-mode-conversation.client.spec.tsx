@@ -460,6 +460,52 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
+  it('keeps a failed image retryable and opens it only after browser decode succeeds', async () => {
+    const attachmentId = 'attachment:preview-retry'
+    const occurredAt = '2026-08-21T09:00:00.000Z'
+    const b = await runtimeWithTeam({
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
+      mainStreamEntries: [{
+        kind: 'message', sequence: 1, occurredAt,
+        message: {
+          messageRef: 'message:preview-retry', projectRef: 'project:engineering', scope: 'main', sender: 'member:human',
+          body: '图片失败时正文仍可读', sequence: 1, occurredAt,
+          attachments: [{ attachmentId, name: 'broken.png', byteSize: 8, mediaType: 'image/png' }],
+        },
+        mentions: [],
+      }],
+    })
+    b.getAttachment
+      .mockRejectedValueOnce(new Error('read failed (test seam)'))
+      .mockResolvedValueOnce({ ok: true, value: { name: 'broken.png', mediaType: 'image/png', byteSize: 8, bytesBase64: 'cG5n' } })
+      .mockResolvedValueOnce({ ok: true, value: { name: 'broken.png', mediaType: 'image/png', byteSize: 8, bytesBase64: 'cG5n' } })
+
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    expect(await b.view.findByText('图片失败时正文仍可读')).toBeTruthy()
+    expect(await b.view.findByText('broken.png')).toBeTruthy()
+    expect(await b.view.findByText('图片暂不可用')).toBeTruthy()
+
+    fireEvent.click(b.view.getByRole('button', { name: '重试读取' }))
+    const decodingChip = (await b.view.findByText('图片读取中')).closest('[aria-live="polite"]')!
+    await waitFor(() => { expect(document.activeElement).toBe(decodingChip) })
+    expect(b.view.queryByRole('button', { name: '查看大图 broken.png' })).toBeNull()
+
+    const failedProbe = decodingChip.querySelector('img')!
+    fireEvent.error(failedProbe)
+    const retry = await b.view.findByRole('button', { name: '重试读取' })
+    await waitFor(() => { expect(document.activeElement).toBe(retry) })
+    fireEvent.click(b.view.getByRole('button', { name: '重试读取' }))
+    const recoveredChip = (await b.view.findByText('图片读取中')).closest('[aria-live="polite"]')!
+    const recoveredProbe = recoveredChip.querySelector('img')!
+    fireEvent.load(recoveredProbe)
+    const secondThumb = await b.view.findByRole('button', { name: '查看大图 broken.png' })
+    await waitFor(() => { expect(document.activeElement).toBe(secondThumb) })
+    fireEvent.click(secondThumb)
+    expect(await b.view.findByRole('dialog', { name: 'broken.png' })).toBeTruthy()
+    expect(b.getAttachment).toHaveBeenCalledTimes(3)
+    await b.runtime.dispose()
+  })
+
   it('uploads thread reply attachments and passes their ids to reply', async () => {
     const b = await runtimeWithTeam({ initialProjects: true, remainingUnreadCounts: [1], seededMessages: [{ body: '开个任务', occurredAt: '2026-08-21T09:00:00.000Z' }] })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))

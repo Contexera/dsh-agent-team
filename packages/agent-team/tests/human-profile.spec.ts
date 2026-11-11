@@ -1,4 +1,4 @@
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -14,10 +14,10 @@ import { AgentTeamLedger, AGENT_TEAM_HUMAN_HANDLE, agentTeamHumanActor } from '.
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import { assertValidHumanName, HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_VERSION, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile } from '../src/human-profile.ts'
-import { planHostRowWrite } from '../src/host-row-settings.ts'
+import { TEAM_HOST_ROW_SETTINGS_SCHEMA, planHostRowWrite } from '../src/host-row-settings.ts'
 import { DEFAULT_WAKE_RECYCLE } from '../src/wake-recycle.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
-import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from '../src/human-avatar.ts'
+import { assertHumanAvatarRef, humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from '../src/human-avatar.ts'
 import type { AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
 const alpha = WorkspaceId('workspace:alpha')
@@ -106,7 +106,38 @@ describe('human avatar persistent store', () => {
     tempRoots.push(root)
     await expect(writeHumanAvatar(root, 'a.txt', 'text/plain', Buffer.from('x'))).rejects.toThrow('must be an image')
     await expect(writeHumanAvatar(root, 'a.png', 'image/png', Buffer.alloc(0))).rejects.toThrow('must not be empty')
-    expect(await readHumanAvatar(root, 'missing')).toBeUndefined()
+    expect(await readHumanAvatar(root, '00000000-0000-4000-8000-000000000000')).toBeUndefined()
+  })
+
+  it('accepts released UUID ids and rejects traversal before touching the filesystem', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'human-avatar-'))
+    tempRoots.push(root)
+    const oldId = '8dbafa6d-06a8-4b4b-8a34-1b1f73c99aa0'
+    expect(assertHumanAvatarRef(oldId)).toBe(oldId)
+    await expect(readHumanAvatar(root, '../outside')).rejects.toThrow('invalid human avatar reference')
+    await expect(removeHumanAvatar(root, '/tmp/outside')).rejects.toThrow('invalid human avatar reference')
+  })
+
+  it('reads exactly the payload named by metadata', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'human-avatar-'))
+    tempRoots.push(root)
+    const avatarRef = '8dbafa6d-06a8-4b4b-8a34-1b1f73c99aa0'
+    const dir = join(root, avatarRef)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'chosen.png'), Buffer.from([1]))
+    await writeFile(join(dir, 'other.png'), Buffer.from([2]))
+    await writeFile(join(dir, 'meta.json'), JSON.stringify({ name: 'chosen.png', mediaType: 'image/png', uploadedAt: '2026-11-11T00:00:00.000Z' }))
+    expect((await readHumanAvatar(root, avatarRef))?.bytes).toEqual(Buffer.from([1]))
+  })
+
+  it.runIf(process.platform !== 'win32')('rejects an avatar directory symlinked outside the store', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'human-avatar-'))
+    const outside = await mkdtemp(join(tmpdir(), 'human-avatar-outside-'))
+    tempRoots.push(root, outside)
+    const avatarRef = '8dbafa6d-06a8-4b4b-8a34-1b1f73c99aa0'
+    await symlink(outside, join(root, avatarRef), 'dir')
+    await expect(readHumanAvatar(root, avatarRef)).rejects.toThrow('outside the avatar store')
+    await expect(removeHumanAvatar(root, avatarRef)).rejects.toThrow('outside the avatar store')
   })
 })
 
@@ -152,6 +183,10 @@ describe('retired human settings section', () => {
 
   it('returns undefined when no field survives validation', () => {
     expect(parseLegacyHumanProfile('agent-team-human:\n  name: "   "\n  avatarRef: ""')).toBeUndefined()
+  })
+
+  it('preserves the explicit no-avatar sentinel', () => {
+    expect(parseLegacyHumanProfile('agent-team-human:\n  avatarRef: null')).toEqual({ avatarRef: null })
   })
 })
 
@@ -238,6 +273,12 @@ describe('host row migration precedence', () => {
     // `human` here is the Human's own choice after the upgrade, not an absence,
     // so the retired name may not replace it.
     expect(planHostRowWrite({ name: HUMAN_PROFILE_DEFAULT_NAME }, { name: 'YuCreate' })).toBeUndefined()
+  })
+
+  it('treats the explicit no-avatar value as stored, so neither migration can revive an inherited avatar', () => {
+    expect(TEAM_HOST_ROW_SETTINGS_SCHEMA({ avatarRef: null }).avatarRef.get()).toBeNull()
+    expect(planHostRowWrite({}, { avatarRef: null })).toEqual({ avatarRef: null })
+    expect(planHostRowWrite({ avatarRef: null }, { avatarRef: 'ref-1' })).toBeUndefined()
   })
 
   it('never re-writes the retired row\'s default name as if it were a fact', () => {
@@ -468,6 +509,38 @@ describe('host row migration on boot', () => {
       expect(mutations[0]).toEqual({
         namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
         ops: [{ op: 'set', path: ['name'], value: 'YuCreate' }],
+      })
+    })
+
+    it('skips an invalid legacy avatar without blocking the other carried fields', async () => {
+      const home = await tempDshHome()
+      const profile = await tempProfile(home, legacyRow(
+        'name: YuCreate',
+        'avatarRef: ../../outside',
+        'memberCompaction: { enabled: false, tokens: 12345 }',
+      ))
+      const mutations = await bootHost(home, profile)
+      await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
+      expect(mutations[0]).toEqual({
+        namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+        ops: [
+          { op: 'set', path: ['name'], value: 'YuCreate' },
+          { op: 'set', path: ['memberCompaction'], value: { enabled: false, tokens: 12345 } },
+        ],
+      })
+    })
+
+    it('carries the explicit no-avatar sentinel without trying to read a file', async () => {
+      const home = await tempDshHome()
+      const profile = await tempProfile(home, legacyRow('name: YuCreate', 'avatarRef: null'))
+      const mutations = await bootHost(home, profile)
+      await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
+      expect(mutations[0]).toEqual({
+        namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+        ops: [
+          { op: 'set', path: ['name'], value: 'YuCreate' },
+          { op: 'set', path: ['avatarRef'], value: null },
+        ],
       })
     })
 

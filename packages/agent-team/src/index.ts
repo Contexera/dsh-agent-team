@@ -37,7 +37,7 @@ import { ATTACHMENT_MAX_BYTES, attachmentPayloadPath, attachmentsRoot, copyPathA
 import { reportEnvironment } from './environment-check.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile, type LegacyHumanProfileFields } from './human-profile.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowWrite } from './host-row-settings.ts'
-import { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
+import { HUMAN_AVATAR_NONE, HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 import { readableSidebarOrders, sanitizeSidebarOrderRefs, sidebarOrderKeyProblem } from './sidebar-order.ts'
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from './human-avatar.ts'
 import { createHumanUpdateChecker } from './human-update-check.ts'
@@ -317,6 +317,30 @@ async function readProfileDocument(path: string): Promise<string | undefined> {
   }
 }
 
+interface HumanProfileSettingsConflict {
+  readonly code: 'SETTINGS_CONFLICT'
+  readonly message: string
+  readonly expected: number
+  readonly actual: number
+}
+
+function settingsConflictOf(error: unknown): HumanProfileSettingsConflict | undefined {
+  if (typeof error !== 'object' || error === null) return undefined
+  if (Reflect.get(error, 'code') !== 'SETTINGS_CONFLICT'
+    || typeof Reflect.get(error, 'message') !== 'string'
+    || typeof Reflect.get(error, 'expected') !== 'number'
+    || typeof Reflect.get(error, 'actual') !== 'number') return undefined
+  return error as HumanProfileSettingsConflict
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function errorCode(error: unknown): unknown {
+  return typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : undefined
+}
+
 /**
  * A preset mount/validation failure during activation, carrying its own class
  * so the activation diagnostic can route preset-composition failures (the
@@ -591,6 +615,8 @@ export default class AgentTeam extends TypertRemoteService {
    * so the profile read path never waits on the network and every failure settles as "no update known".
    */
   private readonly humanUpdateCheck = createHumanUpdateChecker({ currentVersion: HUMAN_PROFILE_VERSION })
+  /** Opaque process fence kept out of the Client's interpretation and combined with the Harness revision on every profile write. */
+  private readonly humanProfileHostFence = randomUUID()
 
   private readonly memberIdle = new MemberIdleTracker()
   private reminderEvaluationTail: Promise<void> = Promise.resolve()
@@ -868,7 +894,7 @@ export default class AgentTeam extends TypertRemoteService {
   /** Current human profile reference from this Host row's Config. `avatarRef` is present only when configured, never explicit `undefined` (exactOptionalPropertyTypes). */
   humanProfile(): { readonly name: string; readonly avatarRef?: string } {
     const avatarRef = this.config.avatarRef.get()
-    return Object.freeze({ name: this.humanHandle(), ...(avatarRef === undefined ? {} : { avatarRef }) })
+    return Object.freeze({ name: this.humanHandle(), ...(typeof avatarRef === 'string' ? { avatarRef } : {}) })
   }
 
   /** The Host row's Worker switch, read at each use so a live edit is never cached into a stale decision. */
@@ -1017,8 +1043,16 @@ export default class AgentTeam extends TypertRemoteService {
     if (name !== undefined) ops.push({ op: 'set', path: ['name'], value: name })
     // The reference is carried only while its bytes still draw: the avatar
     // store, not the document, is the authority for whether it exists at all.
-    if (plan.avatarRef !== undefined && await readHumanAvatar(humanAvatarsRoot(), plan.avatarRef) !== undefined) {
+    if (plan.avatarRef === null) {
       ops.push({ op: 'set', path: ['avatarRef'], value: plan.avatarRef })
+    } else if (plan.avatarRef !== undefined) {
+      try {
+        if (await readHumanAvatar(humanAvatarsRoot(), plan.avatarRef) !== undefined) {
+          ops.push({ op: 'set', path: ['avatarRef'], value: plan.avatarRef })
+        }
+      } catch (error) {
+        this.ctx.logger.warn(`agent-team: skipped an invalid legacy human avatar reference during migration: ${errorMessage(error)}`)
+      }
     }
     if (plan.wakeRecycle !== undefined) ops.push({ op: 'set', path: ['wakeRecycle'], value: plan.wakeRecycle })
     if (plan.memberCompaction !== undefined) ops.push({ op: 'set', path: ['memberCompaction'], value: plan.memberCompaction })
@@ -2002,8 +2036,9 @@ export default class AgentTeam extends TypertRemoteService {
     if (requested === undefined || requested.length === 0) return []
     const metadata: AgentTeamMessageAttachment[] = []
     for (const attachmentId of requested) {
-      const stored = await readAttachment(attachmentsRoot(), attachmentId)
-      if (stored === undefined) throw new Error(`attachment '${attachmentId}' is not in the upload cache`)
+      const outcome = await readAttachment(attachmentsRoot(), attachmentId)
+      if (outcome.kind === 'missing') throw new Error(`attachment '${attachmentId}' is not in the upload cache`)
+      const stored = outcome.attachment
       metadata.push(Object.freeze({ attachmentId, name: stored.name, byteSize: stored.byteSize, mediaType: stored.mediaType }))
     }
     return metadata
@@ -2045,8 +2080,9 @@ export default class AgentTeam extends TypertRemoteService {
    */
   @Remote('getAttachment')
   async getAttachment(request: AgentTeamGetAttachmentRequest): Promise<AgentTeamGetAttachmentResult> {
-    const stored = await readAttachment(attachmentsRoot(), request.attachmentId)
-    if (stored === undefined) throw new RemoteError('team/attachment-not-found', `attachment '${request.attachmentId}' is no longer cached`, { attachmentId: request.attachmentId })
+    const outcome = await readAttachment(attachmentsRoot(), request.attachmentId)
+    if (outcome.kind === 'missing') throw new RemoteError('team/attachment-not-found', `attachment '${request.attachmentId}' is no longer cached`, { attachmentId: request.attachmentId })
+    const stored = outcome.attachment
     return Object.freeze({ name: stored.name, mediaType: stored.mediaType, byteSize: stored.byteSize, bytesBase64: stored.bytes.toString('base64') })
   }
 
@@ -2090,9 +2126,11 @@ export default class AgentTeam extends TypertRemoteService {
   humanProfileForClient(_request: AgentTeamHumanProfileRequest): AgentTeamHumanProfileResult {
     const profile = this.humanProfile()
     const update = this.humanUpdateCheck.snapshot()
+    const settingsFence = this.humanProfileSettingsFence()
     return Object.freeze({
       name: profile.name,
       ...(profile.avatarRef === undefined ? {} : { avatarRef: profile.avatarRef }),
+      ...(settingsFence === undefined ? {} : { settingsFence }),
       version: HUMAN_PROFILE_VERSION,
       repoUrl: HUMAN_PROFILE_REPO_URL,
       ...(update.latestVersion === undefined ? {} : { latestVersion: update.latestVersion }),
@@ -2100,14 +2138,27 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Upload one human avatar image into the persistent store; the caller stores the returned ref in settings.
-   * Bytes never enter the TTL-bound attachment cache.
+   * Prepare one avatar and commit its reference as one settings intent. A
+   * confirmed settings refusal removes only this request's uncommitted bytes;
+   * an uncertain write retains them for recovery.
    */
   @Remote('putHumanAvatar')
   async putHumanAvatar(request: AgentTeamPutHumanAvatarRequest): Promise<AgentTeamPutHumanAvatarResult> {
     this.requireAccepting()
+    const expectedRevision = this.humanProfileWriteRevision(request.expectedFence)
     const bytes = Buffer.from(request.bytesBase64, 'base64')
-    return Object.freeze(await writeHumanAvatar(humanAvatarsRoot(), request.name, request.mediaType ?? 'application/octet-stream', bytes))
+    const written = await writeHumanAvatar(humanAvatarsRoot(), request.name, request.mediaType ?? 'application/octet-stream', bytes)
+    try {
+      await this.mutateHumanProfile([{ op: 'set', path: ['avatarRef'], value: written.avatarRef }], expectedRevision)
+    } catch (error) {
+      if (errorCode(error) === 'settings/conflict') {
+        await removeHumanAvatar(humanAvatarsRoot(), written.avatarRef).catch((cleanupError: unknown) => {
+          this.ctx.logger.warn(`agent-team: could not remove an uncommitted human avatar '${written.avatarRef}': ${errorMessage(cleanupError)}`)
+        })
+      }
+      throw error
+    }
+    return this.humanProfileWriteResult()
   }
 
   /** Read one human avatar back; removed entries throw and the UI falls back to hue/initial. */
@@ -2118,36 +2169,95 @@ export default class AgentTeam extends TypertRemoteService {
     return Object.freeze({ name: stored.name, mediaType: stored.mediaType, byteSize: stored.byteSize, bytesBase64: stored.bytes.toString('base64') })
   }
 
-  /** Remove one human avatar entry; the UI falls back to hue/initial afterwards. */
+  /** Commit the explicit no-avatar sentinel; old immutable files stay for other profiles or inherited layers. */
   @Remote('removeHumanAvatar')
   async removeHumanAvatar(request: AgentTeamRemoveHumanAvatarRequest): Promise<AgentTeamRemoveHumanAvatarResult> {
     this.requireAccepting()
-    await removeHumanAvatar(humanAvatarsRoot(), request.avatarRef)
-    return Object.freeze({ removed: true })
+    const expectedRevision = this.humanProfileWriteRevision(request.expectedFence)
+    await this.mutateHumanProfile([{ op: 'set', path: ['avatarRef'], value: HUMAN_AVATAR_NONE }], expectedRevision)
+    return this.humanProfileWriteResult()
   }
 
   /**
-   * Overwrite the Human profile fields the caller supplies. The schema supplies the shape; this method adds the two judgements it cannot make
-   * (a non-empty name, a name no live Member answers to); the settings service persists the result and applies it live.
-   * No expected revision: the last write wins. The stored document can also change outside this method (settings document opener, text editor).
+   * Rename the Human against the settings revision the page read. Avatar refs
+   * have their own all-or-nothing operations above, so this method cannot turn
+   * a Client string into an arbitrary file reference.
    */
   @Remote('setHumanProfile')
   async setHumanProfile(request: AgentTeamSetHumanProfileRequest): Promise<AgentTeamSetHumanProfileResult> {
     this.requireAccepting()
+    const name = assertValidHumanName(request.name)
+    this.validateHumanProfile({ name })
+    const expectedRevision = this.humanProfileWriteRevision(request.expectedFence)
+    await this.mutateHumanProfile([{ op: 'set', path: ['name'], value: name }], expectedRevision)
+    return this.humanProfileWriteResult()
+  }
+
+  /** Current settings revision, or absent when this Host has no settings form to write against. */
+  private humanProfileRevision(): number | undefined {
+    try {
+      return this.ctx.get('settings')?.describe().find(row => row.ns === HUMAN_PROFILE_SETTINGS_NAMESPACE)?.revision
+    } catch {
+      return undefined
+    }
+  }
+
+  /** The opaque value a page returns on its next write; it changes with the Host process and every settings revision. */
+  private humanProfileSettingsFence(): string | undefined {
+    const revision = this.humanProfileRevision()
+    return revision === undefined ? undefined : `${this.humanProfileHostFence}:${String(revision)}`
+  }
+
+  /** Validate the Host instance before a write can touch avatar bytes, then return the Harness revision to fence. */
+  private humanProfileWriteRevision(expectedFence: string): number {
+    const settings = this.ctx.get('settings')
+    if (settings === undefined) throw new RemoteError('settings/rejected', 'the settings service is unavailable', { ns: HUMAN_PROFILE_SETTINGS_NAMESPACE })
+    const actual = this.humanProfileRevision()
+    if (actual === undefined) throw new RemoteError('settings/rejected', 'the Human profile settings row is unavailable', { ns: HUMAN_PROFILE_SETTINGS_NAMESPACE })
+    const separator = expectedFence.lastIndexOf(':')
+    const nonce = separator < 0 ? '' : expectedFence.slice(0, separator)
+    const rawRevision = separator < 0 ? '' : expectedFence.slice(separator + 1)
+    const expected = /^(0|[1-9][0-9]*)$/.test(rawRevision) ? Number(rawRevision) : Number.NaN
+    if (nonce === '' || !Number.isSafeInteger(expected)) {
+      throw new RemoteError('gateway/bad-request', 'invalid Human profile settings fence', {})
+    }
+    if (nonce !== this.humanProfileHostFence || expected !== actual) {
+      throw new RemoteError('settings/conflict', 'the Human profile settings changed since this page read them', {
+        ns: HUMAN_PROFILE_SETTINGS_NAMESPACE, expected, actual,
+      })
+    }
+    return actual
+  }
+
+  /** The profile fields a write answers with, including the fence now in force. */
+  private humanProfileWriteResult(): AgentTeamSetHumanProfileResult {
+    const profile = this.humanProfile()
+    const settingsFence = this.humanProfileSettingsFence()
+    return Object.freeze({
+      name: profile.name,
+      ...(profile.avatarRef === undefined ? {} : { avatarRef: profile.avatarRef }),
+      ...(settingsFence === undefined ? {} : { settingsFence }),
+    })
+  }
+
+  /** Apply one Human-profile intent and preserve the settings service's conflict semantics on the wire. */
+  private async mutateHumanProfile(ops: readonly SettingsPathOp[], expectedRevision: number): Promise<void> {
     const settings = this.ctx.get('settings')
     if (settings === undefined) throw new Error('the settings service is unavailable')
-    const name = request.name === undefined ? undefined : assertValidHumanName(request.name)
-    if (name !== undefined) this.validateHumanProfile({ name })
-    const ops: SettingsPathOp[] = []
-    if (name !== undefined) ops.push({ op: 'set', path: ['name'], value: name })
-    if (request.avatarRef === null) ops.push({ op: 'unset', path: ['avatarRef'] })
-    else if (request.avatarRef !== undefined) ops.push({ op: 'set', path: ['avatarRef'], value: request.avatarRef })
-    if (ops.length !== 0) {
-      // The settings namespace is this Host row's id, addressed by name rather than `ctx.fiber.entry`: a Remote call runs under its caller's context,
-      // whose fiber entry is the RPC gateway's row (`typert-gateway`). shipping.spec.ts pins the constant to the row `cordis.patch.yml` declares.
-      await settings.mutate(HUMAN_PROFILE_SETTINGS_NAMESPACE, ops)
+    try {
+      // The namespace is the Host row id. A Remote call's fiber belongs to the gateway, not this row.
+      await settings.mutate(HUMAN_PROFILE_SETTINGS_NAMESPACE, ops, expectedRevision)
+    } catch (error) {
+      const conflict = settingsConflictOf(error)
+      if (conflict !== undefined) {
+        throw new RemoteError('settings/conflict', conflict.message, {
+          ns: HUMAN_PROFILE_SETTINGS_NAMESPACE, expected: conflict.expected, actual: conflict.actual,
+        }, { cause: error })
+      }
+      throw new RemoteError('team/human-profile-write-uncertain',
+        `the Human profile write did not settle at the revision it read: ${errorMessage(error)}`,
+        { expectedFence: `${this.humanProfileHostFence}:${String(expectedRevision)}` }, { cause: error })
     }
-    return Object.freeze({ ...this.humanProfile() })
   }
 
   /**
@@ -3345,6 +3455,8 @@ export default class AgentTeam extends TypertRemoteService {
       publish: (subscription, acceptedSequence, eventId) => this.commitSubscriptionPublication(subscription, acceptedSequence, eventId),
       pauseForFailures: subscription => this.commitFailurePause(subscription),
       checkpoint: subscriptionRef => this.subscriptionCheckpoints.get(subscriptionRef) ?? { subscriptionRef, ...INITIAL_CHECKPOINT },
+      timerReady: subscriptionRef => !this.resumeNeedsCheckpoint(subscriptionRef) &&
+        !this.admissionRecordsOf(subscriptionRef).some(record => record.failureStreak !== undefined),
       save: (subscriptionRef, change) => this.updateCheckpoint(subscriptionRef, change),
     })
     this.subscriptionScheduler = scheduler
@@ -3401,8 +3513,13 @@ export default class AgentTeam extends TypertRemoteService {
     sourceRevision: number): Promise<void> {
     try {
       if (this.writableSubscription(subscriptionRef)?.revision !== sourceRevision) return
-      await this.updateCheckpointLocked(subscriptionRef, checkpoint => Object.freeze({ ...checkpoint,
-        consecutiveFailures: 0, ...(accepted ? { lastSuccessAt: new Date().toISOString() } : {}) }))
+      await this.updateCheckpointLocked(subscriptionRef, checkpoint => {
+        const { countedAdmissionRef: _counted, ...rest } = checkpoint
+        return Object.freeze({ ...rest, consecutiveFailures: 0,
+          failureResumeSequence: this.requireLedger().subscriptionResumeSequence(subscriptionRef),
+          failureSuccessEpoch: (checkpoint.failureSuccessEpoch ?? 0) + 1,
+          ...(accepted ? { lastSuccessAt: new Date().toISOString() } : {}) })
+      })
     } catch (error) {
       // The output is already in the ledger: a count that cannot be cleared is
       // no reason to call a delivered run a failure, and the next success
@@ -3413,6 +3530,36 @@ export default class AgentTeam extends TypertRemoteService {
 
   private checkpointFor(subscriptionRef: AgentTeamSubscriptionRef): SubscriptionCheckpoint {
     return this.subscriptionCheckpoints.get(subscriptionRef) ?? { subscriptionRef, ...INITIAL_CHECKPOINT }
+  }
+
+  private webhookFailureStreak(subscriptionRef: AgentTeamSubscriptionRef) {
+    return {
+      resumeSequence: this.requireLedger().subscriptionResumeSequence(subscriptionRef),
+      successEpoch: this.checkpointFor(subscriptionRef).failureSuccessEpoch ?? 0,
+    }
+  }
+
+  private resumeNeedsCheckpoint(subscriptionRef: AgentTeamSubscriptionRef): boolean {
+    const stored = this.checkpointFor(subscriptionRef).failureResumeSequence
+    // A legacy checkpoint already reflects any legacy resume we can observe.
+    return stored !== undefined && stored !== this.requireLedger().subscriptionResumeSequence(subscriptionRef)
+  }
+
+  private async repairWebhookCheckpointLocked(subscriptionRef: AgentTeamSubscriptionRef): Promise<void> {
+    const checkpoint = this.checkpointFor(subscriptionRef)
+    if (this.resumeNeedsCheckpoint(subscriptionRef)) {
+      const { countedAdmissionRef: _counted, ...rest } = checkpoint
+      await this.updateCheckpointLocked(subscriptionRef, () => Object.freeze({ ...rest, consecutiveFailures: 0,
+        failureResumeSequence: this.requireLedger().subscriptionResumeSequence(subscriptionRef) }))
+    } else if (checkpoint.countedAdmissionRef !== undefined &&
+      this.subscriptionAdmissionsTable?.get(admissionKey(subscriptionRef, checkpoint.countedAdmissionRef)) === undefined) {
+      await this.forgetCountedAdmissionLocked(subscriptionRef, checkpoint.countedAdmissionRef)
+    }
+  }
+
+  private async forgetCountedAdmissionLocked(subscriptionRef: AgentTeamSubscriptionRef, admissionRef: string): Promise<void> {
+    const { countedAdmissionRef, ...rest } = this.checkpointFor(subscriptionRef)
+    if (countedAdmissionRef === admissionRef) await this.updateCheckpointLocked(subscriptionRef, () => Object.freeze(rest))
   }
 
   /**
@@ -3764,10 +3911,10 @@ export default class AgentTeam extends TypertRemoteService {
     const ledger = this.requireLedger()
     const project = ledger.getProject(subscription.projectRef)
     const current = ledger.subscription(subscription.subscriptionRef)
-    if (project === undefined || current === undefined || current.state !== 'active') return
+    if (project?.state !== 'active' || current?.state !== 'active' || current.revision !== subscription.revision) return
     const result = await ledger.pauseSubscription({
       requestId: randomUUID() as AgentTeamRequestId, workspaceId: project.workspaceId, projectRef: current.projectRef,
-      subscriptionRef: current.subscriptionRef, expectedRevision: current.revision, actor: agentTeamHostActor(), reason: 'failures',
+      subscriptionRef: current.subscriptionRef, expectedRevision: subscription.revision, actor: agentTeamHostActor(), reason: 'failures',
     })
     if (result.committed) this.emitCommitted(result.value.receipt)
   }
@@ -4369,6 +4516,12 @@ export default class AgentTeam extends TypertRemoteService {
       for (const subscription of this.ledger.subscriptions()) {
         if (subscription.state === 'deleted') continue
         try {
+          const { countedAdmissionRef } = this.checkpointFor(subscription.subscriptionRef)
+          if (this.resumeNeedsCheckpoint(subscription.subscriptionRef) || (countedAdmissionRef !== undefined &&
+            this.subscriptionAdmissionsTable?.get(admissionKey(subscription.subscriptionRef, countedAdmissionRef)) === undefined)) {
+            await this.serializeSubscriptionWrite(subscription.subscriptionRef,
+              () => this.repairWebhookCheckpointLocked(subscription.subscriptionRef))
+          }
           const records = this.admissionRecordsOf(subscription.subscriptionRef)
           const exhausted = records.find(record => record.state === 'exhausted')
           if (exhausted !== undefined) {
@@ -4417,47 +4570,44 @@ export default class AgentTeam extends TypertRemoteService {
     }
     // The definition the payload arrived under, not the one that stands now.
     const source = this.replaySource(live, record, 'received')
-    const execute = () => this.runSubscriptionOnce(source, 'webhook', {
-      stdin: webhookStdin(record.headers, record.body),
-      scriptDeliveryId: record.admissionRef,
-      delivery: { deliveryRef: record.deliveryRef, attempt },
-      requestId,
-      holdEvents: events => this.holdAdmissionEvents(record, events),
-    })
-    const scheduler = this.subscriptionScheduler
-    const run = await (scheduler === undefined ? execute() : scheduler.runAdmitted(live, 'run', execute))
-      .catch((error: unknown) => {
-        // A host that is shutting down refuses the admission: nothing ran, so
-        // nothing is owed and the row waits for the next boot.
-        this.ctx.logger.warn(`agent-team: a webhook delivery was not admitted: ${error instanceof Error ? error.message : String(error)}`)
-        return undefined
+    const execute = async () => {
+      // A queued run can get its slot after a resume committed but failed to
+      // clear the checkpoint. Let the next pass repair the count before running.
+      if (this.resumeNeedsCheckpoint(record.subscriptionRef)) return
+      const failureStreak = this.webhookFailureStreak(record.subscriptionRef)
+      const run = await this.runSubscriptionOnce(source, 'webhook', {
+        stdin: webhookStdin(record.headers, record.body),
+        scriptDeliveryId: record.admissionRef,
+        delivery: { deliveryRef: record.deliveryRef, attempt },
+        requestId,
+        holdEvents: events => this.holdAdmissionEvents(record, events),
       })
-    if (run === undefined) {
-      // Either the subscription stopped being live mid-run, or no slot was
-      // granted: a terminal barrier drops the row, a refused admission keeps it.
+      // A held batch owes acceptance, not a failure. Keep the slot through
+      // settlement so a queued timer cannot run before an exhausted pause.
+      if (run === undefined || run.outcome === 'deferred') return
+      if (run.outcome === 'accepted' || run.outcome === 'empty') {
+        await this.dropWebhookAdmission(record)
+        return
+      }
+      const failure = run.report.ok
+        ? `this run produced more events than the Project can hold (${SUBSCRIPTION_PENDING_MAX} unpublished)`
+        : run.report.reason ?? 'the run failed'
+      await this.retryOrFailWebhookAdmission(live, record, failure, run.outcome !== 'backlog', failureStreak)
+    }
+    const scheduler = this.subscriptionScheduler
+    try {
+      await (scheduler === undefined ? execute() : scheduler.runAdmitted(live, 'run', execute))
+    } finally {
+      // A refusal to grant a slot keeps the row unless the ledger is terminal.
       if (this.writableSubscription(record.subscriptionRef) === undefined) await this.dropWebhookAdmission(record)
-      return
     }
-    if (run.outcome === 'accepted' || run.outcome === 'empty') {
-      await this.dropWebhookAdmission(record)
-      return
-    }
-    // `deferred` is not a failure: the row now holds the batch and waits for room.
-    if (run.outcome === 'deferred') return
-    // `backlog` is the run that printed more events than the Project can still
-    // accept. The spec spends such a delivery's retries at once, because the
-    // same script would print the same output again and fail the same way.
-    const failure = run.report.ok
-      ? `this run produced more events than the Project can hold (${SUBSCRIPTION_PENDING_MAX} unpublished)`
-      : run.report.reason ?? 'the run failed'
-    await this.retryOrFailWebhookAdmission(live, record, failure, run.outcome !== 'backlog')
   }
 
   /** Keep one run's batch on its delivery row: called inside the accept step's lock and barrier read. */
   private async holdAdmissionEvents(record: SubscriptionAdmissionRecord, events: readonly SubscriptionEvent[]): Promise<void> {
     const table = this.subscriptionAdmissionsTable
     const key = admissionKey(record.subscriptionRef, record.admissionRef)
-    if (table === undefined || table.get(key) === undefined) return
+    if (record.state === 'exhausted' || table === undefined || table.get(key) === undefined) return
     const { nextAttemptAt: _due, lastError: _error, ...waiting } = record
     await table.put(key, Object.freeze({ ...waiting, state: 'queued' as const, heldEvents: Object.freeze([...events]) }))
   }
@@ -4507,10 +4657,10 @@ export default class AgentTeam extends TypertRemoteService {
    * can change, which sends it straight to that record.
    */
   private retryOrFailWebhookAdmission(subscription: AgentTeamSubscription, record: SubscriptionAdmissionRecord,
-    failure: string, retryable = true): Promise<void> {
+    failure: string, retryable: boolean, failureStreak: NonNullable<SubscriptionAdmissionRecord['failureStreak']>): Promise<void> {
     return this.serializeSubscriptionWrite(record.subscriptionRef, async () => {
       const table = this.subscriptionAdmissionsTable
-      if (table === undefined) return
+      if (record.state === 'exhausted' || table === undefined) return
       const key = admissionKey(record.subscriptionRef, record.admissionRef)
       if (table.get(key) === undefined) return
       const attempts = record.attempts + 1
@@ -4530,11 +4680,26 @@ export default class AgentTeam extends TypertRemoteService {
       // Both state-only fields come off here: the record that becomes `exhausted`
       // keeps neither a retry instant nor a held batch, as its type and schema say.
       const { nextAttemptAt: _due, heldEvents: _held, ...spent } = record
-      const exhausted = Object.freeze({ ...spent, attempts, state: 'exhausted' as const, lastError: failure })
+      const earlier = this.deliveryRecordForSettlement(
+        this.subscriptionDeliveriesTable?.get(deliveryKey(record.subscriptionRef, record.deliveryRef)), record.admissionRef)
+      const exhausted = Object.freeze({ ...spent, attempts, state: 'exhausted' as const, lastError: failure,
+        ...(earlier === undefined && live.revision === record.receivedRevision ? { failureStreak } : {}) })
       await table.put(key, exhausted)
       await this.finishExhaustedWebhookAdmissionLocked(exhausted)
       this.ctx.logger.warn(`agent-team: a webhook delivery for '${subscription.subscriptionRef}' spent its retries: ${failure}`)
     })
+  }
+
+  /**
+   * A stored failure still owns its delivery while it is live, or while it belongs
+   * to the same unfinished admission. An expired record from a different
+   * admission is a fresh provider delivery and must not suppress its count.
+   */
+  private deliveryRecordForSettlement(record: SubscriptionDeliveryRecord | undefined,
+    admissionRef: string | undefined): SubscriptionDeliveryRecord | undefined {
+    if (record === undefined) return undefined
+    if (Date.parse(record.expiresAt) > Date.now()) return record
+    return record.admissionRef !== undefined && record.admissionRef === admissionRef ? record : undefined
   }
 
   private async finishExhaustedWebhookAdmissionLocked(admission: SubscriptionAdmissionRecord): Promise<void> {
@@ -4556,8 +4721,22 @@ export default class AgentTeam extends TypertRemoteService {
         attempts: record.attempts,
         lastError: record.lastError,
       })
+      // The definition can change while the failure row is being written.
+      const current = this.writableSubscription(record.subscriptionRef)
+      const streak = this.webhookFailureStreak(record.subscriptionRef)
+      if (current?.revision === record.receivedRevision && record.failureStreak?.resumeSequence === streak.resumeSequence &&
+        record.failureStreak.successEpoch === streak.successEpoch) {
+        const checkpoint = this.checkpointFor(record.subscriptionRef)
+        const settled = checkpoint.countedAdmissionRef === record.admissionRef ? checkpoint :
+          await this.updateCheckpointLocked(record.subscriptionRef, current => Object.freeze({ ...current,
+            consecutiveFailures: current.consecutiveFailures + 1, countedAdmissionRef: record.admissionRef }))
+        if (settled !== undefined && settled.consecutiveFailures >= SUBSCRIPTION_FAILURES_BEFORE_PAUSE) {
+          await this.commitFailurePause(current)
+        }
+      }
     }
     await table.delete(key)
+    await this.forgetCountedAdmissionLocked(record.subscriptionRef, record.admissionRef)
     // Keep the replay row as the deduplication proof until the queue row is gone.
     if (live !== undefined) await this.pruneDeliveries(live.subscriptionRef, Date.now())
   }
@@ -4578,28 +4757,28 @@ export default class AgentTeam extends TypertRemoteService {
    */
   async recordFailedDelivery(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<void> {
     await this.serializeSubscriptionWrite(subscription.subscriptionRef, async () => {
-      await this.recordFailedDeliveryLocked(subscription, input)
+      const fresh = await this.recordFailedDeliveryLocked(subscription, input)
+      const current = this.writableSubscription(subscription.subscriptionRef)
+      if (fresh && current?.revision === input.receivedRevision) await this.countDeliveryFailure(current)
       await this.pruneDeliveries(subscription.subscriptionRef, Date.now())
     })
   }
 
-  private async recordFailedDeliveryLocked(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<void> {
+  private async recordFailedDeliveryLocked(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<boolean> {
     const table = this.subscriptionDeliveriesTable
-    if (table === undefined) return
+    if (table === undefined) return false
     // Nothing admits this write but its caller, so the terminal barrier is read
     // here: a delivery that arrives for a deleted subscription — or one whose
     // Project was archived — must not recreate the rows the deletion dropped.
     const live = this.writableSubscription(subscription.subscriptionRef)
     if (live === undefined) {
       this.ctx.logger.warn(`agent-team: a spent delivery for '${subscription.subscriptionRef}' arrived after the subscription stopped being live; it was dropped`)
-      return
+      return false
     }
     const key = deliveryKey(live.subscriptionRef, input.deliveryRef)
-    const earlier = table.get(key)
+    const earlier = this.deliveryRecordForSettlement(table.get(key), input.admissionRef)
     await table.put(key, deliveryRecordOf(live, input, earlier))
-    // One delivery is one failure however many times it was retried, and a
-    // provider that redelivers the same request is still the same delivery.
-    if (earlier === undefined && input.receivedRevision === live.revision) await this.countDeliveryFailure(live)
+    return earlier === undefined
   }
 
   /**
@@ -5319,14 +5498,24 @@ export default class AgentTeam extends TypertRemoteService {
     if (subscription.state === 'deleted') throw new Error(`subscription '${request.subscriptionRef}' is deleted (subscription_deleted)`)
     // The retry of a resume answers from the ledger, so the script runs once.
     const replayed = ledger.subscriptionWriteReplay({ ...request, actor })
-    if (replayed !== undefined) return this.replayedSubscriptionWrite(replayed.value, replayed.addressArmed)
+    if (replayed !== undefined) {
+      await this.serializeSubscriptionWrite(request.subscriptionRef, () => this.repairWebhookCheckpointLocked(request.subscriptionRef))
+      return this.replayedSubscriptionWrite(replayed.value, replayed.addressArmed)
+    }
     const trial = await this.trialSubscriptionRun(subscription)
     if (!trial.ok) return Object.freeze({ kind: 'trial-failed', failure: this.trialFailureOf(trial) })
-    const result = await ledger.resumeSubscription({ ...request, actor })
-    if (result.committed) this.emitCommitted(result.value.receipt)
-    // Only a committed resume clears the count: a failed trial left it alone.
-    await this.updateCheckpoint(request.subscriptionRef, checkpoint => Object.freeze({ ...checkpoint, consecutiveFailures: 0 }))
-    return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity })
+    return this.serializeSubscriptionWrite(request.subscriptionRef, async () => {
+      // Capture the previous ledger resume before the first new-format resume
+      // can commit; absence alone cannot distinguish a legacy checkpoint.
+      if (this.checkpointFor(request.subscriptionRef).failureResumeSequence === undefined) {
+        await this.updateCheckpointLocked(request.subscriptionRef, checkpoint => Object.freeze({ ...checkpoint,
+          failureResumeSequence: ledger.subscriptionResumeSequence(request.subscriptionRef) }))
+      }
+      const result = await ledger.resumeSubscription({ ...request, actor })
+      if (result.committed) this.emitCommitted(result.value.receipt)
+      await this.repairWebhookCheckpointLocked(request.subscriptionRef)
+      return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity })
+    })
   }
 
   async baselineSubscriptionForAgent(agent: Agent, request: AgentTeamBaselineSubscriptionRequest): Promise<AgentTeamSubscriptionBaselineResult> {

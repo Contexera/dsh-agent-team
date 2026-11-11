@@ -72,6 +72,16 @@ async function contextGroup() {
 afterEach(cleanup)
 
 describe('Team settings page: the Host row configuration group', () => {
+  it('notifies the shared identity only after a compaction save is accepted', async () => {
+    const row = hostRow()
+    const accepted = vi.fn()
+    const scope = teamConfigScope(row.scope, accepted)
+    await scope.mutate([{ op: 'set', path: ['tokens'], value: 42 }], row.scope.getSnapshot().revision)
+    expect(accepted).toHaveBeenCalledTimes(1)
+    row.mutate.mockResolvedValueOnce(false)
+    await scope.mutate([{ op: 'set', path: ['tokens'], value: 43 }], row.scope.getSnapshot().revision)
+    expect(accepted).toHaveBeenCalledTimes(1)
+  })
   it('renders the resolved threshold in its capacity spelling', async () => {
     renderSection()
     const group = await contextGroup()

@@ -47,6 +47,7 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
+  const [savedRefreshFailed, setSavedRefreshFailed] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -69,35 +70,52 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
 
   const loadedRef = useRef(false)
   const mountedRef = useRef(false)
+  const editAwaitingRefresh = useRef(false)
   // Three wake sources can overlap; only the newest issuance applies.
   const refreshSequenceRef = useRef(0)
   const refresh = useCallback(async () => {
     const sequence = refreshSequenceRef.current + 1
     refreshSequenceRef.current = sequence
     if (!loadedRef.current) setLoading(true)
-    const [projectResult, memberResult] = await Promise.all([
-      loadProjects({ workspaceId, limit: 1 }),
-      loadMembers({ workspaceId }),
+    // Start each read inside allSettled so a synchronous Remote failure cannot hide the other leg's result.
+    const [projectRead, memberRead] = await Promise.allSettled([
+      Promise.resolve().then(() => loadProjects({ workspaceId, limit: 1 })),
+      Promise.resolve().then(() => loadMembers({ workspaceId })),
     ])
     // A panel the user already left changes nothing; the key-remounted successor owns the state.
     if (!mountedRef.current || sequence !== refreshSequenceRef.current) return
+    const projectResult = projectRead.status === 'fulfilled' ? projectRead.value : undefined
+    const memberResult = memberRead.status === 'fulfilled' ? memberRead.value : undefined
     // The roster and catalog legs have independent freshness; one leg's failure must not freeze the other's landed value.
-    if (projectResult.ok) {
+    if (projectResult?.ok === true) {
       setView(projectResult.value)
       loadedRef.current = true
     }
-    if (memberResult.ok) {
+    if (memberResult?.ok === true) {
       const visibleMembers = memberResult.value.filter(status => status.member.state !== 'inactive' && status.member.state !== 'archived')
       setMembers(visibleMembers)
       const selectable = new Set(visibleMembers.filter(status => status.presence !== 'unavailable')
         .map(status => status.member.memberId))
       setSelected(current => new Set([...current].filter(memberId => selectable.has(memberId))))
     }
-    if (!projectResult.ok) setError(projectResult.error.message)
-    else if (!memberResult.ok) setError(memberResult.error.message)
+    const failure = (read: PromiseSettledResult<unknown>, result: { readonly ok: boolean; readonly error?: { readonly message: string } } | undefined): string | undefined => {
+      if (read.status === 'rejected') return read.reason instanceof Error ? read.reason.message : String(read.reason)
+      return result?.ok === false ? result.error?.message : undefined
+    }
+    const projectError = failure(projectRead, projectResult)
+    const memberError = failure(memberRead, memberResult)
+    if (projectError !== undefined) setError(projectError)
+    else if (memberError !== undefined) setError(memberError)
     else setError(undefined)
+    const failed = projectError !== undefined || memberError !== undefined
+    if (!failed) editAwaitingRefresh.current = false
+    setSavedRefreshFailed(failed && editAwaitingRefresh.current)
     setLoading(false)
   }, [loadProjects, loadMembers, workspaceId])
+  const refreshAfterCommit = useCallback(() => {
+    editAwaitingRefresh.current = true
+    return refresh()
+  }, [refresh])
 
   useEffect(() => {
     mountedRef.current = true
@@ -110,6 +128,7 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
   useEffect(() => subscribeChanges({ kind: 'workspace', workspaceId }, update => {
     if (update.type === 'failed') {
       setError(update.message)
+      setSavedRefreshFailed(editAwaitingRefresh.current)
       return
     }
     void refresh()
@@ -160,6 +179,7 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
     setPendingCreate(request)
     setMutating(true)
     setError(undefined)
+    setSavedRefreshFailed(false)
     try {
       const result = await createProject(request)
       if (result.ok) {
@@ -224,7 +244,7 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
         onToggle={open => { setSidebarSectionOpen(workspaceId, 'projects', open) }}
         actions={(
           <Tooltip label={t('addProject')} delayMs={500}>
-            <button ref={triggerRef} type="button" className={css.iconButton} aria-label={t('addProject')} onClick={() => { setError(undefined); setFormOpen(true) }}>
+            <button ref={triggerRef} type="button" className={css.iconButton} aria-label={t('addProject')} onClick={() => { setError(undefined); setSavedRefreshFailed(false); setFormOpen(true) }}>
               <IconPlusOutlineRegular size={14} />
             </button>
           </Tooltip>
@@ -250,6 +270,7 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
                   updateProject={updateProject}
                   archiveProject={props.archiveProject}
                   onCommitted={refresh}
+                  onEditCommitted={refreshAfterCommit}
                   selectProject={selectProject}
                   t={t}
                 />
@@ -258,12 +279,17 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
           })}
         </div>
       </TeamSidebarSection>
-      {!formOpen && error !== undefined && <p className={css.error} role="alert">{error}</p>}
+      {!formOpen && error !== undefined && (
+        <div className={css.retryError} role="alert">
+          <span>{savedRefreshFailed ? t('editSavedRefreshFailed', { message: error }) : error}</span>
+          <button type="button" className={css.textButton} disabled={mutating} onClick={() => { void refresh() }}>{savedRefreshFailed ? t('editRefreshRetry') : t('retry')}</button>
+        </div>
+      )}
     </div>
   )
 }
 
-function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, removeProjectOwner, humanIdentity, selected, updateProject, archiveProject, onCommitted, selectProject, t }: {
+function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, removeProjectOwner, humanIdentity, selected, updateProject, archiveProject, onCommitted, onEditCommitted, selectProject, t }: {
   readonly project: AgentTeamProject
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly joinedIds: ReadonlySet<AgentTeamMemberId>
@@ -275,6 +301,7 @@ function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, re
   readonly updateProject: TeamSidebarProps['updateProject']
   readonly archiveProject: TeamSidebarProps['archiveProject']
   readonly onCommitted: () => Promise<void> | void
+  readonly onEditCommitted: () => Promise<void> | void
   readonly selectProject: TeamSidebarProps['selectProject']
   readonly t: TeamSidebarProps['t']
 }) {
@@ -282,6 +309,7 @@ function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, re
   const [editing, setEditing] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [rowAlert, setRowAlert] = useState<string>()
+  const selectRef = useRef<HTMLButtonElement>(null)
   const archive = async (): Promise<void> => {
     try {
       const result = await archiveProject({
@@ -300,7 +328,7 @@ function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, re
   return (
     <>
       <article className={css.projectRow} data-team-project-row={project.projectRef} data-menu-open={menuOpen || undefined} aria-current={selected ? 'page' : undefined}>
-        <button type="button" className={css.projectSelect} aria-label={`# ${project.name}`} onClick={() => { selectProject(project.projectRef) }}>
+        <button ref={selectRef} type="button" className={css.projectSelect} aria-label={`# ${project.name}`} onClick={() => { selectProject(project.projectRef) }}>
           <strong className={css.projectName}># {project.name}</strong>
         </button>
         <span className={css.rowMenu}>
@@ -311,8 +339,10 @@ function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, re
               { id: 'archive', label: t('archiveProject'), icon: <IconArchiveOutlineRegular size={16} />, danger: true },
             ]}
             onSelect={(id) => {
-              if (id === 'edit') setEditing(true)
-              else setArchiving(true)
+              if (id === 'edit') {
+                selectRef.current?.focus({ preventScroll: true })
+                setEditing(true)
+              } else setArchiving(true)
             }}
             onOpenChange={setMenuOpen}
           />
@@ -344,7 +374,7 @@ function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, re
           removeProjectOwner={removeProjectOwner}
           humanIdentity={humanIdentity}
           updateProject={updateProject}
-          onCommitted={onCommitted}
+          onCommitted={onEditCommitted}
           onClose={() => { setEditing(false) }}
           t={t}
         />
@@ -404,7 +434,7 @@ function ProjectEditorDialog({ project, members, ownerIds, addProjectOwner, remo
       <form id="team-project-edit-form" className={createCss.form} onSubmit={event => { void submit(event) }}>
         <label className={createCss.field}>
           <span>{t('projectName')}</span>
-          <Input className={createCss.input!} value={name} onChange={event => { setName(event.target.value); invalidate() }} disabled={saving} autoFocus />
+          <Input className={createCss.input!} value={name} onChange={event => { setName(event.target.value); invalidate() }} disabled={saving} data-modal-autofocus />
         </label>
         <label className={createCss.field}>
           <span>{t('projectDescription')}{t('optionalSuffix')}</span>

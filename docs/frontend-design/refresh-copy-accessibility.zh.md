@@ -6,6 +6,7 @@
 - project 视图：change 事件触发 `refresh()` 时按 `messageRef` 去重合并新窗口与已加载历史（`mergeProjectView`），cursor 取更旧者，`hasMore = fresh.hasMore || current.cursor < fresh.cursor`。新窗口对它覆盖到的每条消息**权威**——change 唤醒必须让该行的活字段（Task 状态、最新时刻、未读）跟着新事实一起动——而更早加载的历史消息保留而不是丢弃。每次 refresh 还会读一次 Workspace Inbox 切片并据此重建「threadRef → 未读」映射；该读取失败则清空映射。
 - thread 视图：被动事实合并进 currentFacts。打开与到达的读取全部自动推进 durable read pointer（有界批次余量由串行续读循环清零），`newFactsCount` 仅驱动纯跳转提示。
 - `loadOlder` 有并发保护（loadingOlder 状态禁用按钮）。
+- Agent 或 Project 编辑保存后关闭弹窗。列表刷新成功前，读取失败会在列表中说明编辑已保存，并提供重读入口。Project 列表和成员列表分别应用成功的结果；已被新请求取代的读取不能更新列表或错误提示。
 
 ## 文案与本地化
 - 全部用户可见文案经 locale key（`locales.ts` zh/en 同构，key 类型取自 zh）。禁止在组件里拼接英文句子。
@@ -18,6 +19,7 @@
 - 侧栏分区折叠头是原生 button（`aria-expanded`），键盘 Enter/Space 由原生行为保证。
 - 长消息的「展开全文/收起」是原生 button 并携带 `aria-expanded`，键盘 Enter/Space 原生可达。
 - 行内 ⋯ 菜单按钮带 `aria-label`（`{name} 的操作`）与 `aria-expanded/haspopup`；菜单项由公共 `Menu` 提供完整键盘与外点关闭路径。
+- Agent 和 Project 编辑弹窗打开时聚焦名称，关闭时把焦点还给原列表行。
 - listbox/option 完整键盘闭环（见 composer 一节）；Project composer 的「作为任务」使用原生 button 的 `aria-pressed`，Space/Enter 均可切换。
 - Project 页的 `项目 | 看板` 页签行是复合控件：整组只有一个 tab stop（未选中的那个 `tabIndex` 为 -1），Left/Right/Home/End 同时移动选中与焦点，每个页签用 `aria-controls`/`aria-labelledby` 指明自己控制的 panel。
 - 图标按钮均有 aria-label；装饰元素 `aria-hidden`。

@@ -161,11 +161,15 @@ it('reads a Worker diagnostic from its row and keeps the list to five rows', asy
   await waitForMemberAgent(scaffold!, workspaceId, runner.memberId)
   await waitForMemberAgent(scaffold!, workspaceId, other.memberId)
 
-  /** Start one run and let its ending settle; a failed start is the expected ending here. */
+  /** Start one run; the scenario waits below where it depends on the ending. */
   const delegate = async (member: typeof runner, task: string): Promise<void> => {
     await team.workerStartForAgent(memberAgent(scaffold!, workspaceId, member.memberId), {
       requestId: `e2e-worker-inspect-${task}` as never, threadRef, task, cwd,
     }).then(() => undefined, (error: unknown) => error)
+  }
+  const waitForFailure = async (member: typeof runner, marker: string): Promise<void> => {
+    await expect.poll(() => team.workerRunsForClient({ workspaceId, memberId: member.memberId }).runs
+      .find(run => run.task.includes(marker))?.state, { timeout: 60_000 }).toBe('failed')
   }
 
   // The run that will fall out of the window ends first: it carries the turn's own
@@ -185,12 +189,16 @@ it('reads a Worker diagnostic from its row and keeps the list to five rows', asy
   const longTask = '[FAIL] 填满窗口的第 1 条：这是一段足够长的任务描述，用来证明任务行只占一行、'
     + '超出的部分以省略号收尾，而全文留在 title 上，读者hover 就能读到。'
   for (let index = 0; index < 4; index += 1) {
-    await delegate(runner, index === 0 ? longTask : `[FAIL] 填满窗口的第 ${index + 1} 条`)
+    const marker = `[FAIL] 填满窗口的第 ${index + 1} 条`
+    await delegate(runner, index === 0 ? longTask : marker)
+    // Let each ending land before the next run changes which rows are in the window.
+    await waitForFailure(runner, marker)
   }
   // One live run: it takes a seat in the window instead of being added on top.
   await delegate(runner, '[HOLD] 一直运行、占掉窗口一个座位的那条')
   // Another Member's run: it stays out of this Member's list.
   await delegate(other, '[FAIL] 另一个成员的执行')
+  await waitForFailure(other, '[FAIL] 另一个成员的执行')
 
   // Five rows: the live run holds one seat, the newest four endings hold the rest.
   await expect.poll(() => team.workerRunsForClient({ workspaceId, memberId: runner.memberId }).runs.length,

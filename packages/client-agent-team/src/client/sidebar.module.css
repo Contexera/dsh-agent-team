@@ -797,7 +797,15 @@
   font-size: 11px;
   gap: 8px;
   justify-content: space-between;
-  padding: 8px 12px;
+  line-height: 16px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 4px 8px 6px;
+}
+
+.retryError > button {
+  flex: none;
+  white-space: nowrap;
 }
 
 .rowAlert {
@@ -805,17 +813,6 @@
   font-size: 11px;
   overflow-wrap: anywhere;
   padding: 2px 8px 6px;
-}
-
-/* A Panel's own failure line on the rail's 11px alert scale. The 8px inset lands the text on the row labels (the list between
-   carries none). A missing CSS-module class resolves to `undefined` and renders unstyled; this rule is what the Panels' `css.error` resolves to. */
-.error {
-  color: var(--dsw-alias-state-error-primary);
-  font-size: 11px;
-  line-height: 16px;
-  margin: 0;
-  overflow-wrap: anywhere;
-  padding: 4px 8px 6px;
 }
 
 .editDescription {

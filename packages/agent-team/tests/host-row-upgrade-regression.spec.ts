@@ -63,7 +63,7 @@ interface BootOptions {
  * `_commitVolatile` in the loader's config entry), so the value a restarted
  * Host would resolve can be asserted in the same boot.
  */
-async function bootHost(options: BootOptions = {}): Promise<{ readonly mutations: readonly Mutation[]; readonly host: AgentTeam }> {
+async function bootHost(options: BootOptions = {}) {
   const mutations: Mutation[] = []
   const stored: Record<string, unknown> = {}
   let fiber: Fiber | undefined
@@ -130,8 +130,9 @@ async function bootHost(options: BootOptions = {}): Promise<{ readonly mutations
   fiber = options.user === undefined
     ? await ctx.plugin(AgentTeam)
     : await ctx.plugin(AgentTeam, options.user as never)
-  cleanups.push(async () => { await fiber!.dispose() })
-  return { mutations, host: ctx.agentTeam }
+  const dispose = async () => { await fiber!.dispose() }
+  cleanups.push(dispose)
+  return { mutations, host: ctx.agentTeam, dispose }
 }
 
 /** A profile patch document that still carries the pre-rename Host row. */
@@ -221,6 +222,24 @@ describe('the post-upgrade user layer outranks both legacy sources', () => {
     const { mutations } = await bootHost({ patchPath, user: { name: 'CurrentName' } })
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(mutations).toEqual([])
+  })
+
+  it('keeps an explicit avatar removal across legacy migration without taking the image from another profile', async () => {
+    const home = await tempDshHome()
+    const avatar = await writeHumanAvatar(humanAvatarsRoot(), 'old.png', 'image/png', Buffer.from([1]))
+    const patchPath = join(home, 'cordis.patch.yml')
+    await writeFile(patchPath, preRenameRow('name: LegacyName', `avatarRef: ${avatar.avatarRef}`))
+    await writeFile(join(home, 'settings.yaml.imported'), `agent-team-human:\n  avatarRef: ${avatar.avatarRef}\n`)
+
+    const removed = await bootHost({ patchPath, user: { avatarRef: null } })
+    await vi.waitFor(() => { expect(removed.mutations).toHaveLength(1) })
+    expect(removed.mutations[0]?.ops).toEqual([{ op: 'set', path: ['name'], value: 'LegacyName' }])
+    expect(removed.host.humanProfile().avatarRef).toBeUndefined()
+    await removed.dispose()
+
+    const other = await bootHost({ user: { avatarRef: avatar.avatarRef } })
+    expect(other.host.humanProfile().avatarRef).toBe(avatar.avatarRef)
+    await expect(other.host.getHumanAvatar({ avatarRef: avatar.avatarRef })).resolves.toMatchObject({ name: 'old.png' })
   })
 })
 

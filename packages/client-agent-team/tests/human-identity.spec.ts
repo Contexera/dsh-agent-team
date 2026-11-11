@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamHumanProfileResult } from '@contexera/dsh-agent-team/types'
-import { TeamHumanIdentity } from '../src/client/human-identity.ts'
+import { TeamHumanIdentity, TeamHumanProfileWriter } from '../src/client/human-identity.ts'
 
 /** A read failure in the shape the carrier produces (code/details belong to it, not to the test). */
 const readFailure = (message: string): RemoteResult<AgentTeamHumanProfileResult> =>
@@ -61,6 +61,42 @@ describe('Human identity projection', () => {
     expect(identity.getSnapshot().avatarUrl).toBeUndefined()
   })
 
+  it('keeps the accepted profile when the avatar loader throws, then retries that reference', async () => {
+    let fail = true
+    const { identity, loadAvatarUrl } = storeWith({
+      profile: async () => ({ ok: true as const, value: { ...PROFILE, avatarRef: 'avatar:1' } }),
+      avatar: async () => {
+        if (fail) throw new Error('avatar transport down')
+        return 'data:image/png;base64,AAAA'
+      },
+    })
+    await identity.refresh()
+    expect(identity.getSnapshot()).toMatchObject({ status: 'ready', name: 'Ada', avatarRef: 'avatar:1' })
+    expect(identity.getSnapshot().avatarUrl).toBeUndefined()
+    fail = false
+    await identity.refresh()
+    expect(loadAvatarUrl).toHaveBeenCalledTimes(2)
+    expect(identity.getSnapshot().avatarUrl).toBe('data:image/png;base64,AAAA')
+  })
+
+  it('does not keep the old picture when a new avatar reference fails during refresh', async () => {
+    let profile = { ...PROFILE, avatarRef: 'avatar:old' }
+    const { identity, loadAvatarUrl } = storeWith({
+      profile: async () => ({ ok: true as const, value: profile }),
+      avatar: async () => 'data:image/png;base64,AAAA',
+    })
+    await identity.refresh()
+    expect(identity.getSnapshot().avatarUrl).toBeDefined()
+    profile = { ...profile, name: 'Grace', avatarRef: 'avatar:new' }
+    loadAvatarUrl.mockRejectedValueOnce(new Error('new image unavailable'))
+    await identity.refresh()
+    expect(identity.getSnapshot()).toMatchObject({ status: 'ready', name: 'Grace', avatarRef: 'avatar:new' })
+    expect(identity.getSnapshot().avatarUrl).toBeUndefined()
+    await identity.refresh()
+    expect(loadAvatarUrl.mock.calls.map(([ref]) => ref)).toEqual(['avatar:old', 'avatar:new', 'avatar:new'])
+    expect(identity.getSnapshot().avatarUrl).toBeDefined()
+  })
+
   it('keeps the last accepted identity beside a later read failure', async () => {
     const { identity, loadProfile } = storeWith()
     await identity.refresh()
@@ -94,5 +130,62 @@ describe('Human identity projection', () => {
     const { identity, loadProfile } = storeWith()
     await Promise.all([identity.refresh(), identity.refresh(), identity.refresh()])
     expect(loadProfile).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Human profile writes', () => {
+  const writeFailure = (code: string, message: string): RemoteResult<never> =>
+    ({ ok: false, error: { code, message } }) as RemoteResult<never>
+
+  function writerWith(
+    identity: TeamHumanIdentity,
+    setHumanName: () => Promise<RemoteResult<never>> = async () => ({ ok: true, value: {} }) as never,
+  ) {
+    return new TeamHumanProfileWriter(identity, {
+      setHumanName,
+      replaceAvatar: async () => ({ ok: true, value: {} }) as never,
+      removeAvatar: async () => ({ ok: true, value: {} }) as never,
+    })
+  }
+
+  it.each(['gateway/internal', 'gateway/cancelled'])('treats %s as uncertain and re-reads', async (code) => {
+    const { identity, loadProfile } = storeWith()
+    await identity.refresh()
+    const writer = writerWith(identity, async () => writeFailure(code, 'transport failed'))
+    await expect(writer.setName('Grace', 'fixture-host:0')).resolves.toEqual({ kind: 'uncertain', message: 'transport failed' })
+    expect(loadProfile).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats a settings conflict as a re-read outcome', async () => {
+    const { identity } = storeWith()
+    await identity.refresh()
+    const writer = writerWith(identity, async () => writeFailure('settings/conflict', 'changed elsewhere'))
+    await expect(writer.setName('Grace', 'fixture-host:0')).resolves.toEqual({ kind: 'conflict', message: 'changed elsewhere' })
+  })
+
+  it('reports a committed write as saved when the following profile read fails', async () => {
+    const { identity, loadProfile } = storeWith()
+    await identity.refresh()
+    loadProfile.mockImplementation(async () => readFailure('refresh offline'))
+    const writer = writerWith(identity)
+    await expect(writer.setName('Grace', 'fixture-host:0')).resolves.toEqual({ kind: 'saved', warning: 'refresh offline' })
+  })
+
+  it('cannot coalesce the post-commit read with a read that began before the write', async () => {
+    let releaseOld!: (value: RemoteResult<AgentTeamHumanProfileResult>) => void
+    const oldRead = new Promise<RemoteResult<AgentTeamHumanProfileResult>>(resolve => { releaseOld = resolve })
+    const loadProfile = vi.fn()
+      .mockImplementationOnce(() => oldRead)
+      .mockImplementationOnce(async () => ({ ok: true as const, value: { ...PROFILE, name: 'Grace', settingsFence: 'fixture-host:1' } }))
+    const identity = new TeamHumanIdentity({ loadProfile, loadAvatarUrl: async () => null })
+    const reading = identity.refresh()
+    const writer = writerWith(identity)
+    const writing = writer.setName('Grace', 'fixture-host:0')
+    await writing
+    expect(loadProfile).toHaveBeenCalledTimes(2)
+    expect(identity.getSnapshot()).toMatchObject({ name: 'Grace', settingsFence: 'fixture-host:1' })
+    releaseOld({ ok: true, value: { ...PROFILE, settingsFence: 'fixture-host:0' } })
+    await reading
+    expect(identity.getSnapshot()).toMatchObject({ name: 'Grace', settingsFence: 'fixture-host:1' })
   })
 })

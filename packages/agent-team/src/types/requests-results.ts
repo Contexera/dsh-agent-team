@@ -303,6 +303,8 @@ export interface AgentTeamHumanProfileRequest {
 export interface AgentTeamHumanProfileResult {
   readonly name: string
   readonly avatarRef?: string | undefined
+  /** Opaque Host-instance plus settings-revision fence; return it verbatim on the next profile write. */
+  readonly settingsFence?: string | undefined
   /** Bundle version shown in the settings footnote. */
   readonly version: string
   /** Repository home the footnote links to. */
@@ -369,33 +371,31 @@ export interface AgentTeamToolCatalogResult {
   readonly names: readonly string[]
 }
 
-/** Human profile write: each Client-supplied field is optional and independent. */
+/** Human display-name write against the settings revision the page read. */
 export interface AgentTeamSetHumanProfileRequest {
-  /** New display name; omitted keeps the current one. */
-  readonly name?: string | undefined
-  readonly avatarRef?: string | null | undefined
+  readonly name: string
+  readonly expectedFence: string
 }
 
-/** Resolved Human profile after a write; the same two fields the read returns. */
+/** Resolved Human profile after a write. */
 export interface AgentTeamSetHumanProfileResult {
   readonly name: string
   readonly avatarRef?: string | undefined
+  readonly settingsFence?: string | undefined
 }
 
-/** Upload one human avatar image into the persistent avatar store. */
+/** Prepare and commit one replacement avatar as a single settings intent. */
 export interface AgentTeamPutHumanAvatarRequest {
   readonly name: string
   readonly mediaType?: string | undefined
   readonly bytesBase64: string
+  readonly expectedFence: string
 }
 
 export interface AgentTeamPutHumanAvatarResult {
-  readonly avatarRef: string
-  /** Absolute path members read the bytes from; stable until removed. */
-  readonly path: string
   readonly name: string
-  readonly byteSize: number
-  readonly mediaType: string
+  readonly avatarRef?: string | undefined
+  readonly settingsFence?: string | undefined
 }
 
 /** Read one human avatar back for client-side display. */
@@ -410,13 +410,15 @@ export interface AgentTeamGetHumanAvatarResult {
   readonly bytesBase64: string
 }
 
-/** Remove one human avatar entry; the profile falls back to hue/initial. */
+/** Replace the profile's avatar reference with the explicit no-avatar sentinel. */
 export interface AgentTeamRemoveHumanAvatarRequest {
-  readonly avatarRef: string
+  readonly expectedFence: string
 }
 
 export interface AgentTeamRemoveHumanAvatarResult {
-  readonly removed: boolean
+  readonly name: string
+  readonly avatarRef?: string | undefined
+  readonly settingsFence?: string | undefined
 }
 
 /** Intent to append one public Message to an existing Thread. */

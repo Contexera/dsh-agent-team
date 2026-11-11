@@ -120,7 +120,9 @@ Both avatar seats draw the picture only while those bytes decode. The Host accep
 
 `human-identity.ts` is the one reader of that profile. `TeamHumanIdentity` shares a single in-flight read between subscribers, reuses the avatar it already decoded while the reference is unchanged, keeps the last accepted value when a later read fails, and refreshes after every accepted write. Only a never-loaded profile becomes unavailable; that identity block renders `role="alert"` with its own retry and does not hide the extra-tools or other settings groups.
 
-Its writes go through the Team Remote's own `setHumanProfile` and avatar calls, which own the profile entry: the Client never writes the settings document for the identity fields, so it never has to name them.
+If the profile loads but the avatar request fails, the name and initial remain visible and the next refresh can retry that reference.
+
+The Team Remote owns each profile write. A read that started before the write cannot replace its follow-up read. A confirmed save with a failed refresh offers a re-read; a stale or uncertain save asks the Human to re-read before making a new change.
 
 `team-config.ts` is the one reader and writer of the threshold. The shared settings form addresses a namespace's top-level fields only, while the threshold lives inside the row's `memberCompaction` group, so a small `SettingsFormScope` adapter flattens that group for the form and maps its edits back onto child paths.
 
