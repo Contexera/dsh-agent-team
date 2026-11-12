@@ -62,12 +62,13 @@
 
 ## 5. 发布
 
-推送或发布**之前**先断言四条发布语义：
+推送或发布**之前**先断言五条发布语义：
 
 1. tag 恰好是 `v<package.json version>`——manifest 与 tag 之间不得漂移。
 2. 预发布后缀与 GitHub Release 的 prerelease 标记一致；稳定版不得被标为 prerelease。
 3. 发布命令必须显式指名 dist-tag——`npm publish --tag <dist-tag> --access public`，稳定版用 `latest`、预发布用它自己的 tag。npm 会拒绝在默认 tag 下发布预发布，所以省略 `--tag` 根本表达不了这笔发布：运行会停在这里，而不会移动 `latest`。
-4. 占用 `latest` 的发布绝不把它往回移：当前 `latest` 必须 semver 上低于即将发布的版本。
+4. 把某个版本发成 `latest` 时绝不把 tag 往回移：当前 `latest` 必须 semver 上低于即将发布的版本。
+5. 稳定版只有在它的声明区间接纳「DSH `latest` 解析到的那个版本」时才占用 `latest`（见 [§2.4](dsh-release-compatibility.zh.md)）。认证越过那个版本时，发到 `next`、`latest` 原地不动，等 DSH 自己的 `latest` 到了再移过去。
 
 ```sh
 git add package.json CHANGELOG.md

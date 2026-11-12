@@ -62,12 +62,13 @@ Maintenance is a rotation over two comments of our own: post the new release com
 
 ## 5. Publish
 
-Assert all four release-semantics facts **before** pushing or publishing:
+Assert all five release-semantics facts **before** pushing or publishing:
 
 1. The tag is exactly `v<package.json version>` — no drift between manifest and tag.
 2. A prerelease suffix matches the GitHub Release's prerelease flag; a stable release is not flagged prerelease.
 3. Publishing names the dist-tag explicitly — `npm publish --tag <dist-tag> --access public`, with `<dist-tag>` `latest` for a stable version and the prerelease's own tag otherwise. npm refuses a prerelease published under the default tag, so an omitted `--tag` cannot express this release at all: the run stops there rather than moving `latest`.
-4. A release that takes `latest` never moves it backwards: the current `latest` must be semver-lower than the version being published.
+4. Publishing a version as `latest` never moves the tag backwards: the current `latest` must be semver-lower than the version being published.
+5. A stable release holds `latest` only while its declared range admits the version DSH's `latest` resolves to ([§2.4](dsh-release-compatibility.md)). When certification moves past that version, publish under `next`, leave `latest` where it is, and re-point it once DSH's own `latest` arrives.
 
 ```sh
 git add package.json CHANGELOG.md

@@ -53,6 +53,14 @@ npm 的 prerelease 版本范围不是普通的连续区间。比如：
 
 因此，不允许根据主版本号相同就假定兼容。也不允许用过宽范围掩盖未经验证的版本。只有候选 DSH 不在当前 peerDependencies 范围内、且认证通过时，才将根 `package.json` 内全部 `@deepseek-ai/dsh-*` peerDependencies 一起更新到新的版本线。随后发布新的 Team bundle。它们必须保持一个可解析、无嵌套旧版 DSH 包的依赖图。
 
+### 2.4 dist-tag 跟着宿主线走
+
+一个 bundle 只有在宿主装得上它时才有用。bundle 的默认安装解析 npm `latest`，而 DSH 的默认安装解析 DSH 自己的 `latest`——后者可能整整落后 `next` 一个候选版本。
+
+因此，只有当某个版本的声明区间接纳「DSH `latest` 解析到的那个版本」时，`latest` 才可以指向它。认证把下界抬过那个版本时，把新版本发到 `next`，`latest` 留在最后一个区间仍接纳它的版本上。
+
+等 DSH 自己的 `latest` 走到认证线，再把 `latest` 移过去。判断依据是注册表，永远不是本机正在跑的那条线。
+
 ## 3. 认证流程
 
 ### 3.1 发现与初步评估

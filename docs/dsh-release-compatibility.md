@@ -34,6 +34,14 @@ Prerelease ranges are not ordinary continuous intervals. For example, `>=0.1.0-r
 
 Do not infer compatibility from a shared major version or hide unverified versions behind a broad range. Only when a candidate falls outside current peers and certification passes should all `@deepseek-ai/dsh-*` peerDependencies be moved together to the new version line and a new Team bundle be published. The result must resolve without nested old DSH packages.
 
+### 2.4 Dist-tags follow the host line
+
+A bundle is usable only on a host that can install it. A default install of the bundle resolves npm `latest`, while a default install of DSH resolves DSH's own `latest`, which may lag `next` by a whole candidate.
+
+So `latest` may name a bundle only while that bundle's declared range admits the version DSH's `latest` resolves to. When certification raises the lower bound past it, publish under `next` and leave `latest` on the last bundle whose range still admits it.
+
+Re-point `latest` once DSH's own `latest` reaches the certified line. Decide this from the registry, never from the host you happen to run.
+
 ## 3. Certification process
 
 ### 3.1 Discover and assess
