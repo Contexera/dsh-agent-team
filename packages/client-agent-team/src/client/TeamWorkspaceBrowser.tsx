@@ -157,6 +157,5 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
         <TeamAgentsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} subscribeChanges={subscribeChanges} addMember={addMember} updateMember={updateMember} recoverMember={recoverMember} archiveMember={archiveMember} joinWorkspace={joinWorkspace} leaveWorkspace={leaveWorkspace} loadModels={loadModels} loadMemberReminders={loadMemberReminders} cancelMemberReminder={cancelMemberReminder} loadWorkerRuns={loadWorkerRuns} stopWorker={stopWorker} inspectWorker={inspectWorker} {...(navigationState.memberSessionId === undefined ? {} : { memberSessionId: navigationState.memberSessionId })} openMemberSession={openMemberSession} onCreatingChange={(request, creating) => { setCreatingAgents(current => creating ? [...current.filter(item => item.requestId !== request.requestId), request] : current.filter(item => item.requestId !== request.requestId)) }} t={t} />
       </div>
     </div>}
-    <span className={css.boardFade} aria-hidden="true" />
   </section>
 }

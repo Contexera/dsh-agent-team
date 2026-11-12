@@ -70,14 +70,16 @@ The mode's way back to the conversation leads the browsing seat: first in `sideb
 
 That is the closest a Team control can legally stand to the brand row. The row is the shipped New Session button on non-macOS and a window-drag surface on macOS, and its mark is `aria-hidden`, so it can carry neither a second control nor an accessible name.
 
-The exit row is the one row in this column that leaves rather than navigates, so it never carries `aria-current`. It takes over the shipped New Session bar instead of restating a row of its own: the mode hides that bar, so one bar stands in that position in either mode and only its label changes — the same 38px elevated slab and the same l3 hairline, with the label reading 对话 and the glyph pointing back.
+The exit row is the one row in this column that leaves rather than navigates, so it never carries `aria-current`. It takes over the shipped New Session bar instead of restating a row of its own: the mode hides that bar, so one bar stands in that place in either mode and only its label changes — the same 38px elevated slab and the same l3 hairline, with the label reading 对话 and the glyph pointing back.
 
-Taking over the slot means taking over the box, not only the position. The row stands where the shipped bar stands and measures what it measures: 12px to 268px in the 280px sidebar.
+It is the browsing column's first row, and DSH 0.2.2-rc.2 starts that column one shell gap below the brand row, so the slab sits inside the bar's band rather than on its exact top edge.
+
+Taking over the slot means taking over the box, not only the role. The row measures what the shipped bar measures: the same 38px height and the same 12px-to-268px span in the 280px sidebar.
 
 The 4px horizontal inset is the shipped bar's own — 0.2.2 sets it to its paint inset plus the hairline, where the certified line used a flat 2px — since shipped declares no width and lets that margin pull a stretched flex item in.
-The browser test measures both in one render and requires them equal, so the two modes put one bar on one box and a change to either is caught rather than eyeballed.
+The browser test measures the slab against the bar in one render — height, x and width equal, and the top inside the bar's band — so the two modes put one bar on one box and a change to either is caught rather than eyeballed.
 
-The browsing column below keeps the shipped browser's own trailing 12px inset. That is what puts this column's section headers and rows on the shipped rows' left edge.
+The browsing column below stands on the shell's content box: 0.2.2-rc.2's shipped browsing region states no inset on either side, and neither does the seat, so the cards and the rows above the lists end on the column's own edges. The lists' scrollbar gutter and air are the one band that sits outside that edge, and only as far as the shell's scroll region reaches — 6px past it — so 4px of the band stays inside and the rows end 4px in rather than making the sidebar scroll sideways.
 
 What centres is the label, not the group it would lay out with the chevron. Centring the group depends on the air inside each glyph's box, and that air differs between CJK and Latin glyphs and across font stacks — a compensation measured on one stack walks the ink off the middle on another. So the row centres the label alone (CJK ink sits symmetric inside its advance, so a centred box is centred ink), and the chevron hangs 6px off its leading edge, out of flow, where the air in its own box can no longer move the text.
 
@@ -110,11 +112,11 @@ The page answers to the same empty rule as the Project board: when no Task is op
 
 The two cards and the Workspace selector read as one stack: every gap between them is that control's own 2px top step (the shipped list's within-group step), never the previous row's bottom, and the selector keeps its field chrome inside the same rhythm — the same unit, in the selector's own form. The Inbox card's 4px top is the stack's step off the exit slab above it, not part of the stack's internal rhythm.
 
-The browsing seat closes on the shipped session tree's own bottom fade: a 24px overlay at the scroll container's foot, transparent to `--dsw-specific-sidebar-fill`, with `pointer-events: none`. It is the seam between the scrolling list and the Settings/More row below it. Without it the last row is cut at the clip edge, and the drop to the footer row reads as a break rather than the list continuing under it.
+The browsing seat paints no bottom fade of its own. DSH 0.2.2-rc.2 moved the fade from the browsing tree into the shell's sidebar scroll region, which paints one 24px overlay over the slot content at the region's foot; a copy inside the seat would be a second gradient over the same seam, doubling the alpha mid-fade and stopping at a different inline edge. The journey asserts the seat paints no overlay of that shape, and the shell's own fade is the host's to test.
 
-The two boxes and their gradients are measured equal in one render (`x`/`width`/`height`/`background`), and that equality is written into the journey. The list also carries a 16px bottom inset so the last row sits above the gradient at scroll end — the shipped list's own number. The seat states no trailing inset, so the gradient's bottom edge is the seat's bottom edge and meets the footer row directly.
+The list keeps the shipped list's 16px bottom inset so the last row sits above the gradient at scroll end — the shipped list states the same clearance under the shell's fade. The seat states no trailing inset, as the shipped browsing region states none either.
 
-macOS desktop drops the overlay: the sidebar there is translucent over window vibrancy, so an opaque fill gradient would paint a solid smear instead of a fade — the shipped tree drops its own fade for the same reason.
+macOS desktop needs nothing from Team here: the shell hides its fade there, because the sidebar is translucent over window vibrancy and an opaque fill gradient would paint a solid smear instead of a fade.
 
 ### Page frame and header
 

@@ -37,15 +37,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Measured while on screen: Team mode's stand-down rule hides this bar.
   const shippedBarBox = await page.locator('button[class*="newSession"]').boundingBox()
   expect(shippedBarBox).not.toBeNull()
-  // The shipped tree's bottom fade is measured in the same render as the bar above: Team's browsing seat must close on
-  // the same seam, so the two boxes are compared as an equality rather than "looks faded".
-  const shippedFadeBox = await page.evaluate(() => {
-    const fade = document.querySelector('[class*="sidebarCol"] span[class*="fade"]')
-    if (fade === null) return null
-    const box = fade.getBoundingClientRect()
-    return { x: box.x, y: box.y, width: box.width, height: box.height, background: getComputedStyle(fade).backgroundImage }
-  })
-  expect(shippedFadeBox).not.toBeNull()
   const [teamBox, pluginsBox, settingsBox] = await Promise.all([teamTrigger.boundingBox(), pluginsTrigger.boundingBox(), settingsTrigger.boundingBox()])
   expect(teamBox).not.toBeNull()
   expect(pluginsBox).not.toBeNull()
@@ -54,8 +45,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Every launcher sits on the list's one pitch. The last row is not Team's to
   // claim: a shipped release may append its own launcher after the registered
   // panels, so the assertion is that Team lands on the same grid as the rest,
-  // not that it terminates it.
-  const railRows = await panelRail.evaluate(el => [...el.querySelectorAll('button')]
+  // not that it terminates it. Only the row buttons are launchers: 0.2.2-rc.2
+  // adds a per-row unpin action inside the row's own wrapper, and that action
+  // sits 2px into its row rather than on the pitch.
+  const railRows = await panelRail.evaluate(el => [...el.querySelectorAll('button[class*="panelRow"]')]
     .map(b => b.getBoundingClientRect().y))
   expect(railRows.length).toBeGreaterThan(1)
   const pitch = railRows[1]! - railRows[0]!
@@ -79,16 +72,18 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(conversationBox).not.toBeNull()
   expect(brandRowBox).not.toBeNull()
   expect(topInboxBox).not.toBeNull()
-  expect(teamSettingsBox).not.toBeNull()
   expect(conversationBox!.y).toBeGreaterThanOrEqual(brandRowBox!.y + brandRowBox!.height)
   expect(conversationBox!.y).toBeLessThan(topInboxBox!.y)
-  // Same top and height as the hidden shipped bar, so the first row does not jump
-  // between modes.
-  expect(conversationBox!.y).toBeCloseTo(shippedBarBox!.y, 0)
+  // The exit slab is the browsing column's first row, standing where the hidden
+  // New Session bar stood: 0.2.2-rc.2 starts that column one shell gap below the
+  // brand row (the scroll region's own margin and grid rows), so the slab lands
+  // inside the bar's band rather than on its exact top edge.
+  expect(conversationBox!.y).toBeGreaterThanOrEqual(shippedBarBox!.y)
+  expect(conversationBox!.y).toBeLessThan(shippedBarBox!.y + shippedBarBox!.height)
   expect(conversationBox!.height).toBeCloseTo(shippedBarBox!.height, 0)
-  // Same box as the hidden shipped bar: 14px to 266px in the 280px sidebar.
-  // `width: 100%` would add margin and overshoot by 4px; an inset onto the
-  // browsing region's 12px edge would pull it in 2px.
+  // Same box as the hidden shipped bar: 12px to 268px in the 280px sidebar.
+  // `width: 100%` would add the margin and overshoot by 4px; the seat states no
+  // trailing inset, so the stretched slab's own 4px margin lands it there.
   expect(conversationBox!.x).toBeCloseTo(shippedBarBox!.x, 0)
   expect(conversationBox!.width).toBeCloseTo(shippedBarBox!.width, 0)
   // Nothing in the browsing column may scroll sideways, though section headers
@@ -117,33 +112,23 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // The shipped Settings row is not shadowed and keeps its position.
   expect(teamSettingsBox!.y).toBeCloseTo(settingsBox!.y, 0)
   expect(teamSettingsBox!.height).toBeCloseTo(settingsBox!.height, 0)
-  // Team's browsing seat closes on the shipped tree's own bottom fade: same box, same gradient, inert to the pointer.
-  // Without it the last row is cut at the clip edge and the seam to the Settings row reads as a break.
-  const teamFade = await page.evaluate(() => {
-    const fade = document.querySelector('span[class*="boardFade"]')
-    if (fade === null) return null
-    const box = fade.getBoundingClientRect()
-    const style = getComputedStyle(fade)
-    return { x: box.x, y: box.y, width: box.width, height: box.height, background: style.backgroundImage, pointerEvents: style.pointerEvents }
-  })
-  expect(teamFade).not.toBeNull()
-  expect(teamFade!.width).toBeCloseTo(shippedFadeBox!.width, 0)
-  expect(teamFade!.height).toBeCloseTo(shippedFadeBox!.height, 0)
-  expect(teamFade!.x).toBeCloseTo(shippedFadeBox!.x, 0)
-  expect(teamFade!.background).toBe(shippedFadeBox!.background)
-  expect(teamFade!.pointerEvents).toBe('none')
-  // The fade's bottom edge is the browsing seat's own bottom, and that seat ends where the footer row begins: no blank
-  // band between the gradient and the Settings row.
-  const fadeSeat = await page.evaluate(() => {
-    const fade = document.querySelector('span[class*="boardFade"]')
+  // The shell owns the sidebar's bottom fade since DSH 0.2.2-rc.2: its scroll region paints one over the slot content, so
+  // the browsing seat must not paint a second. Two 24px gradients over the same seam double the alpha mid-fade and stop at
+  // different inline edges. The guard is the fade's shape — an absolutely positioned gradient band across the seat — so a
+  // renamed copy still fails it.
+  const seatFades = await page.evaluate(() => {
     const seat = document.querySelector('section[class*="workspaceBrowser"]')
-    const row = document.querySelector('[data-slot="sidebar.settings"]')
-    if (fade === null || seat === null || row === null) return null
-    return { fadeBottom: fade.getBoundingClientRect().bottom, seatBottom: seat.getBoundingClientRect().bottom, rowTop: row.getBoundingClientRect().top }
+    if (seat === null) return null
+    const seatWidth = seat.getBoundingClientRect().width
+    return [...seat.querySelectorAll('*')].filter(element => {
+      const style = getComputedStyle(element)
+      if (style.position !== 'absolute' || !style.backgroundImage.includes('linear-gradient')) return false
+      const box = element.getBoundingClientRect()
+      return box.width >= seatWidth / 2 && box.height > 0 && box.height <= 48
+    }).map(element => element.className).join(' ')
   })
-  expect(fadeSeat).not.toBeNull()
-  expect(fadeSeat!.fadeBottom).toBeCloseTo(fadeSeat!.seatBottom, 0)
-  expect(fadeSeat!.rowTop - fadeSeat!.seatBottom).toBeLessThanOrEqual(4.5)
+  expect(seatFades).not.toBeNull()
+  expect(seatFades).toBe('')
   await expect.poll(() => page.getByRole('button', { name: '成员', exact: true }).count()).toBe(0)
   const newSessionButtons = page.locator('button[aria-label="新建会话"]')
   const newSessionButton = page.locator('button[class*="newSession"][aria-label="新建会话"]')
@@ -2667,7 +2652,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Archive confirms state the no-restore contract. The archived Project leaves
   // the sidebar; the archived Member leaves the agents panel, its Host session is
   // disposed and archived, and its private memory stays on disk.
-  await page.getByRole('button', { name: '团队' }).click()
+  await page.getByRole('button', { name: '团队', exact: true }).click()
   // Restoration returns to the last open surface; the sidebar row stays the entry
   // back onto the Project.
   await page.getByRole('button', { name: '# delivery' }).waitFor({ timeout: 20_000 })
@@ -3282,7 +3267,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
 
   // Rail Panels re-subscribe only on remount, so leave and re-enter Team mode.
   await page.getByRole('button', { name: '对话' }).click()
-  await page.getByRole('button', { name: '团队' }).click()
+  await page.getByRole('button', { name: '团队', exact: true }).click()
   const railAlert = page.locator('section[aria-label="工作区"] [role="alert"]')
   await railAlert.first().waitFor({ timeout: 30_000 })
   const railBox = await railAlert.first().evaluate(element => {

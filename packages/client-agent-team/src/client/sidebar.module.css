@@ -6,18 +6,13 @@
   display: none;
 }
 
-/* The browsing region is the shipped browser's seat: the shell's sidebar padding on the right and nothing on the left (the
-   shell already indents the region). Reading the shipped variable keeps both modes one column, so switching shifts nothing. */
+/* The browsing region is the shipped browser's seat, and DSH 0.2.2-rc.2 states no inset on either side: the shell's
+   sidebar already indents the region, so the seat stands on that content box and its rows end on its own edge. */
 .workspaceBrowser {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  /* No trailing inset: the seat ends where the footer row begins, exactly as the shipped browsing region does, so the
-     bottom fade meets the Settings/More row instead of leaving a blank band between them. */
-  padding: 0 var(--dsh-sidebar-inline-padding, 12px) 0 0;
-  /* Anchors the bottom fade to the browsing seat, the way the shipped tree body anchors its own. */
-  position: relative;
 }
 
 .railButton {
@@ -346,36 +341,20 @@
   flex-direction: column;
   gap: 4px;
   margin-left: -4px;
-  margin-right: calc(-1 * (var(--team-list-bar) + var(--team-list-air)));
+  /* The scrollbar gutter and the air belong outside the seat's content edge, where no row draws. The shell's scroll
+     region ends 6px past that edge, so 4px of the 10px band stays inside: the rows end 4px in, and the sidebar never
+     scrolls sideways. */
+  margin-right: calc(-1 * (var(--team-list-bar) + var(--team-list-air)) + 4px);
   margin-top: 2px;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding-left: 4px;
   padding-right: var(--team-list-air);
-  /* Clears the bottom fade overlay the way the shipped list does: at scroll end the last row sits above the gradient
+  /* The shipped list's own clearance for the shell's bottom fade: at scroll end the last row sits above the gradient
      instead of under it. */
   padding-bottom: 16px;
   scrollbar-gutter: stable;
-}
-
-/* Bottom fade: the shipped browsing tree's own compact overlay, transparent to the sidebar fill so it tracks the theme. It
-   is the seam between a scrolling list and the footer row below it — without it the last row is cut off at the clip edge
-   and the gap to the Settings/More row reads as a hard break rather than the list continuing under it. */
-.boardFade {
-  position: absolute;
-  left: 0;
-  right: var(--dsh-sidebar-inline-padding, 12px);
-  bottom: 0;
-  height: 24px;
-  background: linear-gradient(to bottom, transparent, var(--dsw-specific-sidebar-fill));
-  pointer-events: none;
-}
-
-/* macOS desktop: the sidebar is translucent over window vibrancy, so the opaque fill gradient would paint a solid smear
-   instead of a fade. The shipped tree drops its own fade for the same reason. */
-:global([data-platform='darwin']) .boardFade {
-  display: none;
 }
 
 .section { display: flex; flex-direction: column; }
