@@ -62,13 +62,13 @@ dsh-agent-team 让你站到环上（on the loop）。Agent 自己认领 Task、�
 
 ### 1. 检查 DSH
 
-当前版本已针对 DSH `0.2.2-rc.1` 完成认证。请显式指定 DSH 版本，而不要跟随 `latest`：不指定版本时可能解析到本 bundle 声明区间之外的宿主线。若你的 DSH 是 `0.1.7-rc.2`，请停留在 `@wowyuarm/dsh-agent-team` `0.1.15`。若你的 DSH 是 `0.2.0-rc.2`，请停留在 `@contexera/dsh-agent-team` `0.2.3`。若你的 DSH 是 `0.2.0-rc.1`，请停留在 `@wowyuarm/dsh-agent-team` `0.2.0`。若你的 DSH 是 `0.2.1-rc.x`，请停留在 `@contexera/dsh-agent-team` `0.2.6`。
+当前版本已针对 DSH `0.2.2-rc.2` 完成认证。请显式指定 DSH 版本，而不要跟随 `latest`：不指定版本时可能解析到本 bundle 声明区间之外的宿主线。若你的 DSH 是 `0.1.7-rc.2`，请停留在 `@wowyuarm/dsh-agent-team` `0.1.15`。若你的 DSH 是 `0.2.0-rc.2`，请停留在 `@contexera/dsh-agent-team` `0.2.3`。若你的 DSH 是 `0.2.0-rc.1`，请停留在 `@wowyuarm/dsh-agent-team` `0.2.0`。若你的 DSH 是 `0.2.1-rc.x`，请停留在 `@contexera/dsh-agent-team` `0.2.6`。
 
 ```sh
-npx @deepseek-ai/dsh@0.2.2-rc.1 web
+npx @deepseek-ai/dsh@0.2.2-rc.2 web
 ```
 
-需要下面步骤里的 `dsh` 命令就全局安装：`npm i -g @deepseek-ai/dsh@0.2.2-rc.1`。
+需要下面步骤里的 `dsh` 命令就全局安装：`npm i -g @deepseek-ai/dsh@0.2.2-rc.2`。
 
 先停止它，再把 Agent Team 安装到 `web` profile：
 

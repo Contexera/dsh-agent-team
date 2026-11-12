@@ -133,17 +133,21 @@ There is no general slot for extra members — the upstream `compact` plugin obt
 
 ### 3.7 Competing Team implementations
 
-The Harness ships an experimental Agent Teams feature as its own profile bundles (`@deepseek-ai/dsh-experimental-agent-team-profile`, `@deepseek-ai/dsh-experimental-agent-team-web-profile`).
+The Harness ships an Agent Teams feature of its own: `@deepseek-ai/dsh-agent-team` and its model-facing tool plugin `@deepseek-ai/dsh-tool-agent-team`, mounted unconditionally by the base bundle (`packages/bundle/base/cordis.patch.yml`, `maxTasks: 256`).
 
-It is a competing Team implementation, not an extension point this bundle builds on. It registers its own model-facing tool family (`spawn_teammate`, `send_message`, `list_agents`, `wait_agent`, `interrupt_agent`, `team_task_*`), disables the shipped global subagent rows in its profile patch to free those names, and carries its own members, tasks, store, and client panel.
+DSH `0.2.2-rc.2` renamed them from the `dsh-experimental-agent-team` / `dsh-experimental-tool-agent-team` pair that shipped as separate experimental profile bundles, so the feature is no longer experimental and every `0.2.2` profile carries it.
+
+It is a competing Team implementation, not an extension point this bundle builds on. It registers its own model-facing tool family (`spawn_teammate`, `send_message`, `list_agents`, `wait_agent`, `interrupt_agent`, `team_task_create`, `team_task_get`, `team_task_list`, `team_task_update`) and carries its own members, tasks, store, and client panel.
 
 This bundle's ten tools are `team_view`, `team_inbox`, `team_thread`, `team_message`, `team_task`, `team_attention`, `team_dm`, `team_subscription`, `team_reminder`, and `team_worker`, registered only inside its `team-member` preset.
 
-Certification covers profiles that do not mount the experimental packages, and mounting both at once is **unsupported**: two Team authorities, two tool families, and two UI surfaces would be live with no shared authority or naming rule between them.
+Certification therefore runs in a profile where both official rows are live, and the two implementations stay apart by the preset boundary rather than by absence: this bundle's registry, preset, and tool family live inside its own isolated group, while an ordinary session keeps composing the host's `standard` preset with the official family.
+
+Mixing the two families in one session, or mounting this bundle's rows twice, is **unsupported**: two Team authorities would write the same conceptual objects with no shared authority or naming rule between them.
 
 Choose one Team profile per profile.
 
-Member tool-policy tests mount the real experimental Team service and tool plugin before or after Member activation. Members complete model turns using only declared tools, deny official tool calls, and resume while the plugin stays enabled. Ordinary Agents retain the official tools and identity.
+Member tool-policy tests mount the real official Team service and tool plugin before or after Member activation. Members complete model turns using only declared tools, deny official tool calls, and resume while the plugin stays enabled. Ordinary Agents retain the official tools and identity.
 
 Its `team:policy` and required `team:identity` prompts still reach Members. A complete mixed-profile coexistence run has not been certified; these tool checks do not establish general plugin compatibility; [Tools and preset](architecture/tools-and-preset.md) records the local filtering limits.
 
@@ -152,6 +156,7 @@ Its `team:policy` and required `team:identity` prompts still reach Members. A co
 | Result | Action |
 | --- | --- |
 | Candidate is within current peers and all checks pass | Record the certified baseline and evidence; do not change the manifest or publish Team. |
+| Candidate is within current peers, but a breaking host change inside that range makes the peers admit a line the bundle no longer runs on | Move the peers to the candidate as well, and hold the publish until npm carries it: a published version must never declare a line it cannot install on, nor claim support for one it broke on. |
 | Candidate is outside current peers and all checks pass | Atomically update all DSH peers, compatibility docs, and Team version; verify the dependency graph and publish. |
 | Any check fails | Do not widen peers or publish; record and handle under section 5. |
 
@@ -169,13 +174,15 @@ Record candidate tag, symptom, affected interface, reproduction command, and nex
 
 ## 6. Current baseline
 
-The current certified baseline is DSH `0.2.2-rc.1`; the paragraphs below preserve the history that produced the preceding baselines.
+The current certified baseline is DSH `0.2.2-rc.2`; the paragraphs below preserve the history that produced the preceding baselines.
 
-The DSH peers state exactly that certified line, `>=0.2.2-rc.1 <0.2.3`, so a line this repository has not verified falls outside the declared range instead of installing under an unverified compatibility claim. The removed `@deepseek-ai/dsh-tool-todo` peer left with the preset row it named when the Team surface dropped the session-local todo tool; the remaining peers keep the one certified range.
+The DSH peers state exactly that certified line, `>=0.2.2-rc.2 <0.2.3`, so a line this repository has not verified falls outside the declared range instead of installing under an unverified compatibility claim. The removed `@deepseek-ai/dsh-tool-todo` peer left with the preset row it named when the Team surface dropped the session-local todo tool; the remaining peers keep the one certified range.
 
 The removed `@deepseek-ai/dsh-invariants` peer likewise left with the registry row it named when the invariant companion began validating on its own.
 
 No dependency now sits outside the DSH line: the external context engine and its `jev` judge left with the tools that used them, so the bundle's own dependencies are `yaml` and `zod` alone and neither contributes a DSH peer declaration to the tree.
+
+`zod` carries an exact pin (`4.6.6`), not a range. Typert generation puts this bundle's packages inside the host workspace for type analysis, and the DSH `0.2.2-rc.2` bundle declares that same exact version; a caret range there resolves a second copy and splits `ZodType` into two incompatible declarations. A zod patch therefore moves this pin deliberately, on the round that certifies the host carrying it, instead of drifting in through a caret.
 
 The routed sqlite backend is a vendored fork, not a dependency at all (GitHub issue #28). The upstream package stays a devDependency pinned at the fork source, 0.1.5-rc.2, as the byte-compatibility fixture reference, and every compat round diffs the fork against that version's file before anything else.
 

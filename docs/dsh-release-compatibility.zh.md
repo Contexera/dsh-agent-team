@@ -179,17 +179,23 @@ section 的 `text` 是插件自己的字符串，会被逐字读回。列表要�
 
 ### 3.7 并存的另一套 Team 实现
 
-Harness 随附一套 experimental Agent Teams，以独立 profile bundle 形式发布（`@deepseek-ai/dsh-experimental-agent-team-profile`、`@deepseek-ai/dsh-experimental-agent-team-web-profile`）。
+Harness 随附一套自己的 Agent Teams：`@deepseek-ai/dsh-agent-team` 及其 model-facing 工具插件 `@deepseek-ai/dsh-tool-agent-team`，由 base bundle 无条件挂载（`packages/bundle/base/cordis.patch.yml`，`maxTasks: 256`）。
 
-它是与本 bundle 竞争的另一套 Team 实现，不是本 bundle 依赖的扩展点。它注册自己的 model-facing 工具族（`spawn_teammate`、`send_message`、`list_agents`、`wait_agent`、`interrupt_agent`、`team_task_*`）。它在自己的 profile patch 里禁掉随附的全局 subagent 行，腾出这些名字。它自带成员、任务、store 与 client 面板。
+DSH `0.2.2-rc.2` 把它们从原先作为独立 experimental profile bundle 发布的 `dsh-experimental-agent-team` / `dsh-experimental-tool-agent-team` 改了名，这套功能不再是 experimental，每个 `0.2.2` profile 都会带上它。
+
+它是与本 bundle 竞争的另一套 Team 实现，不是本 bundle 依赖的扩展点。
+
+它注册自己的 model-facing 工具族（`spawn_teammate`、`send_message`、`list_agents`、`wait_agent`、`interrupt_agent`、`team_task_create`、`team_task_get`、`team_task_list`、`team_task_update`），自带成员、任务、store 与 client 面板。
 
 本 bundle 的十个工具是 `team_view`、`team_inbox`、`team_thread`、`team_message`、`team_task`、`team_attention`、`team_dm`、`team_subscription`、`team_reminder`、`team_worker`，只在 `team-member` preset 内注册。
 
-认证覆盖的是未挂载这些 experimental 包的 profile。同时挂载两者属于不支持的组合。会出现两套 Team authority、两个工具族、两块 UI surface。它们之间既无共享权威也无命名规则。
+因此认证跑在两条官方 row 都在的 profile 上，两套实现靠 preset 边界而不是靠「不存在」分开：本 bundle 的 registry、preset 与工具族都在自己隔离的 group 内，普通会话继续组合宿主的 `standard` preset 与官方工具族。
+
+把两个工具族混进同一个会话，或把本 bundle 的 row 挂两遍，属于不支持的组合：两套 Team authority 会以同一套概念写同一批对象，而它们之间既无共享权威也无命名规则。
 
 一个 profile 只选一套 Team profile。
 
-Member 工具策略测试在 Member 激活前或激活后挂载真实 experimental Team service 和工具插件。Member 只使用声明的工具完成模型回合，拒绝官方工具调用，并能在插件保持启用时恢复。普通 Agent 仍保留官方工具与身份。
+Member 工具策略测试在 Member 激活前或激活后挂载真实的官方 Team service 和工具插件。Member 只使用声明的工具完成模型回合，拒绝官方工具调用，并能在插件保持启用时恢复。普通 Agent 仍保留官方工具与身份。
 
 其 `team:policy` 与必需的 `team:identity` 提示仍会进入 Member 上下文。完整混合 profile 的共存运行尚未认证，工具检查不代表通用插件兼容；本地过滤的限制见 [Tools and preset](architecture/tools-and-preset.zh.md)。
 
@@ -200,6 +206,7 @@ Member 工具策略测试在 Member 激活前或激活后挂载真实 experiment
 | 认证结果 | 后续动作 |
 | --- | --- |
 | 候选 DSH 已在当前 peerDependencies 范围内，且全部验证通过 | 在本文件记录已认证基线和验证证据；不修改 manifest，不发布 Team。 |
+| 候选 DSH 虽在范围内，但区间内出现了破坏性宿主变更，使 peer 仍会放进本 bundle 已无法运行的宿主线 | 同样把 peer 移到候选版本，并等 npm 有了该版本再发布：已发布的版本不能声明自己装不上的线，也不能声明自己在上面已经坏掉的线。 |
 | 候选 DSH 不在当前 peerDependencies 范围内，且全部验证通过 | 原子更新所有 DSH peerDependencies、兼容性文档和 Team 自身版本，完成安装依赖图验证后发布 Team。 |
 | 验证未通过 | 不扩大 peerDependencies，不发布 Team；按第 5 节记录和处理。 |
 
@@ -228,13 +235,15 @@ Member 工具策略测试在 Member 激活前或激活后挂载真实 experiment
 
 ## 6. 当前基线
 
-当前 Team bundle 的已认证基线是 DSH `0.2.2-rc.1`；以下几段保留产生前几条基线的历史。
+当前 Team bundle 的已认证基线是 DSH `0.2.2-rc.2`；以下几段保留产生前几条基线的历史。
 
-DSH peers 正好声明这条已认证线：`>=0.2.2-rc.1 <0.2.3`。本仓库尚未验证的线会落在声明区间之外，而不是在未经核实的兼容声明下被装上。Team 面向模型的工具面去掉 session-local todo 工具时，被移除的 `@deepseek-ai/dsh-tool-todo` peer 随它指名的 preset row 一并删除。其余 peers 仍保持唯一一条已认证区间。
+DSH peers 正好声明这条已认证线：`>=0.2.2-rc.2 <0.2.3`。本仓库尚未验证的线会落在声明区间之外，而不是在未经核实的兼容声明下被装上。Team 面向模型的工具面去掉 session-local todo 工具时，被移除的 `@deepseek-ai/dsh-tool-todo` peer 随它指名的 preset row 一并删除。其余 peers 仍保持唯一一条已认证区间。
 
 被移除的 `@deepseek-ai/dsh-invariants` peer 同样随它指名的 registry row 一并删除：invariant companion 此后自持校验。
 
 现在已经没有依赖落在 DSH 线之外：外部的 context 引擎与它的 `jev` judge 随使用它们的工具一并移除，本 bundle 自己的 dependencies 只剩 `yaml` 与 `zod`，两者都不往树里带 DSH peer 声明。
+
+`zod` 用精确锁（`4.6.6`），不是区间。Typert 生成会把本 bundle 的包放进宿主工作区做类型分析，而 DSH `0.2.2-rc.2` 的 bundle 声明的正是这个精确版本；此处用 caret 会解析出第二份拷贝，把 `ZodType` 劈成两个互不兼容的声明。所以 zod 的每次补丁都由认证那一轮有意识地移动这个钉，而不是靠 caret 漂移进来。
 
 经路由的 sqlite 后端是 vendored fork，根本不是 dependency（GitHub issue #28）。上游包只以 devDependency 钉在 fork 来源版本 0.1.5-rc.2，用作字节兼容 fixture 参照。每次兼容认证先把 fork 与该版本文件对一遍 diff，再做其他事。
 
