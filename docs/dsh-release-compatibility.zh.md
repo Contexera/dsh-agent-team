@@ -438,3 +438,23 @@ Tag `66491b05e3`（2026-11-04）相对 `dsh-v0.2.1-rc.2` 改动 8,278 个文件�
 §3.6 以零新增拒绝收尾：767 个已存会话被重新打开，755 通过、12 拒绝，而等价对照线拒绝 47 条；多接受的每一条都是 `subagent/descriptor version 2` 工件。§3.5 的扁平安装解析到 322 个 `0.2.2-rc.1` 包、零个更早版本。
 
 认证树上的证据：`npm run typecheck`、`npm test`（2022 通过、1 跳过）、`npm run lint`（102 warning、0 error）、`npm run build`、`npm pack --dry-run`（409 文件）、`check:artifact`（108 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（13 条旅程）。
+
+### DSH 0.2.2-rc.2
+
+DSH `0.2.2-rc.2` 在移动后的 peer 线 `>=0.2.2-rc.2 <0.2.3` 上认证通过，随 Agent Team `0.2.8` 发布。
+
+候选版本落在上一条 `>=0.2.2-rc.1 <0.2.3` 之内，按 §4 本该就地记录基线——但那条区间已经不再描述现实：宿主从 `SubagentActivationSpec` 里删掉了嵌套的 `request` 对象，而唯一把 `{ parent, prompt, cwd }` 放在它下面的调用点，在旧宿主线上根本跑不起来。
+
+因此 peer 移到候选版本，发布等 npm 跟上。
+
+tag `ddac96760b`（2026-11-11）相对 `dsh-v0.2.2-rc.1` 改了 4,645 个文件、1,568 笔提交。触及本 bundle 的只有三处：
+
+- 激活形状摊平：`worker-service.ts` 把 `parent`、`prompt`、`cwd` 提到顶层，bundle 内没有第二处读旧形状。
+- 宿主把 `zod` 精确钉在 `4.6.6`，而 Typert 生成会把本 bundle 的包放进那个工作区做类型分析，caret 会解析出第二份拷贝、把 `ZodType` 劈成两个互不兼容的声明。本 bundle 的依赖改为同一个精确钉，生成的 Typert 产物零 diff。
+- 官方 Team 从 `dsh-experimental-agent-team` 那一对改名为 `@deepseek-ai/dsh-agent-team` 与 `@deepseek-ai/dsh-tool-agent-team`，并由 base bundle 无条件挂载；§3.7 说明这对共存意味着什么。
+
+仅夹具：官方包的新名字、`listChildren` → `listDescendants`、`list()` 移除。
+
+证据：`npm run typecheck`（581 个 Harness 映射）、`npm test`（2651 通过、1 跳过）、`npm run lint`（109 warning、0 error）、`npm run build`、`npm pack --dry-run`（452 文件）、`check:artifact`（133 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（24 条旅程）。
+
+认证当时 npm 上仍只有 `0.2.2-rc.1`（`latest` 与 `next` 都是），因此 §3 的安装、依赖图与已发布 bundle 检查，在候选版本出现在 registry 之后、本版本发布之前补做。

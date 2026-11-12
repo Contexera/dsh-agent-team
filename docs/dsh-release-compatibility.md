@@ -373,3 +373,21 @@ Tag `66491b05e3` (2026-11-04) carries 8,278 changed files against `dsh-v0.2.1-rc
 Section 3.6 closes with no new refusal: 767 stored sessions were reopened, 755 pass and 12 are refused, while the equivalent control line refuses 47; every extra acceptance is a `subagent/descriptor version 2` artifact. Section 3.5 resolves a flat install to 322 `0.2.2-rc.1` packages and zero older ones.
 
 Evidence on the certified tree: `npm run typecheck`, `npm test` (2022 passed, 1 skipped), `npm run lint` (102 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (409 files), `check:artifact` (108 runtime relative imports resolved), `git diff --check`, and `npm run test:browser` (13 journeys).
+
+### DSH 0.2.2-rc.2
+
+DSH `0.2.2-rc.2` is certified on a moved peer line, `>=0.2.2-rc.2 <0.2.3`, shipped as Agent Team `0.2.8`. The candidate falls inside the previous `>=0.2.2-rc.1 <0.2.3`, so section 4 would record a baseline in place — except that the range stopped describing reality: the Host removed the nested `request` object from `SubagentActivationSpec`, and the one call site that passed `{ parent, prompt, cwd }` under it cannot run on the previous line at all.
+
+The peers move to the candidate, and the publish waits until npm carries it.
+
+Tag `ddac96760b` (2026-11-11) carries 4,645 changed files and 1,568 commits against `dsh-v0.2.2-rc.1`. Three changes reached this bundle:
+
+- The activation shape flattened: `worker-service.ts` now passes `parent`, `prompt`, and `cwd` at the top level, and nothing else in the bundle reads the old shape.
+- The Host pins `zod` at exactly `4.6.6`, and Typert generation analyses this bundle's packages inside that workspace, so a caret range resolved a second copy and split `ZodType` into two incompatible declarations. The bundle's own dependency carries the same exact pin, and the generated Typert output is unchanged.
+- The official Team feature was renamed from the `dsh-experimental-agent-team` pair into `@deepseek-ai/dsh-agent-team` and `@deepseek-ai/dsh-tool-agent-team`, and the base bundle now mounts both unconditionally; section 3.7 states what that means for coexistence.
+
+Fixture-only changes: the official packages' new names, `listChildren` → `listDescendants`, and the removal of `list()`.
+
+Evidence on the certified tree: `npm run typecheck` (581 Harness mappings), `npm test` (2651 passed, 1 skipped, 207 files), `npm run lint` (109 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (452 files), `check:artifact` (133 runtime relative imports resolved), `git diff --check v0.2.7..HEAD`, and `npm run test:browser` (24 journeys).
+
+At certification time npm still carried only `0.2.2-rc.1` — `latest` and `next` both — so section 3's install, dependency-graph, and published-bundle checks run against the registry as soon as the candidate lands there, before this version publishes.
