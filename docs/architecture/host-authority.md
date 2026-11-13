@@ -56,6 +56,8 @@ A wake is one bounded coalesced notice the Host delivers over one of four causes
 
 Waking is not a second authority and never promises exactly-once model processing. A wake that fails delivery clears its recorded notice state, so the next commit touching that Member rederives the same durable facts and retries without a second append.
 
+When a recovery instruction is queued, the Host records coverage from that snapshot. Later Inbox facts, Threads omitted as a whole, and Member reminder occurrences left out of the text stay owed.
+
 `recoverMember` is the manual path and picks exactly one of these, in order:
 
 | Condition | Action | Use it when |
@@ -140,7 +142,7 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 - A model edit commits and reports like any other edit, but whether the new route takes effect is upstream's call: a switch whose new window cannot hold the Session after compaction is refused with the previous route kept, so the pending selection waits for a compatible model while the recorded intent survives either way.
 - The composer is the other entry point, and it does not reach the ledger on the selection event. A Member Session's `request/header` is what proves the switch passed the Host's compaction guard and entered a real request, so the Host records the route from `header.config` as one Human `team/member-updated` operation. Only the route is written: the reasoning tier stays a Session-log fact that activation re-reads for the same route.
 - Three requests write nothing. One is a request on the route the Member already runs, which includes the route Team itself wrote back when it activated that Member — so the write-back cannot feed itself through the ledger. Another is a switch the Host refuses: it never logs a header, so it never writes. The third is a header the Member has already moved past: a pick made after that step fixed its route is newer, and writing the header's route would put the replaced one back.
-- Every roster row carries `capabilityState` (`applied` | `pending`), derived from the effects the runtime actually applied; states with no live surface report `pending` literally. The field is orthogonal to `availability`/`presence`: those answer whether the Member runs, this answers whether its stored configuration is in effect.
+- Every roster row carries `capabilityState` (`applied` | `pending`). It compares that Member's stored `capabilities` with the capabilities applied to its live runtime; a Member without a live runtime reports `pending`. It is separate from `availability` and `presence` and does not report whether the profile's `extraToolGrants` took effect on a turn.
 - Skills are Member-private. The preset carries no shared skill-filesystem row; instead the Host registers one filesystem provider per Member on that agent's exact scope layer (the traceable-service seam, same shape as the tool restriction). That provider scans exactly two Team-owned roots with default roots excluded: the plugin's bundled read-only core skills (`packages/agent-team/core-skills/`, first — a same-name bundled skill stays stable across upgrades) and the Member's writable `$DSH_HOME/agent-team/members/<memberId>/skills/`.
 
   A Member catalog therefore starts with the bundled set (the `member-skill-manager` meta skill, which owns all skill craft guidance — the persona itself only states the private-space physical facts). Installing is writing into the Member's own directory (directory form `skills/<name>/SKILL.md` with optional references/scripts, or a flat `.md`), there is deliberately no upload Remote, and the filesystem watcher feeds discovery.
@@ -164,7 +166,9 @@ The Host owns every timer a subscription obeys. `SubscriptionScheduler` (`packag
 
 Admission re-reads the ledger rather than the queued snapshot: a subscription deleted — or a Project archived — while a trial or a timer run waits is refused without running its script, and a record in that terminal state neither publishes again nor keeps a checkpoint.
 
-Its state — next due instant, failure count, publication window, last success — lives in the private domain `agent_team_subscriptions` (`packages/agent-team/src/subscription-store.ts`), never in the ledger. Deleting every checkpoint changes no domain result, and a restart resumes from the persisted due instant instead of resetting it.
+If the admission check cannot read its inputs, the scheduler logs the error and leaves the entry queued for a later pass. A refusal after a successful check removes the entry and settles the caller.
+
+Scheduling state — next due instant, failure count, publication window, last success — lives in the private domain `agent_team_subscriptions` (`packages/agent-team/src/subscription-store.ts`). Restart resumes from the persisted checkpoint. Deleting that checkpoint changes scheduling and failure accounting even though it cannot rewrite a committed event.
 
 The same domain keeps four tables no ledger fact depends on: `runs`, the newest fifty runs of each subscription; `deliveries`, the webhook deliveries whose automatic retries were spent; `replays`, the answer each replay request already got; and `admissions`, the accepted webhook requests that still owe a run, an accept, or a replayable failure record, with the definition each arrived under and the batch a full queue held back.
 
@@ -230,6 +234,8 @@ A header over 1 KiB refuses the delivery rather than truncating it, and a non-id
 Only `content-type`, `user-agent`, and names matching `x-*-event`, `x-*-delivery`, `x-*-signature*`, and `x-*-timestamp` reach the script, all lowercased; `authorization`, `cookie`, `x-api-key`, and proxy-inserted headers never do.
 
 The entry answers 202 only after the row is written, so a restart before the answer replays nothing it lost — the queue is private state, and the next pass runs what it owes. A run reads `{headers, body}` on stdin under `DSH_TEAM_TRIGGER=webhook` and the admission's own id as `DSH_TEAM_DELIVERY_ID`, which is what keeps one delivery one identity across its retries and a later replay.
+
+On shutdown the Host stops scheduling new queue passes, drains the scheduler, and waits for the active webhook pass before closing storage. Any work still owed remains in the durable queue for the next Host.
 
 A failed run keeps the row and waits 1, 5, and 30 minutes; the fourth failure turns it into the `deliveries` row an owner replays, and a batch that alone passes the ceiling goes straight there, because retrying it would print the same output again. A retry that succeeds ends the delivery without spending a failure on it.
 
@@ -301,7 +307,7 @@ Rules version 6 introduced both operations. Version 7 extends them with an optio
 
 The durable state of a bound run is derived, never stored twice. `threadWorkerStates` reads the execution records rather than the facts a page returned, so a long Thread reports the state of every run bound to it even when that run's facts sit outside the window.
 
-A record still marked `running` with no live handle in this Host — the signature of a Host replaced mid-run — reads as `unconfirmed`: the result cannot be confirmed, the run is not re-run, and nothing is retried automatically. `unconfirmed` mints no marker and wakes nobody; it is visible on the Thread.
+A record still marked `running` with no live execution in this Host reads as `unconfirmed`. This can follow a Host restart or an ending that has not reached the ledger. The run is not restarted or retried automatically, and `unconfirmed` writes no fact and wakes nobody.
 
 One stop transaction covers both surfaces: the Member's `team_worker` call with `stop` and the Human's `stopWorker` Remote enter the same `WorkerRegistry.stop`. Authorization is the identity that opened the run — its `initiatedBy` Member, or the Human — and deliberately not the start conditions, so an ownership change, a transfer, or the settings switch being turned off never decides a stop.
 
@@ -319,7 +325,7 @@ Anything still unconfirmed at that boundary is sealed: the run keeps its `runnin
 
 The Human's surface is the edit-Agent dialog, which gives that Member at most five rows: the live runs (`running`, `stopping`) and the records a previous Host left running as `unconfirmed` hold their seats first, and the newest endings by ending time fill the rest — a long run that started early and failed just now stays inside that window — each with the ending the Host confirmed, and a diagnostic door on every run that ended.
 
-Its `stopWorker` receipt is structured rather than a sentence to read: `ended` names the state the run really reached and the Host's diagnostic, `pending` says the cleanup is still in flight, and `unconfirmed` says this Host no longer holds the handle. A run a previous Host left behind appears as `unconfirmed` with an explanation and no stop control, and a call that never completed says only that, never deciding the run's state.
+Its `stopWorker` receipt is structured: `ended` names the recorded ending and any diagnostic, `pending` means cleanup or recording is still in flight, and `unconfirmed` means the Host lost the live handle or could not record the ending. A run listed as `unconfirmed` has no stop control. A failed request that returns no receipt does not decide the run's state.
 
 ### Reading one run's diagnostic
 
@@ -375,13 +381,17 @@ A steer admission and its outcome are private ledger state: they publish no Thre
 
 Attachments live in the bounded cache `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/`, with a sanitized original name and `meta.json`; they are never ledger bytes or an archive. `putAttachment` enforces a 10 MB file cap and sanitizes names; `getAttachment` serves Client display. Messages record metadata while the stored body contains machine-facing `[attachment] <absolute path>` lines. The Client strips those lines and renders thumbnails/chips.
 
-The request's `requestId` is an upload's idempotency key. Retrying the same payload replays the original result instead of writing a second entry, reusing that key for a different payload is refused as a request collision, and the cache id derives from the request id alone. A retry therefore converges on the same entry after a Host restart without a second durable store or an in-memory map.
+The request's `requestId` is an upload's idempotency key. Retrying the same payload replays the original result, including after Host restart. Reusing that key for a different payload is refused even when both requests arrive together. The cache id derives from the request id alone.
 
 The Project and Thread composers accept files both through the "+" picker and by pasting into the draft; a paste that carries files is intercepted and joins the same pending-file chips, while plain-text pastes keep their native insertion.
 
 Garbage collection runs at startup and every 24 hours: referenced uploads older than 72 hours and orphaned uploads older than 24 hours are removed, while metadata remains. Agent-sent absolute paths are validated as absolute non-empty regular files under 10 MB and rejected atomically if any path fails; each surviving path is copied into an immutable cache entry whose id derives from the message or reply request and the path's position in it. A manually pasted absolute path is simply read by the Agent; Host touches nothing it does not own.
 
-That request-derived identity is what makes retries cheap: a repeated send or reply converges on the entry the first attempt prepared instead of writing an orphan, so the stored body — one `[attachment]` line per file — stays identical across retries. A message or reply that fails after preparation removes the entries this attempt prepared which no committed Message references, with the ledger's reference set as the guard; genuinely unreferenced uploads stay GC's to reclaim.
+An interrupted upload with missing or corrupt metadata also expires after 24 hours from the cache directory's last modification, provided no Message references it. The sweep ignores foreign directory names and symlinks at the cache root.
+
+Repeating a send or reply reuses the prepared copies, keeping each `[attachment]` line stable. Attempts that share those copies run in order through commit and failure cleanup. If a send or reply fails after preparation, it removes copies only when no committed Message references them.
+
+The sweep checks ledger references after it has exclusive access to the cache entry. A file that has passed the orphan limit but is now referenced therefore gets the remaining referenced retention window.
 
 On a reused request id the ledger compares the recorded resolved attachment ids with the retry's resolved ids, so a retry carrying a different attachment set is refused as a collision.
 
@@ -407,6 +417,6 @@ The settings form and runtime normalization share the structural schema in `memb
 
 The footnote carries the version of the bundle this Host runs from — read from the installed package's own manifest, so it states what the profile actually installed rather than a string every release must remember to bump — plus the repository link and an update tip. The tip names the newer version once a background check has observed a newer published release.
 
-The check asks the public npm `latest` document at most every 12 hours, refreshes in the background so profile reads never wait on the network, settles every failure as "no update known", and stays off while `DSH_AGENT_TEAM_UPDATE_CHECK=0`.
+The check reads the public npm `latest` document in the background at most every 12 hours. A successful check replaces the previous result; a failure keeps it. `DSH_AGENT_TEAM_UPDATE_CHECK=0` stops new outbound checks. It does not hide the last confirmed result or cancel a check already in flight.
 
 The ledger reads the same profile for `team_view` and @ matching, so a rename reaches every surface at once. `human` stays a permanent alias for the Human and no agent handle may claim the literal, so `@human` keeps delivering across renames while chips render the current display name.

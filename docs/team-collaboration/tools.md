@@ -251,7 +251,7 @@ The stop is authorized by the identity that opened the run: the delegating Membe
 
 A run this Host no longer holds — the signature of a restart — is refused as `worker_unconfirmed`: it cannot be confirmed or stopped, and it is never re-run.
 
-The stop waits for the engine to confirm its cleanup, and the wait is bounded. Past the deadline the run is still `running` — the Thread read and the Human's list call it `stopping` while the stop is in flight — and the call is refused as `worker_stop_pending`, while the cleanup it already asked for keeps going. An engine that reports a failed teardown instead records the run `failed` with a diagnostic saying the cleanup is unconfirmed, never `stopped`.
+A stop waits for cleanup and the recorded ending, within the same deadline even on a retry. If the wait runs out, `worker_stop_pending` says which part is outstanding; the operation keeps going. If cleanup failed, the run is recorded as `failed` with a diagnostic. If the ending could not be written, the refusal is `worker_stop_unrecorded`; retrying does not report the in-memory ending as confirmed. The tool result preserves these Worker refusal codes.
 
 Two runs are independent: stopping one leaves the other's process, Thread facts, and Inbox notice untouched.
 

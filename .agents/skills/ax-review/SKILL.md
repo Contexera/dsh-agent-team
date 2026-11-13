@@ -18,18 +18,22 @@ Inventory what exists and its weight: root `AGENTS.md` / `CLAUDE.md` (line count
 
 ## 2. Mechanical pass
 
-Run from the skill directory, with `<repo>` the repository under review:
+Run from the skill directory, with `<repo>` the repository under review. Script defaults retain the Git-known Markdown scope. For the standard current-work review of a repository with `.scratch/`, explicitly add ignored active work and remove historical archives:
 
 ```bash
-python3 scripts/check_links.py <repo>        # relative links resolve to files and heading anchors
-python3 scripts/check_references.py <repo>  # cited paths, npm scripts, make targets still exist
+python3 scripts/check_links.py <repo> --include .scratch/active --exclude .scratch/archive
+python3 scripts/check_references.py <repo> --include .scratch/active --exclude .scratch/archive
 ```
 
-Both scan the Markdown files git knows about, exit non-zero on findings, and print `file:line: reason`. Findings are candidates, not verdicts: a methodology doc may cite paths of the repos it talks about, a runbook may cite paths on the target machine. Every finding gets fixed or consciously explained in the report — saying "expected, this doc cites external paths" is a valid resolution.
+Use the same scope for both. Omit `--include` when no active directory exists. `--exclude` is a repository-relative file or directory prefix, not a glob; a missing include fails rather than silently narrowing the review. Archive history enters only through an explicit scope change, such as omitting the archive exclusion for a separately requested historical audit. Do not present a scoped green run as repo-wide green.
+
+Both scripts exit non-zero on findings and print `file:line: reason`, plus the effective include/exclude scope. Findings are candidates, not verdicts: a methodology doc may cite paths of the repos it talks about, a runbook may cite paths on the target machine. Every current-scope finding gets fixed or consciously explained in the report — saying "expected, this doc cites external paths" is a valid resolution. Report archive-only findings separately and never rewrite history merely to make the current review green.
+
+When a repository has project skill copies and the upstream skills checkout is available, also run the upstream repository's documented read-only skill-copy comparison. It checks installed copies by name and byte content without requiring every upstream skill to be installed. No upstream checkout means this check is unavailable, not a failure.
 
 ## 3. Cold-start walk
 
-Pick 2–3 realistic tasks (derive them from the README, recent commits, or issue titles — for example "fix a bug in X", "add config option Y", "release a version"). For each, walk the path a fresh agent would take: entry file → routing → landing doc → code, and record friction:
+Pick 2–3 realistic tasks (derive them from the README, recent commits, or issue titles — for example "fix a bug in X", "add config option Y", "release a version"). When the repository uses `.scratch/`, include a cross-session task that requires delegation: root guide → work-item rules → discussion/spec → ready ticket → worker packet and delivery → implementation review → required Human acceptance → archive. For each, walk the path a fresh agent would take: entry file → routing → landing doc or ticket packet → execution, and record friction:
 
 | Finding | Meaning |
 | --- | --- |
@@ -38,8 +42,9 @@ Pick 2–3 realistic tasks (derive them from the README, recent commits, or issu
 | drift | the doc states something the code contradicts |
 | broken | mechanical failure: link, missing file, dead command |
 | stale | `> TODO:` markers, old dates, "coming soon" pages |
+| misleading status | a ticket is shown as ready although a blocker or information gate remains, or complete although review/acceptance remains |
 
-Spot-checking cited facts is what makes this a review rather than a lint: take the 3–5 most load-bearing claims in the entry documents (commands, boundaries, "X owns Y") and verify each against source. A green script run with a misleading routing table is a failing review.
+Spot-checking cited facts is what makes this a review rather than a lint: take the 3–5 most load-bearing claims in the entry documents (commands, boundaries, "X owns Y") and verify each against source. For a ready ticket, also verify its required reading and acceptance path against the work-item spec. A green script run with misleading routing or an unstartable ready ticket is a failing review.
 
 ## 4. Guardrails and rules
 
@@ -55,7 +60,7 @@ Where a mechanical rule currently lives only in prose, that is a finding: propos
 
 ### Two loads
 
-Every line in an always-loaded file (a root `AGENTS.md`, a global instructions file) is paid for on every turn, whether or not it is used; material behind a pointer costs only the pointer's line. This is why entry-doc weight is a finding rather than a preference. The method behind it — the pointer, disclosure, and pruning rules — is in `skill-manager/references/writing-great-skills.md`; reach for it when a finding is about wording rather than structure.
+Every line in an always-loaded file (a root `AGENTS.md`, a global instructions file) is paid for on every turn, whether or not it is used; material behind a pointer costs only the pointer's line. This is why entry-doc weight is a finding rather than a preference. The method behind it — the pointer, disclosure, and pruning rules — is in the `skill-manager` skill's Writing Great Skills reference; reach for it when a finding is about wording rather than structure. Reference the skill by name so project installation can flatten skill directories.
 
 ## 5. Observed friction (optional)
 
@@ -71,4 +76,4 @@ Findings from the log use the same report format and the same classification as 
 
 Report findings impact-first — what hurts a fresh agent most — each with location, why it hurts, and the smallest fix. Write the report in the conversation's language. Structural gaps (no entry file at all, a root guide that should become a routing layer) point at ax-init rather than being hand-rolled here. Apply fixes only on the user's go-ahead.
 
-Done means: both scripts exit clean or every finding is explained in the report, every cold-start walk is written down with its friction list, the guardrail question is answered (is there a check, does it run), and the user has the prioritized fix list. The session log is a bonus, not a gate: no log available is not a reason to hold the review.
+Done means: the report records the exact include/exclude scope, both current-scope scripts exit clean or every finding is explained, every cold-start walk is written down with its friction list, the guardrail question is answered (is there a check, does it run), and the user has the prioritized fix list. The session log is a bonus, not a gate: no log available is not a reason to hold the review.

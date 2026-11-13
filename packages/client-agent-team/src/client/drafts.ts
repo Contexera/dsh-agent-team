@@ -1,4 +1,5 @@
-import type { AgentTeamProjectRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamPostMainMessageResult, AgentTeamProjectRef, AgentTeamReplyResult, AgentTeamStartThreadResult, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import { ComposerSends, type ProjectAddress, type ReplyAddress } from './composer-sends.ts'
 
 /** Drafts are local UI convenience state, never Host-authoritative, so localStorage is their home. */
 export type TeamDraftKey = `project:${AgentTeamProjectRef}` | `thread:${AgentTeamThreadRef}`
@@ -68,6 +69,8 @@ function persistStored(entries: ReadonlyMap<TeamDraftKey, StoredDraft>): void {
 
 /** One instance per Client context (created in `applyUi`), never a module singleton. */
 export class TeamDraftStore {
+  readonly replies = new ComposerSends<ReplyAddress, AgentTeamReplyResult>(this)
+  readonly projectSends = new ComposerSends<ProjectAddress, AgentTeamPostMainMessageResult | AgentTeamStartThreadResult>(this)
   private entries = readStored()
   private readonly snapshots = new Map<TeamDraftKey, TeamDraftState>()
   private readonly listeners = new Set<() => void>()
@@ -79,6 +82,8 @@ export class TeamDraftStore {
 
   dispose(): void {
     this.listeners.clear()
+    this.replies.dispose()
+    this.projectSends.dispose()
   }
 
   /** Stable per-key snapshot identity for useSyncExternalStore. */

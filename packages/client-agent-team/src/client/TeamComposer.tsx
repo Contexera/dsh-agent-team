@@ -5,6 +5,7 @@ import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/
 import { IconPaperclipOutlineMedium, IconSendOutlineRegular, Tooltip, useAnchoredMaxHeight, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
+import type { ReplyTarget } from './composer-sends.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { buildMentionGroups, enrollmentIds, mentionSurfaceOf, type MentionGroupKey } from './mention-presentation.ts'
 import { HUMAN_MEMBER_ID, mentionedMemberIds, plainGist } from './team-formatters.ts'
@@ -28,14 +29,6 @@ function findMention(draft: string, caret: number): MentionMatch | undefined {
   // as text the Host would keep prose.
   if (!startsMentionAt(draft, at)) return undefined
   return { start: at, end: caret, query: beforeCaret.slice(at + 1) }
-}
-
-/** The Human is excluded from delivery, so a quote naming them joins no notify row. */
-export interface ReplyTarget {
-  /** Absent when the parent did not resolve and cannot name an author. */
-  readonly memberId?: AgentTeamMemberId
-  readonly senderName: string
-  readonly excerpt: string
 }
 
 /** One object URL per draft file; revoked when the draft file is removed. */

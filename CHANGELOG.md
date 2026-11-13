@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+**Fixed**
+
+- A send attempt now survives navigation without taking a newer draft, mode, attachment set, or reply target with it; a Main quote whose target is outside the reopened page stays visible, can be cancelled, and retries with the same target.
+- A discussion's late reads and writes stay with the opening that issued them; confirming a follow cannot be undone by an older read, and the follower set refreshes for handover without waiting for a subscription.
+- Attachment retries and cleanup preserve the files and metadata owned by an accepted request instead of overwriting or deleting them.
+- An update check clears its previous result only after a confirmed no-update answer; a failed check keeps that result, and a Worker ending or webhook delivery is reported only after its durable write.
+- Queue admission, recovery notices, and notification overflow no longer discard work that can still be delivered on a later pass.
+- Sidebar drags preserve the latest order even when an earlier Host read or save returns late.
+- Tool availability guidance names exactly the visible tools the Member guard denies, with tool names escaped as data rather than prompt markup.
+
 ## [0.2.8] - 2026-11-12
 
 **Upgrade note**

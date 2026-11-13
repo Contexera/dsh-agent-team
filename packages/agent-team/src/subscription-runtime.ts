@@ -195,7 +195,7 @@ export class SubscriptionScheduler {
     return new Promise<T>((resolve, reject) => {
       this.enqueue({ subscription, policy, orderAt: this.ports.now(), task,
         settle: outcome => { if (outcome.ok) resolve(outcome.value as T); else reject(outcome.error) } })
-      void this.admit()
+      this.kickAdmission()
     })
   }
 
@@ -270,15 +270,19 @@ export class SubscriptionScheduler {
       // and blocking the whole queue behind one busy subscription would be worse.
       const index = this.queue.findIndex(entry => !this.running.has(entry.subscription.subscriptionRef))
       if (index === -1) return
-      const [next] = this.queue.splice(index, 1)
+      const next = this.queue[index]
       if (next === undefined) return
       // An entry waited with a snapshot, so the terminal barrier is read again
       // here from the ledger: one that was deleted or archived meanwhile must
       // not spend a slot, let alone run a script for a record that is gone.
+      // Keep the entry queued until every read and guard succeeds. A transient
+      // port failure then has an owner to retry instead of orphaning the
+      // caller's promise by removing its only queue entry first.
       const stored = this.ports.current(next.subscription.subscriptionRef)
       const live = stored ?? next.subscription
       if (next.task !== undefined) {
         const refusal = this.admissionRefusal(next.policy, stored, live)
+        this.queue.splice(index, 1)
         if (refusal !== undefined) {
           next.settle?.({ ok: false, error: refusal })
           continue
@@ -286,11 +290,13 @@ export class SubscriptionScheduler {
         this.track(this.launchAdmitted(next))
         continue
       }
-      // A subscription deleted or paused while it waited loses its turn: the
-      // terminal barrier is checked again at admission, not only at enqueue.
-      if (live.state !== 'active' || !this.ports.projectActive(live)) continue
-      if (!this.ports.timerReady(live.subscriptionRef)) continue
-      this.track(this.launchTimer(live, next.orderAt))
+      // A subscription deleted or paused while it waited loses its turn. Read
+      // every guard before changing the queue so a failed read can retry the
+      // same entry rather than silently consuming it.
+      const canRun = live.state === 'active' && this.ports.projectActive(live)
+        && this.ports.timerReady(live.subscriptionRef)
+      this.queue.splice(index, 1)
+      if (canRun) this.track(this.launchTimer(live, next.orderAt))
     }
   }
 
@@ -332,6 +338,17 @@ export class SubscriptionScheduler {
       .finally(() => { this.inFlight.delete(work) })
   }
 
+  /**
+   * Try to fill a freed slot now without letting an admission read failure become
+   * an unhandled rejection. The caller stays queued in memory for the next pass,
+   * and its promise settles when that pass completes the admission.
+   */
+  private kickAdmission(): void {
+    void this.admit().catch((error: unknown) => {
+      this.ports.log(`subscription admission failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
+
   private async launchAdmitted(entry: QueuedRun): Promise<void> {
     const ref = entry.subscription.subscriptionRef
     const task = entry.task!
@@ -344,7 +361,7 @@ export class SubscriptionScheduler {
       this.running.delete(ref)
       // A freed slot is admitted immediately: a queued create must not wait for
       // the next timer tick to start.
-      void this.admit()
+      this.kickAdmission()
     }
   }
 
@@ -374,7 +391,7 @@ export class SubscriptionScheduler {
       this.runningDue.delete(ref)
       // A freed slot is admitted immediately: a queued create must not wait for
       // the next timer tick to start.
-      void this.admit()
+      this.kickAdmission()
     }
     await this.publishPass().catch((error: unknown) => {
       this.ports.log(`subscription '${ref}' could not publish after its run: ${error instanceof Error ? error.message : String(error)}`)

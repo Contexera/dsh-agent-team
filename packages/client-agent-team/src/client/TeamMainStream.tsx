@@ -1,15 +1,15 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
-import type { RemoteFailure } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   AgentTeamClientMemberStatus, AgentTeamMainTimelineEntry, AgentTeamMemberId, AgentTeamMessageRef,
-  AgentTeamProjectRef, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef,
+  AgentTeamProjectRef, AgentTeamTaskRef, AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
-import { isUncertainRemoteFailure, mergeSettledComposerUploads, mintRequestId, reconcileComposerUploads, sameComposerFiles, uploadComposerFiles, type ComposerUpload } from './requests.ts'
+import type { ProjectReply, ProjectSendMode } from './composer-sends.ts'
+import { mergeSettledComposerUploads, reconcileComposerUploads, type ComposerUpload } from './requests.ts'
 import { mainEntryKey, useMainStream } from './main-stream.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { TeamThreadStartControls } from './TeamThreadStartControls.tsx'
@@ -26,34 +26,6 @@ import threadCss from './thread.module.css'
 import streamCss from './main-stream.module.css'
 
 type MessageProps = ComponentProps<typeof TeamMessage>
-type MainPostRequest = Parameters<TeamConversationProps['postMainMessage']>[0]
-type ThreadStartRequest = Parameters<TeamConversationProps['startThread']>[0]
-type MainSendMode = 'main' | 'discussion' | 'task'
-type MainSendRequest =
-  | { readonly kind: 'post'; readonly request: MainPostRequest }
-  | { readonly kind: 'thread'; readonly request: ThreadStartRequest }
-
-interface MainSendIntent {
-  readonly requestId: AgentTeamRequestId
-  readonly body: string
-  readonly mode: MainSendMode
-  readonly replyToMessageRef?: AgentTeamMessageRef | undefined
-  readonly uploads: readonly ComposerUpload[]
-  readonly request?: MainSendRequest | undefined
-}
-
-const matchesMainSend = (
-  intent: MainSendIntent,
-  body: string,
-  mode: MainSendMode,
-  replyToMessageRef: AgentTeamMessageRef | undefined,
-  files: readonly File[],
-): boolean => intent.body === body && intent.mode === mode
-  && intent.replyToMessageRef === replyToMessageRef && sameComposerFiles(intent.uploads, files)
-
-/** Generated Remote failures always carry a code; Main keeps its established explicit-failure handling for unclassified test doubles. */
-const isUncertainMainFailure = (error: RemoteFailure): boolean =>
-  (error as { readonly code?: string }).code !== undefined && isUncertainRemoteFailure(error)
 
 interface TeamMainStreamProps {
   readonly workspaceId: WorkspaceId
@@ -99,45 +71,77 @@ export function TeamMainStream({
   const [pendingFiles, setPendingFiles] = useState<readonly File[]>([])
   const [actionError, setActionError] = useState<string>()
   const [notice, setNotice] = useState<string>()
-  const [startingThread, setStartingThread] = useState(false)
-  const [asTask, setAsTask] = useState(false)
-  const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
+  const [mode, setMode] = useState<ProjectSendMode>('main')
+  const startingThread = mode !== 'main'
+  const asTask = mode === 'task'
+  const [reply, setReply] = useState<ProjectReply>()
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
   const [flashedMessage, setFlashedMessage] = useState<AgentTeamMessageRef>()
   const draftKey: TeamDraftKey = `project:${projectRef}`
   const sending = useRef(false)
-  const sendIntent = useRef<MainSendIntent>()
+  const activeOpen = useRef<symbol>()
   const uploads = useRef<readonly ComposerUpload[]>([])
   const lastEntry = entries.at(-1)
   const timeline = useTimelineScroll(`${entries.length}:${lastEntry === undefined ? '' : mainEntryKey(lastEntry)}`)
   const error = actionError ?? stream.error
 
+  const clearSelection = (): void => {
+    uploads.current = []
+    setPendingFiles([])
+    setReply(undefined)
+    setMode('main')
+  }
+  useLayoutEffect(() => {
+    const open = Symbol()
+    activeOpen.current = open
+    const previous = drafts.projectSends.restore(draftKey)
+    uploads.current = previous?.uploads ?? []
+    setPendingFiles(uploads.current.map(upload => upload.file))
+    setMode(previous?.address.mode ?? 'main')
+    setReply(previous?.address.replyTo)
+    void previous?.pending?.then(settled => {
+      if (activeOpen.current === open && settled.kind === 'answered' && settled.clearedDraft && drafts.getSnapshot(draftKey).draft === '') {
+        clearSelection()
+      }
+    })
+    return () => { activeOpen.current = undefined }
+  }, [drafts, draftKey])
+
   const handleByMember = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
   const human: TeamAvatarHuman | undefined = humanMemberId === undefined
     ? undefined
     : { memberId: humanMemberId, name: humanName, ...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl }) }
-  const nameOf = (memberId: AgentTeamMemberId): string => {
+  const nameOf = useCallback((memberId: AgentTeamMemberId): string => {
     if (memberId === humanMemberId) return humanName
     const handle = handleByMember.get(memberId)
     return handle === undefined ? memberId : `@${handle}`
-  }
+  }, [handleByMember, humanMemberId, humanName])
 
-  const clearSendState = useCallback((): void => {
-    sendIntent.current = undefined
-    setNotice(current => current === undefined ? current : undefined)
-    setActionError(current => current === undefined ? current : undefined)
+  const clearSendFeedback = useCallback((): void => {
+    setNotice(undefined)
+    setActionError(undefined)
   }, [])
   const changePendingFiles = useCallback((files: readonly File[]): void => {
     uploads.current = reconcileComposerUploads(files, uploads.current)
-    sendIntent.current = undefined
+    drafts.projectSends.changeSelection(draftKey)
     setPendingFiles(files)
-  }, [])
-  const handleReply = useCallback((messageRef: AgentTeamMessageRef): void => {
-    sendIntent.current = undefined
-    setReplyTarget(messageRef)
-    setStartingThread(false)
-    setAsTask(false)
-  }, [])
+  }, [drafts, draftKey])
+  const handleReply = useCallback((messageRef: AgentTeamMessageRef | undefined): void => {
+    drafts.projectSends.changeSelection(draftKey)
+    setMode('main')
+    if (messageRef === undefined) {
+      setReply(undefined)
+      return
+    }
+    const entry = entries.find((candidate): candidate is MessageEntry => candidate.kind === 'message' && candidate.message.messageRef === messageRef)
+    if (entry === undefined) return
+    setReply({
+      messageRef,
+      memberId: entry.message.sender,
+      senderName: nameOf(entry.message.sender),
+      excerpt: plainGist(entry.message.body),
+    })
+  }, [drafts, draftKey, entries, nameOf])
   const handleToggleCard = useCallback((messageRef: AgentTeamMessageRef): void => {
     setOpenCard(current => current === messageRef ? undefined : messageRef)
   }, [])
@@ -161,96 +165,70 @@ export function TeamMainStream({
   }, [flashedMessage])
   const handleOpenReplyTo = useCallback((messageRef: AgentTeamMessageRef): void => { jumpToMessage(messageRef) }, [jumpToMessage])
   const toggleThreadStart = (open: boolean): void => {
-    sendIntent.current = undefined
-    setStartingThread(open)
-    if (!open) setAsTask(false)
-    else setReplyTarget(undefined)
+    drafts.projectSends.changeSelection(draftKey)
+    setMode(open ? 'discussion' : 'main')
+    if (open) setReply(undefined)
   }
   const changeAsTask = (next: boolean): void => {
-    sendIntent.current = undefined
-    setAsTask(next)
+    drafts.projectSends.changeSelection(draftKey)
+    setMode(next ? 'task' : 'discussion')
   }
 
+  const replyTarget = reply?.messageRef
   const replyEntry = replyTarget === undefined
     ? undefined
     : entries.find((entry): entry is MessageEntry => entry.kind === 'message' && entry.message.messageRef === replyTarget)
+  const replyTo = replyEntry === undefined
+    ? reply
+    : {
+        messageRef: replyEntry.message.messageRef,
+        memberId: replyEntry.message.sender,
+        senderName: nameOf(replyEntry.message.sender),
+        excerpt: plainGist(replyEntry.message.body),
+      }
 
   const send = async (): Promise<void> => {
     // Read at send time: this page does not subscribe to the draft.
+    const open = activeOpen.current
     const { draft } = drafts.getSnapshot(draftKey)
-    if (sending.current || pending || draft.trim() === '') return
+    if (open === undefined || sending.current || draft.trim() === '') return
     sending.current = true
-    const body = draft.trim()
-    const mode: MainSendMode = startingThread ? (asTask ? 'task' : 'discussion') : 'main'
-    const replyToMessageRef = mode === 'main' ? replyTarget : undefined
-    const currentUploads = reconcileComposerUploads(pendingFiles, uploads.current)
-    uploads.current = currentUploads
-    let intent = sendIntent.current
-    if (intent === undefined || !matchesMainSend(intent, body, mode, replyToMessageRef, pendingFiles)) {
-      intent = { requestId: mintRequestId(), body, mode, ...(replyToMessageRef === undefined ? {} : { replyToMessageRef }), uploads: currentUploads }
-      sendIntent.current = intent
-    }
     setPending(true); setActionError(undefined); setNotice(undefined)
     try {
-      const upload = await uploadComposerFiles(putAttachment, workspaceId, intent.uploads)
-      const stillCurrent = sendIntent.current?.requestId === intent.requestId
-      uploads.current = stillCurrent ? upload.uploads : mergeSettledComposerUploads(uploads.current, upload.uploads)
-      if (!stillCurrent) return
-      intent = { ...intent, uploads: upload.uploads }
-      sendIntent.current = intent
-      if (!upload.ok) {
-        setActionError(upload.error)
-        return
-      }
-      let submission = intent.request
-      if (submission === undefined) {
-        const content = {
-          requestId: intent.requestId, workspaceId, projectRef, body: intent.body,
-          ...(intent.replyToMessageRef === undefined ? {} : { replyToMessageRef: intent.replyToMessageRef }),
-          ...(upload.attachmentIds.length === 0 ? {} : { attachments: upload.attachmentIds }),
-        }
-        submission = intent.mode === 'main'
-          ? { kind: 'post', request: content }
-          : { kind: 'thread', request: { ...content, kind: intent.mode } }
-        intent = { ...intent, request: submission }
-        sendIntent.current = intent
-      }
-      const result = submission.kind === 'thread'
-        ? await startThread(submission.request)
-        : await postMainMessage(submission.request)
-      const ownsIntent = sendIntent.current?.requestId === intent.requestId
+      uploads.current = reconcileComposerUploads(pendingFiles, uploads.current)
+      const settled = await drafts.projectSends.send(draftKey, {
+        workspaceId, projectRef, mode, body: draft.trim(),
+        ...(mode !== 'main' || reply === undefined ? {} : { replyTo: reply }),
+      }, uploads.current, {
+        putAttachment,
+        submit: ({ mode: kind, replyTo: replySnapshot, ...request }) => kind === 'main'
+          ? postMainMessage({ ...request, ...(replySnapshot === undefined ? {} : { replyToMessageRef: replySnapshot.messageRef }) })
+          : startThread({ ...request, kind }),
+      })
+      if (activeOpen.current !== open) return
+      uploads.current = mergeSettledComposerUploads(uploads.current, settled.uploads)
+      if (settled.kind === 'superseded') return
+      if (settled.kind === 'failed') { setActionError(settled.error); return }
+      const { result } = settled
       if (!result.ok) {
-        if (ownsIntent) {
-          if (!isUncertainMainFailure(result.error)) sendIntent.current = undefined
-          setActionError(result.error.message)
-        }
+        setActionError(result.error.message)
       } else if (result.value.kind === 'committed') {
-        if (ownsIntent) {
-          sendIntent.current = undefined
-          uploads.current = []
-          setStartingThread(false)
-          setAsTask(false)
-          setReplyTarget(undefined)
-          drafts.clear(draftKey)
-          setPendingFiles([])
+        if (settled.clearedDraft && drafts.getSnapshot(draftKey).draft === '') {
+          clearSelection()
           timeline.scrollToBottom()
-          if (intent.mode === 'task') onTaskStarted('task' in result.value ? result.value.task?.taskRef : undefined)
+          if (mode === 'task') onTaskStarted('task' in result.value ? result.value.task?.taskRef : undefined)
         }
         await stream.refresh()
       } else {
-        // The draft stays; a resend after reading is a new operation.
-        if (ownsIntent) {
-          sendIntent.current = undefined
-          setNotice(t('mainUnreadRequired'))
-        }
+        setNotice(t('mainUnreadRequired'))
         await stream.refresh()
-        await stream.markRead()
+        if (activeOpen.current === open) await stream.markRead()
       }
     } catch (cause) {
-      if (sendIntent.current?.requestId === intent.requestId) setActionError(cause instanceof Error ? cause.message : String(cause))
+      if (activeOpen.current === open) setActionError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       sending.current = false
-      setPending(false)
+      if (activeOpen.current === open) setPending(false)
     }
   }
 
@@ -410,13 +388,13 @@ export function TeamMainStream({
       placeholder={startingThread ? t(asTask ? 'startTaskPlaceholder' : 'startThreadPlaceholder') : t('messagePlaceholder')}
       {...(notice === undefined ? {} : { notice })}
       {...(error === undefined ? {} : { error })}
-      onEdit={clearSendState}
+      onEdit={clearSendFeedback}
       onSubmit={() => { void send() }}
       pendingFiles={pendingFiles}
       onFilesChange={changePendingFiles}
-      {...(replyEntry === undefined ? {} : {
-        replyTo: { memberId: replyEntry.message.sender, senderName: nameOf(replyEntry.message.sender), excerpt: plainGist(replyEntry.message.body) },
-        onCancelReply: () => { sendIntent.current = undefined; setReplyTarget(undefined) },
+      {...(replyTo === undefined ? {} : {
+        replyTo,
+        onCancelReply: () => { handleReply(undefined) },
       })}
       toolbarExtra={<TeamThreadStartControls open={startingThread} asTask={asTask} pending={pending} onOpenChange={toggleThreadStart} onAsTaskChange={changeAsTask} t={t} />}
       t={t}

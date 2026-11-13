@@ -16,7 +16,7 @@ The trigger takes `aria-current="page"` while the Workspace overview is the page
 
 Persistent Projects/Agents sections use native button headers with `aria-expanded`, default expanded. Collapse state is a per-browser preference, not a Team fact: both panels are keyed per workspace, and `sidebar-sections.ts` persists them to one localStorage key (`dsh.agent-team.sidebar-sections`) with a read-through cache and an in-memory fallback when storage is unavailable. The Workspace selector is a field rather than a section, so it keeps no preference of its own. Rows remain quiet: Projects keep `#`; Agent rows use avatars and presence.
 
-Row order is the Human's own drag, and it is not browser-only: the Team Host row's `sidebarOrder` setting keeps one order per Workspace and per list (Projects/Agents), this browser caches it so the first paint does not wait for a read, and an order arranged before the setting existed is carried up on the first read. A drag writes the Host once; newcomers still append and removed rows still drop out.
+Dragging updates the browser's order immediately. The Host stores one order per Workspace and list (Projects or Agents). The first read migrates an older local order only if no new drag has replaced it. Newcomers append and removed rows drop out.
 
 Only the active leaf row has `aria-current="page"`, and exactly one row carries it at a time: the open Project, the Workspace overview while it stands, or the one global face (Inbox, Task board) the reader is on. A global face never leaves the marker on the Workspace selector, because no Workspace overview stands underneath it.
 

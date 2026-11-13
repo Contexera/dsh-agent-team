@@ -68,8 +68,10 @@ UI work 的边界如下：
 
   Thread reads 使用 Host projections（`readThread`、`threadHistory`）和 Host mutations（replies、promotion、Task actions）。 当前 Thread UI 不提供 Attention controls 或 observations。这些 controls 的 Host Remote methods 留给后续自有 UI。 Browser 会持久化四样东西。Team navigation mode、Workspace selection、最近选中的 Project 或 Thread，还有 Inbox 页位置。回到 Team 时恢复位置。unread 或 Attention 不持久化。
 
+  Thread 页面或讨论侧栏每次打开都有独立的读取范围。切换时丢弃上一次打开尚未返回的历史、未读和关注者结果，即使之后回到同一个 Thread 也一样。
+
   Agent Inbox 仍由 Host 持有，并通过 `team_inbox` 提供。
-- Sidebar row order（Projects/Agents）是 Human presentation preference，存进 Team Host row 的 `sidebarOrder` 设置（与 Human profile 并列），并按浏览器缓存到 `localStorage`；加载时折叠到 Remote default order 上。保留的 refs 保持顺序，移除的 refs 丢弃，新的 refs 追加。它从不成为 ledger fact，也不是 Agent 可读的偏好。Whole-row native drag 复用 Harness list interaction model，是 Team-owned rows 唯一的重排控件；一次拖拽向 Host 写一次，丢了缓存的浏览器也能读回同一顺序。
+- 侧栏 Projects/Agents 排序存入 Team Host row 的 `sidebarOrder`，按浏览器缓存并与 Remote 默认顺序合并。每个列表按拖动顺序保存，已有保存请求时只保留最新待写顺序。浏览器丢失缓存后从 Host 读回。排序不进入 ledger，Agent 不读取这项偏好。
 - Team 设置的许可编辑器用 `toolCatalog` 发现名称，注入 `remote.settings` 读取已保存名单。它只写 `extraToolGrants`，并携带开始编辑时读到的 revision。它不使用共享配置表单的 mutation adapter，因为后者把所有失败压成一个 boolean；编辑器必须区分 `settings/conflict`、`settings/rejected` 与传输失败。已保存名单、Human 身份和目录各自拥有独立的加载与失败状态。冲突保留本地草稿、重读最新 committed 值，并要求显式核对后才能再次保存，绝不自动重放旧草稿。名单读取失败时不能变成 `[]`。
 - 嵌入的 Team Member Session 使用未修改的 shipped composer。Team 不注册任何成员会话的 composer 表面。它不接管 seat，没有 trigger sources，没有 dock 提示条。rc.1 把 trigger-menu overlay 移进了 `conversation.composer.bar` 的 children。接管者会一并继承渲染义务，并使 overlay 悬空。Team 自有的命令/成员引用入口相对 shipped 词汇表不再有不可替代的价值，因此一并移除。普通会话与 Member Session 共享同一 composer 与词汇表。
 - 有对应能力时复用 public Harness primitives 和 `--dsw-*` theme tokens。

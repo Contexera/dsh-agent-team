@@ -2,11 +2,11 @@
 
 Review a change through the work item that explains why it exists. Check the implementation against its spec, correctness, repository standards, and unnecessary complexity; leave a report that a later session can act on.
 
-This procedure changes nothing except its new review report and temporary verification files. Do not modify implementation code, design materials, ticket status, acceptance checkboxes, or the work-item continuation README.
+This procedure changes nothing except its new review report and temporary verification files. Keep temporary files in ignored local storage or a system temporary directory. Do not modify implementation code, design materials, ticket status, acceptance checkboxes, or the work-item continuation README.
 
-## 1. Pin the code range
+## 1. Pin the delivery range
 
-The review must name the exact code it examined. Use the work item's acceptance criteria as the spec and its design snapshot for intent and boundaries. If the selected scope has neither a ticket nor explicit acceptance criteria, report the spec gap instead of inventing requirements.
+Review a coherent delivered ticket set or work item by default; use an earlier single-ticket gate when the ticket explicitly requires one for risk or sequencing. The review must name the exact delivery it examined. Use the work item's acceptance criteria as the spec and its design snapshot for intent and boundaries. If the selected scope has neither a ticket nor explicit acceptance criteria, report the spec gap instead of inventing requirements.
 
 - With a base ref, verify the ref, use `git diff <ref>...HEAD`, and record `git log <ref>..HEAD --oneline`. Also inspect uncommitted changes and untracked files separately.
 - Without a base ref, review the working tree, including untracked files. If it is clean, ask which fixed point to compare against; do not silently choose a branch or commit.
@@ -19,7 +19,7 @@ Run these as independent read-only sub-agent reviews in parallel or as an explic
 
 ### Spec
 
-For every acceptance criterion, determine whether it is implemented, partial, missing, or not verifiable here. Report behavior outside the requested scope and requirements that appear implemented but behave incorrectly. Cite the ticket or design passage supporting each finding.
+For every acceptance criterion, determine whether it is implemented, partial, missing, or not verifiable here. Report behavior outside the requested scope and requirements that appear implemented but behave incorrectly. Check the worker's stated changes, observed evidence, unverified scope, and deviations against the actual delivery. Cite the ticket or design passage supporting each finding.
 
 ### Correctness
 
@@ -49,7 +49,7 @@ The script resolves a ticket to its work item and creates a new empty report und
 
 Fill that new file using [assets/review-template.md](../assets/review-template.md). Use the repository's documentation language. Write only this report; never rewrite an earlier review to make history look clean.
 
-The conclusion is one of:
+A pass means the reviewed delivery satisfies its implementation contract; it does not mark Human acceptance, ticket completion, or work-item closure. After the review, the lead returns any ticket with an unmet in-scope gate to `in-progress`; a defect in the delivered contract does not require a replacement ticket. Optional historical scope is verified only when explicitly requested and is not an implicit gap in a current-work review. The conclusion is one of:
 
 - **Pass** — no confirmed finding requires a change. This does not erase listed unverified scope or residual risk.
 - **Changes needed** — at least one confirmed finding requires a change.

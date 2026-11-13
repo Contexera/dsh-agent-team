@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.setConfig({ testTimeout: 30_000 })
-import { cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam, type MainStreamSeedEntry } from './harness.tsx'
 
@@ -207,9 +207,54 @@ describe('Team Main stream', () => {
     await waitFor(() => { expect(b.postMainMessage).toHaveBeenCalledTimes(1) })
     expect(b.postMainMessage).toHaveBeenCalledWith(expect.objectContaining({ body: '统一', replyToMessageRef: 'message:main-1', projectRef: 'project:engineering' }))
     expect(b.startThread).not.toHaveBeenCalled()
-    expect(b.startThread).not.toHaveBeenCalled()
     expect(await b.view.findByText('统一')).toBeTruthy()
     expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('')
+    await b.runtime.dispose()
+  })
+
+  it('restores a quote whose target fell outside the reopened page and retries it once', async () => {
+    const many: MainStreamSeedEntry[] = Array.from({ length: 25 }, (_, index) => ({
+      kind: 'message', sequence: index + 1, occurredAt: '2026-10-20T08:00:00.000Z', mentions: [],
+      message: { ...agentMessage, messageRef: `message:m${index + 1}`, body: `第 ${index + 1} 条`, sequence: index + 1 },
+    }))
+    const b = await openProject({ mainStreamEntries: many })
+    await b.view.findByText('第 25 条')
+    fireEvent.click(b.view.getByRole('button', { name: '加载更早消息' }))
+    await b.view.findByText('第 1 条')
+
+    const firstRow = b.view.getByText('第 1 条').closest('[data-message-ref]')
+    if (!(firstRow instanceof HTMLElement)) throw new Error('first message row missing')
+    fireEvent.click(within(firstRow).getByRole('button', { name: '引用这条消息' }))
+    typeDraft(b, '带着旧引用重试')
+    b.postMainMessage.mockRejectedValueOnce(new Error('socket closed'))
+    const send = b.view.getByRole('button', { name: '发送' })
+    fireEvent.click(send)
+    await waitFor(() => { expect(b.postMainMessage).toHaveBeenCalledTimes(1) })
+    expect(await b.view.findByText('socket closed')).toBeTruthy()
+
+    fireEvent.click(b.view.getByRole('tab', { name: '看板' }))
+    fireEvent.click(b.view.getByRole('tab', { name: '主对话' }))
+    await waitFor(() => { expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('带着旧引用重试') })
+    expect(b.view.container.querySelector('[data-message-ref="message:m1"]')).toBeNull()
+    const banner = b.view.container.querySelector('[data-reply-banner]')
+    expect(banner?.textContent).toContain('引用 @builder')
+    expect(banner?.textContent).toContain('第 1 条')
+    expect(within(banner! as HTMLElement).getByRole('button', { name: '取消引用' })).toBeTruthy()
+
+    fireEvent.click(b.view.getByRole('button', { name: '发送' }))
+    await waitFor(() => { expect(b.postMainMessage).toHaveBeenCalledTimes(2) })
+    const [first, retried] = b.postMainMessage.mock.calls.map(([request]) => request)
+    expect(retried).toEqual(first)
+    expect(retried?.replyToMessageRef).toBe('message:m1')
+    await waitFor(() => { expect(b.view.container.querySelector('[data-reply-banner]')).toBeNull() })
+
+    fireEvent.click(b.view.getByRole('button', { name: '加载更早消息' }))
+    await b.view.findByText('第 1 条')
+    const reopenedFirst = b.view.getByText('第 1 条').closest('[data-message-ref]')
+    if (!(reopenedFirst instanceof HTMLElement)) throw new Error('first message row missing after retry')
+    fireEvent.click(within(reopenedFirst).getByRole('button', { name: '引用这条消息' }))
+    fireEvent.click(b.view.getByRole('button', { name: '取消引用' }))
+    expect(b.view.container.querySelector('[data-reply-banner]')).toBeNull()
     await b.runtime.dispose()
   })
 
@@ -236,6 +281,32 @@ describe('Team Main stream', () => {
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
     await waitFor(() => { expect(b.startThread).toHaveBeenCalledWith(expect.objectContaining({ kind: 'task', body: '整理组件库' })) })
     await waitFor(() => { expect(b.view.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true') })
+    await b.runtime.dispose()
+  })
+
+  it('keeps the selected tab when a Task start settles after leaving the Main stream', async () => {
+    const b = await openProject()
+    const start = b.startThread.getMockImplementation()!
+    const committed = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    b.startThread.mockImplementationOnce(async request => {
+      const result = await start(request)
+      committed.resolve()
+      await release.promise
+      return result
+    })
+    fireEvent.click(b.view.getByRole('button', { name: '讨论/任务' }))
+    fireEvent.click(b.view.getByRole('checkbox', { name: '作为任务' }))
+    typeDraft(b, '晚到的 Task')
+    fireEvent.click(b.view.getByRole('button', { name: '发送' }))
+    await committed.promise
+    const subscriptions = b.view.getByRole('tab', { name: '订阅' })
+    fireEvent.click(subscriptions)
+
+    await act(async () => { release.resolve() })
+    expect(subscriptions.getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(b.view.getByRole('tab', { name: '主对话' }))
+    expect(await b.view.findByRole('button', { name: /^打开 Task #\d+：晚到的 Task/ })).toBeTruthy()
     await b.runtime.dispose()
   })
 

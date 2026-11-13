@@ -25,9 +25,6 @@ export const reconcileComposerUploads = (
   })
 }
 
-export const sameComposerFiles = (uploads: readonly ComposerUpload[], files: readonly File[]): boolean =>
-  uploads.length === files.length && uploads.every((upload, index) => upload.file === files[index])
-
 /** Carry upload results into a newer intent only when the same file and upload request still stand. */
 export const mergeSettledComposerUploads = (
   current: readonly ComposerUpload[],

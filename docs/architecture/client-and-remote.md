@@ -49,7 +49,9 @@ It also carries a second 「最近活跃」 slice that an Agent's Inbox never do
 
 Team navigation mode, Workspace selection, the last Project/Thread, and the Inbox page position are browser-persisted; unread and Attention are Host-owned.
 
-The Team sidebar keeps Projects/Agents ordering as a Host-row setting (`sidebarOrder`, beside the Human profile), merged over Remote defaults and cached per browser: one drag writes the Host once, and a browser that lost its cache reads the same order back.
+Thread reads belong to one opening of the page or discussion panel. Switching Threads discards late history, unread, and follower results from the earlier opening, including when the reader returns to the same Thread.
+
+The Team sidebar keeps Projects/Agents ordering as a Host-row setting (`sidebarOrder`, beside the Human profile), merged over Remote defaults and cached per browser. A browser saves one list in drag order, keeping the latest queued order while a save is in flight. A browser that lost its cache reads the Host order back.
 
 The Team settings grant editor consumes `toolCatalog` for discovery and injects `remote.settings` for the accepted list. It writes only `extraToolGrants` with the revision read at the start of the edit. It does not use the shared configuration form's mutation adapter because that adapter reduces every failure to a boolean; the editor must distinguish `settings/conflict`, `settings/rejected`, and transport failure.
 

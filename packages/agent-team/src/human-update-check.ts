@@ -1,5 +1,5 @@
 /**
- * Best-effort check for a newer published bundle release. The profile read path never waits on the network: it serves a cached in-memory snapshot and refreshes in the background. Every failure settles as "no update known". Nothing is persisted across Host restarts.
+ * Profile reads never wait on the registry, and a failed check leaves the last confirmed result in place.
  */
 
 /** Public npm metadata document for the bundle's `latest` dist-tag. */
@@ -66,7 +66,8 @@ export async function fetchLatestVersion(
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) })
     if (!response.ok) return undefined
     const payload = (await response.json()) as { readonly version?: unknown }
-    return typeof payload?.version === 'string' ? payload.version : undefined
+    const version = payload?.version
+    return typeof version === 'string' && parseVersionCore(version) !== undefined ? version : undefined
   } catch {
     return undefined
   }
@@ -107,7 +108,9 @@ export function createHumanUpdateChecker(options: HumanUpdateCheckerOptions): {
     if (!isUpdateCheckEnabled(env)) return
     const settled = fetchLatestVersion(fetchImpl, HUMAN_UPDATE_CHECK_REGISTRY_URL, timeoutMs).then(version => {
       checkedAt = now()
-      if (version !== undefined && isNewerVersion(currentVersion, version)) latestVersion = version
+      if (version !== undefined) {
+        latestVersion = isNewerVersion(currentVersion, version) ? version : undefined
+      }
     })
     const tracked = settled.finally(() => {
       if (inFlight === tracked) inFlight = undefined

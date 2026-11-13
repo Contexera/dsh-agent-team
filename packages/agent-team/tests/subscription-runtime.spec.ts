@@ -52,6 +52,8 @@ interface Harness {
     saveThrows: boolean
     pendingThrows: boolean
     publishThrows: boolean
+    currentThrows: boolean
+    timerReadyThrows: boolean
     archived: boolean
     holdSaves: Promise<void> | undefined
     holdPublish: Promise<void> | undefined
@@ -81,7 +83,8 @@ function harness(options: {
   const logs: string[] = []
   const saves: string[] = []
   const stored = new Map<string, AgentTeamSubscription>(options.subscriptions.map(entry => [entry.subscriptionRef, entry]))
-  const control = { saveThrows: false, pendingThrows: false, publishThrows: false, archived: false,
+  const control = { saveThrows: false, pendingThrows: false, publishThrows: false, currentThrows: false,
+    timerReadyThrows: false, archived: false,
     holdSaves: undefined as Promise<void> | undefined, holdPublish: undefined as Promise<void> | undefined, stored }
   let release: Array<() => void> = []
   let scheduled: (() => void) | undefined
@@ -92,7 +95,10 @@ function harness(options: {
     cancel: () => {},
     log: message => { logs.push(message) },
     subscriptions: () => options.subscriptions,
-    current: ref => stored.get(ref),
+    current: ref => {
+      if (control.currentThrows) throw new Error('injected ledger read failure')
+      return stored.get(ref)
+    },
     projectActive: () => !control.archived,
     workspacePath: () => '/tmp/workspace',
     pending: ref => {
@@ -119,7 +125,10 @@ function harness(options: {
     },
     pauseForFailures: async entry => { paused.push(entry.subscriptionRef) },
     checkpoint: ref => checkpoints.get(ref) ?? { subscriptionRef: ref, ...INITIAL_CHECKPOINT },
-    timerReady: () => true,
+    timerReady: () => {
+      if (control.timerReadyThrows) throw new Error('injected timer guard failure')
+      return true
+    },
     save: async (ref, change) => {
       if (control.holdSaves !== undefined) await control.holdSaves
       if (control.saveThrows) throw new Error('injected checkpoint failure')
@@ -538,6 +547,34 @@ describe('one admission for every entry point', () => {
     const paused = { ...subscription('paused'), state: 'paused' as const }
     const test = harness({ subscriptions: [paused] })
     await expect(test.scheduler.runTrial(paused, async () => 'ok')).resolves.toBe('ok')
+  })
+
+  it('logs a rejected immediate admission and lets the next pass settle its queued trial', async () => {
+    const entry = subscription('s0')
+    const test = harness({ subscriptions: [entry] })
+    test.control.currentThrows = true
+    const trial = test.scheduler.runTrial(entry, async () => 'ok')
+    await new Promise<void>(resolve => { setTimeout(resolve, 0) })
+    expect(test.logs.join('\n')).toMatch(/subscription admission failed: injected ledger read failure/)
+
+    test.control.currentThrows = false
+    await test.scheduler.runTick()
+    await expect(trial).resolves.toBe('ok')
+  })
+
+  it('keeps a timer queued when a guard throws before admission', async () => {
+    const entry = subscription('s0')
+    const later = subscription('later')
+    const test = harness({ subscriptions: [entry] })
+    await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 0 })
+    test.control.timerReadyThrows = true
+    await expect(test.scheduler.runTick()).rejects.toThrow(/injected timer guard failure/)
+    expect(test.runs).toEqual([])
+
+    test.control.timerReadyThrows = false
+    // A new request can fill a slot before the next timer scan; the old run must already be in the queue.
+    await expect(test.scheduler.runTrial(later, async () => 'ok')).resolves.toBe('ok')
+    expect(test.runs).toEqual([entry.subscriptionRef])
   })
 
   it('keeps a due run ahead of a request that arrived later, even while its own run is in flight', async () => {

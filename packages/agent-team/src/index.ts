@@ -33,7 +33,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { DomainFacility, type Domain, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { ATTACHMENT_MAX_BYTES, attachmentPayloadPath, attachmentsRoot, copyPathAttachment, pathAttachmentId, readAttachment, removeAttachment, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, writeRequestScopedAttachment } from './attachments.ts'
+import { ATTACHMENT_MAX_BYTES, attachmentPayloadPath, attachmentsRoot, copyPathAttachment, pathAttachmentId, readAttachment, removeAttachment, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, withMessageAttachmentEntries, writeRequestScopedAttachment } from './attachments.ts'
 import { reportEnvironment } from './environment-check.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile, type LegacyHumanProfileFields } from './human-profile.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowWrite } from './host-row-settings.ts'
@@ -509,8 +509,8 @@ export default class AgentTeam extends TypertRemoteService {
   private subscriptionAdmissionsTable?: KvTable<string, SubscriptionAdmissionRecord>
   /** The pass that runs due webhook deliveries; it stops with the Host. */
   private admissionPumpTimer?: ReturnType<typeof setInterval> | undefined
-  /** One pass at a time: a second one would read the same rows and start them twice. */
-  private admissionPumpRunning = false
+  /** The running pass Host shutdown waits for; a second request joins it. */
+  private admissionPumpTail?: Promise<void> | undefined
   private subscriptionScheduler?: SubscriptionScheduler
   private readonly subscriptionCheckpoints = new Map<AgentTeamSubscriptionRef, SubscriptionCheckpoint>()
   /**
@@ -1204,6 +1204,11 @@ export default class AgentTeam extends TypertRemoteService {
       // wait for the ones already executing: a late result must never reach a
       // store this shutdown is about to close.
       await this.subscriptionScheduler?.stop()
+      // `accepting` already blocks a new pass. Stop the interval after the
+      // scheduler has settled queued callers, then drain writes already in one.
+      if (this.admissionPumpTimer !== undefined) clearInterval(this.admissionPumpTimer)
+      this.admissionPumpTimer = undefined
+      await this.admissionPumpTail
       // Host shutdown must not depend on a turn that may never end: release
       // every wait (in-chain idle waits through the gate, boundary waits
       // through the runtime), so the chains below can drain to zero first.
@@ -1215,8 +1220,6 @@ export default class AgentTeam extends TypertRemoteService {
       await this.workerRegistry.dispose()
       if (this.attachmentGcTimer !== undefined) clearInterval(this.attachmentGcTimer)
       this.attachmentGcTimer = undefined
-      if (this.admissionPumpTimer !== undefined) clearInterval(this.admissionPumpTimer)
-      this.admissionPumpTimer = undefined
       if (this.memberReminderTimer !== undefined) clearTimeout(this.memberReminderTimer)
       this.memberReminderTimer = undefined
       this.memberReminderWakes.clear()
@@ -1769,7 +1772,16 @@ export default class AgentTeam extends TypertRemoteService {
    */
   private startAttachmentGc(ledger: AgentTeamLedger): void {
     const sweep = async (): Promise<void> => {
-      await sweepAttachmentCache(attachmentsRoot(), ledger.referencedAttachmentIds(), Date.now())
+      let references: { readonly sequence: number; readonly ids: ReadonlySet<AgentTeamAttachmentId> } | undefined
+      try {
+        await sweepAttachmentCache(attachmentsRoot(), id => {
+          const sequence = ledger.projectionSequence()
+          if (references?.sequence !== sequence) references = { sequence, ids: ledger.referencedAttachmentIds() }
+          return references.ids.has(id)
+        }, Date.now())
+      } catch (error) {
+        this.ctx.logger.warn(`agent-team: attachment cache sweep failed: ${String(error)}`)
+      }
     }
     void sweep()
     this.attachmentGcTimer = setInterval(() => { void sweep() }, 24 * 60 * 60 * 1000)
@@ -1801,6 +1813,10 @@ export default class AgentTeam extends TypertRemoteService {
     const notice = notifications.length === 0 && mainNotifications.length === 0 && memberReminders.length === 0 ? undefined
       : this.notificationText(handle.agent, notifications, member.memberId, mainNotifications, undefined, text, memberReminders,
         material.workers)
+    // A queued recovery instruction can answer only the snapshot rendered into it;
+    // recomputing coverage when a later fact arrives would claim text it never held.
+    const recoveryPlan = notice === undefined ? undefined : this.inboxDeliveryPlan({ notifications, main: mainNotifications,
+      memberReminders, deliveredReminders: notice.deliveredReminders, undelivered: notice.undelivered })
     const body = notice === undefined ? text : `${text}\n\n${notice.text}`
     const hint = createUserMessage({
       content: [{ type: 'text', text: body }],
@@ -1817,6 +1833,10 @@ export default class AgentTeam extends TypertRemoteService {
       this.memberReminderWakes.set(hint.id, { memberId: member.memberId, reminders: notice.deliveredReminders })
     }
     handle.agent.steer(hint)
+    if (notice !== undefined && recoveryPlan !== undefined) {
+      this.inboxNoticeDeliveries.set(member.memberId, { covered: recoveryPlan.delivered, undelivered: notice.undelivered,
+        attempt: this.inboxNoticeDeliveries.get(member.memberId)?.attempt ?? 0 })
+    }
     this.ctx.logger.info(`agent-team: ${trigger} continuation steered for ${this.memberScope(member.memberId, handle.agent.session.id)}${notifications.length === 0 && mainNotifications.length === 0 && memberReminders.length === 0 ? '' : ` carrying ${this.notificationIdentity(notifications, mainNotifications, memberReminders)}`}: it is queued for the Member's next step, not yet read by the model`)
   }
 
@@ -2283,9 +2303,7 @@ export default class AgentTeam extends TypertRemoteService {
     const refs = sanitizeSidebarOrderRefs(request.refs)
     const settings = this.ctx.get('settings')
     if (settings === undefined) throw new Error('the settings service is unavailable')
-    // One gesture, one write: the path addresses this list inside the row's
-    // `sidebarOrder.lists` dict, so neither the other Workspaces' lists nor the
-    // sibling Host-row groups are restated.
+    // Address only this list so other Workspaces' lists and sibling settings survive the write.
     await settings.mutate(HUMAN_PROFILE_SETTINGS_NAMESPACE, [{ op: 'set', path: ['sidebarOrder', 'lists', request.key], value: refs }])
     return Object.freeze({ lists: readableSidebarOrders({ ...this.config.sidebarOrder.get().lists, [request.key]: refs }) })
   }
@@ -2919,27 +2937,29 @@ export default class AgentTeam extends TypertRemoteService {
    * Shared append envelope for both message commits: resolve uploads, append through the chosen ledger method, emit the committed receipt,
    * and on failure drop the cache entries this attempt prepared. Keeping the order here once stops send and reply from drifting.
    */
-  private async commitMessageAs<
-    Req extends { readonly requestId: AgentTeamRequestId; readonly body: string; readonly attachmentPaths?: readonly string[] | undefined },
+  private commitMessageAs<
+    Req extends { readonly requestId: AgentTeamRequestId; readonly body: string; readonly attachments?: readonly AgentTeamAttachmentId[] | undefined; readonly attachmentPaths?: readonly string[] | undefined },
     Res extends { readonly kind: string; readonly receipt?: AgentTeamOperationReceipt },
   >(
     actor: AgentTeamHumanActor | AgentTeamMemberActor,
     request: Req,
     commit: (authorized: Req & { readonly actor: AgentTeamHumanActor | AgentTeamMemberActor; readonly body: string; readonly resolvedAttachments?: readonly AgentTeamMessageAttachment[] }) => Promise<{ readonly committed: boolean; readonly value: Res }>,
   ): Promise<Res> {
-    try {
-      const metadata = await this.resolveMessageAttachments(request)
-      const result = await commit({
-        ...request, body: this.appendAttachmentLines(request.body, metadata),
-        ...(metadata.length === 0 ? {} : { resolvedAttachments: metadata }),
-        actor,
-      })
-      this.emitCommittedOutcome(result)
-      return result.value
-    } catch (error) {
-      await this.dropUnreferencedPrepared(request, error)
-      throw error
-    }
+    return withMessageAttachmentEntries(attachmentsRoot(), request, async () => {
+      try {
+        const metadata = await this.resolveMessageAttachments(request)
+        const result = await commit({
+          ...request, body: this.appendAttachmentLines(request.body, metadata),
+          ...(metadata.length === 0 ? {} : { resolvedAttachments: metadata }),
+          actor,
+        })
+        this.emitCommittedOutcome(result)
+        return result.value
+      } catch (error) {
+        await this.dropUnreferencedPrepared(request, error)
+        throw error
+      }
+    })
   }
 
   private startThreadAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamStartThreadRequest): Promise<AgentTeamStartThreadResult> {
@@ -3083,7 +3103,7 @@ export default class AgentTeam extends TypertRemoteService {
     agentCtx.systemPrompt.section({
       name: TOOL_AVAILABILITY_SECTION,
       order: agentCtx.systemPrompt.getSectionOrder('TEAM_POLICY'),
-      text: () => toolAvailabilityGuidance(this.memberRuntime.visibleUngrantedToolNames(agentCtx, member.memberId)),
+      text: () => toolAvailabilityGuidance(this.memberRuntime.visibleDeniedToolNames(agentCtx, member.memberId)),
     })
   }
 
@@ -4208,9 +4228,8 @@ export default class AgentTeam extends TypertRemoteService {
   /**
    * The Human's stop of one execution from a Member's edit surface. It runs the
    * same Host stop transaction as the Member's tool, but answers with structured
-   * facts instead of a refusal the Client would have to read a sentence out of:
-   * an ending the engine decided, a cleanup still in flight, or a handle this
-   * Host no longer holds. Authorization and an unknown run stay refusals.
+   * facts: a recorded ending, a stop still pending, or an ending that cannot
+   * be confirmed. Authorization and an unknown run stay refusals.
    */
   @Remote('stopWorker')
   async stopWorkerForClient(request: AgentTeamWorkerStopRequest): Promise<AgentTeamWorkerStopResult> {
@@ -4231,13 +4250,11 @@ export default class AgentTeam extends TypertRemoteService {
     }): AgentTeamWorkerStopResult => Object.freeze({ kind: 'ended', workerRef: request.workerRef, state,
       ...(settled?.settledAt === undefined ? {} : { settledAt: settled.settledAt }),
       ...(settled?.diagnostic === undefined ? {} : { diagnostic: settled.diagnostic }) })
+    if (execution.state !== 'running') return ended(execution.state, execution)
     if (this.workerRegistry.get(request.workerRef) === undefined) {
-      if (execution.state === 'running') {
-        return Object.freeze({ kind: 'unconfirmed', workerRef: request.workerRef,
-          message: `Worker '${request.workerRef}' was started by a Host that no longer holds its handle, `
-            + 'so it cannot be confirmed or stopped; its result stays unconfirmed.' })
-      }
-      return ended(execution.state, execution)
+      return Object.freeze({ kind: 'unconfirmed', workerRef: request.workerRef,
+        message: `Worker '${request.workerRef}' was started by a Host that no longer holds its handle, `
+          + 'so it cannot be confirmed or stopped; its result stays unconfirmed.' })
     }
     try {
       const stopped = await this.workerRegistry.stop(request.workerRef, agentTeamHumanActor())
@@ -4248,9 +4265,7 @@ export default class AgentTeam extends TypertRemoteService {
       return ended(stopped.state, stopped)
     } catch (error: unknown) {
       if (!(error instanceof WorkerRefusal)) throw error
-      // Both of these are endings the Host already recorded, so the receipt
-      // carries the state and the sentence rather than a bare refusal.
-      if (error.code === 'worker_stop_unconfirmed' || error.code === 'worker_already_ended') {
+      if (error.code === 'worker_stop_unconfirmed') {
         const recorded = this.requireLedger().workerExecution(request.workerRef)
         if (recorded !== undefined && recorded.state !== 'running') {
           return ended(recorded.state, recorded)
@@ -4258,6 +4273,9 @@ export default class AgentTeam extends TypertRemoteService {
       }
       if (error.code === 'worker_stop_pending') {
         return Object.freeze({ kind: 'pending', workerRef: request.workerRef, message: error.message })
+      }
+      if (error.code === 'worker_stop_unrecorded') {
+        return Object.freeze({ kind: 'unconfirmed', workerRef: request.workerRef, message: error.message })
       }
       throw error
     }
@@ -4509,40 +4527,47 @@ export default class AgentTeam extends TypertRemoteService {
    * timer-only one stops serving its address, but a request already answered 202 is
    * still owed its run under the definition it arrived with.
    */
-  private async pumpWebhookAdmissions(): Promise<void> {
-    if (this.admissionPumpRunning || this.ledger === undefined) return
-    this.admissionPumpRunning = true
-    try {
-      for (const subscription of this.ledger.subscriptions()) {
-        if (subscription.state === 'deleted') continue
-        try {
-          const { countedAdmissionRef } = this.checkpointFor(subscription.subscriptionRef)
-          if (this.resumeNeedsCheckpoint(subscription.subscriptionRef) || (countedAdmissionRef !== undefined &&
-            this.subscriptionAdmissionsTable?.get(admissionKey(subscription.subscriptionRef, countedAdmissionRef)) === undefined)) {
-            await this.serializeSubscriptionWrite(subscription.subscriptionRef,
-              () => this.repairWebhookCheckpointLocked(subscription.subscriptionRef))
-          }
-          const records = this.admissionRecordsOf(subscription.subscriptionRef)
-          const exhausted = records.find(record => record.state === 'exhausted')
-          if (exhausted !== undefined) {
-            // Pausing stops scripts, not settlement of an attempt that already ended.
-            // Settlement comes first and one row at a time, so a queue holding several
-            // spent deliveries settles one per pass and runs nothing until the last is
-            // gone: the 5s pass interval makes that wait, not a lock or a retry ladder.
-            await this.serializeSubscriptionWrite(subscription.subscriptionRef,
-              () => this.finishExhaustedWebhookAdmissionLocked(exhausted))
-          } else if (subscription.state === 'active') {
-            // One delivery per subscription per pass, oldest arrival first, so a busy
-            // subscription cannot hold the pass away from the others.
-            const due = dueAdmissions(records, Date.now())[0]
-            if (due !== undefined) await this.runWebhookAdmission(subscription, due)
-          }
-        } catch (error) {
-          this.ctx.logger.warn(`agent-team: the webhook queue pass for '${subscription.subscriptionRef}' stopped: ${error instanceof Error ? error.message : String(error)}`)
+  private pumpWebhookAdmissions(): Promise<void> {
+    if (!this.accepting || this.ledger === undefined) return Promise.resolve()
+    if (this.admissionPumpTail !== undefined) return this.admissionPumpTail
+    const pass = this.runWebhookAdmissionPass().catch((error: unknown) => {
+      this.ctx.logger.warn(`agent-team: the webhook queue pass stopped: ${error instanceof Error ? error.message : String(error)}`)
+    })
+    this.admissionPumpTail = pass
+    void pass.then(() => {
+      if (this.admissionPumpTail === pass) this.admissionPumpTail = undefined
+    })
+    return pass
+  }
+
+  private async runWebhookAdmissionPass(): Promise<void> {
+    for (const subscription of this.requireLedger().subscriptions()) {
+      if (subscription.state === 'deleted') continue
+      try {
+        const { countedAdmissionRef } = this.checkpointFor(subscription.subscriptionRef)
+        if (this.resumeNeedsCheckpoint(subscription.subscriptionRef) || (countedAdmissionRef !== undefined &&
+          this.subscriptionAdmissionsTable?.get(admissionKey(subscription.subscriptionRef, countedAdmissionRef)) === undefined)) {
+          await this.serializeSubscriptionWrite(subscription.subscriptionRef,
+            () => this.repairWebhookCheckpointLocked(subscription.subscriptionRef))
         }
+        const records = this.admissionRecordsOf(subscription.subscriptionRef)
+        const exhausted = records.find(record => record.state === 'exhausted')
+        if (exhausted !== undefined) {
+          // Pausing stops scripts, not settlement of an attempt that already ended.
+          // Settlement comes first and one row at a time, so a queue holding several
+          // spent deliveries settles one per pass and runs nothing until the last is
+          // gone: the 5s pass interval makes that wait, not a lock or a retry ladder.
+          await this.serializeSubscriptionWrite(subscription.subscriptionRef,
+            () => this.finishExhaustedWebhookAdmissionLocked(exhausted))
+        } else if (subscription.state === 'active') {
+          // One delivery per subscription per pass, oldest arrival first, so a busy
+          // subscription cannot hold the pass away from the others.
+          const due = dueAdmissions(records, Date.now())[0]
+          if (due !== undefined) await this.runWebhookAdmission(subscription, due)
+        }
+      } catch (error) {
+        this.ctx.logger.warn(`agent-team: the webhook queue pass for '${subscription.subscriptionRef}' stopped: ${error instanceof Error ? error.message : String(error)}`)
       }
-    } finally {
-      this.admissionPumpRunning = false
     }
   }
 
@@ -5797,15 +5822,15 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * The delivery plan for one redelivery. `deliveredReminders` narrows the
-   * coverage to the occurrences a notice actually rendered: the plan decides
-   * that an attempt is owed, the notice earns what it covers.
+   * The previous coverage decides if another attempt is owed. A recovery notice
+   * supplies its own omitted Threads because its coverage belongs to that snapshot.
    */
   private inboxDeliveryPlan(input: {
     readonly notifications: ReturnType<AgentTeamLedger['notificationFacts']>
     readonly main: ReturnType<AgentTeamLedger['mainNotificationFacts']>
     readonly memberReminders?: readonly AgentTeamUnreadMemberReminder[] | undefined
     readonly deliveredReminders?: readonly InboxMemberReminder[] | undefined
+    readonly undelivered?: readonly AgentTeamThreadRef[] | undefined
     readonly previous?: InboxNoticeDelivery | undefined
   }): InboxDeliveryPlan {
     return planInboxDelivery({
@@ -5813,7 +5838,7 @@ export default class AgentTeam extends TypertRemoteService {
       main: input.main.map(({ project, entries }) => ({ projectRef: project.projectRef, entries })),
       reminders: (input.memberReminders ?? []).map(entry => ({ reminderRef: entry.reminder.reminderRef, sequence: entry.sequence })),
       deliveredReminders: input.deliveredReminders,
-      covered: input.previous?.covered, undelivered: input.previous?.undelivered })
+      covered: input.previous?.covered, undelivered: input.undelivered ?? input.previous?.undelivered })
   }
 
   private notificationIdentity(notifications: ReturnType<AgentTeamLedger['notificationFacts']>,
@@ -5907,17 +5932,10 @@ export default class AgentTeam extends TypertRemoteService {
       return
     }
     const pending = [...agent.inbox.nextStep, ...agent.inbox.nextTurn]
-    // steerResume already combines the recovery instruction and these durable
-    // facts. Its synchronous running transition must not replace that notice.
+    // A recovery instruction owns the durable snapshot it rendered. Leave it in
+    // place while later facts stay uncovered for the next rederivation.
     if (pending.some(message => this.isRecoveryNotice(message))) {
-      // Only the occurrences that recovery instruction actually rendered are
-      // answered by it. One raised after it was queued was never in its text, so
-      // it stays out of `covered` and stays owed: the claim of that instruction
-      // rederives the Inbox and delivers it.
-      const recovery = pending.find(message => this.isRecoveryNotice(message))!
-      this.coverInboxFacts(member.memberId, this.inboxDeliveryPlan({ notifications, main: mainNotifications,
-        deliveredReminders: this.memberReminderWakes.get(recovery.id)?.reminders ?? [], previous }))
-      this.ctx.logger.info(`agent-team: Team Inbox notice carried by the queued recovery instruction for ${scope} cause ${causeText} (${facts}): queued with that recovery instruction, not yet read by the model`)
+      this.ctx.logger.info(`agent-team: Team Inbox notice not queued for ${scope} cause ${causeText} (current unread: ${facts}): the queued recovery instruction is left in place, and newly arriving facts remain owed for the next rederivation`)
       return
     }
     const existingInboxHint = pending.find(message => this.isInboxNotice(message))
@@ -6079,12 +6097,6 @@ export default class AgentTeam extends TypertRemoteService {
   /** Forget a Member's notice delivery entirely: a new generation starts over. */
   private clearMemberNotificationState(memberId: AgentTeamMemberId): void {
     this.inboxNoticeDeliveries.delete(memberId)
-  }
-
-  /** Record that the queued notice now answers these facts, keeping the attempt count. */
-  private coverInboxFacts(memberId: AgentTeamMemberId, plan: InboxDeliveryPlan): void {
-    this.inboxNoticeDeliveries.set(memberId, { covered: plan.delivered, attempt: this.inboxNoticeDeliveries.get(memberId)?.attempt ?? 0,
-      undelivered: this.inboxNoticeDeliveries.get(memberId)?.undelivered ?? [] })
   }
 
   /** Spend one delivery attempt and mark the facts it covers; the count rises first so a failed wake still reports the attempt it spent. */

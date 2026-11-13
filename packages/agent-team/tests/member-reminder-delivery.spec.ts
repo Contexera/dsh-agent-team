@@ -3,9 +3,10 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { addLedgerMember, alpha, harness, requestId } from './helpers/host-harness.ts'
-import type { AgentTeamMemberId, AgentTeamReminderRef } from '../src/types.ts'
+import type { AgentTeamMemberId, AgentTeamReminderRef, AgentTeamThreadRef } from '../src/types.ts'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
 import { TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from '../src/context-projection.ts'
+import { agentTeamHumanActor } from '../src/ledger.ts'
 
 /**
  * Delivery-level tests for Member reminders: what a queued notice actually
@@ -83,7 +84,8 @@ async function boot(tag: string) {
   const added = await addLedgerMember(test.ctx.agentTeam['ledger']!, project.project.projectRef, `member:${tag}`, 'Reminded', tag)
   const seam = wakeSeam(test.ctx as never)
   test.ctx.agentTeam['handles'].set(added.member.memberId, { agent: seam.agent, dispose: async () => {} })
-  return { ctx: test.ctx, ledger: test.ctx.agentTeam['ledger']!, memberId: added.member.memberId, actor: added.actor, seam }
+  return { ctx: test.ctx, ledger: test.ctx.agentTeam['ledger']!, memberId: added.member.memberId, actor: added.actor,
+    projectRef: project.project.projectRef, seam }
 }
 
 /** A one-shot reminder that is already due, so the next evaluation raises it. */
@@ -214,6 +216,52 @@ describe('a notice consumes only the occurrences it rendered', () => {
 })
 
 describe('a recovery instruction renders and consumes reminders', () => {
+  it('leaves a Thread fact that arrives after the instruction uncovered until the recovery turn', async () => {
+    const { ctx, ledger, memberId, projectRef, seam } = await boot('recovery-thread-later')
+    ctx.agentTeam['steerResume'](ledger.getMember(memberId)!, 'Resume the interrupted work.', 'operator recovery')
+    const recovery = seam.calls.filter(message => isNotice(message, TEAM_RECOVERY_NOTICE_SUMMARY)).at(-1)!
+
+    const started = await ledger.startThread({ requestId: requestId('recovery-late-thread'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      projectRef, kind: 'discussion', body: '@recovery-thread-later please review this' })
+    expect(started.value.kind).toBe('committed')
+    ctx.agentTeam['notifyMember'](seam.agent, { kind: 'running' })
+    expect(seam.calls.filter(message => isNotice(message, TEAM_INBOX_NOTICE_SUMMARY))).toHaveLength(0)
+
+    await seam.claim(recovery)
+    ctx.agentTeam['notifyMember'](seam.agent, { kind: 'running' })
+    const notice = seam.calls.filter(message => isNotice(message, TEAM_INBOX_NOTICE_SUMMARY)).at(-1)!
+    expect(textOf(notice)).toContain(started.value.thread.threadRef)
+  })
+
+  it('keeps work omitted from a recovery notice available for a later delivery', async () => {
+    const { ctx, ledger, memberId, actor, projectRef, seam } = await boot('recovery-overflow')
+    const threads: Array<{ ref: AgentTeamThreadRef; text: string }> = []
+    for (let index = 0; index < 9; index += 1) {
+      const text = `review item ${index}`
+      const started = await ledger.startThread({ requestId: requestId(`recovery-overflow-${index}`), actor: agentTeamHumanActor(), workspaceId: alpha,
+        projectRef, kind: 'discussion', body: `@recovery-overflow ${text}` })
+      expect(started.value.kind).toBe('committed')
+      threads.push({ ref: started.value.thread.threadRef, text })
+    }
+
+    const notify = () => ctx.agentTeam['notifyMember'](seam.agent, { kind: 'running' })
+    const notices = () => seam.calls.filter(message => isNotice(message, TEAM_INBOX_NOTICE_SUMMARY))
+    ctx.agentTeam['steerResume'](ledger.getMember(memberId)!, 'Resume the interrupted work.', 'operator recovery')
+    const initial = seam.calls.at(-1)!
+    const initialText = textOf(initial)
+    const omitted = threads.find(thread => !initialText.includes(thread.text))!
+    const rendered = threads.find(thread => initialText.includes(thread.text))!
+
+    await seam.claim(initial)
+    notify()
+    expect(notices()).toHaveLength(0)
+
+    await ledger.readThread({ requestId: requestId('recovery-overflow-read'), actor, workspaceId: alpha, threadRef: rendered.ref })
+    notify()
+    expect(notices()).toHaveLength(1)
+    expect(textOf(notices().at(-1)!)).toContain(omitted.text)
+  })
+
   it('carries a reminder that is the only unread fact, and consumes it when it enters a turn', async () => {
     const { ctx, ledger, memberId, actor, seam } = await boot('recovery-only')
     const reminderRef = await dueOnce(ledger, actor, memberId, 'recovery-only', 'check the CI run before reviewing')

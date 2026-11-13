@@ -1,11 +1,10 @@
 import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, relative, sep } from 'node:path'
-import { randomUUID } from 'node:crypto'
 import { stableRequestUuid } from './request-scoped-id.ts'
 import { recoveryFor } from './recovery-hints.ts'
 import { truncateToCharacters } from './text.ts'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import type { AgentTeamAttachmentId } from './types.ts'
+import type { AgentTeamAttachmentId, AgentTeamMessageAttachment, AgentTeamPutAttachmentResult } from './types.ts'
 
 /** Composer attachment cache: `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/` holds the payload (sanitized name) plus a `meta.json` sidecar. Bytes are temporary; the ledger keeps the metadata. */
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
@@ -27,10 +26,6 @@ export function attachmentsRoot(): string {
 export function attachmentPayloadPath(attachmentId: AgentTeamAttachmentId, name: string): string {
   if (name.length === 0 || sanitizeFileName(name) !== name) throw new Error(`attachment '${attachmentId}' has an invalid stored file name`)
   return join(attachmentDir(attachmentsRoot(), attachmentId), name)
-}
-
-export function newAttachmentId(): AgentTeamAttachmentId {
-  return randomUUID() as AgentTeamAttachmentId
 }
 
 /** Request-stable cache id (see `stableRequestUuid`); `scope` separates path copies from the request's own upload. */
@@ -95,35 +90,25 @@ export async function validatePathAttachment(raw: string): Promise<void> {
 }
 
 /** Copy a validated file under the request-stable id. A committed Message may reference that id, so an existing entry is never overwritten: identical content replays, anything else is refused as a request-id collision. */
-export async function copyPathAttachment(root: string, raw: string, attachmentId: AgentTeamAttachmentId, requestId: string): Promise<{ attachmentId: AgentTeamAttachmentId; name: string; byteSize: number; mediaType: string }> {
-  const bytes = await readFile(raw)
-  const name = sanitizeFileName(basename(raw))
-  const mediaType = mediaTypeForPath(raw)
-  const existing = await readAttachmentForWrite(root, attachmentId)
-  if (existing !== undefined) {
-    collideUnlessSamePayload(existing, name, mediaType, bytes, requestId)
-    return { attachmentId, name: existing.name, byteSize: existing.byteSize, mediaType: existing.mediaType }
-  }
-  const stored = await writeAttachment(root, attachmentId, basename(raw), mediaType, bytes)
-  return { attachmentId: stored.attachmentId, name: stored.name, byteSize: stored.byteSize, mediaType: stored.mediaType }
+export async function copyPathAttachment(root: string, raw: string, attachmentId: AgentTeamAttachmentId, requestId: string): Promise<AgentTeamMessageAttachment> {
+  const { name, byteSize, mediaType } = await writeAttachmentOnce(root, attachmentId, requestId, basename(raw), mediaTypeForPath(raw), await readFile(raw))
+  return { attachmentId, name, byteSize, mediaType }
 }
 
 /** Store an upload under its request-derived id: identical payload replays, a different payload for the same request is refused. */
-export async function writeRequestScopedAttachment(root: string, requestId: string, rawName: string, mediaType: string, bytes: Buffer): Promise<{ attachmentId: AgentTeamAttachmentId; path: string; name: string; byteSize: number; mediaType: string }> {
+export function writeRequestScopedAttachment(root: string, requestId: string, rawName: string, mediaType: string, bytes: Buffer): Promise<AgentTeamPutAttachmentResult> {
   const attachmentId = requestScopedAttachmentId(requestId)
-  const existing = await readAttachmentForWrite(root, attachmentId)
-  if (existing !== undefined) {
-    collideUnlessSamePayload(existing, sanitizeFileName(rawName), mediaType, bytes, requestId)
-    return { attachmentId, path: join(attachmentDir(root, attachmentId), existing.name), name: existing.name, byteSize: existing.byteSize, mediaType: existing.mediaType }
-  }
-  return writeAttachment(root, attachmentId, rawName, mediaType, bytes)
+  return withCacheEntries(root, [attachmentId], () => writeAttachmentOnce(root, attachmentId, requestId, rawName, mediaType, bytes))
 }
 
-/** Refuse a reused request id whose stored payload no longer matches this attempt. */
-function collideUnlessSamePayload(existing: StoredAttachment, name: string, mediaType: string, bytes: Buffer, requestId: string): void {
-  if (existing.name !== name || existing.mediaType !== mediaType || !existing.bytes.equals(bytes)) {
+async function writeAttachmentOnce(root: string, attachmentId: AgentTeamAttachmentId, requestId: string, rawName: string, mediaType: string, bytes: Buffer): Promise<AgentTeamPutAttachmentResult> {
+  const existing = await readAttachmentForWrite(root, attachmentId)
+  if (existing === undefined) return writeAttachment(root, attachmentId, rawName, mediaType, bytes)
+  const { name, byteSize } = existing
+  if (name !== sanitizeFileName(rawName) || existing.mediaType !== mediaType || !existing.bytes.equals(bytes)) {
     throw new Error(`agent-team request id '${requestId}' was reused with a different operation or payload`)
   }
+  return { attachmentId, path: join(attachmentDir(root, attachmentId), name), name, byteSize, mediaType }
 }
 
 interface AttachmentMeta {
@@ -137,6 +122,31 @@ function attachmentDir(root: string, attachmentId: AgentTeamAttachmentId): strin
     throw new AttachmentCacheInvalidError(`attachment '${attachmentId}' is not a UUID cache id`)
   }
   return join(root, attachmentId)
+}
+
+const cacheEntryTails = new Map<string, Promise<void>>()
+
+/** Reserve every entry before waiting so a sweep or retry cannot observe a half-written entry or clear another attempt's copies. */
+async function withCacheEntries<T>(root: string, ids: readonly AgentTeamAttachmentId[], use: () => Promise<T>): Promise<T> {
+  if (ids.length === 0) return use()
+  const paths = ids.map(id => attachmentDir(root, id))
+  const result = Promise.all(paths.map(path => cacheEntryTails.get(path))).then(use)
+  const tail = result.then(() => {}, () => {})
+  for (const path of paths) cacheEntryTails.set(path, tail)
+  try {
+    return await result
+  } finally {
+    for (const path of paths) if (cacheEntryTails.get(path) === tail) cacheEntryTails.delete(path)
+  }
+}
+
+/** Keep a message's attachments available through the ledger commit and failure cleanup. */
+export function withMessageAttachmentEntries<T>(root: string, request: {
+  readonly requestId: string
+  readonly attachments?: readonly AgentTeamAttachmentId[] | undefined
+  readonly attachmentPaths?: readonly string[] | undefined
+}, use: () => Promise<T>): Promise<T> {
+  return withCacheEntries(root, [...request.attachments ?? [], ...(request.attachmentPaths ?? []).map((_, index) => pathAttachmentId(request.requestId, index))], use)
 }
 
 function errorCode(error: unknown): unknown {
@@ -219,7 +229,7 @@ function parseAttachmentMeta(raw: Buffer): AttachmentMeta {
 }
 
 /** Write one upload as an immutable payload plus its metadata sidecar. */
-export async function writeAttachment(root: string, attachmentId: AgentTeamAttachmentId, rawName: string, mediaType: string, bytes: Buffer): Promise<{ attachmentId: AgentTeamAttachmentId; path: string; name: string; byteSize: number; mediaType: string }> {
+export async function writeAttachment(root: string, attachmentId: AgentTeamAttachmentId, rawName: string, mediaType: string, bytes: Buffer): Promise<AgentTeamPutAttachmentResult> {
   const name = sanitizeFileName(rawName)
   const storedMediaType = sanitizeMediaType(mediaType)
   const dir = attachmentDir(root, attachmentId)
@@ -283,39 +293,23 @@ async function readAttachmentForWrite(root: string, attachmentId: AgentTeamAttac
   }
 }
 
-export interface CacheEntryScan {
-  readonly attachmentId: AgentTeamAttachmentId
-  readonly uploadedAt: number
-}
-
-/** Read one cache entry's sidecar; `undefined` for a half-written or foreign directory the sweep skips. */
-async function readCacheEntry(root: string, id: string): Promise<CacheEntryScan | undefined> {
+async function ageOfCacheEntry(root: string, id: AgentTeamAttachmentId, now: number): Promise<{ readonly age: number; readonly incomplete: boolean } | undefined> {
   try {
-    const dir = await resolveCacheDirectory(root, id as AgentTeamAttachmentId)
+    const dir = await resolveCacheDirectory(root, id)
     if (dir === undefined) return undefined
-    const metaPath = await cacheFile(dir, ATTACHMENT_SIDECAR_NAME)
-    if (metaPath === undefined) return undefined
-    const meta = parseAttachmentMeta(await readFile(metaPath))
-    return { attachmentId: id as AgentTeamAttachmentId, uploadedAt: Date.parse(meta.uploadedAt) }
+    try {
+      const metaPath = await cacheFile(dir, ATTACHMENT_SIDECAR_NAME)
+      if (metaPath !== undefined) {
+        const meta = parseAttachmentMeta(await readFile(metaPath))
+        return { age: now - Date.parse(meta.uploadedAt), incomplete: false }
+      }
+    } catch (error) {
+      if (!(error instanceof AttachmentCacheInvalidError) || !error.repairable) throw error
+    }
+    return { age: now - (await stat(dir)).mtimeMs, incomplete: true }
   } catch {
     return undefined
   }
-}
-
-/** List every cache entry with its upload instant for the GC sweep. */
-export async function scanAttachmentCache(root: string): Promise<readonly CacheEntryScan[]> {
-  let ids: string[]
-  try {
-    ids = await readdir(root)
-  } catch {
-    return []
-  }
-  const entries: CacheEntryScan[] = []
-  for (const id of ids) {
-    const entry = await readCacheEntry(root, id)
-    if (entry !== undefined) entries.push(entry)
-  }
-  return entries
 }
 
 /** Remove one cache entry's bytes; missing entries already satisfy the sweep. */
@@ -323,19 +317,24 @@ export async function removeAttachment(root: string, attachmentId: AgentTeamAtta
   await rm(attachmentDir(root, attachmentId), { recursive: true, force: true })
 }
 
-/** Ids of uploads a Message still references — everything else is an orphan. */
-export type ReferencedAttachments = ReadonlySet<AgentTeamAttachmentId>
-
 /** One GC pass: drops orphans past the orphan TTL and referenced uploads past the consumption TTL; returns removed ids. */
-export async function sweepAttachmentCache(root: string, referenced: ReferencedAttachments, now: number): Promise<readonly AgentTeamAttachmentId[]> {
+export async function sweepAttachmentCache(root: string, isReferenced: (id: AgentTeamAttachmentId) => boolean, now: number): Promise<readonly AgentTeamAttachmentId[]> {
   const removed: AgentTeamAttachmentId[] = []
-  for (const entry of await scanAttachmentCache(root)) {
-    const age = now - entry.uploadedAt
-    const ttl = referenced.has(entry.attachmentId) ? ATTACHMENT_REFERENCED_TTL_MS : ATTACHMENT_ORPHAN_TTL_MS
-    if (age > ttl) {
-      await removeAttachment(root, entry.attachmentId)
-      removed.push(entry.attachmentId)
-    }
+  const names = await readdir(root).catch(error => {
+    if (errorCode(error) === 'ENOENT') return []
+    throw error
+  })
+  for (const name of names) {
+    if (!ATTACHMENT_ID_PATTERN.test(name)) continue
+    const id = name as AgentTeamAttachmentId
+    await withCacheEntries(root, [id], async () => {
+      const entry = await ageOfCacheEntry(root, id, now)
+      if (entry === undefined || entry.age <= ATTACHMENT_ORPHAN_TTL_MS) return
+      // A send may have committed while the sweep waited to reserve this entry.
+      if ((entry.incomplete || entry.age <= ATTACHMENT_REFERENCED_TTL_MS) && isReferenced(id)) return
+      await removeAttachment(root, id)
+      removed.push(id)
+    })
   }
   return removed
 }

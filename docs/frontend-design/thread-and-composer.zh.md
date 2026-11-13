@@ -35,9 +35,11 @@
 - 点名读者这件事只在行上表达一次，不在 chip 上：所有 mention chip 同样式，卡片上给出「提到了你」提示。正文写的是读者改名前的 handle 时，行与提示一样成立 —— 判定跟着身份走，不跟着拼写走。
 - Project composer 发到 Main stream，工具区是 `讨论/任务` 开关。它是 pressed button；打开后出现原生复选框 `作为任务`。关闭时发 `postMainMessage`（引用 Main 消息时带 `replyToMessageRef`）；打开时发 `startThread`，勾选则建 Task，否则建讨论；Task 提交后页面切到 `看板` 页签并把焦点放上去。引用会关掉开关，打开开关会丢掉引用，因为新 Thread 没有引用目标。Host 返回 `main_unread_required` 时保留草稿，刷新并读取主对话，用状态行提示 Human 先看一下再发；重发是新的 operation。版本 2 的回复不再要求确认；Main stream 与 Thread composer 都不提供 `@all`，也不把它展开为 recipients，手打的 `@all` 就是普通文本。
 - 文件有三条进草稿的路，落进同一份列表：选择器、携带文件的粘贴、拖到 composer 上。携带文件的拖动先用 composer 自己的状态行说明松开会发生什么；落下时取消浏览器默认，所以在 composer 旁边松手也不会把页面导航到那个文件。
-- 草稿缓存：草稿内容不在页面局部，按 `project:<projectRef>` / `thread:<threadRef>` 键存放。每 Client 上下文存一份 `TeamDraftStore`（`drafts.ts`）。它用单一 localStorage 键 `dsh.agent-team.drafts.v1`，写穿持久化，按 savedAt 淘汰最旧 ~50 条，每条只存正文与保存时刻。切换视图或刷新后草稿原样恢复。发送提交成功即清除对应键，失败保留。旧版草稿里残留的 `recipientIds` 字段在读取时直接忽略，不做迁移。Project 的「作为任务」意图不进入草稿缓存：默认关闭，成功提交后再次复位关闭。
-- 发送结果不确定时，打开的编辑器用原请求重试未改动的提交，保留 Thread 原修订和附件顺序，复用每个文件的上传请求与已取得的附件引用。Host 明确拒绝未读或旧修订时，仍先读取，再由用户重发。重新打开编辑器只恢复草稿。
-- taskless Thread 的「转为任务」是 Human-only durable mutation，不做乐观 overlay。成功后重新读取 Thread 与补充 Project/Member 投影；unread/stale fence 时保留 Host 返回错误并重新读取相关事实。
+- 草稿按 `project:<projectRef>` / `thread:<threadRef>` 存放，每 Client 一份 `TeamDraftStore`。localStorage 最多保留 50 条正文与保存时刻；旧版的 `recipientIds` 字段会被忽略。确认成功只清除提交时那份未改动的草稿；失败保留。新草稿的「作为任务」默认关闭，提交成功后复位，不写入 localStorage。
+- 在同一 Client 内重新打开输入框，可以继续未改动的 Project 发送或 Thread 回复。发送还在途时，再点发送只等待同一次结果；结果不确定时，重试复用原请求以及适用的模式、修订、引用和附件。改动正文或选择会开始一次新提交。Host 明确拒绝未读或旧修订时，仍先读取，再由用户重发。刷新浏览器只恢复正文草稿。
+- 在同一侧栏切换讨论时，在途写入只占用原 Thread，回执不改变另一条讨论。只有发起 Task 的那次打开仍然有效时，成功回执才打开看板。
+- 只有 Human 可以把讨论转为 Task，结果以 Host 确认的提交为准。仍在原讨论时，侧栏转入新 Task，完整 Thread 页重新读取。已切到别处时，Task 仍归原 Project，页面不自动跳转。未读或旧修订的拒绝只刷新仍打开的原讨论。
+- 关注按钮由当前 Thread 的 Host 读取或确认写入决定。上一次打开的错误或读取结果不会改变当前按钮。
 
 ## 引用一条 Message
 Thread 里的一条 Message，可以通过「选中它所回答的那条 Message」来回答。这个入口无条件存在：回复动作、已存的引用行与 composer 引用条是同一个功能，Host 一律完整提供，没有哪个表面需要先问一句「引用是否可用」。

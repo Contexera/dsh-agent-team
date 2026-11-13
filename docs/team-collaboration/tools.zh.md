@@ -219,7 +219,9 @@ create 与 update 的请求身份包含脚本来源、触发选项与 create bas
 
 回执给出 Team 执行编号（`worker:` 引用）、Project、引擎、工作目录与启动时刻，绑定执行还给出 Thread，并说明执行在后台继续、结果会出现在哪里。
 
-同一个工具也能停止一次执行：只给 `stop: <worker:…>`，不给 `task`；同时再给 task、Thread、Task、Project、引擎、工作目录或 request id 会被拒绝，而不是部分生效。停止按打开这次执行的身份授权：发起成员本人，或 Human 通过「编辑 Agent」弹窗。其他成员即使现在是该 Project 的 owner 也会被拒绝；开关与当前 owner 身份只约束启动，不在停止时重新校验。已经结束的执行回答它真实的终态，而不是被停第二次。本 Host 不再持有句柄的执行（重启后的特征）按 `worker_unconfirmed` 拒绝：既不能确认也不能停止，且绝不重跑。停止要等引擎确认清理，而这个等待有界限。超过界限后执行仍是 `running`（Thread 读取与 Human 的列表在停止进行中读作 `stopping`），这次调用按 `worker_stop_pending` 拒绝，已经发起的清理继续在后台进行。引擎报告清理失败时，执行记为 `failed` 并附「清理未确认」的可行动说明，绝不会报成 `stopped`。
+同一个工具也能停止一次执行：只给 `stop: <worker:…>`。停止只授权发起 Member，Human 可通过「编辑 Agent」弹窗停止。当前 owner 或设置开关只约束启动。已结束的执行不会再次被停止；没有活跃句柄且没有终态记录时，拒绝码为 `worker_unconfirmed`。
+
+停止等待清理和终态落账，重试也遵守相同的等待上限。超时返回 `worker_stop_pending`，说明还在等待什么，已开始的操作继续执行。清理失败会记录 `failed` 并附诊断；终态写入失败会返回 `worker_stop_unrecorded`，重试也不会把内存里的终态当成确认结果。工具结果保留这些 Worker 拒绝码。
 
 两次执行彼此独立：停一条不影响另一条的进程、Thread 事实与 Inbox 通知。
 

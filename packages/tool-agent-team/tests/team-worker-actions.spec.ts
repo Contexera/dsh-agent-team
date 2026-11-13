@@ -242,16 +242,18 @@ describe('team_worker steers a live run with one instruction', () => {
     expect(receipt).not.toContain('may never have been read')
   })
 
-  it('returns the new worker ref when an ended execution is continued', async () => {
+  it('returns the new Worker ref and the state observed when the continuation receipt was written', async () => {
     const host = fakeHost()
     const nextWorker = 'worker:00000000-0000-4000-8000-000000000099'
     host.workerSteerForAgent.mockResolvedValueOnce(steered({ workerRef: nextWorker, state: 'started',
-      continuedFrom: WORKER, turnId: undefined }))
+      continuedFrom: WORKER, runState: 'failed', turnId: undefined }))
     const result = await call(tool, { steer: WORKER, instruction: 'continue the work' }, host)
     expect(result).toMatchObject({ mode: 'steer', workerRef: nextWorker, state: 'started', continuedFrom: WORKER })
     const receipt = renderText(tool, { steer: WORKER, instruction: 'continue the work' }, result)
     expect(receipt).toContain(`New Worker: ${nextWorker}`)
     expect(receipt).toContain('started a new execution in the same native session')
+    expect(receipt).toContain('When this receipt was written, that run was failed.')
+    expect(receipt).not.toContain('ready for later steer, stop, and inspect calls')
     expect(receipt).toContain('submitted, not confirmed read')
   })
 

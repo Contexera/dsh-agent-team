@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { SubagentActivation, SubagentRuntime, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
@@ -186,10 +187,9 @@ export interface WorkerRegistryDeps {
   readonly warn: (message: string) => void
 }
 
-export class WorkerRefusal extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message)
-    this.name = 'WorkerRefusal'
+export class WorkerRefusal extends HarnessError {
+  constructor(code: string, message: string) {
+    super(message, code)
   }
 }
 
@@ -555,26 +555,31 @@ export class WorkerRegistry {
     const entry = this.runs.get(workerRef)
     if (entry === undefined) throw new WorkerRefusal('worker_unknown', `No Worker '${workerRef}' was started by this Host.`)
     this.assertMayStop(entry, stopper)
-    if (entry.run.state !== 'running') return entry.run
-    const transaction = entry.stop ??= this.stopRun(entry)
+    const alreadyEnding = entry.run.state !== 'running'
+    const transaction = alreadyEnding ? Promise.resolve() : (entry.stop ??= this.stopRun(entry))
     // The transaction outlives this wait: a caller that gave up must not cancel
     // the cleanup the engine is already carrying out.
-    const done = await within(transaction.then(() => true), WORKER_STOP_DEADLINE_MS)
-    if (done === undefined || entry.run.state === 'running') {
-      throw new WorkerRefusal('worker_stop_pending', `Worker '${workerRef}' was asked to stop, but the engine has not confirmed `
-        + `its cleanup within ${WORKER_STOP_DEADLINE_MS}ms; it is still stopping. Check the engine's process before starting another task.`)
+    const ended = await within(transaction.then(async () => {
+      if (entry.run.state === 'running') return undefined
+      try {
+        await entry.record
+      } catch {
+        throw new WorkerRefusal('worker_stop_unrecorded', `Worker '${workerRef}' ended, but its ending could not be recorded; `
+          + 'the result remains unconfirmed.')
+      }
+      if (!alreadyEnding && entry.cleanupUnconfirmed) {
+        throw new WorkerRefusal('worker_stop_unconfirmed', `Worker '${workerRef}' was asked to stop, but the engine did not `
+          + 'confirm its cleanup, so it cannot be confirmed stopped. Check the engine\'s process before starting another task.')
+      }
+      return entry.run
+    }), WORKER_STOP_DEADLINE_MS)
+    if (ended !== undefined) return ended
+    if (entry.run.state !== 'running') {
+      throw new WorkerRefusal('worker_stop_pending', `Worker '${workerRef}' ended as ${entry.run.state}, but its ending `
+        + `has not reached storage within ${WORKER_STOP_DEADLINE_MS}ms; it remains unconfirmed there.`)
     }
-    if (entry.cleanupUnconfirmed) {
-      throw new WorkerRefusal('worker_stop_unconfirmed', `Worker '${workerRef}' was asked to stop, but the engine did not `
-        + 'confirm its cleanup, so it cannot be confirmed stopped. Check the engine\'s process before starting another task.')
-    }
-    try {
-      await entry.record
-    } catch {
-      throw new WorkerRefusal('worker_stop_unrecorded', `Worker '${workerRef}' stopped, but its ending could not be recorded; `
-        + 'the Thread reports the result as unconfirmed.')
-    }
-    return entry.run
+    throw new WorkerRefusal('worker_stop_pending', `Worker '${workerRef}' was asked to stop, but the engine has not confirmed `
+      + `its cleanup within ${WORKER_STOP_DEADLINE_MS}ms; it is still stopping. Check the engine's process before starting another task.`)
   }
 
   /**

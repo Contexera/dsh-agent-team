@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
-import { scopeOf, scopeParentOf } from '@deepseek-ai/dsh-scope'
+import { scopeOf, scopeParentOf, type ScopeKey } from '@deepseek-ai/dsh-scope'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type {
@@ -104,7 +104,7 @@ export class MemberRuntime {
   /** Per-Member tool restriction disposers: activation registers, disposal releases, edits swap at a turn boundary. */
   private readonly memberRestrictions = new Map<AgentTeamMemberId, () => void>()
   /** The allow-list enforced behind `memberRestrictions`: the rollback source when a swap fails, so a failed apply never leaves the Member less restricted. */
-  private readonly enforcedToolAllow = new Map<AgentTeamMemberId, readonly string[]>()
+  private readonly enforcedToolAllow = new Map<AgentTeamMemberId, ReadonlySet<string>>()
   private readonly memberToolBindings = new Map<AgentTeamMemberId, ReadonlyMap<string, ToolDefinition>>()
   /** The exact extra names frozen for this Member's current turn; a settings edit waits for the next `turn/start`. */
   private readonly turnToolGrants = new Map<AgentTeamMemberId, ReadonlySet<string>>()
@@ -130,16 +130,18 @@ export class MemberRuntime {
     return names
   }
 
-  /** Foreign own-scope registrations remain visible despite restriction; name exactly those still denied by the Member guard. */
-  visibleUngrantedToolNames(agentCtx: Context, memberId: AgentTeamMemberId): readonly string[] {
+  /** Own-scope registrations can stay visible despite the execution guard. */
+  visibleDeniedToolNames(agentCtx: Context, memberId: AgentTeamMemberId): readonly string[] {
     const scope = scopeOf(agentCtx)
     if (scope === undefined) throw new Error('Member tool guidance requires a mounted Agent scope')
-    const allowed = this.enforcedToolAllow.get(memberId) ?? []
-    const allowedSet = new Set(allowed)
     const grants = this.turnToolGrants.get(memberId)
+    const bindings = this.memberToolBindings.get(memberId)
     return this.deps.ctx.tools.schemas(scope)
       .map(tool => tool.name)
-      .filter(name => !allowedSet.has(name) && !grants?.has(name))
+      .filter(name => {
+        if (grants?.has(name) && !isReservedToolName(name)) return false
+        return bindings === undefined || this.baselineToolDenial(memberId, scope, name, bindings) !== undefined
+      })
       .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
   }
 
@@ -347,8 +349,7 @@ export class MemberRuntime {
     const dispose = agentCtx.tools.restrict({ allow })
     const previous = this.memberRestrictions.get(memberId)
     this.memberRestrictions.set(memberId, dispose)
-    const frozen = Object.freeze([...allow])
-    this.enforcedToolAllow.set(memberId, frozen)
+    this.enforcedToolAllow.set(memberId, new Set(allow))
     this.turnToolGrants.set(memberId, new Set(grants))
     this.turnToolPolicyFailures.delete(memberId)
     previous?.()
@@ -364,7 +365,8 @@ export class MemberRuntime {
 
   private mountMemberToolBindings(agentCtx: Context, memberId: AgentTeamMemberId): ReadonlyMap<string, ToolDefinition> {
     const scope = scopeOf(agentCtx)
-    const presetScope = scope === undefined ? undefined : scopeParentOf(scope)
+    if (scope === undefined) throw new Error('Member tool policy requires a mounted Agent scope')
+    const presetScope = scopeParentOf(scope)
     if (presetScope === undefined) throw new Error('Member tool policy requires a mounted preset scope')
     const tools = this.deps.ctx.tools
     const bindings = new Map<string, ToolDefinition>()
@@ -380,7 +382,6 @@ export class MemberRuntime {
     agentCtx.tools.guard(execution => {
       if (execution.agent !== scope) return undefined
       const name = execution.name
-      const binding = bindings.get(name)
       const grants = this.turnToolGrants.get(memberId)
       if (grants?.has(name) && !isReservedToolName(name)) {
         // Grant execution follows exactly the registration DSH admitted for this
@@ -390,18 +391,27 @@ export class MemberRuntime {
           ? `Tool "${name}" is not admitted for this Team Member`
           : undefined
       }
-      if (!this.enforcedToolAllow.get(memberId)?.includes(name)) {
-        return `Tool "${execution.name}" is not declared for this Team Member`
-      }
-      if (binding === undefined || tools.get(name, scope) !== binding) {
-        return `Team Member tool replaced: ${name}`
-      }
+      const denial = this.baselineToolDenial(memberId, scope, name, bindings)
+      if (denial === 'not-declared') return `Tool "${execution.name}" is not declared for this Team Member`
+      if (denial === 'replaced') return `Team Member tool replaced: ${name}`
       return undefined
     })
     // `restrict` above is what shapes this Member's declared tools: 0.2.2 builds
     // a request's declarations from the step's admitted set, which reads the
     // scope's restricted view, so an assembly-time filter no longer exists.
     return bindings
+  }
+
+  /** The execution guard for a name outside the current turn's grant set; prompt guidance reports the same denial. */
+  private baselineToolDenial(
+    memberId: AgentTeamMemberId,
+    scope: ScopeKey,
+    name: string,
+    bindings: ReadonlyMap<string, ToolDefinition>,
+  ): 'not-declared' | 'replaced' | undefined {
+    if (!this.enforcedToolAllow.get(memberId)?.has(name)) return 'not-declared'
+    const binding = bindings.get(name)
+    return binding === undefined || this.deps.ctx.tools.get(name, scope) !== binding ? 'replaced' : undefined
   }
 
   /** Whether the live surface is known to reflect exactly this capability intent; an absent record never matches. */

@@ -82,8 +82,6 @@ const factOccurredAt = (fact: AgentTeamThreadFact): string | undefined => fact.k
 /** A taskless Thread's whole face beside its feed. Claims and acceptance stay on the Thread page. */
 export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, anchor, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, projectOwnerIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, subscribeChanges, selectThread, selectDiscussion, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
-  // The promote button's own label: a reply send also raises the shared `pending` gate, and must not retitle it.
-  const [mutating, setMutating] = useState<'promote' | undefined>()
   const rootRef = useRef<HTMLElement | null>(null)
 
   const projectMembers = members.filter(status => projectMemberIds.size === 0 || projectMemberIds.has(status.member.memberId))
@@ -111,10 +109,11 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
 
   const {
     projection, task, thread, workerStates,
-    currentFacts, readFacts, olderFacts, taskCards, followerIds, historyHasMore, loading, error, pending, autoReadExhausted,
+    currentFacts, readFacts, olderFacts, taskCards, followerObservation, historyHasMore, loading, error, pending, pendingAction, autoReadExhausted,
     replyTarget, replyTo, pendingFiles, draftKey, flashedMessage, timelineRef,
-    readCurrent, loadOlder, retryAutoRead, onTimelineScroll, setReplyTarget, setPendingFiles, clearSendState, sendReply, commit,
+    readCurrent, loadOlder, retryAutoRead, onTimelineScroll, setReplyTarget, setPendingFiles, sendReply, commit,
   } = controller
+  const followerIds = followerObservation.ids
 
   const mentionHandlesMap = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
 
@@ -261,16 +260,11 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
   // The panel's only Task action; the promotion walks the reader into the Task's own Thread.
   const convertToTask = async (): Promise<void> => {
     if (pending || thread === undefined || task !== undefined) return
-    setMutating('promote')
-    try {
-      await commit({
-        key: 'promote',
-        write: requestId => promoteThread({ requestId, workspaceId, threadRef, baseRevision: thread.revision }),
-        onCommitted: committed => { onPromoted(committed.task.taskRef) },
-      })
-    } finally {
-      setMutating(undefined)
-    }
+    await commit({
+      key: 'promote',
+      write: requestId => promoteThread({ requestId, workspaceId, threadRef, baseRevision: thread.revision }),
+      onCommitted: committed => { onPromoted(committed.task.taskRef) },
+    })
   }
 
   const currentFactsWithAnchor = mergeFacts(projection === undefined ? [] : [messageFact(projection.anchor, projection.anchorMentions)], currentFacts)
@@ -293,7 +287,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
         </Button>
       </Tooltip>}
       {task === undefined && thread !== undefined && <Tooltip label={t('promoteHint')} side="bottom" delayMs={500} portal maxWidth={260}>
-        <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
+        <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{pendingAction === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
       </Tooltip>}
       {task !== undefined && <Button size="sm" variant="primary" onClick={() => { onPromoted(task.taskRef) }}>{t('openTask', { number: resolvedTaskNumber ?? '…' })}</Button>}
       <Button size="sm" icon={<IconCloseOutlineRegular size={14} />} aria-label={t('panelClose')} onClick={onClose} />
@@ -322,7 +316,6 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
       draftKey={draftKey}
       pending={pending}
       {...(error === undefined ? {} : { error })}
-      onEdit={clearSendState}
       onSubmit={() => { void sendReply() }}
       placeholder={t('replyPlaceholder')}
       pendingFiles={pendingFiles}

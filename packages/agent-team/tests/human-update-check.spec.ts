@@ -71,6 +71,7 @@ describe('human latest-version fetch', () => {
     await expect(fetchLatestVersion(okFetcher('0.1.14'))).resolves.toBe('0.1.14')
     await expect(fetchLatestVersion(failingFetcher())).resolves.toBeUndefined()
     await expect(fetchLatestVersion(okFetcher(42))).resolves.toBeUndefined()
+    await expect(fetchLatestVersion(okFetcher('latest'))).resolves.toBeUndefined()
     await expect(fetchLatestVersion(okFetcher(undefined))).resolves.toBeUndefined()
     const notFound = (async () => ({ ok: false, json: async () => ({}) })) as UpdateCheckFetcher
     await expect(fetchLatestVersion(notFound)).resolves.toBeUndefined()
@@ -107,6 +108,31 @@ describe('human update checker cache', () => {
     checker.snapshot()
     await flush()
     expect(fetchImpl.calls).toBe(2)
+  })
+
+  it('keeps a known update after a failed check but clears it when a successful check says it is no longer newer', async () => {
+    let now = 1_000
+    let version: string | undefined = '0.1.14'
+    const fetchImpl: UpdateCheckFetcher = async () => {
+      if (version === undefined) throw new Error('offline')
+      return { ok: true, json: async () => ({ version }) }
+    }
+    const checker = createHumanUpdateChecker({ currentVersion: '0.1.13', fetchImpl, now: () => now, env: {} })
+    checker.snapshot()
+    await flush()
+    expect(checker.snapshot()).toEqual({ latestVersion: '0.1.14' })
+
+    now += HUMAN_UPDATE_CHECK_TTL_MS
+    version = undefined
+    checker.snapshot()
+    await flush()
+    expect(checker.snapshot()).toEqual({ latestVersion: '0.1.14' })
+
+    now += HUMAN_UPDATE_CHECK_TTL_MS
+    version = '0.1.13'
+    checker.snapshot()
+    await flush()
+    expect(checker.snapshot()).toEqual({})
   })
 
   it('never throws and never calls out when disabled or offline', async () => {

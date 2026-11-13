@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""Check that every relative Markdown link resolves to a file and heading anchor.
+"""Check that relative Markdown links and heading anchors resolve.
 
-Catches rot in documentation routing: links to renamed or deleted files, and
-anchors pointing at headings that no longer exist. HTTP(S), mailto, and
-root-absolute URLs are out of scope; links inside fenced code blocks are
-ignored (they are examples, not assertions). Both ``[text](target)`` and the
-angle form ``[text](<target with spaces>)`` are recognized, including images.
+HTTP(S), mailto, and root-absolute URLs are out of scope; links inside fenced
+code blocks are ignored. Both ``[text](target)`` and angle-bracket targets are
+recognized, including images.
 
-Anchor matching follows GitHub slugging: lowercase, punctuation removed,
-spaces to hyphens, duplicates suffixed -1, -2, ... Explicit HTML anchors
-(<a name=...>) are not modeled and may report false findings.
-
-Scans the Markdown files git knows about (tracked or untracked, not ignored).
-Usage: check_links.py [repo_root]   (default: current directory)
-Exit status: 0 = all links resolve, 1 = broken links found.
+Default scope is Git-known Markdown (tracked or untracked, not ignored).
+Repeat ``--include PATH`` to add ignored current work and ``--exclude PATH``
+to remove a file or directory prefix. Paths are repository-relative.
+Exit status: 0 = all links resolve, 1 = broken links found, 2 = invalid scope.
 """
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -35,7 +31,7 @@ def heading_slugs(text):
         match = re.match(r'^(#{1,6})\s+(.*?)\s*#*\s*$', line.lstrip())
         if not match:
             continue
-        title = re.sub(r'[`*_]', '', match.group(2))
+        title = re.sub(r'[`*]', '', match.group(2))
         slug = ''.join(c for c in title.lower() if c.isalnum() or c in ' -_')
         slug = slug.replace(' ', '-')
         if not slug:
@@ -53,8 +49,7 @@ def check_file(doc, findings):
     text = doc.read_text(encoding='utf-8', errors='replace')
     stripped_lines = []
     for lineno, line in iter_visible_lines(text):
-        # Links live in prose; blank out inline code spans so paths and
-        # examples in backticks are not parsed as link targets.
+        # Inline code may contain link-shaped examples rather than links.
         stripped_lines.append((lineno, re.sub(r'(`+)[^`]*\1', ' ', line)))
     for lineno, line in stripped_lines:
         for match in LINK_RE.finditer(line):
@@ -79,15 +74,30 @@ def check_file(doc, findings):
                         f'{doc}:{lineno}: anchor not found: #{anchor} in {path_part}')
 
 
-def main():
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else '.').resolve()
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('repo', nargs='?', default='.')
+    parser.add_argument('--include', action='append', default=[], metavar='PATH')
+    parser.add_argument('--exclude', action='append', default=[], metavar='PATH')
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    root = Path(args.repo).resolve()
+    try:
+        docs = [d for d in collect_markdown(root, args.include, args.exclude)
+                if not is_template(d, root)]
+    except ValueError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 2
     findings = []
-    docs = [d for d in collect_markdown(root) if not is_template(d, root)]
     for doc in docs:
         check_file(doc, findings)
     for finding in findings:
         print(finding)
     print(f'{len(docs)} files scanned, {len(findings)} broken link(s)')
+    print(f'Scope: include={args.include or ["(Git default)"]}; exclude={args.exclude or ["(none)"]}')
     return 1 if findings else 0
 
 

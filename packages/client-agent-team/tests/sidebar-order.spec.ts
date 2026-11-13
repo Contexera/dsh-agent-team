@@ -5,6 +5,16 @@ import { attachSidebarOrderHost, ensureSidebarOrderHydrated, moveSidebarItem, re
 
 type Ref = 'a' | 'b' | 'c' | 'd'
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(accept => { resolve = accept })
+  return { promise, resolve }
+}
+
+async function settle(): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
+
 beforeEach(() => { localStorage.clear(); attachSidebarOrderHost(undefined) })
 afterEach(cleanup)
 
@@ -105,6 +115,74 @@ describe('the Host preference behind the browser cache', () => {
     expect(remote.saves).toEqual([{ key: 'w1|projects', refs: ['c', 'a', 'b'] }])
     expect(renderHook(() => useSidebarOrder<Ref>('w1' as never, 'projects', ['a', 'b', 'c'])).result.current)
       .toEqual(['c', 'a', 'b'])
+  })
+
+  it('does not migrate a stale cache over a drag started during an empty Host read', async () => {
+    localStorage.setItem('dsh.agent-team.sidebar-order', JSON.stringify({ 'w1|projects': ['c', 'a', 'b'] }))
+    const load = deferred<Awaited<ReturnType<SidebarOrderHost['load']>>>()
+    const saved: { key: string; refs: readonly string[] }[] = []
+    attachSidebarOrderHost({
+      load: () => load.promise,
+      save: async request => {
+        saved.push({ key: request.key, refs: request.refs })
+        return { ok: true, value: { lists: {} } } as never
+      },
+    })
+
+    const hydration = ensureSidebarOrderHydrated()
+    moveSidebarItem('w1' as never, 'projects', ['a', 'b', 'c'], 'b', 'a', 'before')
+    await settle()
+    load.resolve({ ok: true, value: { lists: {} } } as never)
+    await hydration
+
+    expect(saved).toEqual([{ key: 'w1|projects', refs: ['b', 'a', 'c'] }])
+  })
+
+  it('serializes rapid drags and retries the latest failed order after hydration', async () => {
+    const load = deferred<Awaited<ReturnType<SidebarOrderHost['load']>>>()
+    const saves: { request: Parameters<SidebarOrderHost['save']>[0]; answer: ReturnType<typeof deferred<Awaited<ReturnType<SidebarOrderHost['save']>>>> }[] = []
+    let savedAgents = false
+    attachSidebarOrderHost({
+      load: () => load.promise,
+      save: request => {
+        if (request.key === 'w1|agents') {
+          savedAgents = true
+          return Promise.resolve({ ok: true, value: { lists: {} } })
+        }
+        const answer = deferred<Awaited<ReturnType<SidebarOrderHost['save']>>>()
+        saves.push({ request, answer })
+        return answer.promise
+      },
+    })
+
+    const hydration = ensureSidebarOrderHydrated()
+    const first = moveSidebarItem('w1' as never, 'projects', ['a', 'b', 'c'], 'c', 'a', 'before')
+    await settle()
+    const second = moveSidebarItem('w1' as never, 'projects', first!, 'b', 'c', 'before')
+    expect(second).toEqual(['b', 'c', 'a'])
+    expect(saves.map(({ request }) => request.refs)).toEqual([['c', 'a', 'b']])
+    moveSidebarItem('w1' as never, 'agents', ['a', 'b'], 'b', 'a', 'before')
+    await settle()
+    expect(savedAgents).toBe(true)
+
+    saves[0]!.answer.resolve({ ok: true, value: { lists: {} } } as never)
+    await settle()
+    expect(saves.map(({ request }) => request.refs)).toEqual([
+      ['c', 'a', 'b'],
+      ['b', 'c', 'a'],
+    ])
+    saves[1]!.answer.resolve({ ok: false, error: { message: 'settings unavailable' } } as never)
+    await settle()
+
+    load.resolve({ ok: true, value: { lists: {} } } as never)
+    await settle()
+    expect(saves.map(({ request }) => request.refs)).toEqual([
+      ['c', 'a', 'b'],
+      ['b', 'c', 'a'],
+      ['b', 'c', 'a'],
+    ])
+    saves[2]!.answer.resolve({ ok: true, value: { lists: {} } } as never)
+    await hydration
   })
 
   it('saves a drag and keeps serving it when the write fails', async () => {

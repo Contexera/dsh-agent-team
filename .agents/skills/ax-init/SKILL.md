@@ -11,7 +11,7 @@ disable-model-invocation: true
 | Piece | Role | Default |
 | --- | --- | --- |
 | Root `AGENTS.md` | Only the rules every task must know, plus routing. Loaded into every session, so it stays short (~60 lines) | always |
-| `.scratch/` | Cross-session work items: design snapshots, research, tickets, validation evidence — never an authority on current behavior | always |
+| `.scratch/` | Cross-session work items: design snapshots, research, tickets, reviews, and validation evidence — never an authority on current behavior | always |
 | `docs/` skeleton | Maintained engineering docs: `docs/README.md` routing index + `docs/AGENTS.md` maintenance discipline | only when the repo warrants maintained docs |
 
 The pattern is proven in real agent-driven repositories (Loom, dsh-agent-team): a fat root guide drowns every session, so the root file routes instead of explaining; in-progress work lives in `.scratch/active/` where it can change hourly without polluting history; durable conclusions graduate into `docs/` when the work closes.
@@ -38,7 +38,7 @@ Write it in the repository's dominant documentation language (translate the head
 
 ## Create the .scratch work area
 
-Copy `assets/scratch-AGENTS.md` to `.scratch/AGENTS.md` and `assets/scratch-README.md` to `.scratch/README.md`, adapting the prose the way you would adapt any boilerplate: drop what does not apply, keep the discipline. The templates define the work-item structure (`active/<work>/` with a five-item continuation README, `DESIGN.md`, `issues/NN-<slug>.md` tickets), ticket discipline (vertical slices, self-contained, frontier workflow), the closing lifecycle, and git tracking. Do not rewrite these rules per repo unless the repo genuinely works differently — their value is being the same everywhere. Templates are English; when the repository's documentation language is not, translate the prose while keeping the structure, headings order, and technical terms.
+Copy `assets/scratch-AGENTS.md` to `.scratch/AGENTS.md` and `assets/scratch-README.md` to `.scratch/README.md`. The templates define the work-item structure (`active/<work>/` with a continuation README, `spec.md`, tickets, materials, reviews, and validation), information authority, ticket readiness, stateless delegation, the closing lifecycle, and git tracking. `DESIGN.md` is read only as a legacy snapshot name. Keep the generic core stable across repositories; put genuine repository differences under `## Local conventions` instead of rewriting shared rules. Templates are English; when the repository's documentation language is not, translate the prose while keeping the structure, heading order, and technical terms.
 
 On a greenfield repo, the design work that follows initialization starts as an `active/<work>/` item, not in `docs/` — until source lands, `active/` is the primary design authority (the template says so).
 
@@ -62,7 +62,9 @@ Do not pre-create empty subsystem pages. The skeleton is governance, not filler.
 
 ## Re-runs and retrofitting
 
-Re-running on an already-initialized repository adds the missing pieces — most often the `docs/` skeleton once the repo grows into needing one — and never regenerates or overwrites files that already exist.
+Re-running on an already-initialized repository adds missing pieces — most often the `docs/` skeleton once the repo grows into needing one — and never silently regenerates or overwrites files that already exist.
+
+For an existing `.scratch/AGENTS.md` or `.scratch/README.md`, first compare it with the current asset. Report generic-core differences separately from the AGENTS file's `## Local conventions` and the README's live open/archive index data. With the user's go-ahead, upgrade the generic core while preserving intentional local extensions and current index data; without that approval, change no existing file. A missing local-conventions section is not itself a reason to discard repository-specific rules: classify and preserve them in the proposed upgrade.
 
 Never overwrite an existing root `AGENTS.md`. When one exists, read it, separate always-on rules from long-form explanation, and propose the restructure: rules stay in the root file, explanation moves to `docs/` pages (create the skeleton in the same pass if it is missing), work-history notes move to `.scratch/`. Apply it only with the user's go-ahead, since the existing file may be load-bearing for other tooling.
 
@@ -71,6 +73,9 @@ Never overwrite an existing root `AGENTS.md`. When one exists, read it, separate
 - Every command in the generated files comes from the repo or is marked `> TODO:`.
 - Root `AGENTS.md` fits on one screen and contains no content that belongs in `docs/` or `.scratch/`.
 - The `.gitignore` entries are committed together with the skeleton, before any `active/` work could leak into a commit.
-- `.scratch/AGENTS.md` and `.scratch/README.md` exist; `.gitignore` covers `active/` and `local/`.
+- `.scratch/AGENTS.md` and `.scratch/README.md` exist; `.gitignore` covers `active/` and `local/` without ignoring `.scratch/archive/` (verify with `git check-ignore`).
+- An existing repository's template differences have been reported, and every remaining difference is an intentional local extension recorded under `## Local conventions`.
+- Every ticket shown as `ready` has both completed blockers and information readiness: settled decisions, closed required reading, available access, and evaluable acceptance.
+- A fresh agent can route from the root guide to the scratch contract and tell what a worker receives, where review and acceptance evidence live, and who marks completion.
 - If `docs/` was created, every routing row points at a file that exists.
 - All generated files use the repository's dominant documentation language consistently.

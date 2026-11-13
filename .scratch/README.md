@@ -1,8 +1,10 @@
 # 工作资料目录索引
 
-`.scratch/` 保存跨会话工作项的设计快照、研究、实施 tickets、原型和可复查的里程碑证据。它不定义当前产品行为、公开 API、稳定维护流程或架构边界；这些以 `packages/`、测试、package README 和 `../docs/` 为准。
+`.scratch/` 保存跨会话工作项的设计快照、研究、可委派 tickets、原型、评审和验收证据。它不定义当前产品行为、公开 API、稳定维护流程或架构边界；这些以 `packages/`、测试、package README 和 `../docs/` 为准。
 
-**怎么在这里工作（工作项结构、ticket 骨架、Team 流程对接、生命周期）见 [AGENTS.md](AGENTS.md)。**
+**怎么在这里工作（工作项结构、信息权威、ticket 就绪、worker 派发、评审、验收和生命周期）见 [AGENTS.md](AGENTS.md)。**
+
+新工作项以 `spec.md` 保存当前设计快照，旧记录可能使用 `DESIGN.md`。实现评审记录位于工作项的 `reviews/`，需要 Human 或指定验收者确认的证据位于 `validation/`；实施记录不改写原 ticket 契约。
 
 ## 目录
 
@@ -22,6 +24,7 @@
 | 月 | 工作项 | 一句话结论 | 链接 |
 | --- | --- | --- | --- |
 | 2026-11 | implicit-state-machines | Webhook 耗尽可恢复、订阅存储升到 v5、Task 写入与重放共享状态推导；编辑、发送、头像、附件与时间线的故障恢复通过 Web 验收。 | [README](archive/2026-11/implicit-state-machines/README.md) |
+| 2026-11 | implicit-state-machines-deep | 14 张票全部验收：Host 终态与恢复、通知覆盖、草稿发送归属和侧栏保存顺序；收口证据及重开条件已记录。 | [README](archive/2026-11/implicit-state-machines-deep/README.md) |
 | 2026-11 | member-host-tools | Team 设置按 profile 放行额外宿主工具名，下一轮生效；过滤 preset 基线候选，自有 scope 的可见未许可工具由动态 prompt 列名且执行 guard 拒绝，#143/#147 已验收。 | [README](archive/2026-11/member-host-tools/README.md) |
 | 2026-11 | domain-owners-and-workers | 本机 Codex／Claude Worker、owner 常驻引导与开关隔离收口；完整组合和浏览器独立验收通过，Claude 同轮追加指令按原生能力阻塞关闭、不宣称完成。 | [README](archive/2026-11/domain-owners-and-workers/README.md) |
 | 2026-11 | dsh-0.2.2-adaptation | DSH `0.2.2-rc.1` 适配与认证：peer 移到 `>=0.2.2-rc.1 <0.2.3`，四处上游契约变化（设置图标官方槽位、窄屏 drawer、outline inset shadow、paint inset）适配完成，2022 用例与 13 条浏览器旅程全绿，独立验收判绿，随 0.2.7 发布。 | [README](archive/2026-11/dsh-0.2.2-adaptation/README.md) |

@@ -16,7 +16,7 @@ Execution follows the registration DSH actually resolves for this Member and ste
 
 External tool visibility and execution are separate. Inherited global or ancestor registrations are removed from the schema by `tools.restrict()` until granted. Registrations in the Member's own Agent scope are exempt from that restriction, so current Harness APIs cannot hide them; the execution guard denies them until granted.
 
-A conditional `team:tool-availability` prompt section lists these visible, ungranted names at every assembly and tells the Member not to call them. A grant removes that name from the warning from the next turn. This is compatibility behavior, not a permanent interface promise: if Harness later exposes an own-scope declaration filter, Team can hide the schemas instead while retaining the execution guard.
+At each prompt assembly, `team:tool-availability` lists visible names that the Member guard denies: ungranted Agent-scope registrations and same-name replacements of baseline tools. It tells the Member not to call them. A valid grant can remove its name from the warning from the next turn. The execution guard remains authoritative for the actual step.
 
 A step refresh runs inside the public `agent/pre-step` gate using the turn's frozen grants. Tool resolution for that step has already happened, so this refresh prepares later declarations, not the current one; a failed refresh can still refuse the current request. Session event observers cannot provide that refusal, and `step/start` is too late.
 

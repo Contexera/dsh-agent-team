@@ -1140,9 +1140,8 @@ export interface AgentTeamWorkerStopRequest {
  * rather than a sentence to parse. `ended` carries the state the run really
  * reached — a run that finished first is not a stopped run, and a cleanup the
  * engine never confirmed is `failed` with the Host's own `diagnostic`. `pending`
- * means the stop was requested and the cleanup is still in flight, and
- * `unconfirmed` means this Host no longer holds the handle, so it can neither
- * confirm nor stop the run. Neither of the last two is an ending.
+ * means cleanup or recording is still in flight. `unconfirmed` means this Host
+ * cannot supply an ending, because it lost the handle or recording failed.
  */
 export type AgentTeamWorkerStopResult =
   | {

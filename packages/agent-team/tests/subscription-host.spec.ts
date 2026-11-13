@@ -1619,6 +1619,45 @@ describe('the webhook trigger', () => {
     expect(pool.media.get('agent_team_subscriptions')?.tables.get('deliveries')?.size).toBe(2)
   }, 30_000)
 
+  it('waits for a stalled webhook admission pass before closing the stores', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const host = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await host.fiber.dispose() } })
+    const projectRef = await project(host)
+    const created = await host.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+
+    // Leave an exhausted row for the next pass, where settlement no longer owns a scheduler slot.
+    shell.stdout = tooManyEvents
+    pool.writeFault = write => write.table === 'deliveries' && write.operation === 'put' ? new Error('injected settlement failure') : undefined
+    await host.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    await pump(host)
+    expect(admissionRows(pool)).toMatchObject([{ state: 'exhausted' }])
+    pool.writeFault = undefined
+
+    const atWrite = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    pool.writeStall = write => {
+      if (write.table !== 'deliveries' || write.operation !== 'put') return undefined
+      atWrite.resolve()
+      return release.promise
+    }
+    const settling = pump(host)
+    await atWrite.promise
+
+    let disposed = false
+    const disposal = host.fiber.dispose().then(() => { disposed = true })
+    try {
+      await new Promise<void>(resolve => { setImmediate(resolve) })
+      expect(disposed, 'the Host must not close while its admission pass still owns a write').toBe(false)
+    } finally {
+      release.resolve()
+    }
+    await Promise.all([settling, disposal])
+    expect(admissionRows(pool)).toEqual([])
+  })
+
   it.each(['delete', 'archive'] as const)('does not resurrect an exhausted delivery after %s commits', async action => {
     const pool = new MemoryMediaPool()
     const shell = fakeShell({ stdout: '' })
