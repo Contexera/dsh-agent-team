@@ -399,3 +399,21 @@ Fixture-only changes: the official packages' new names, `listChildren` → `list
 Evidence on the certified tree: `npm run typecheck` (581 Harness mappings), `npm test` (2651 passed, 1 skipped, 207 files), `npm run lint` (109 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (452 files), `check:artifact` (133 runtime relative imports resolved), `git diff --check v0.2.7..HEAD`, and `npm run test:browser` (24 journeys).
 
 At certification time npm still carried only `0.2.2-rc.1` — `latest` and `next` both — so section 3's install, dependency-graph, and published-bundle checks run against the registry as soon as the candidate lands there, before this version publishes.
+
+### DSH 0.2.2-rc.3
+
+DSH `0.2.2-rc.3` is certified on the same peers with no manifest change. The candidate falls inside `>=0.2.2-rc.2 <0.2.3`, so section 4 records a baseline instead of a peer move, and every version spot keeps naming the range's lower bound. No Team release is involved: Agent Team `0.2.8` already declares this range and is what the `next` dist-tag carries; section 2.4 keeps `latest` at `0.2.7` while DSH's own `latest` is still `0.2.2-rc.1`.
+
+At certification time npm `latest` still pointed at `0.2.2-rc.1` and `next` at the candidate, whose version document answered 200; `0.2.2-rc.2` was published as well, so the lower bound names an installable host. The published `0.2.8` bundle then installed from the registry into an empty directory: 285 packages, 102 of them `@deepseek-ai/dsh-*` and every one at `0.2.2-rc.3`, with no older set and no peer conflict.
+
+Tag `38a6a5c965` (2026-11-13) carries 515 changed files and 6 commits against `dsh-v0.2.2-rc.2`, and nothing this bundle consumes was removed or renamed:
+
+- An experimental `@deepseek-ai/dsh-deepseek-chat-import` package imports DeepSeek web chat exports as Sessions. It joins the on-demand bundle catalog rather than the base bundle, and this bundle neither imports nor mounts it.
+- The Client gains a `workspace.picker` Factory, its `workspace.picker.directoryFlow` hole, and a `sidebar.session.action` HOC around the New-session row. The three slots this bundle composes into — `sidebar.workspaces` with its declared children, `sidebar.panellist`, and the settings-section contracts — keep their signatures.
+- The rest is sidebar markup and CSS, primitives icon artwork, directory-picker client tweaks, and the session-log export path the importer reads.
+
+The official Team packages change only their manifest version line, so section 3.7 is unchanged. Section 3.6 is not re-triggered: nothing under `packages/session` or `packages/llm` changes beyond manifest version lines, and no released artifact content is refused.
+
+Typert output is unchanged, and the generated facades absorb one new upstream package this bundle does not import: 584 Harness mappings against 581.
+
+Evidence on the certified tree: `npm run typecheck`, `npm test` (2683 passed, 1 skipped, 208 files), `npm run lint` (oxlint `1.76.0` run directly, because this sandbox has no `corepack`; 108 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (458 files), `check:artifact` (133 runtime relative imports resolved), `git diff --check`, and `npm run test:browser` (28 journeys).

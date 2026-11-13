@@ -466,3 +466,25 @@ tag `ddac96760b`（2026-11-11）相对 `dsh-v0.2.2-rc.1` 改了 4,645 个文件�
 证据：`npm run typecheck`（581 个 Harness 映射）、`npm test`（2651 通过、1 跳过）、`npm run lint`（109 warning、0 error）、`npm run build`、`npm pack --dry-run`（452 文件）、`check:artifact`（133 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（24 条旅程）。
 
 认证当时 npm 上仍只有 `0.2.2-rc.1`（`latest` 与 `next` 都是），因此 §3 的安装、依赖图与已发布 bundle 检查，在候选版本出现在 registry 之后、本版本发布之前补做。
+
+### DSH 0.2.2-rc.3
+
+DSH `0.2.2-rc.3` 在同一条 peer 线上认证通过，manifest 不变。候选版本落在 `>=0.2.2-rc.2 <0.2.3` 之内，因此按 §4 就地记录基线、不移动 peer，所有版本点仍写区间的下界。
+
+本轮不涉及 Team 发版：Agent Team `0.2.8` 已经声明这条区间，`next` dist-tag 指的就是它；按 §2.4，在 DSH 自己的 `latest` 还是 `0.2.2-rc.1` 期间我们的 `latest` 停在 `0.2.7`。
+
+认证当时 npm `latest` 仍指向 `0.2.2-rc.1`、`next` 指向候选版本，其版本文档返回 200；`0.2.2-rc.2` 也已在 npm 上，所以下界指向的是一个装得上的宿主。随后把已发布的 `0.2.8` 从 registry 装进空目录：285 个包，其中 102 个 `@deepseek-ai/dsh-*` 全部落在 `0.2.2-rc.3`，没有旧线残留，也没有 peer 冲突。
+
+tag `38a6a5c965`（2026-11-13）相对 `dsh-v0.2.2-rc.2` 改了 515 个文件、6 笔提交，本 bundle 消费的接口没有删除或改名：
+
+- 新增实验包 `@deepseek-ai/dsh-deepseek-chat-import`，把 DeepSeek 官网对话导出导入成 Session。它进的是按需安装的 bundle 目录而不是 base bundle，本 bundle 既不 import 也不挂载它。
+- Client 侧新增 `workspace.picker` Factory 及其 `workspace.picker.directoryFlow` 洞，以及包住 New-session 行的 `sidebar.session.action` HOC。本 bundle 组合的三处——`sidebar.workspaces` 及其声明的 children、`sidebar.panellist`、settings section 契约——签名不变。
+- 其余是侧栏标记与样式、primitives 图标绘制、目录选择器 client 调整，以及导入功能读取的 session-log 导出路径。
+
+官方 Team 包只改了 manifest 的版本行，§3.7 的结论不变。§3.6 未被重新触发：`packages/session` 与 `packages/llm` 下除 manifest 版本行外无改动，也没有任何已发布产物被拒绝。
+
+Typert 产物零 diff；生成的 facades 多吸收一个本 bundle 不 import 的上游包：Harness 映射 584 条，此前 581 条。
+
+证据（认证树）：`npm run typecheck`、`npm test`（2683 通过、1 跳过，208 文件）、`npm run lint`（108 warning、0 error）、`npm run build`、`npm pack --dry-run`（458 文件）、`check:artifact`（133 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（28 条旅程）。
+
+本沙箱没有 `corepack`，lint 直接跑脚本钉住的 oxlint `1.76.0`，读数与脚本一致。
