@@ -25,8 +25,8 @@ If the repository has no `.scratch` work area, or the user supplied only a diff 
 
 The user's explicit request takes precedence over the work item's status. Otherwise, use the actual design and code state rather than relying on a status label alone.
 
-- **Converged design before implementation:** follow [references/design-review.md](references/design-review.md). Review the chosen shape, evidence, risks, and tickets, then write confirmed improvements back into the existing design materials. Do not create a review report.
-- **Implementation or delivery:** follow [references/implementation-review.md](references/implementation-review.md). Check the implementation against its spec and repository standards, run relevant checks, and save a report in the work item.
+- **Converged design before implementation:** follow [references/design-review.md](references/design-review.md). Review the chosen shape, evidence, risks, ticket information readiness, and verification, then write confirmed improvements back into the existing design materials. Do not create a review report. If the design has not converged, report that state and stop rather than inventing a spec.
+- **Implementation or delivery:** follow [references/implementation-review.md](references/implementation-review.md). Review a coherent delivered set by default, check it against its spec and repository standards, run relevant checks, and save a report in the work item. Implementation review does not mark Human acceptance or close tickets.
 
 If the user asks for both, refine the design first, then review the implementation against the revised spec. An ambiguous stage that would materially change the output requires a clarifying question.
 

@@ -1,31 +1,18 @@
 #!/usr/bin/env python3
-"""Check that file paths and commands cited in Markdown still exist.
+"""Check file paths and commands cited in Markdown.
 
-Catches documentation drift: prose referencing files that were renamed or
-deleted, ``npm run <script>`` names no longer defined, and ``make`` targets
-that disappeared. Only inline code spans are checked — fenced blocks are
-examples, not assertions. Each finding is a candidate to judge in context:
+Only inline code spans are checked; fenced blocks are examples. Findings are
+candidates to judge in context, not automatic defects. Placeholders, variables,
+globs, absolute paths, and ``../`` cross-repository paths are skipped. Documents
+under ``assets/`` are templates for another tree and are skipped.
 
-- Placeholders (``<...>``, ``$VAR``, globs) and ``../`` cross-repository
-  paths are skipped: not claims about this repository.
-- Absolute paths (``/usr/...``, URL path segments) are skipped: they name
-  other systems, not this tree.
-- Candidates must look like a file (last segment has an extension); bare
-  directory or API-segment mentions such as ``src/`` or ``space/wbi/arc``
-  are convention prose, not existence claims.
-- Paths resolve against the repository root and then the citing document's
-  ancestor directories, the way a reader would interpret them.
-- Documents under an ``assets/`` directory are skipped entirely: templates
-  cite the repository they will be copied into.
-- ``npm run`` names are validated only when the repository has a
-  package.json, against the union of every package's scripts (workspaces
-  define scripts in many places); ``make`` targets against a root Makefile.
-
-Scans the Markdown files git knows about (tracked or untracked, not ignored).
-Usage: check_references.py [repo_root]   (default: current directory)
-Exit status: 0 = every citation resolves, 1 = findings found.
+Default scope is Git-known Markdown (tracked or untracked, not ignored).
+Repeat ``--include PATH`` to add ignored current work and ``--exclude PATH``
+to remove a file or directory prefix. Paths are repository-relative.
+Exit status: 0 = every citation resolves, 1 = findings found, 2 = invalid scope.
 """
 
+import argparse
 import json
 import os
 import re
@@ -39,10 +26,11 @@ SPAN_RE = re.compile(r'(`+)([^`]+)\1')
 PATH_RE = re.compile(r'^[A-Za-z0-9._/@+-]+$')
 RUN_RE = re.compile(r'\b(?:npm|pnpm|yarn|bun)\s+run\s+([A-Za-z0-9:_-]+)')
 MAKE_RE = re.compile(r'^make\s+([A-Za-z0-9._-]+)$')
+VERSIONED_PACKAGE_RE = re.compile(r'^(?:@[^/]+/)?[^/\s]+@[^/\s]+$')
 
 
 def npm_script_names(root):
-    """(has_package_json, script names across all packages)."""
+    """Return (has_package_json, script names across all packages)."""
     names = set()
     found = False
     for dirpath, dirnames, filenames in os.walk(root):
@@ -100,6 +88,8 @@ def check_file(doc, root, has_scripts, scripts, targets, findings):
             make_match = MAKE_RE.match(content)
             if targets is not None and make_match and make_match.group(1) not in targets:
                 findings.append(f'{doc}:{lineno}: make target not defined: {make_match.group(1)}')
+            if VERSIONED_PACKAGE_RE.match(content):
+                continue
             if '/' not in content or not PATH_RE.match(content):
                 continue
             last = content.rstrip('/').rsplit('/', 1)[-1]
@@ -109,9 +99,23 @@ def check_file(doc, root, has_scripts, scripts, targets, findings):
                 findings.append(f'{doc}:{lineno}: cited path missing: {content}')
 
 
-def main():
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else '.').resolve()
-    docs = [d for d in collect_markdown(root) if not is_template(d, root)]
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('repo', nargs='?', default='.')
+    parser.add_argument('--include', action='append', default=[], metavar='PATH')
+    parser.add_argument('--exclude', action='append', default=[], metavar='PATH')
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    root = Path(args.repo).resolve()
+    try:
+        docs = [d for d in collect_markdown(root, args.include, args.exclude)
+                if not is_template(d, root)]
+    except ValueError as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 2
     has_scripts, scripts = npm_script_names(root)
     targets = make_targets(root)
     findings = []
@@ -120,6 +124,7 @@ def main():
     for finding in findings:
         print(finding)
     print(f'{len(docs)} files scanned, {len(findings)} reference finding(s)')
+    print(f'Scope: include={args.include or ["(Git default)"]}; exclude={args.exclude or ["(none)"]}')
     return 1 if findings else 0
 
 

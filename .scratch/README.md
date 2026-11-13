@@ -1,8 +1,10 @@
 # 工作资料目录索引
 
-`.scratch/` 保存跨会话工作项的设计快照、研究、实施 tickets、原型和可复查的里程碑证据。它不定义当前产品行为、公开 API、稳定维护流程或架构边界；这些以 `packages/`、测试、package README 和 `../docs/` 为准。
+`.scratch/` 保存跨会话工作项的设计快照、研究、可委派 tickets、原型、评审和验收证据。它不定义当前产品行为、公开 API、稳定维护流程或架构边界；这些以 `packages/`、测试、package README 和 `../docs/` 为准。
 
-**怎么在这里工作（工作项结构、ticket 骨架、Team 流程对接、生命周期）见 [AGENTS.md](AGENTS.md)。**
+**怎么在这里工作（工作项结构、信息权威、ticket 就绪、worker 派发、评审、验收和生命周期）见 [AGENTS.md](AGENTS.md)。**
+
+新工作项以 `spec.md` 保存当前设计快照，旧记录可能使用 `DESIGN.md`。实现评审记录位于工作项的 `reviews/`，需要 Human 或指定验收者确认的证据位于 `validation/`；实施记录不改写原 ticket 契约。
 
 ## 目录
 

@@ -19,6 +19,7 @@ Cover every selected behavior and open question in the spec. Findings need a con
 - Trace the chosen shape back to the original user problem and an end-to-end scenario.
 - Check first-version scope, explicit non-goals, and whether an unresolved question could change the chosen shape or make a ticket unstartable.
 - Identify superseded decisions that still influence later text, conflicting terminology, and places where the README, spec, and tickets describe different behavior.
+- Check that valuable raw evidence, examples, counterexamples, and rejected alternatives remain available with provenance. The spec must link the evidence that gives abstract decisions meaning; synthesis must not silently replace it with lossy paraphrase.
 
 ### Architecture and evidence
 
@@ -37,16 +38,18 @@ Cover every selected behavior and open question in the spec. Findings need a con
 
 ### Tickets and verification
 
-- Map every selected behavior to a ticket and observable acceptance criterion; identify ticket text that silently narrows or changes the spec.
-- Keep each ticket a complete, independently verifiable user path unless the work area documents an exception. Correct dependency edges and the ready frontier.
-- Cover important failure and boundary cases, real integrations, and affected documentation. Distinguish deterministic tests from non-deterministic model behavior and human acceptance.
-- Ensure the testing seams exercise the same public behavior as callers rather than implementation details.
+- Map every selected outcome to a ticket and observable acceptance criterion; identify ticket text that silently narrows or changes the spec.
+- Check that each ticket is one independently reviewable dispatch unit with required/binding and background references, boundaries, and evidence suited to its deliverable type. Implementation work normally follows a complete user path; other work uses an equivalently bounded deliverable.
+- Correct dependency edges and the ready frontier. `ready` requires both completed blockers and information readiness: settled decisions, available access and reading, and an evaluable acceptance path. Missing information keeps the ticket `pending` with the gap named.
+- For substantial, ambiguous, or high-impact tickets, perform or request a fresh-context rehearsal before readiness. The fresh agent restates scope, boundaries, required reading, and verification without implementing; any settled-product question is a design finding.
+- Cover important failure and boundary cases, real integrations, and affected documentation. Distinguish deterministic tests, cited or rendered evidence, non-deterministic model behavior, and Human acceptance.
+- Ensure testing or evaluation seams exercise the same public behavior or deliverable as callers rather than implementation details.
 
 ## 3. Revise the existing materials
 
 Write confirmed improvements directly into the existing `spec.md`, affected files under `issues/`, and the continuation `README.md`; correct an existing file under `materials/` when its evidence is wrong or incomplete. Do not create a review report, a parallel design summary, or a `reviews/` directory for this procedure.
 
-Keep the spec focused on selected behavior, reasons, boundaries, and testing seams. Make tickets self-contained and their acceptance criteria observable. Update the README's status, last-checked date, current frontier, completion conditions, and formal-document exit when the revisions affect them. Adjust `ready` and `pending` only when blockers or unresolved design questions change whether work can start; leave implementation progress and acceptance checkboxes alone.
+Keep the spec focused on selected behavior, reasons, boundaries, and verification seams. Close each ticket's required reading and make its acceptance criteria observable. Update the README's status, last-checked date, current frontier, completion conditions, acceptance owner, and formal-document exit when revisions affect them. Adjust `ready` and `pending` when either dependency or information readiness changes; leave implementation progress and acceptance checkboxes alone.
 
 When a finding requires a genuine Human product decision, record the precise conflict and decision needed in the existing spec or README, keep affected tickets from appearing startable, and apply every other revision that already follows from confirmed decisions.
 
