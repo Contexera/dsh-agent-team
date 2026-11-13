@@ -9,7 +9,9 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { SessionId } from '@deepseek-ai/dsh-session'
 
-import { realHarness, ScriptedAdapter, textResponse, waitFor, waitForArchive, requestId } from './helpers/member-harness.ts'
+import { cleanups, realHarness, ScriptedAdapter, textResponse, waitFor, waitForArchive, requestId } from './helpers/member-harness.ts'
+
+afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 
 

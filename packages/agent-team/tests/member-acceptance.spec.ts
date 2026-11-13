@@ -16,7 +16,9 @@ import { MEMBER_COMPACT_TOKENS } from '../src/member-compaction.ts'
 import type { AgentTeamClaimRef } from '../src/types.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 
-import { realHarness, ScriptedAdapter, acceptanceReminders, textResponse, waitFor, waitForIdle, requestId } from './helpers/member-harness.ts'
+import { cleanups, realHarness, ScriptedAdapter, acceptanceReminders, textResponse, waitFor, waitForIdle, requestId } from './helpers/member-harness.ts'
+
+afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 
 

@@ -1,9 +1,8 @@
 import { afterEach, it, expect } from 'vitest'
-import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { WORKER_INSPECT_SHOTS, chooseMemberModel, closeScenario, memberAgent, openSettings,
-  openSidebar, openTeamPage, scaffold, settleLayout, waitForMemberAgent, type Locator } from './__external-agent-team-support.ts'
+  openSidebar, openTeamPage, scaffold, scenarioTempDir, settleLayout, waitForMemberAgent, type Locator } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -134,7 +133,7 @@ it('reads a Worker diagnostic from its row and keeps the list to five rows', asy
   const threadRef = discussion.thread.threadRef
 
   // The fake engine is installed where an operator would point the setting.
-  const directory = await mkdtemp(join(tmpdir(), 'dsh-team-fake-codex-'))
+  const directory = await scenarioTempDir('dsh-team-fake-codex-')
   const fakeCodex = join(directory, 'codex')
   await writeFile(fakeCodex, FAKE_CODEX, 'utf8')
   await chmod(fakeCodex, 0o755)

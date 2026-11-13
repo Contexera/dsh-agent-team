@@ -102,7 +102,7 @@ export async function openTeamPage(options: {
  * profile document. A lane without it cannot arm an address at all.
  */
 async function webhookOriginOverlay(origin: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'dsh-team-webhook-overlay-'))
+  const directory = await scenarioTempDir('dsh-team-webhook-overlay-')
   const path = join(directory, 'webhook-origin.overlay.yml')
   await writeFile(path, [
     '# The deployment public origin for one scenario: installation config.',
@@ -119,10 +119,21 @@ async function webhookOriginOverlay(origin: string): Promise<string> {
 export let scaffold: WebScaffold | undefined
 export let browser: Browser | undefined
 
-/** Release the current scenario's scaffold and browser. */
+/** Throwaway directories this scenario owns; `closeScenario` removes them. */
+const scenarioTempDirs: string[] = []
+
+/** A throwaway directory that `closeScenario` removes with the rest of the scenario. */
+export async function scenarioTempDir(prefix: string): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), prefix))
+  scenarioTempDirs.push(directory)
+  return directory
+}
+
+/** Release the current scenario's scaffold, browser, and throwaway directories. */
 export async function closeScenario(): Promise<void> {
   await browser?.close(); browser = undefined
   await scaffold?.close(); scaffold = undefined
+  await Promise.all(scenarioTempDirs.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
 }
 
 /** A Member record as the Host currently reports it. */

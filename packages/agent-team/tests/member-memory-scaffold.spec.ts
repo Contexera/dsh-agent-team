@@ -8,7 +8,9 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 
-import { realHarness, requestId } from './helpers/member-harness.ts'
+import { cleanups, realHarness, requestId } from './helpers/member-harness.ts'
+
+afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 
 

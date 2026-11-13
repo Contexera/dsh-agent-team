@@ -7,7 +7,9 @@ vi.setConfig({ testTimeout: 60_000 })
 
 import { changeBaseline, nextChange } from './helpers/change-stream.ts'
 
-import { EmptyAdapter, realHarness, requestId } from './helpers/member-harness.ts'
+import { cleanups, EmptyAdapter, realHarness, requestId } from './helpers/member-harness.ts'
+
+afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 
 

@@ -12,7 +12,9 @@ import { access, mkdtemp, mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, basename } from 'node:path'
 
-import { realHarness, requestId } from './helpers/member-harness.ts'
+import { cleanups, realHarness, requestId } from './helpers/member-harness.ts'
+
+afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 
 

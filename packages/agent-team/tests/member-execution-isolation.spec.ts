@@ -7,7 +7,9 @@ vi.setConfig({ testTimeout: 60_000 })
 
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
-import { GatedAdapter, realHarness, requestId } from './helpers/member-harness.ts'
+import { cleanups, GatedAdapter, realHarness, requestId } from './helpers/member-harness.ts'
+
+afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 
 

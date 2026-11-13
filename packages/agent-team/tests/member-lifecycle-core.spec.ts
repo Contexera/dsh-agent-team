@@ -26,7 +26,7 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import AgentTeam from '../src/index.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
-import { EmptyAdapter, GatedAdapter, realHarness, ScriptedAdapter, textResponse, toolCallResponse, waitFor, waitForIdle, requestId, persistenceRaceError } from './helpers/member-harness.ts'
+import { cleanups, EmptyAdapter, GatedAdapter, realHarness, ScriptedAdapter, textResponse, toolCallResponse, waitFor, waitForIdle, requestId, persistenceRaceError } from './helpers/member-harness.ts'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, basename, sep } from 'node:path'
@@ -38,6 +38,8 @@ import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
 import { RECOVERY_DELAY_MS } from '../src/recovery.ts'
 import { AgentTeamLedger } from '../src/ledger.ts'
 import type { AgentTeamProjectRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
+
+afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 
 
