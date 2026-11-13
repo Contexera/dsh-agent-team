@@ -38,9 +38,11 @@ Only the enrolment group carries weight: its name drops to the secondary label a
 
 A quiet recipient notice shows who will be notified: the `@Handle` names typed into the body (`mentionedMemberIds`, matched on the Host's own case-insensitive ASCII word boundaries), plus the quoted Message's author on a reply. The body is the sole delivery authority — no explicit recipient list travels with the request — so the notice and the send read the same set. A recipient the Project does not yet carry is named there as joining it.
 
-Drafts are stored per Project/Thread in the bounded `TeamDraftStore`; a legacy `recipientIds` field in an old entry is ignored on load, successful sends clear the draft and failures preserve it.
+Drafts are stored per Project/Thread in the bounded `TeamDraftStore`; a legacy `recipientIds` field in an old entry is ignored on load. A confirmed send clears the draft it submitted if it has not changed; failure preserves it.
 
-When delivery is uncertain, an unchanged submission in the open composer retries the same request. It keeps the original Thread revision and attachment order, and reuses each file's upload request and any returned attachment reference. A definite unread or stale revision refusal follows the usual read and resend flow. Reopening the composer restores the draft, not a pending submission.
+An unchanged Project send or Thread reply can resume after reopening in the same Client. While its send is in flight, another submit waits for that result. If delivery is uncertain, retry sends the same request with its original mode, revision, quote, and attachments where applicable. Edits to the text or selection start a new submission. A definite unread or stale revision refusal follows the usual read and resend flow. Only the text draft survives a browser reload.
+
+Switching between discussions in the open panel leaves a write pending only on its original Thread; its response cannot change the other discussion. A Task start opens the Board only if the opening that submitted it is still active.
 
 The 「作为任务」 intent is not persisted and resets off after success. The mode chip keeps its word label at every width and narrows the toolbar gap below 560px rather than hiding the word.
 
@@ -67,7 +69,9 @@ The send carries the parent's ref, so the Host records the link and delivers to 
 
 In the timeline the link leads the Message it belongs to, in the Markdown reference form the reader already knows: one muted line behind a 2px rule, naming the author and the parent's first line, the whole of it a jump to the original. It is a handle on the original rather than a copy — a long parent is never pasted twice, and the quote cannot disagree with the Message it points at. The composer's banner is the same object in the same language, which is what lets the two read as one statement.
 
-Taskless Thread promotion is Human-only, durable, and non-optimistic. On success reread Thread and supplemental Project/Member projections; on unread/stale fence errors preserve Host error and reread relevant facts.
+Taskless Thread promotion is Human-only, durable, and non-optimistic. While the discussion that requested it is still open, success opens the new Task from the side panel or refreshes the full Thread page. If the reader has switched away, the Task remains in the Project without taking over navigation. Unread or stale revision refusals reread the original discussion only while that opening is active.
+
+The follow control takes its state from the current Thread's Host observation or confirmed write. A previous opening's error or observation cannot change the active control.
 
 ## Thread/Task entry rows
 Every Thread has one entry in the Project feed, drawn as a single quiet row under its anchor Message's body that both states and opens the Thread. It never treats Task as a navigation level, and no state of an entry ever lives on the identity line. A continuation row in a run has no identity of its own, so a cluster parked there would float alone at a line's far end. Any placement that far right costs the reader a trip across the column for the value they came for.

@@ -86,7 +86,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
   // Label source for the promote/accept buttons only: a reply send also raises
   // the shared `pending` gate, and must not retitle those buttons.
-  const [mutating, setMutating] = useState<'promote' | 'accept' | undefined>()
   const [transferDialogOpen, setTransferDialogOpen] = useState(false)
   const mountedRef = useRef(false)
   const supplementalRef = useRef<Promise<void>>()
@@ -154,11 +153,12 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const {
     projection: activeProjection, task, thread,
-    currentFacts, readFacts, olderFacts, taskCards, workerStates, followerIds, historyHasMore, loading, error, pending,
+    currentFacts, readFacts, olderFacts, taskCards, workerStates, followerObservation, historyHasMore, loading, error, pending, pendingAction,
     autoReadExhausted, newFactsCount, replyTarget, replyTo, pendingFiles, draftKey, flashedMessage, timelineRef,
-    readCurrent, loadOlder, refreshAfterFence, refreshPassiveFacts, retryAutoRead, onTimelineScroll, jumpToNewest,
-    flashMessage, setReplyTarget, setPendingFiles, clearSendState, sendReply, commit, applyTaskCommit,
+    readCurrent, loadOlder, refreshAfterFence, refreshPassiveFacts, retryAutoRead, invalidateFollowerReads, onTimelineScroll, jumpToNewest,
+    flashMessage, setReplyTarget, setPendingFiles, sendReply, commit, applyTaskCommit,
   } = controller
+  const followerIds = followerObservation.ids
 
   useEffect(() => {
     if (confirmingAccept && task?.resolution === 'accepted') setConfirmingAccept(false)
@@ -423,7 +423,14 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // The page hands in the same follower set it refreshes for the composer, so a change another face or
   // another client makes reaches the control: the set is re-read on every subscription tick, not only on
   // the mount read that seeded it.
-  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest }, followerIds, projectView?.humanMemberId)
+  const follow = useThreadFollow(
+    changeAttention,
+    threadObservations,
+    { workspaceId, ...threadRequest },
+    followerObservation,
+    projectView?.humanMemberId,
+    invalidateFollowerReads,
+  )
   const transfer = useTaskTransfer(transferTask, {
     workspaceId,
     taskRef: task?.taskRef as AgentTeamTaskRef,
@@ -444,30 +451,20 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const convertToTask = async (): Promise<void> => {
     if (pending || thread === undefined || task !== undefined) return
-    setMutating('promote')
-    try {
-      await commit({
-        key: 'promote',
-        write: requestId => promoteThread({ requestId, workspaceId, threadRef, baseRevision: thread.revision }),
-        onCommitted: async committed => { await applyTaskCommit(committed) },
-      })
-    } finally {
-      setMutating(undefined)
-    }
+    await commit({
+      key: 'promote',
+      write: requestId => promoteThread({ requestId, workspaceId, threadRef, baseRevision: thread.revision }),
+      onCommitted: applyTaskCommit,
+    })
   }
 
   const mutateTask = async (action: 'accept' | 'close' | 'reopen'): Promise<void> => {
     if (pending || task === undefined || thread === undefined) return
-    if (action === 'accept') setMutating('accept')
-    try {
-      await commit({
-        key: `task:${action}`,
-        write: requestId => changeTask({ requestId, workspaceId, taskRef: task.taskRef, action, baseRevision: thread.revision }),
-        onCommitted: async committed => { await applyTaskCommit(committed) },
-      })
-    } finally {
-      setMutating(undefined)
-    }
+    await commit({
+      key: `task:${action}`,
+      write: requestId => changeTask({ requestId, workspaceId, taskRef: task.taskRef, action, baseRevision: thread.revision }),
+      onCommitted: applyTaskCommit,
+    })
   }
 
   const currentFactsWithAnchor = mergeFacts(activeProjection === undefined ? [] : [messageFact(activeProjection.anchor, activeProjection.anchorMentions)], currentFacts)
@@ -558,7 +555,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           {showLifecycleGroup && <div className={css.actionGroup} data-team-action-group="lifecycle">
             {task === undefined
               ? <Tooltip label={t('promoteHint')} side="bottom" delayMs={500} portal maxWidth={260}>
-                  <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
+                  <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{pendingAction === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
                 </Tooltip>
               : task.resolution === 'open'
                 ? <>
@@ -630,7 +627,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           closeLabel={t('cancel')}
           footer={<>
             <Button variant="outline" disabled={pending} onClick={() => { setConfirmingAccept(false) }}>{t('cancel')}</Button>
-            <Button variant="primary" disabled={pending} onClick={() => { void mutateTask('accept') }}>{mutating === 'accept' ? t('acceptingTask') : t('acceptTask')}</Button>
+            <Button variant="primary" disabled={pending} onClick={() => { void mutateTask('accept') }}>{pendingAction === 'task:accept' ? t('acceptingTask') : t('acceptTask')}</Button>
           </>}
         >
           <p className={css.confirmBody}>{t('acceptEarlyBody', { count: activeClaims.length })}</p>
@@ -681,7 +678,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       draftKey={draftKey}
       pending={pending}
       {...(error === undefined ? {} : { error })}
-      onEdit={clearSendState}
       onSubmit={() => { void sendReply() }}
       placeholder={t('replyPlaceholder')}
       pendingFiles={pendingFiles}

@@ -3293,7 +3293,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => projectSurface.locator('[role="alert"]').count()).toBe(0)
   await recoveryRow.waitFor({ timeout: 45_000 })
   await expect.poll(async () => await railAlert.count(), { timeout: 20_000 }).toBe(0)
-  await expect.poll(() => consoleWatch.warnings.slice(offlineWarningStart).some(warning => /connection lost/i.test(warning)), { timeout: 20_000 }).toBe(true)
+  // The Team reads can recover before the shell's connection retry finishes.
+  await page.getByText(/^重新连接中/).waitFor({ state: 'hidden', timeout: 20_000 })
   acknowledgeReloadConnectionLoss(consoleWatch, offlineWarningStart)
   await settleAnimations(page)
   await page.screenshot({ path: join(UI08_SHOTS, 'sidebar-recovered-online.png'), fullPage: true })

@@ -6,7 +6,6 @@ import type {
   AgentTeamMemberId,
   AgentTeamMessageRef,
   AgentTeamOperationReceipt,
-  AgentTeamReplyRequest,
   AgentTeamRequestId,
   AgentTeamStaleRevision,
   AgentTeamTask,
@@ -25,35 +24,17 @@ import type {
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
-import type { ReplyTarget } from './TeamComposer.tsx'
-import { isUncertainRemoteFailure, mergeSettledComposerUploads, mintRequestId, reconcileComposerUploads, sameComposerFiles, uploadComposerFiles, type ComposerUpload } from './requests.ts'
+import type { ReplyTarget } from './composer-sends.ts'
+import { mergeSettledComposerUploads, mintRequestId, reconcileComposerUploads, type ComposerUpload } from './requests.ts'
 import { useTimelineScroll, type TimelineScroll } from './timeline-scroll.ts'
 import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRefs, useResolvedMessageRefVersion } from './refs.ts'
 import { factKey, mergeFacts, messageFact, minSequence } from './thread-facts.ts'
 import { mentionedMemberIds } from './team-formatters.ts'
+import type { ThreadFollowerObservation } from './thread-observation.ts'
 
 // A bounded read acknowledges at most 20 unread facts and reads never self-wake a change scope,
 // so larger backlogs need continuation reads; the cap stops a feed that outpaces reading.
 const MAX_AUTO_READ_ROUNDS = 50
-
-interface ReplySendIntent {
-  readonly requestId: AgentTeamRequestId
-  readonly body: string
-  readonly taskRef?: AgentTeamTaskRef | undefined
-  readonly replyToMessageRef?: AgentTeamMessageRef | undefined
-  readonly baseRevision: number
-  readonly uploads: readonly ComposerUpload[]
-  readonly request?: AgentTeamReplyRequest | undefined
-}
-
-const matchesReplySend = (
-  intent: ReplySendIntent,
-  body: string,
-  taskRef: AgentTeamTaskRef | undefined,
-  replyToMessageRef: AgentTeamMessageRef | undefined,
-  files: readonly File[],
-): boolean => intent.body === body && intent.taskRef === taskRef
-  && intent.replyToMessageRef === replyToMessageRef && sameComposerFiles(intent.uploads, files)
 
 export interface TeamThreadControllerOptions {
   readonly workspaceId: WorkspaceId
@@ -80,16 +61,24 @@ export interface TeamThreadControllerOptions {
   readonly openingTarget?: ((facts: readonly AgentTeamThreadReadFact[]) => AgentTeamMessageRef | undefined) | undefined
 }
 
-/** One durable Thread write, run under the surface's shared busy gate with a requestId that a retry replays. */
-export interface ThreadWrite<TCommitted extends { readonly kind: 'committed' }> {
-  /** Cache key for the requestId; one in-flight write per key at a time. */
-  readonly key: string
-  readonly write: (requestId: AgentTeamRequestId) => Promise<RemoteResult<TCommitted | AgentTeamUnreadRequired | AgentTeamStaleRevision>>
-  readonly onCommitted: (committed: TCommitted) => void | Promise<void>
+type TaskWriteAction = 'promote' | 'task:accept' | 'task:close' | 'task:reopen'
+type ThreadWriteAction = 'reply' | TaskWriteAction
+
+interface ThreadOpening {
+  readonly threadRef: AgentTeamThreadRef
+  readRequestId: AgentTeamRequestId
+}
+
+/** One durable Task write, with a requestId that an uncertain retry replays. */
+interface ThreadWrite {
+  readonly key: TaskWriteAction
+  readonly write: (requestId: AgentTeamRequestId) => Promise<RemoteResult<CommittedTaskWrite | AgentTeamUnreadRequired | AgentTeamStaleRevision>>
+  readonly onCommitted: (committed: CommittedTaskWrite) => void | Promise<void>
 }
 
 /** The fields every committed Task write carries, so one merge serves promote, accept, close, reopen, and transfer. */
 export interface CommittedTaskWrite {
+  readonly kind: 'committed'
   readonly receipt: AgentTeamOperationReceipt
   readonly activity: AgentTeamTaskActivity
   readonly task: AgentTeamTask
@@ -108,12 +97,13 @@ export interface TeamThreadController {
   readonly taskCards: readonly AgentTeamThreadTaskCard[]
   /** How each Worker run these facts name stands, merged across every read and page, so a window never decides a run's state. */
   readonly workerStates: ReadonlyMap<AgentTeamWorkerRef, AgentTeamWorkerStateView>
-  readonly followerIds: ReadonlySet<AgentTeamMemberId>
+  readonly followerObservation: ThreadFollowerObservation
   readonly historyHasMore: boolean
   readonly loading: boolean
   readonly error: string | undefined
-  /** The surface's shared busy gate: a reply send and every Task write hold it. */
+  /** A reply or Task write is in flight for this Thread. */
   readonly pending: boolean
+  readonly pendingAction: ThreadWriteAction | undefined
   readonly autoReadExhausted: boolean
   readonly newFactsCount: number
   readonly replyTarget: AgentTeamMessageRef | undefined
@@ -128,16 +118,17 @@ export interface TeamThreadController {
   readonly refreshAfterFence: () => Promise<void>
   readonly refreshPassiveFacts: () => Promise<void>
   readonly retryAutoRead: () => void
+  /** Rejects every follower read already issued in this opening, refreshes the set, and returns the next accepted sequence. */
+  readonly invalidateFollowerReads: () => number
   readonly onTimelineScroll: () => void
   readonly jumpToNewest: () => void
   readonly flashMessage: (messageRef: AgentTeamMessageRef) => void
   readonly setReplyTarget: (messageRef: AgentTeamMessageRef | undefined) => void
   readonly setPendingFiles: (files: readonly File[]) => void
-  readonly clearSendState: () => void
   readonly reportError: (message: string) => void
   readonly sendReply: () => Promise<void>
   /** Runs one durable write and converges on the Host's answer for either fence. */
-  readonly commit: <TCommitted extends { readonly kind: 'committed' }>(spec: ThreadWrite<TCommitted>) => Promise<void>
+  readonly commit: (spec: ThreadWrite) => Promise<void>
   /** Merges one committed Task write's projection and activity row, then re-reads the Thread. */
   readonly applyTaskCommit: (committed: CommittedTaskWrite) => Promise<void>
 }
@@ -169,7 +160,10 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   const [autoReadExhausted, setAutoReadExhausted] = useState(false)
   const [newFactsCount, setNewFactsCount] = useState(0)
   // Current Thread followers; the composer ranks them first because they are already in the conversation.
-  const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
+  const [followerObservation, setFollowerObservation] = useState<ThreadFollowerObservation>(() => ({ ids: new Set(), sequence: 0 }))
+  const followerReadSequenceRef = useRef(0)
+  const followerReadFloorRef = useRef(0)
+  const followerAppliedSequenceRef = useRef(0)
   // The draft cache outlives this page across view switches; the composer owns the subscription so typing never re-renders the timeline.
   const draftKey: TeamDraftKey = `thread:${threadRef}`
   const [replyTarget, setReplyTargetState] = useState<AgentTeamMessageRef>()
@@ -180,28 +174,32 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   // The target whose opening pulse has already started; released with the pulse. This effect also re-runs while the
   // timeline settles, and a state write on each of those commits would keep re-centring a reader who has already arrived.
   const pulsedRef = useRef<AgentTeamMessageRef>()
-  const [pending, setPending] = useState(false)
+  const [pendingAction, setPendingAction] = useState<ThreadWriteAction>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [pendingFiles, setPendingFiles] = useState<readonly File[]>([])
-  const mountedRef = useRef(false)
+  const activeGenerationRef = useRef<ThreadOpening>()
   const currentFactsRef = useRef<readonly AgentTeamThreadFact[]>([])
   const sequenceRef = useRef(0)
-  const readRequestIdRef = useRef<AgentTeamRequestId>(mintRequestId())
   const projectionRef = useRef<AgentTeamThreadReadResult>()
-  const mutationRequests = useRef(new Map<string, AgentTeamRequestId>())
-  const sending = useRef(false)
-  const replySendIntent = useRef<ReplySendIntent>()
+  const mutationRequests = useRef(new Map<TaskWriteAction, AgentTeamRequestId>())
+  const writes = useRef(new Map<AgentTeamThreadRef, ThreadWriteAction>())
   const uploads = useRef<readonly ComposerUpload[]>([])
+  const isCurrentOpen = (generation: ThreadOpening): boolean => activeGenerationRef.current === generation
   const setReplyTarget = useCallback((next: AgentTeamMessageRef | undefined): void => {
-    replySendIntent.current = undefined
+    drafts.replies.changeSelection(draftKey)
     setReplyTargetState(next)
-  }, [])
+  }, [drafts, draftKey])
   const changePendingFiles = useCallback((files: readonly File[]): void => {
     uploads.current = reconcileComposerUploads(files, uploads.current)
-    replySendIntent.current = undefined
+    drafts.replies.changeSelection(draftKey)
     setPendingFiles(files)
-  }, [])
+  }, [drafts, draftKey])
+  const clearReplySelection = (): void => {
+    uploads.current = []
+    setReplyTargetState(undefined)
+    setPendingFiles([])
+  }
   const threadLastFact = currentFacts[currentFacts.length - 1]
   const timeline = useTimelineScroll(`${currentFacts.length}:${olderFacts.length}:${threadLastFact === undefined ? '' : factKey(threadLastFact)}`)
   // The hook returns a fresh object per render, but this callback is stable: the
@@ -232,13 +230,16 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   // Each round mints a fresh requestId (the Host replays a repeated id from its idempotency cache). Terminates on a zero
   // remainder, a failed read, a superseding sequence, or the round cap.
   const drainUnread = async (): Promise<void> => {
+    const generation = activeGenerationRef.current
+    if (generation === undefined) return
     for (let round = 1; round <= MAX_AUTO_READ_ROUNDS; round += 1) {
+      if (!isCurrentOpen(generation)) return
       const snapshot = projectionRef.current
       if (snapshot === undefined || snapshot.remainingUnreadCount <= 0) return
       const beforeSequence = sequenceRef.current
       if (!await readCurrent(true)) return
       // A newer read or remount owns the tail now; it drains the remainder.
-      if (!mountedRef.current || sequenceRef.current !== beforeSequence + 1) return
+      if (!isCurrentOpen(generation) || sequenceRef.current !== beforeSequence + 1) return
       // A stalled remainder (Host fault) must not spin the loop.
       if (projectionRef.current?.remainingUnreadCount === snapshot.remainingUnreadCount) return
     }
@@ -246,31 +247,34 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   }
 
   const readCurrent = async (newRequest = false): Promise<boolean> => {
-    if (!mountedRef.current) return false
-    if (newRequest) readRequestIdRef.current = mintRequestId()
+    const generation = activeGenerationRef.current
+    if (generation === undefined) return false
+    if (newRequest) generation.readRequestId = mintRequestId()
     const sequence = sequenceRef.current + 1
     sequenceRef.current = sequence
     setLoading(true)
     try {
-      const result = await readThread({ requestId: readRequestIdRef.current, workspaceId, ...request })
-      if (!mountedRef.current || sequence !== sequenceRef.current) return false
+      const result = await readThread({ requestId: generation.readRequestId, workspaceId, ...request })
+      if (!isCurrentOpen(generation) || sequence !== sequenceRef.current) return false
       if (!result.ok) { setError(result.error.message); return false }
       updateProjection(result.value)
       setError(undefined)
       options.onRead?.()
       return true
     } catch (cause) {
-      if (mountedRef.current && sequence === sequenceRef.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (isCurrentOpen(generation) && sequence === sequenceRef.current) setError(cause instanceof Error ? cause.message : String(cause))
       return false
     } finally {
-      if (mountedRef.current && sequence === sequenceRef.current) setLoading(false)
+      if (isCurrentOpen(generation) && sequence === sequenceRef.current) setLoading(false)
     }
   }
 
   const refreshPassiveFacts = async (): Promise<void> => {
+    const generation = activeGenerationRef.current
+    if (generation === undefined) return
     try {
       const result = await loadThreadHistory({ workspaceId, ...request, limit: 100 })
-      if (!mountedRef.current || !result.ok) return
+      if (!isCurrentOpen(generation) || !result.ok) return
       setTaskCards(result.value.taskCards ?? [])
       const incoming = result.value.facts
       const shown = currentFactsRef.current
@@ -300,22 +304,62 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
     }
   }
 
+  const applyFollowerObservation = useCallback((generation: ThreadOpening, sequence: number, followers: readonly AgentTeamMemberId[]): void => {
+    if (activeGenerationRef.current !== generation || sequence < followerReadFloorRef.current || sequence <= followerAppliedSequenceRef.current) return
+    followerAppliedSequenceRef.current = sequence
+    setFollowerObservation({ ids: new Set(followers), sequence })
+  }, [])
+
   // Follower ranking is an enhancement, not a page fact: a failed observation
   // read leaves the roster order in place instead of surfacing an error.
-  const refreshFollowers = async (): Promise<void> => {
+  const refreshFollowers = useCallback(async (): Promise<void> => {
+    const generation = activeGenerationRef.current
+    if (generation === undefined) return
+    const sequence = ++followerReadSequenceRef.current
     try {
       const result = await threadObservations({ workspaceId, ...request })
-      if (!mountedRef.current || !result.ok) return
-      setFollowerIds(new Set(result.value.followers))
+      if (result.ok) applyFollowerObservation(generation, sequence, result.value.followers)
     } catch {
     }
-  }
+  }, [applyFollowerObservation, threadObservations, workspaceId, threadRef, taskRef])
+
+  const invalidateFollowerReads = useCallback((): number => {
+    followerReadFloorRef.current = Math.max(followerReadFloorRef.current, followerReadSequenceRef.current + 1)
+    void refreshFollowers()
+    return followerReadFloorRef.current
+  }, [refreshFollowers])
+
+  // Returning to the same Thread must not revive a response from its earlier opening.
+  useLayoutEffect(() => {
+    const generation = { threadRef, readRequestId: mintRequestId() }
+    activeGenerationRef.current = generation
+    followerReadSequenceRef.current = 0
+    followerReadFloorRef.current = 0
+    followerAppliedSequenceRef.current = 0
+    projectionRef.current = undefined
+    mutationRequests.current.clear()
+    const replyDraft = drafts.replies.restore(draftKey)
+    uploads.current = replyDraft?.uploads ?? []
+    setPendingAction(writes.current.get(threadRef))
+    setReplyTargetState(replyDraft?.address.replyToMessageRef)
+    setPendingFiles(uploads.current.map(upload => upload.file))
+    setFlashedMessage(undefined)
+    void replyDraft?.pending?.then(settled => {
+      if (isCurrentOpen(generation) && settled.kind === 'answered' && settled.clearedDraft && drafts.getSnapshot(draftKey).draft === '') {
+        clearReplySelection()
+      }
+    })
+    return () => {
+      if (activeGenerationRef.current !== generation) return
+      activeGenerationRef.current = undefined
+    }
+  }, [workspaceId, taskRef, threadRef, drafts, draftKey])
 
   useEffect(() => {
-    mountedRef.current = true
-    projectionRef.current = undefined
+    const generation = activeGenerationRef.current
+    if (generation === undefined) return
     setProjection(undefined)
-    setFollowerIds(new Set())
+    setFollowerObservation({ ids: new Set(), sequence: 0 })
     setCurrentFacts([])
     setTaskCards([])
     currentFactsRef.current = []
@@ -331,14 +375,15 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
     setError(undefined)
     const sequence = sequenceRef.current + 1
     sequenceRef.current = sequence
+    const followerSequence = ++followerReadSequenceRef.current
     setLoading(true)
     void (async () => {
       const [read, history, observations] = await Promise.all([
-        readThread({ requestId: readRequestIdRef.current, workspaceId, ...request }),
+        readThread({ requestId: generation.readRequestId, workspaceId, ...request }),
         loadThreadHistory({ workspaceId, ...request, limit: 20 }).catch(() => undefined),
         threadObservations({ workspaceId, ...request }).catch(() => undefined),
       ])
-      if (!mountedRef.current || sequence !== sequenceRef.current) return
+      if (!isCurrentOpen(generation) || sequence !== sequenceRef.current) return
       if (history !== undefined && history.ok) setTaskCards(history.value.taskCards ?? [])
       if (!read.ok) {
         setError(read.error.message)
@@ -364,21 +409,20 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
         // A rejected or refused history read must not take the only way back to older facts with it: pressing the affordance pages under its own error surface.
         setHistoryHasMore(true)
       }
-      if (observations !== undefined && observations.ok) setFollowerIds(new Set(observations.value.followers))
+      if (observations !== undefined && observations.ok) applyFollowerObservation(generation, followerSequence, observations.value.followers)
       setError(undefined)
       setLoading(false)
       await drainUnread()
     })()
     const disposers = [
       subscribeChanges({ kind: 'thread', threadRef }, update => {
-        if (!mountedRef.current) return
+        if (!isCurrentOpen(generation)) return
         if (update.type === 'failed') { setError(update.message); return }
         void refreshPassiveFacts()
         void refreshFollowers()
       }),
     ]
     return () => {
-      mountedRef.current = false
       sequenceRef.current += 1
       for (const dispose of disposers) dispose()
     }
@@ -390,13 +434,15 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   }, [newFactsCount, currentFacts, olderFacts, timeline])
 
   const loadOlder = async (): Promise<void> => {
+    const generation = activeGenerationRef.current
+    if (generation === undefined) return
     if (historyHasMore === false && historyCursor === undefined) return
     const beforeSequence = historyCursor ?? minSequence(currentFactsRef.current)
     if (beforeSequence === undefined) return
     setLoading(true)
     try {
       const result = await loadThreadHistory({ workspaceId, ...request, beforeSequence, limit: 20 })
-      if (!mountedRef.current) return
+      if (!isCurrentOpen(generation)) return
       if (!result.ok) { setError(result.error.message); return }
       setOlderFacts(current => mergeFacts(current, result.value.facts))
       mergeWorkerStates(result.value.workerStates)
@@ -404,9 +450,9 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
       setHistoryHasMore(result.value.hasMore)
       setError(undefined)
     } catch (cause) {
-      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (isCurrentOpen(generation)) setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      if (mountedRef.current) setLoading(false)
+      if (isCurrentOpen(generation)) setLoading(false)
     }
   }
 
@@ -453,19 +499,39 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   }, [replyTarget, messageRefVersion, options.memberName, t])
 
   const refreshAfterFence = async (): Promise<void> => {
+    const generation = activeGenerationRef.current
+    if (generation === undefined) return
     timeline.scrollToBottom()
     await readCurrent(true)
+    if (!isCurrentOpen(generation)) return
     await options.afterWrite?.()
-    await drainUnread()
+    if (isCurrentOpen(generation)) await drainUnread()
   }
 
-  const commit = async <TCommitted extends { readonly kind: 'committed' }>(spec: ThreadWrite<TCommitted>): Promise<void> => {
-    setPending(true)
+  // A write that left the screen may still commit. Keep its own Thread busy until the receipt,
+  // without holding another discussion or letting a second opening send the same draft again.
+  const beginWrite = (action: ThreadWriteAction) => {
+    const generation = activeGenerationRef.current
+    if (generation?.threadRef !== threadRef || writes.current.has(threadRef)) return undefined
+    writes.current.set(threadRef, action)
+    setPendingAction(action)
     setError(undefined)
+    return generation
+  }
+
+  const endWrite = (): void => {
+    writes.current.delete(threadRef)
+    if (activeGenerationRef.current?.threadRef === threadRef) setPendingAction(undefined)
+  }
+
+  const commit = async (spec: ThreadWrite): Promise<void> => {
+    const generation = beginWrite(spec.key)
+    if (generation === undefined) return
     const requestId = mutationRequests.current.get(spec.key) ?? mintRequestId()
     mutationRequests.current.set(spec.key, requestId)
     try {
       const result = await spec.write(requestId)
+      if (!isCurrentOpen(generation)) return
       if (!result.ok) { setError(result.error.message); return }
       if (result.value.kind === 'committed') {
         mutationRequests.current.delete(spec.key)
@@ -480,13 +546,15 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
         await refreshPassiveFacts()
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      if (isCurrentOpen(generation)) setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      setPending(false)
+      endWrite()
     }
   }
 
   const applyTaskCommit = async (committed: CommittedTaskWrite): Promise<void> => {
+    const generation = activeGenerationRef.current
+    if (generation === undefined) return
     setProjection(current => current === undefined ? current
       : { ...current, task: committed.task, thread: committed.thread, ...(committed.claims === undefined ? {} : { claims: committed.claims }) })
     // The Host's own activity row, merged exactly as an accept or close merges its own.
@@ -496,70 +564,32 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
       return merged
     })
     await readCurrent(true)
-    await options.afterWrite?.()
+    if (isCurrentOpen(generation)) await options.afterWrite?.()
   }
-
-  // Every setter returns the same state when there is nothing to clear, so a keystroke does not re-render the timeline.
-  // Editing invalidates the retained requestId.
-  const clearSendState = useCallback((): void => {
-    replySendIntent.current = undefined
-  }, [])
 
   const sendReply = async (): Promise<void> => {
     // Read at send time: neither face subscribes to the draft.
     const { draft } = drafts.getSnapshot(draftKey)
     const activeProjection = projectionRef.current
-    if (sending.current || pending || activeProjection === undefined || draft.trim() === '') return
-    sending.current = true
-    const thread = activeProjection.thread
-    const task = activeProjection.task
-    const body = draft.trim()
-    const currentUploads = reconcileComposerUploads(pendingFiles, uploads.current)
-    uploads.current = currentUploads
-    let intent = replySendIntent.current
-    if (intent === undefined || !matchesReplySend(intent, body, task?.taskRef, replyTarget, pendingFiles)) {
-      intent = {
-        requestId: mintRequestId(), body, ...(task === undefined ? {} : { taskRef: task.taskRef }),
-        ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), baseRevision: thread.revision, uploads: currentUploads,
-      }
-      replySendIntent.current = intent
-    }
-    setPending(true)
-    setError(undefined)
+    if (activeProjection === undefined || draft.trim() === '') return
+    const generation = beginWrite('reply')
+    if (generation === undefined) return
     try {
-      const upload = await uploadComposerFiles(putAttachment, workspaceId, intent.uploads)
-      const stillCurrent = replySendIntent.current?.requestId === intent.requestId
-      uploads.current = stillCurrent ? upload.uploads : mergeSettledComposerUploads(uploads.current, upload.uploads)
-      if (!stillCurrent) return
-      intent = { ...intent, uploads: upload.uploads }
-      replySendIntent.current = intent
-      if (!upload.ok) {
-        setError(upload.error)
-        return
-      }
-      const request = intent.request ?? {
-        requestId: intent.requestId, workspaceId, threadRef,
-        ...(intent.taskRef === undefined ? {} : { taskRef: intent.taskRef }),
-        ...(intent.replyToMessageRef === undefined ? {} : { replyToMessageRef: intent.replyToMessageRef }),
-        body: intent.body, baseRevision: intent.baseRevision,
-        ...(upload.attachmentIds.length === 0 ? {} : { attachments: upload.attachmentIds }),
-      }
-      replySendIntent.current = { ...intent, request }
-      const result = await reply(request)
-      const ownsIntent = replySendIntent.current?.requestId === intent.requestId
-      if (!result.ok) {
-        if (ownsIntent) {
-          if (!isUncertainRemoteFailure(result.error)) replySendIntent.current = undefined
-          setError(result.error.message)
-        }
-        return
-      }
+      const task = activeProjection.task
+      uploads.current = reconcileComposerUploads(pendingFiles, uploads.current)
+      const settled = await drafts.replies.send(draftKey, {
+        workspaceId, threadRef, body: draft.trim(), baseRevision: activeProjection.thread.revision,
+        ...(task === undefined ? {} : { taskRef: task.taskRef }),
+        ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }),
+      }, uploads.current, { submit: reply, putAttachment })
+      if (!isCurrentOpen(generation)) return
+      uploads.current = mergeSettledComposerUploads(uploads.current, settled.uploads)
+      if (settled.kind === 'superseded') return
+      if (settled.kind === 'failed') { setError(settled.error); return }
+      const { result } = settled
+      if (!result.ok) { setError(result.error.message); return }
       if (result.value.kind === 'committed') {
-        if (ownsIntent) {
-          replySendIntent.current = undefined
-          uploads.current = []
-        }
-        const committed = result.value as Extract<typeof result.value, { kind: 'committed' }>
+        const committed = result.value
         // Hand-typed `@Handle` delivers directly; committed facts replace this row on arrival.
         const optimisticMentions = mentionedMemberIds(draft, options.projectMembers())
         setCurrentFacts(current => {
@@ -570,37 +600,26 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
         setProjection(current => current === undefined || committed.thread.revision < current.thread.revision
           ? current
           : { ...current, ...(committed.task === undefined ? {} : { task: committed.task }), thread: committed.thread })
-        if (ownsIntent) {
-          drafts.clear(draftKey)
-          setReplyTarget(undefined)
-          setPendingFiles([])
-        }
+        if (settled.clearedDraft && drafts.getSnapshot(draftKey).draft === '') clearReplySelection()
         await options.afterWrite?.()
       } else if (result.value.kind === 'unread_required') {
-        if (ownsIntent) {
-          setError(t('unreadRequired', { count: result.value.unreadCount }))
-          replySendIntent.current = undefined
-        }
+        setError(t('unreadRequired', { count: result.value.unreadCount }))
         await refreshAfterFence()
       } else if (result.value.kind === 'stale_revision') {
-        if (ownsIntent) {
-          setError(t('staleRevision'))
-          replySendIntent.current = undefined
-        }
+        setError(t('staleRevision'))
         await refreshPassiveFacts()
       }
     } catch (cause) {
-      if (replySendIntent.current?.requestId === intent.requestId) setError(cause instanceof Error ? cause.message : String(cause))
+      if (isCurrentOpen(generation)) setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      sending.current = false
-      setPending(false)
+      endWrite()
     }
   }
 
-  const retryAutoRead = useCallback((): void => {
+  const retryAutoRead = (): void => {
     setAutoReadExhausted(false)
     void drainUnread()
-  }, [])
+  }
 
   // The hint must go away the moment the reader is back within the follow margin, even when no render follows the position change.
   const onTimelineScroll = useCallback((): void => {
@@ -622,11 +641,12 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
     olderFacts,
     taskCards,
     workerStates,
-    followerIds,
+    followerObservation,
     historyHasMore,
     loading,
     error,
-    pending,
+    pending: pendingAction !== undefined,
+    pendingAction,
     autoReadExhausted,
     newFactsCount,
     replyTarget,
@@ -640,12 +660,12 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
     refreshAfterFence,
     refreshPassiveFacts,
     retryAutoRead,
+    invalidateFollowerReads,
     onTimelineScroll,
     jumpToNewest,
     flashMessage: setFlashedMessage,
     setReplyTarget,
     setPendingFiles: changePendingFiles,
-    clearSendState,
     reportError: setError,
     sendReply,
     commit,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
@@ -17,6 +17,7 @@ import type {
   AgentTeamTransferTaskResult,
 } from '@contexera/dsh-agent-team/types'
 import { mintRequestId } from './requests.ts'
+import type { ThreadFollowerObservation } from './thread-observation.ts'
 
 /**
  * One Human Attention write. The Remote method is shared with the Project Main-stream control, so its answer is the
@@ -37,6 +38,21 @@ export type AttentionObservation = (request: AgentTeamThreadObservationsRequest)
 function followsIn(followers: readonly AgentTeamMemberId[] | ReadonlySet<AgentTeamMemberId>, humanMemberId: AgentTeamMemberId | undefined): boolean | undefined {
   if (humanMemberId === undefined) return undefined
   return (followers instanceof Set ? followers : new Set(followers)).has(humanMemberId)
+}
+
+interface ThreadFollowRequest {
+  readonly workspaceId: WorkspaceId
+  readonly threadRef?: AgentTeamThreadRef
+  readonly taskRef?: AgentTeamTaskRef
+}
+
+interface FollowOpening {
+  readonly key: string
+  latestRead: number
+}
+
+function requestKeyOf(request: ThreadFollowRequest): string {
+  return `${request.workspaceId}|thread:${request.threadRef ?? ''}|task:${request.taskRef ?? ''}`
 }
 
 export interface ThreadFollowState {
@@ -64,71 +80,95 @@ export interface ThreadFollowState {
 export function useThreadFollow(
   changeAttention: AttentionWrite,
   threadObservations: AttentionObservation,
-  request: { readonly workspaceId: WorkspaceId; readonly threadRef?: AgentTeamThreadRef; readonly taskRef?: AgentTeamTaskRef },
+  request: ThreadFollowRequest,
   /** The observation a face has already read on mount, so the control starts from the answer that read landed instead of asking again. */
-  observed?: ReadonlySet<AgentTeamMemberId> | undefined,
+  observed?: ThreadFollowerObservation | undefined,
   /** The Human's own Member id, from the Host's projection; undefined keeps the standing unanswered rather than guessing one. */
   humanMemberId?: AgentTeamMemberId | undefined,
+  /** Called after a confirmed write; returns the first observation sequence that includes that write. */
+  onWriteConfirmed?: (() => number) | undefined,
 ): ThreadFollowState {
+  const currentKey = requestKeyOf(request)
   const [following, setFollowing] = useState<boolean | undefined>()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | undefined>()
+  const [observationFloor, setObservationFloor] = useState(0)
+  const inFlight = useRef(new Set<string>())
+  const activeOpen = useRef<FollowOpening>()
   // The requestId a lost answer retries with, keyed by action and Thread: the Host answers a repeated
   // id from its idempotency cache, so a retry converges instead of writing twice. An id that the Host
   // has answered is dropped — the next write is a new operation, not a replay of the last one.
   const requestIds = useRef(new Map<string, AgentTeamRequestId>())
-  const mounted = useRef(true)
-  useEffect(() => () => { mounted.current = false }, [])
 
-  // The observation is the display authority. Reading it again after every write is what makes a follow or
-  // unfollow visible on the other face too, without either face keeping its own copy of the standing.
-  const refresh = useCallback(async (): Promise<void> => {
+  // Each visit has its own identity, so A → B → A cannot revive an answer from the first A.
+  useLayoutEffect(() => {
+    const open: FollowOpening = { key: currentKey, latestRead: 0 }
+    activeOpen.current = open
+    setFollowing(undefined)
+    setError(undefined)
+    setObservationFloor(0)
+    setPending(inFlight.current.has(currentKey))
+    return () => {
+      if (activeOpen.current === open) activeOpen.current = undefined
+    }
+  }, [currentKey])
+
+  const refresh = useCallback(async (open: FollowOpening, target: ThreadFollowRequest): Promise<void> => {
+    // The read after a write supersedes any unfinished observation from before that write.
+    const read = ++open.latestRead
     try {
-      const result = await threadObservations({ workspaceId: request.workspaceId, ...(request.threadRef === undefined ? {} : { threadRef: request.threadRef }), ...(request.taskRef === undefined ? {} : { taskRef: request.taskRef }) })
-      if (!mounted.current) return
-      // The follower set is every Member's Attention, so the Human's standing is the answer to a
-      // question about the Human's own id. Until that id has been projected the standing stays
-      // unanswered: guessing an id would let another Member's Attention read as the Human's.
+      const result = await threadObservations(target)
+      if (activeOpen.current !== open || open.latestRead !== read) return
       if (result.ok) setFollowing(followsIn(result.value.followers, humanMemberId))
     } catch {
       // A failed observation leaves the previous standing in place; the write itself reports its own failure.
     }
-  }, [threadObservations, request.workspaceId, request.threadRef, request.taskRef, humanMemberId])
+  }, [threadObservations, humanMemberId])
 
   // A face that hands its own observation in takes each answer as the standing; a face with
   // none asks for one. Either way the control paints what the Host last answered.
   useEffect(() => {
-    if (observed === undefined) { void refresh(); return }
-    setFollowing(followsIn(observed, humanMemberId))
-  }, [observed, refresh, humanMemberId])
+    const open = activeOpen.current
+    if (open?.key !== currentKey) return
+    if (observed === undefined) { void refresh(open, request); return }
+    if (observed.sequence < observationFloor) return
+    setFollowing(followsIn(observed.ids, humanMemberId))
+  }, [observed, observationFloor, refresh, humanMemberId, currentKey, request.workspaceId, request.threadRef, request.taskRef])
 
   const toggle = useCallback(async (action: 'follow' | 'unfollow'): Promise<void> => {
-    if (pending) return
+    const open = activeOpen.current
+    if (open?.key !== currentKey || inFlight.current.has(currentKey)) return
+    inFlight.current.add(currentKey)
     setPending(true)
     setError(undefined)
-    const key = `${action}:${request.threadRef ?? request.taskRef ?? ''}`
-    const requestId = requestIds.current.get(key) ?? mintRequestId()
-    requestIds.current.set(key, requestId)
+    const operationKey = `${action}|${currentKey}`
+    const requestId = requestIds.current.get(operationKey) ?? mintRequestId()
+    requestIds.current.set(operationKey, requestId)
     try {
-      const result = await changeAttention({ requestId, workspaceId: request.workspaceId, ...(request.threadRef === undefined ? {} : { threadRef: request.threadRef }), ...(request.taskRef === undefined ? {} : { taskRef: request.taskRef }), action })
-      if (!mounted.current) return
-      if (!result.ok) { setError(result.error.message); requestIds.current.delete(key); return }
-      // The Host answered, so this id has played its part: keeping it would make the next write on
-      // this action replay the old one instead of committing a new change of standing.
-      requestIds.current.delete(key)
-      // The result carries the durable Attention row, present after a follow and absent after an
-      // unfollow. The re-read that follows re-projects the whole follower set, which is what the
-      // other face of the Thread reads too — so both faces agree without either keeping a copy.
-      setFollowing(result.value.attention !== undefined)
-      await refresh()
+      const result = await changeAttention({ ...request, requestId, action })
+      requestIds.current.delete(operationKey)
+      if (!result.ok) {
+        if (activeOpen.current === open) setError(result.error.message)
+        return
+      }
+      const current = activeOpen.current
+      if (current === open) {
+        setFollowing(result.value.attention !== undefined)
+        if (onWriteConfirmed !== undefined) {
+          const floor = onWriteConfirmed()
+          setObservationFloor(currentFloor => Math.max(currentFloor, floor))
+        }
+      }
+      if (current?.key === currentKey) await refresh(current, request)
     } catch (cause) {
       // The answer never arrived, so the id stays cached: a retry reuses it and converges on the
       // Host's own record of the write instead of issuing a second one.
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (activeOpen.current === open) setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      if (mounted.current) setPending(false)
+      inFlight.current.delete(currentKey)
+      if (activeOpen.current?.key === currentKey) setPending(false)
     }
-  }, [pending, changeAttention, refresh, request.workspaceId, request.threadRef, request.taskRef])
+  }, [currentKey, changeAttention, refresh, request.workspaceId, request.threadRef, request.taskRef, onWriteConfirmed])
 
   return { following, pending, error, toggle }
 }

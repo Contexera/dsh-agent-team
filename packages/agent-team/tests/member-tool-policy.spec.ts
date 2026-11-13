@@ -278,8 +278,10 @@ describe('Agent Team member tool policy', () => {
       signal: new AbortController().signal, agent, name: 'team_worker', callId: ToolCallId('t21-worker-execute'),
       arguments: { task: 'check the live tool policy', projectRef: 'project:missing', threadRef: 'thread:missing' },
     })
-    expect(JSON.stringify(attempted)).not.toContain('not declared for this Team Member')
-    expect(JSON.stringify(attempted)).toContain('not a Thread in this Team')
+    expect(attempted).toMatchObject({ isError: true, error: {
+      message: expect.stringContaining('not a Thread in this Team'),
+      info: { name: 'WorkerRefusal', code: 'worker_thread_unknown' },
+    } })
 
     // Off again: withdrawn, and the rest of the Team surface stays.
     setWorkerSwitch(ctx, false)
@@ -331,8 +333,8 @@ describe('Agent Team member tool policy', () => {
     // globally instead, so a scoped registration like this one is the reachable case.
     const lateAssembly = await agent.ctx.systemPrompt.assemble({ scope: agent })
     const lateGuidance = lateAssembly.sections.find(section => section.name === TOOL_AVAILABILITY_SECTION)?.text ?? ''
-    expect(lateGuidance).toContain('`foreign_late`')
-    expect(lateGuidance).toContain('Do not invoke them while they are ungranted')
+    expect(lateGuidance).toContain('"foreign_late"')
+    expect(lateGuidance).toContain('Do not invoke them.')
     expect(lateGuidance).toContain('Schema visibility is not execution permission')
     expect(body).not.toHaveBeenCalled()
     const ordinary = await ctx.agents.create({ sessionId: SessionId('t17-ordinary') })
@@ -360,6 +362,10 @@ describe('Agent Team member tool policy', () => {
     })
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result)).toMatch(/replaced.*ordinary_tool/)
+    const assembly = await agent.ctx.systemPrompt.assemble({ scope: agent })
+    const guidance = assembly.sections.find(section => section.name === TOOL_AVAILABILITY_SECTION)?.text ?? ''
+    expect(guidance).toContain('"ordinary_tool"')
+    expect(guidance).toContain('Team does not admit')
     expect(body).not.toHaveBeenCalled()
   })
 

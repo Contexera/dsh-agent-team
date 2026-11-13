@@ -53,6 +53,8 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 
 唤醒不是第二权威，也不承诺恰好一次被模型处理。一次投递失败会清掉它记录的 notice 状态，于是下一条触及该 Member 的提交会重新派生同样持久事实并重试，不会追加第二次通知。
 
+恢复指令排队时记录当时的 Inbox 覆盖。之后到达的事实、整体省略的 Thread 和正文未包含的 Member reminder occurrence 仍待投递。
+
 `recoverMember` 是人工入口，按顺序且只选一个：
 
 | 条件 | 动作 | 适用场景 |
@@ -131,7 +133,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - 模型编辑的落账与回报和其他编辑一样，但新路由是否生效由上游决定：切换后新窗口在压缩之后仍装不下当前 Session 时会被拒绝并保留原路由，pending 选择就等到换回兼容模型为止，而记录在案意图两种情况下都在。
 - composer 是另一个入口，且不靠选择事件落账。真正证明切换越过了 Host 的压缩检查、进入一次真实请求的是 Member Session 的 `request/header`，所以 Host 以 `header.config` 的路由写一条 Human 的 `team/member-updated`。只写路由：推理档位是 Session 日志里的事实，activation 对同一条路由重新读取。
 - 有三种请求什么都不写。一种是请求的路由与 Member 当前正在跑的路由一致，包括 Team 自己在 activation 时写回的那条，于是写回不会经账本自循环。另一种是被 Host 拒绝的切换：它根本不会记下 header，因此也从不写入。第三种是 Member 已经走过的 header：该 step 固定路由之后发生的选择更新，写回这条 header 的路由会把被替换掉的那条按回去。
-- 名册每行恒带 `capabilityState`（`applied` | `pending`），由运行时实际已应用的效果派生；没有活面的状态字面报 `pending`。该字段与 `availability`/`presence` 正交：后两者回答 Member 会不会跑，它回答存储配置此刻生效没有。
+- 名册每行的 `capabilityState`（`applied` | `pending`）比较该 Member 存储的 `capabilities` 与运行时已应用的配置；没有运行时的 Member 报 `pending`。它与 `availability`、`presence` 分开，也不表示某个回合的 profile `extraToolGrants` 是否生效。
 - Skills 是 Member 私有的。preset 不带共享 skill-filesystem row。Host 在每个 Member 的 agent exact scope layer 上注册一个 filesystem provider。它是 traceable-service 接缝，与 tool restriction 同构。这个 provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<memberId>/skills/`。
 
   Member catalog 从内置集起始，内置集里有 `member-skill-manager` meta skill。全部 skill 写作/安装/credentials 引导都在这个 meta skill 里面。persona 只陈述私有空间物理事实。安装就是往 Member 自己的目录写。目录形态为 `skills/<name>/SKILL.md` 加可选 references/scripts，或平铺 `.md`。有意不提供上传 Remote，发现由 filesystem watcher 驱动。
@@ -153,7 +155,9 @@ preset 行必须在执行时解析 `ctx.agentTeam`，不能在声明期静态捕
 
 每个订阅的定时器都由 Host 拥有。`SubscriptionScheduler`（`packages/agent-team/src/subscription-runtime.ts`）全局最多放行 4 个脚本运行——owner 手动触发的试运行也占其中一格——同一订阅的定时条目在等待队列中只保留一个并合并之后的到期时刻，同一订阅也不会同时跑两次，统计连续失败，并按每个订阅每分钟 20 条的花费发布额度。
 
-admission 依据账本而不是排队时的快照：等待中的试运行或定时运行若遇上订阅被删除、或 Project 被归档，会被直接拒绝、脚本不执行；处于这种终态的记录不再发布，也不再保留 checkpoint。它的状态——下次到期时间、失败计数、发布窗口、最后成功时间——放在私有 domain `agent_team_subscriptions`（`packages/agent-team/src/subscription-store.ts`）里，永不进账本：删掉所有 checkpoint 不改变任何领域结果，重启从持久化的到期时刻继续，而不是重置。
+准入检查以账本为准：试运行或定时运行在排队期间遇到订阅被删除或 Project 被归档时，不执行脚本。终态不再发布，也不保留 checkpoint。准入读取失败时，调度器记日志，保留条目供后续检查；读取成功并判定拒绝时，才出队并给调用方结果。
+
+下次到期时间、失败计数、发布窗口和最后成功时间保存在 `agent_team_subscriptions`。重启从已持久化的 checkpoint 继续。删除 checkpoint 不会改写已经提交的事件，但会改变调度和失败计数。
 
 同一个 domain 还放四张没有任何账本事实依赖的表：`runs` 保留每个订阅最近 50 次运行，`deliveries` 保留自动重试用尽的 webhook 投递，`replays` 保留每个重放请求已经得到的答案，`admissions` 保留已接收但还欠一次运行、一次接受或一条可重放失败记录的 webhook 请求，连它到达时的订阅定义和队列满时暂存的批次一起。
 
@@ -213,6 +217,8 @@ token 在账本已武装的地址里解析（比对哈希，跨全部已武装�
 只有 `content-type`、`user-agent` 以及匹配 `x-*-event`、`x-*-delivery`、`x-*-signature*`、`x-*-timestamp` 的 header 会到达脚本且一律小写；`authorization`、`cookie`、`x-api-key` 与反向代理插入的 header 永远不会。
 
 入口只在那一行写完之后才答 202，因此在应答之前重启不会丢掉任何东西：队列是私有状态，下一趟补上它欠下的工作。运行从 stdin 读 `{headers, body}`，`DSH_TEAM_TRIGGER=webhook`，并把入队时分配的 id 作为 `DSH_TEAM_DELIVERY_ID`——同一条投递在多次重试和后来的重放中因此保持同一身份。
+
+关闭时，Host 停止安排新的队列检查，排空调度器，再等待在途的 webhook 队列检查，最后关闭存储。尚未处理的工作保留在持久队列中，供下一次启动继续。
 
 失败的运行保留那一行，按 1、5、30 分钟等待；第四次失败才把它变成 owner 可重放的 `deliveries` 行，而自己就超过上限的批次直接变成那一行，因为重试只会再打印同一份输出。重试成功的投递就此结束，不为它计一次失败。
 
@@ -276,7 +282,7 @@ provider 还保留引擎的原生 session 身份与工作目录，并把只读�
 
 规则版本 6 引入这两个操作。版本 7 在 started 上增加可选的续跑链接、在终态上增加可选的 native turn / input 数组；不带这些字段的版本 6 Worker 记录仍可原样重放。新字段在版本 6 的记录段内被拒绝，而只实现到版本 6 的 build 会在解析 Worker 操作之前先被版本 7 标记拒绝。
 
-绑定执行的持久状态是派生的，从不存第二份。`threadWorkerStates` 读执行记录而不是某次分页返回的事实，所以长 Thread 上每个绑定的执行都有状态，即使它的事实落在窗口之外。仍标记 `running` 而在本 Host 里没有活跃句柄的记录——运行中被替换的 Host 的签名——读作 `unconfirmed`：结果无法确认，不重跑、不自动重试。`unconfirmed` 不写 marker、不唤醒任何人，只在 Thread 上可见。
+`threadWorkerStates` 从执行记录读取状态，即使对应事实不在当前页。记录仍为 `running`、本 Host 却没有活跃执行时，读作 `unconfirmed`。Host 重启或终态尚未落账都可能出现这种情况。不会自动重跑或重试；该读时状态不写入事实，也不触发唤醒。
 
 停止只有一条事务：成员的 `team_worker` 带 `stop`，与 Human 的 `stopWorker` Remote，进入同一个 `WorkerRegistry.stop`。授权只看打开这次执行的身份——它的 `initiatedBy` 成员，或 Human——刻意不重新套用启动条件，所以 owner 变更、Task 转移或关掉开关都不会左右一次停止。事务先 abort 启动信号（发布之前唯一的取消通道），再 dispose 已发布的 activation，然后等引擎自己的证据决定那一次终态写入。`stopping` 是派生的进程内视图：账本仍只有 `running → 终态`，Thread 读取与 Human 列表在停止进行时加这个词，不为它写任何持久内容。
 
@@ -286,7 +292,7 @@ provider 还保留引擎的原生 session 身份与工作目录，并把只读�
 
 卸载是同一事务在 Host 尺度的展开，顺序是：拒绝新委派与续跑；取消所有仍在启动的执行——包括还在写 started 记录的那一个，它被封口而不是去开引擎——并最多花五秒等待这些启动、续跑准入和活动 steer 调用结束，再 dispose 已发布的。仍在读原生历史或写 opening 记录的续跑，因此要么在存储关闭前完成，要么在重查卸载屏障后不写任何东西。这段启动等待之后，steer 持久化屏障拒绝迟到的 alias 准入和结果写入。对每个终态也最多等五秒；仍未确认的封口；等挂起的终态与 steer 写入；最后才释放 provider 注册。五秒界限不会取消一个已经开始却不再回答的存储写入。被封口的执行保留 `running` 记录、不再接受任何迟到的终态，所以关闭存储不会与一次写入赛跑。
 
-Human 的入口是「编辑 Agent」弹窗，给出该成员五行以内的记录：仍在运行的执行（`running`、`stopping`）与上一个 Host 留在 `running` 的未确认记录先占座位，按结束时间排序的最近几条已结束执行补满其余——早启动、刚结束的长执行仍在这个窗口内——每条都给出 Host 确认的终态，已结束的还各带诊断入口。它的 `stopWorker` 回执是结构化事实而不是要解析的句子：`ended` 给出执行真正到达的状态与 Host 的诊断，`pending` 说明清理仍在进行，`unconfirmed` 说明本 Host 已不再持有句柄。上一个 Host 留下的执行显示为 `unconfirmed`，附说明且不给停止控件；请求本身没有完成的调用只说明这一点，绝不据此判定执行的状态。
+Human 的入口是「编辑 Agent」弹窗。运行中和未确认的记录优先，最近结束的记录按结束时间补满五行；已结束的记录带诊断入口。`stopWorker` 回执中，`ended` 给出已落账的终态与诊断，`pending` 表示正在清理或写入终态，`unconfirmed` 表示 Host 已失去活跃句柄或写入终态失败。列表中的未确认记录不提供停止控件。未拿到回执的请求不决定执行状态。
 
 ### 只读查看一次执行的诊断
 
@@ -331,12 +337,13 @@ steer 的 admission 与结果都是私有账本状态：它们不发布 Thread �
 Composer attachments 是有界 cache，不是 archive，也不是 ledger bytes。cache 目录是 `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/`，存经过清理的原始名称和 `meta.json` sidecar。
 
 - `putAttachment` 写入 immutable payload：每个文件上限 10 MB，名称中的 path separators 和 control characters 会被剥离。`getAttachment` 为 Client display 读取它们。两者和其他 Host capabilities 一样都是 typed Remote actions。
-- `requestId` 是一次 upload 的幂等键。同一 payload 的重试 replay 原结果，而不是写第二份条目。复用该 key 携带不同 payload 的调用被拒为 request collision。cache id 单独由 request id 派生，因此 Host 重启后重试仍收敛到同一条目，不需要第二个 durable store 或进程内 map。
+- `requestId` 是一次上传的幂等键。同一内容的重试返回原结果，Host 重启后也一样。复用该请求 ID 提交不同内容会被拒绝，即使两个请求同时到达。缓存 ID 只由请求 ID 派生。
 - Project 与 Thread composer 的附件入口有两个：「+」按钮选择文件，或直接向输入框粘贴。携带文件的粘贴会被拦截，并进入同一 pending-file chips 流。纯文本粘贴保持浏览器原生插入。
 - Message 在 ledger 中记录 attachment metadata（`attachmentId`、`name`、`byteSize`、`mediaType`）。存储 body 为每个 attachment 携带一行面向机器的 `[attachment] <absolute path>`，供 Member agents 通过普通 file tools 按 path 读取 bytes。Client 会从 display 中移除这些行，改为根据 metadata 渲染 thumbnails/chips。
-- Ledger 是唯一 durable attachment authority。Bytes 是 transient 的：Host startup 以及每 24h 执行一次 GC sweep。被 Message 引用且超过 72h 的 uploads（Member consumption window）会被移除。从未发送的 orphaned uploads 超过 24h 同样移除。Metadata 保留，Client 随后优雅降级为 name chip。
+- Ledger 是附件记录的唯一权威。Host 启动时及每 24 小时清理一次缓存。已被 Message 引用的附件保留 72 小时，未引用的保留 24 小时。Message 中的 metadata 保留，Client 之后仍显示文件名。上传中断留下缺失或损坏的 metadata 时，仅清理未被引用、且目录最后修改已超过 24 小时的条目。清理会跳过缓存根目录中不符合命名规则的目录和符号链接。
 - Members 通过 `team_message` 的可选 `attachments` 共享文件。`attachments` 是 absolute paths。Host 先验证每个 path：absolute、regular file、non-empty、10 MB。再以 extension-derived media type 复制到 cache 的 immutable entry。entry id 由该 message/reply request 及 path 在列表中的位置派生，因此 agent-sent images 与 composer uploads 的渲染一致。任一 rejection 都会拒绝整个 send，不提交也不复制。
-- request 派生的 identity 让重试收敛。同一 request 的 send/reply 重试复用首次尝试准备的条目，不产生 orphan。body 中每文件一行的 `[attachment]` 跨重试保持一致。准备之后才失败的 message/reply 会删除本次尝试准备、且没有 committed Message 引用的条目，ledger 的引用集是 guard。真正未被引用的 uploads 仍由 GC 回收。复用 request id 时，ledger 比较记录的 resolved attachment ids 与本次重试的 resolved ids。携带不同 attachment 集合的重试被判为 collision。
+- 同一请求重试 send/reply 会复用附件副本，正文中的 `[attachment]` 路径保持不变。共用这些副本的尝试按顺序完成提交和失败清理。发送或回复失败后，只删除没有已提交 Message 引用的副本。复用请求 ID 时，ledger 比较记录的附件 ID 与本次重试解析出的 ID；附件集合不同会被拒绝。
+- 清理程序独占该缓存条目后才查看 ledger 引用。已经超过未引用保留期、但刚被引用的附件，仍按已引用附件的期限保留。
 - 不需要为手动 path references 增加机制。粘贴到 Message body 的 absolute path 会被 Member agent 像其他文件一样读取，Host 不会触碰不属于自己的内容。
 
 ## Human profile 与版本脚注
@@ -363,6 +370,6 @@ settings 表单与运行时归一化共用 `member-tool-grants.ts` 的结构 sch
 
 脚注携带本 Host 实际运行的那份 bundle 的版本，以及 repository 链接。版本从已安装包自己的 manifest 读取，因此陈述的是 profile 真正装上的版本，而不是每次发版都得记得改的字符串。当后台检查观察到更新的已发布 release，再多一条点名这个版号的更新 tip。
 
-检查最多每 12h 询问一次公开 npm `latest` document。后台刷新使 profile 读取永不等待网络。任何失败都落为「无已知更新」。`DSH_AGENT_TEAM_UPDATE_CHECK=0` 时保持关闭。
+Host 最多每 12 小时在后台读取一次 npm 公开的 `latest` 文档。成功时替换上次结果，失败时保留上次结果。`DSH_AGENT_TEAM_UPDATE_CHECK=0` 停止发起新的检查，仍显示上次确认的结果，也不会取消已发起的检查。
 
 ledger 为 `team_view` 与 @ 匹配读取同一份 profile，一次改名同时到达每个 surface。`human` 是 Human 的永久别名，任何 agent handle 不得占用这个字面。因此 `@human` 跨改名持续送达，而 chip 始终渲染当前显示名。

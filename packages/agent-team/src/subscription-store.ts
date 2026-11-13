@@ -1,9 +1,8 @@
 /**
- * The private state a Project subscription keeps outside the ledger: the
- * scheduling checkpoint, the last fifty runs, the failed deliveries waiting for
- * an owner, and the answers already given to a replay request. Deleting every
- * row changes no domain result — the ledger's accepted and published records
- * remain the authority for what happened.
+ * The ledger owns accepted and published events. This store owns scheduling
+ * checkpoints, bounded run history, failed deliveries and replay receipts, and
+ * admitted webhook requests that still owe work. Removing these rows can lose
+ * accepted deliveries or change scheduling and recovery.
  * @module @contexera/dsh-agent-team/subscription-store
  */
 

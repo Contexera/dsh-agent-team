@@ -1722,7 +1722,9 @@ function steerReceipt(value: { readonly state: string; readonly workerRef: strin
     return [
       `The previous execution ${value.continuedFrom ?? ''} had ended, so this instruction started a new execution in the same native session.`,
       `New Worker: ${value.workerRef}`,
-      'That ref is ready for later steer, stop, and inspect calls.',
+      ...(value.runState === undefined
+        ? [`The receipt does not record the run state; inspect Worker ${value.workerRef} for its current ending.`]
+        : [`When this receipt was written, that run was ${value.runState}.`]),
       'The instruction is submitted, not confirmed read.',
     ].join('\n')
   }

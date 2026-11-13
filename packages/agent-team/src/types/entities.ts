@@ -111,7 +111,7 @@ export interface AgentTeamAgentMemberStatus {
   readonly diagnostic?: AgentTeamMemberDiagnostic
   /** Activation-scoped capability warnings; empty while capabilities resolve cleanly. */
   readonly capabilityWarnings?: readonly AgentTeamCapabilityWarning[] | undefined
-  /** Whether the live runtime reflects the stored configuration: 'applied' after a successful apply, 'pending' while there is no proof (no live handle, deferred edit, or failed apply). Always present so absence is never mistaken for applied. */
+  /** Whether the live runtime reflects this Member's stored capabilities. Profile extra-tool grants are outside this comparison. */
   readonly capabilityState: 'applied' | 'pending'
 }
 

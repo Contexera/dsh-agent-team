@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.setConfig({ testTimeout: 30_000 })
 import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { runtimeWithTeam, pressStartTask, pressStartThread } from './harness.tsx'
 import { TEAM_DRAFTS_STORAGE_KEY } from '../src/client/drafts.ts'
 
@@ -45,7 +46,7 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(b.view.getByRole('option', { name: /@builder/ }))
     expect(messageInput.value).toBe('hello team @builder ')
     pressStartTask(b.view)
-    b.startThread.mockResolvedValueOnce({ ok: false, error: { message: 'send failed' } } as never)
+    b.startThread.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/bad-request', 'send failed', {}) } as never)
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
     expect((await within(projectPage).findByRole('alert')).textContent).toContain('send failed')
     expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('hello team @builder ')

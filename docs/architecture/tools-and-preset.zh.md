@@ -12,7 +12,7 @@ Host 在每个 Session 的 `turn/start` 同步读取名单，发生在首次工�
 
 外部工具的可见性与执行许可分开处理。继承的全局或祖先注册在未获许可时会被 `tools.restrict()` 从 schema 移除。Member 自己的 Agent scope 中的注册不受该 restriction 过滤，当前 Harness 公开接口无法隐藏它们；执行 guard 会在未获许可时拒绝调用。
 
-条件式 `team:tool-availability` prompt section 在每次组装时列出这些可见但未获许可的名称，并明确禁止 Member 调用。许可从下一轮生效后，对应名称撤出提示。这是当前接口下的兼容行为，不是永久接口承诺：若 Harness 以后提供自有 scope 的声明过滤接口，Team 可以改为隐藏 schema，同时保留执行 guard。
+每次组装 prompt 时，`team:tool-availability` 列出仍然可见、但执行守卫会拒绝的名称：未获许可的 Agent scope 注册，以及替换了基线工具的同名注册。提示要求 Member 不要调用这些工具。有效许可从下一轮生效后，可以移除对应提示。实际执行以该步骤的守卫为准。
 
 逐步刷新在公开的 `agent/pre-step` gate 中进行，仍采用该轮冻结的许可。当前步骤的工具解析已完成，所以刷新准备的是后续声明，而不是当前声明；刷新失败仍能拒绝本次请求。Session 事件观察器不能承担这个拒绝职责，`step/start` 也已经太晚。
 

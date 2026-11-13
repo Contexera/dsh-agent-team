@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 
@@ -12,17 +13,18 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { ATTACHMENT_MAX_BYTES, attachmentsRoot, mediaTypeForPath, newAttachmentId, pathAttachmentId, readAttachment, requestScopedAttachmentId, sanitizeFileName, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, writeAttachment } from '../src/attachments.ts'
+import { ATTACHMENT_MAX_BYTES, attachmentsRoot, mediaTypeForPath, pathAttachmentId, readAttachment, requestScopedAttachmentId, sanitizeFileName, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, writeAttachment } from '../src/attachments.ts'
 import AgentTeam from '../src/index.ts'
 import { AgentTeamLedger } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import type { AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
+import type { AgentTeamAttachmentId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
 const cleanups: Array<() => Promise<void>> = []
 const alpha = WorkspaceId('workspace:alpha')
 const originalDshHome = process.env.DSH_HOME
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
+const newAttachmentId = (): AgentTeamAttachmentId => randomUUID() as AgentTeamAttachmentId
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
@@ -178,18 +180,62 @@ describe('attachment cache', () => {
 
     // Sweep with `old` (30h) and `fresh` (73h) referenced: the orphan is past
     // 24h and `fresh` is past its 72h consumption window; `old` survives.
-    const removed = await sweepAttachmentCache(root, new Set([old, fresh]), now)
+    const removed = await sweepAttachmentCache(root, id => id === old || id === fresh, now)
     expect([...removed].sort()).toEqual([orphan, fresh].sort())
     await expect(readAttachment(root, old)).resolves.toMatchObject({ kind: 'found' })
     await expect(readAttachment(root, fresh)).resolves.toEqual({ kind: 'missing' })
     // A later sweep with `old` still referenced leaves it alone.
-    const later = await sweepAttachmentCache(root, new Set([old]), now + 60 * 60 * 1000)
+    const later = await sweepAttachmentCache(root, id => id === old, now + 60 * 60 * 1000)
     expect(later).toEqual([])
     expect(await readdir(root)).toEqual([old])
+  })
+  it('reclaims abandoned partial uploads while protecting recent and referenced entries', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-attach-partial-'))
+    cleanups.push(async () => { await rm(root, { recursive: true, force: true }) })
+    const abandoned = newAttachmentId()
+    const corrupt = newAttachmentId()
+    const referenced = newAttachmentId()
+    const recent = requestScopedAttachmentId('recent-partial')
+    const foreign = 'not-a-cache-entry'
+    const now = Date.now()
+    const old = new Date(now - 25 * 60 * 60 * 1000)
+    for (const name of [abandoned, corrupt, referenced, recent, foreign]) {
+      const dir = join(root, name)
+      await mkdir(dir)
+      await writeFile(join(dir, 'payload.txt'), 'partial upload')
+      if (name === corrupt) await writeFile(join(dir, 'meta.json'), '{"name":')
+      if (name !== recent) await utimes(dir, old, old)
+    }
+    const redirected = newAttachmentId()
+    await symlink(join(root, foreign), join(root, redirected), 'junction')
+
+    const removed = await sweepAttachmentCache(root, id => id === referenced, now)
+
+    expect([...removed].sort()).toEqual([abandoned, corrupt].sort())
+    expect((await readdir(root)).sort()).toEqual([foreign, recent, redirected, referenced].sort())
+    expect(await readFile(join(root, redirected, 'payload.txt'), 'utf8')).toBe('partial upload')
   })
 })
 
 describe('Agent Team attachment remotes', () => {
+  it('refuses a concurrent upload with the same request id and different bytes', async () => {
+    const { ctx } = await harness()
+    const request = { requestId: requestId('put-concurrent'), workspaceId: alpha, name: 'report.txt' }
+    const first = Buffer.from('first upload').toString('base64')
+    const second = Buffer.from('conflicting payload').toString('base64')
+
+    const [accepted, conflict, replay] = await Promise.allSettled([
+      ctx.agentTeam.putAttachment({ ...request, bytesBase64: first }),
+      ctx.agentTeam.putAttachment({ ...request, bytesBase64: second }),
+      ctx.agentTeam.putAttachment({ ...request, bytesBase64: first }),
+    ])
+
+    expect(accepted).toMatchObject({ status: 'fulfilled' })
+    expect(conflict).toMatchObject({ status: 'rejected', reason: { message: expect.stringMatching(/reused with a different operation or payload/) } })
+    expect(replay).toEqual(accepted)
+    const stored = await ctx.agentTeam.getAttachment({ attachmentId: requestScopedAttachmentId(request.requestId) })
+    expect(stored.bytesBase64).toBe(first)
+  })
   it('reads valid attachments and keeps invalid, unreadable, and missing entries distinct', async () => {
     const { ctx } = await harness()
     const uploaded = await ctx.agentTeam.putAttachment({
@@ -366,6 +412,67 @@ describe('Agent Team attachment remotes', () => {
     await expect(ctx.agentTeam.putAttachment({ ...request, name: 'renamed.png' }))
       .rejects.toThrow(/reused with a different operation or payload/)
     expect(await cacheEntries()).toEqual(before)
+  })
+
+  it('does not let concurrent sends replace the bytes bound to the first Message', async () => {
+    const { ctx } = await harness()
+    const root = await mkdtemp(join(tmpdir(), 'dsh-attach-concurrent-'))
+    cleanups.push(async () => { await rm(root, { recursive: true, force: true }) })
+    await mkdir(join(root, 'other'))
+    const original = join(root, 'report.txt')
+    const conflicting = join(root, 'other', 'report.txt')
+    await writeFile(original, 'original')
+    await writeFile(conflicting, 'conflict')
+    const { project } = await ctx.agentTeam.createProject({ requestId: requestId('concurrent-project'), workspaceId: alpha, name: 'engineering', description: '' })
+    const request = { kind: 'discussion', requestId: requestId('concurrent-send'), workspaceId: alpha, projectRef: project.projectRef, body: 'report' } as const
+
+    const [accepted, conflict] = await Promise.allSettled([
+      ctx.agentTeam.startThread({ ...request, attachmentPaths: [original] }),
+      ctx.agentTeam.startThread({ ...request, attachmentPaths: [conflicting] }),
+    ])
+
+    expect(accepted).toMatchObject({ status: 'fulfilled', value: { kind: 'committed' } })
+    expect(conflict).toMatchObject({ status: 'rejected', reason: { message: expect.stringMatching(/reused with a different operation or payload/) } })
+    const stored = await ctx.agentTeam.getAttachment({ attachmentId: pathAttachmentId(request.requestId, 0) })
+    expect(Buffer.from(stored.bytesBase64, 'base64').toString()).toBe('original')
+  })
+
+  it.each(['upload', 'path'] as const)('keeps an old %s attachment when its Message commits during a sweep', async (kind) => {
+    const { ctx } = await harness()
+    const ledger = ctx.agentTeam['ledger']!
+    const { project } = await ctx.agentTeam.createProject({ requestId: requestId('sweep-project'), workspaceId: alpha, name: 'engineering', description: '' })
+    const sendId = requestId('send-during-sweep')
+    const name = 'report.txt'
+    const body = 'report bytes'
+    const root = attachmentsRoot()
+    const now = Date.now()
+    const attachmentId = kind === 'upload' ? requestScopedAttachmentId('sweep-upload') : pathAttachmentId(sendId, 0)
+    await writeAttachment(root, attachmentId, name, 'text/plain', Buffer.from(body))
+    await writeFile(join(root, attachmentId, 'meta.json'), JSON.stringify({ name, mediaType: 'text/plain',
+      uploadedAt: new Date(now - 25 * 60 * 60 * 1000).toISOString() }))
+    const sourceDir = await mkdtemp(join(tmpdir(), 'dsh-attach-sweep-'))
+    cleanups.push(async () => { await rm(sourceDir, { recursive: true, force: true }) })
+    const source = join(sourceDir, name)
+    await writeFile(source, body)
+    const commit = ledger.startThread.bind(ledger)
+    const prepared = Promise.withResolvers<void>()
+    const releaseCommit = Promise.withResolvers<void>()
+    ledger.startThread = async request => {
+      prepared.resolve()
+      await releaseCommit.promise
+      return commit(request)
+    }
+
+    const sending = ctx.agentTeam.startThread({ kind: 'discussion', requestId: sendId, workspaceId: alpha, projectRef: project.projectRef, body,
+      ...(kind === 'upload' ? { attachments: [attachmentId] } : { attachmentPaths: [source] }) })
+    await Promise.race([prepared.promise, sending])
+    const sweeping = sweepAttachmentCache(root, id => ledger.referencedAttachmentIds().has(id), now)
+    releaseCommit.resolve()
+
+    const [sent, removed] = await Promise.all([sending, sweeping])
+    expect(sent).toMatchObject({ kind: 'committed', message: { attachments: [{ attachmentId }] } })
+    expect(removed).not.toContain(attachmentId)
+    await expect(ctx.agentTeam.getAttachment({ attachmentId })).resolves.toMatchObject({ bytesBase64: Buffer.from(body).toString('base64') })
   })
 
   it('replays an upload retry after the Host restarts', async () => {

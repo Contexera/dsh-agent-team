@@ -147,36 +147,57 @@ function orderedSnapshot<R extends string>(workspaceId: WorkspaceId | undefined,
   return result as readonly R[]
 }
 
-let host: SidebarOrderHost | undefined
-let hydration: Promise<void> | undefined
-/** Lists whose latest local order the Host has not confirmed yet; a failed write retries on the next read. */
-const unconfirmed = new Set<string>()
-/** Lists this page has written itself. Its own drag is never older than a Host answer that may have raced it. */
-const writtenHere = new Set<string>()
+interface OrderWrite {
+  refs: readonly string[]
+  confirmed?: readonly string[]
+  pending?: Promise<void> | undefined
+}
+
+interface SidebarOrderBinding {
+  readonly host: SidebarOrderHost
+  readonly writes: Map<string, OrderWrite>
+  hydration?: Promise<void>
+}
+
+let binding: SidebarOrderBinding | undefined
 
 /** Point this module at the Host Remote pair (once per Client wiring); passing `undefined` detaches it. */
 export function attachSidebarOrderHost(next: SidebarOrderHost | undefined): void {
-  host = next
-  hydration = undefined
-  unconfirmed.clear()
-  writtenHere.clear()
+  binding = next === undefined ? undefined : { host: next, writes: new Map() }
 }
 
-async function flushOrder(current: SidebarOrderHost, key: string, refs: readonly string[]): Promise<void> {
-  try {
-    const result = await current.save({ key, refs })
-    if (result.ok) unconfirmed.delete(key)
-  } catch {
-    // The local order keeps serving; the next gesture retries the write.
-  }
+function drainOrder(owner: SidebarOrderBinding, key: string, write: OrderWrite): Promise<void> {
+  return write.pending ??= Promise.resolve().then(async () => {
+    try {
+      while (binding === owner && write.confirmed !== write.refs) {
+        const refs = write.refs
+        try {
+          if ((await owner.host.save({ key, refs })).ok) write.confirmed = refs
+        } catch {
+          // The local order remains usable if the Host cannot save it.
+        }
+        // An older failure must not hold a newer drag. Do not retry an unchanged failure here.
+        if (write.refs === refs) return
+      }
+    } finally {
+      write.pending = undefined
+    }
+  })
 }
 
-async function hydrate(current: SidebarOrderHost): Promise<void> {
+function saveOrder(owner: SidebarOrderBinding, key: string, refs: readonly string[]): Promise<void> {
+  const write = owner.writes.get(key) ?? { refs }
+  write.refs = refs
+  owner.writes.set(key, write)
+  return drainOrder(owner, key, write)
+}
+
+async function hydrate(owner: SidebarOrderBinding): Promise<void> {
   const before = { ...structuredClone(storedOrders()) } as Readonly<Record<string, readonly string[]>>
   let remote: Readonly<Record<string, readonly string[]>>
   try {
-    const result = await current.load()
-    if (!result.ok) return
+    const result = await owner.host.load()
+    if (!result.ok || binding !== owner) return
     remote = result.value.lists
   } catch {
     // An unreachable Host leaves the cache in charge; a later gesture still tries to write.
@@ -186,37 +207,33 @@ async function hydrate(current: SidebarOrderHost): Promise<void> {
   for (const [key, refs] of Object.entries(remote)) {
     // A list this page already dragged outranks the answer, which may have been
     // read before that write landed.
-    if (writtenHere.has(key) || !isListKey(key) || !Array.isArray(refs) || refs.length === 0) continue
+    if (owner.writes.has(key) || !isListKey(key) || !Array.isArray(refs) || refs.length === 0) continue
     if (savedFingerprint(key) === fingerprintOf(refs)) continue
     writeOrder(key, refs)
     adopted = true
   }
-  // An order this browser arranged before the Host carried one moves up once, so
-  // the upgrade costs nobody their arrangement. A drag during the read flushed itself.
-  for (const [key, refs] of Object.entries(before)) {
-    if (refs.length === 0 || key in remote) continue
-    await flushOrder(current, key, refs)
-  }
-  for (const key of [...unconfirmed]) {
-    const refs = storedOrders()[key]
-    if (refs !== undefined && refs.length > 0) await flushOrder(current, key, refs)
-  }
   if (adopted) emitChange()
+
+  const queued = [...owner.writes].filter(([, write]) => write.confirmed !== write.refs)
+  // An order this browser arranged before the Host carried one moves up once, so
+  // the upgrade costs nobody their arrangement. A drag during the read owns the key.
+  const migrations: Promise<void>[] = []
+  for (const [key, refs] of Object.entries(before)) {
+    if (isListKey(key) && !owner.writes.has(key) && refs.length > 0 && !(key in remote)) migrations.push(saveOrder(owner, key, refs))
+  }
+  await Promise.all([...migrations, ...queued.map(([key, write]) => drainOrder(owner, key, write))])
 }
 
 /** Read the Host's saved order once per attached Host; the first list to render starts it. */
 export function ensureSidebarOrderHydrated(): Promise<void> {
-  if (host === undefined) return Promise.resolve()
-  hydration ??= hydrate(host)
-  return hydration
+  if (binding === undefined) return Promise.resolve()
+  binding.hydration ??= hydrate(binding)
+  return binding.hydration
 }
 
 function persistOrder(key: string, refs: readonly string[]): void {
-  const current = host
-  if (current === undefined) return
-  writtenHere.add(key)
-  unconfirmed.add(key)
-  void flushOrder(current, key, refs)
+  const owner = binding
+  if (owner !== undefined) void saveOrder(owner, key, refs)
 }
 
 /** Identity-stable across renders while neither the data nor this browser's preference changes. */

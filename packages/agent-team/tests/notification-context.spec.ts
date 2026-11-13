@@ -193,10 +193,27 @@ describe('Inbox notices present direct signals before ordinary work', () => {
     const notice = latestNotice(agent)
     expect(notice.length).toBeLessThanOrEqual(32 * 1024)
     expect(notice).toContain('SHORT-6-END')
-    expect(notice).toMatch(/direct.*not expanded/i)
     expect(notice).not.toContain('LONG-0-END')
-    expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing)
-      .toMatchObject({ unreadCount: 7, directCount: 7 })
+    expect(notice).toMatch(/direct.*not expanded/i)
+    expect(notice).toContain(`in Main stream ${projectRef}`)
+    expect(notice).toContain('Use team_inbox')
+    expect(ctx.agentTeam.inboxForAgent(agent, { workspaceId }).main).toContainEqual(expect.objectContaining({
+      projectRef, unreadCount: 7, directCount: 7,
+    }))
+    const read = await ctx.agentTeam.readMainStreamForAgent(agent, {
+      requestId: requestId('read-overflow'), workspaceId, projectRef,
+    })
+    expect(read.entries.some(entry => entry.kind === 'message' && entry.message.body.includes('LONG-0-END'))).toBe(true)
+    expect(read.standing).toMatchObject({ unreadCount: 0, directCount: 0 })
+
+    const beforeLaterWake = adapter.requests.length
+    adapter.enqueue(textResponse('Noted the later Main check.'))
+    const later = await ctx.agentTeam.postMainMessage({ requestId: requestId('later-main'), workspaceId, projectRef,
+      body: '@builder LATER-MAIN-END' })
+    if (later.kind !== 'committed') throw new Error('later Main direct failed')
+    await waitFor(() => adapter.requests.length > beforeLaterWake ? true : undefined)
+    await agent.whenIdle()
+    expect(latestNotice(agent)).toContain('LATER-MAIN-END')
   })
 })
 

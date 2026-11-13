@@ -431,6 +431,77 @@ describe('a stop that cannot confirm its cleanup', () => {
   })
 })
 
+describe('a stop whose ending cannot be recorded', () => {
+  it('bounds an already-observed ending whose record has not landed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    const host = await boot(new MemoryMediaPool())
+    const projectRef = await createProject(host)
+    const owner = await addMember(host, projectRef, { owner: true, handle: 'owner' })
+    const thread = await startThread(host, projectRef, 'discussion')
+    const run = await host.host.workerStartForAgent(owner.agent, { requestId: requestId('run'),
+      threadRef: thread.threadRef, task: 'check the schedule', cwd: process.cwd() })
+    const ledger = host.host['ledger']!
+    const record = ledger.recordWorkerSettled.bind(ledger)
+    const writeStarted = Promise.withResolvers<void>()
+    const writeGate = Promise.withResolvers<void>()
+    ledger.recordWorkerSettled = async (write) => {
+      writeStarted.resolve()
+      await writeGate.promise
+      return record(write)
+    }
+    host.engines.workers.get('session:worker-1')!.result.resolve({ output: [{ type: 'text', text: 'finished' }],
+      stopReason: 'completed' })
+    await writeStarted.promise
+
+    const stopping = expect(host.host.workerStopForAgent(owner.agent, { workerRef: run.workerRef }))
+      .rejects.toMatchObject({ code: 'worker_stop_pending' })
+    await vi.advanceTimersByTimeAsync(10_000)
+    await stopping
+    expect(ledger.workerRunState(run.workerRef)).toBe('running')
+
+    vi.useRealTimers()
+    writeGate.resolve()
+    await waitRecorded(host, run.workerRef, 'completed')
+  })
+
+  it('keeps refusing an unrecorded ending on a later request', async () => {
+    const host = await boot(new MemoryMediaPool())
+    const projectRef = await createProject(host)
+    const owner = await addMember(host, projectRef, { owner: true, handle: 'owner' })
+    const thread = await startThread(host, projectRef, 'discussion')
+    const run = await host.host.workerStartForAgent(owner.agent, { requestId: requestId('run'),
+      threadRef: thread.threadRef, task: 'check the schedule', cwd: process.cwd() })
+    const ledger = host.host['ledger']!
+    let writes = 0
+    ledger.recordWorkerSettled = async () => {
+      writes += 1
+      throw new Error('storage unavailable')
+    }
+
+    await expect(host.host.workerStopForAgent(owner.agent, { workerRef: run.workerRef }))
+      .rejects.toThrow(/ending could not be recorded/u)
+    // A retry must not turn the live observation into a durable success. The
+    // first write failed, so the ledger still reports the run as unconfirmed.
+    await expect(host.host.workerStopForAgent(owner.agent, { workerRef: run.workerRef }))
+      .rejects.toThrow(/ending could not be recorded/u)
+    expect(writes).toBe(1)
+    expect(ledger.workerRunState(run.workerRef)).toBe('running')
+
+    const stopped = await host.host.stopWorkerForClient({ workspaceId: alpha, workerRef: run.workerRef,
+      memberId: owner.actor.memberId })
+    expect(stopped).toMatchObject({ kind: 'unconfirmed', workerRef: run.workerRef,
+      message: expect.stringMatching(/ending could not be recorded/u) as unknown as string })
+    expect(Object.keys(stopped).sort()).toEqual(['kind', 'message', 'workerRef'])
+    expect(host.host.workerRunsForClient({ workspaceId: alpha, memberId: owner.actor.memberId }).runs)
+      .toMatchObject([{ workerRef: run.workerRef, state: 'unconfirmed' }])
+    const read = await host.host.readThread({ requestId: requestId('read-unrecorded'), workspaceId: alpha,
+      threadRef: thread.threadRef })
+    expect(read.workerStates).toEqual([{ workerRef: run.workerRef, state: 'running', unconfirmed: true }])
+    expect(read.facts.filter(entry => entry.fact.kind === 'activity'
+      && entry.fact.activity.kind === 'worker_settled')).toHaveLength(0)
+  })
+})
+
 describe('a Project-only delegation', () => {
   it('stops without a public fact and keeps its record private', async () => {
     const host = await boot(new MemoryMediaPool())

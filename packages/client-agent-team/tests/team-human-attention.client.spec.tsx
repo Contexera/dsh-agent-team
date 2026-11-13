@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.setConfig({ testTimeout: 30_000 })
-import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
@@ -192,6 +192,73 @@ describe('Team Human Attention and Task transfer controls', () => {
     b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers: [] } }))
     b.publishProjectUpdate()
     await waitFor(() => expect(b.view.queryByRole('button', { name: '取消关注此 Thread' })).toBeNull())
+    await b.runtime.dispose()
+  })
+
+  it('keeps a confirmed follow when an older controller read returns after it', async () => {
+    const b = await seedThreadPage({ seedFollowers: [] })
+    await b.view.findByRole('button', { name: '关注此 Thread' })
+
+    const stale = Promise.withResolvers<never>()
+    let staleStarted = false
+    b.threadObservations.mockImplementation(async () => {
+      if (!staleStarted) {
+        staleStarted = true
+        return stale.promise
+      }
+      return { ok: true as const, value: { items: [], followers: ['member:human'] } }
+    })
+    b.publishProjectUpdate()
+    await waitFor(() => { expect(staleStarted).toBe(true) })
+
+    // This Host confirms Attention without waking the page's subscription, so the read above stays the
+    // controller's newest observation while the hook's own readback confirms the write.
+    b.changeAttention.mockImplementationOnce(async () => ({
+      ok: true as const,
+      value: {
+        receipt: {},
+        thread: { threadRef: 'thread:1', taskRef: 'task:1', revision: 2 },
+        attention: { threadRef: 'thread:1', taskRef: 'task:1', memberId: 'member:human', action: 'follow' },
+      },
+    }) as never)
+    fireEvent.click(b.view.getByRole('button', { name: '关注此 Thread' }))
+    await waitFor(() => { expect(b.changeAttention).toHaveBeenCalled() })
+    expect((await b.view.findByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
+
+    await act(async () => {
+      stale.resolve({ ok: true, value: { items: [], followers: [] } } as never)
+      await Promise.resolve()
+    })
+    expect((b.view.getByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
+    await b.runtime.dispose()
+  })
+
+  it('refreshes the page follower set from the confirmed write without waiting for a subscription', async () => {
+    const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
+    const first = await openTransferDialog(b)
+    fireEvent.click(within(first).getByRole('button', { name: '转交给 @builder' }))
+    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
+
+    let followers = ['member:builder']
+    b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers } }))
+    b.changeAttention.mockImplementationOnce(async () => {
+      followers = ['member:builder', 'member:human']
+      return {
+        ok: true as const,
+        value: {
+          receipt: {},
+          thread: { threadRef: 'thread:1', taskRef: 'task:1', revision: 2 },
+          attention: { threadRef: 'thread:1', taskRef: 'task:1', memberId: 'member:human', action: 'follow' },
+        },
+      } as never
+    })
+    b.publishProjectUpdate()
+    fireEvent.click(await b.view.findByRole('button', { name: '关注此 Thread' }))
+    await waitFor(() => expect(b.changeAttention).toHaveBeenCalled())
+
+    const dialog = await openTransferDialog(b)
+    await waitFor(() => expect(candidateLabels(b.view.getByRole('dialog', { name: '转交负责人' }))).toEqual(['转交给你自己']))
+    expect(dialog).toBeTruthy()
     await b.runtime.dispose()
   })
 
