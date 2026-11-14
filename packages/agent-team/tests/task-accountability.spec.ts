@@ -1,35 +1,23 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import { describe, expect, it } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { openTestLedger, openTestTable } from './helpers/ledger-harness.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, TASK_BOARD_FINISHED_PER_PROJECT, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import type { AgentTeamHumanActor, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask } from '../src/types.ts'
 
 const alpha = WorkspaceId('workspace:alpha')
 const human = agentTeamHumanActor()
-const cleanups: Array<() => Promise<void>> = []
 let counter = 0
 const requestId = (label: string) => `test:accountability:${label}:${++counter}` as AgentTeamRequestId
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
-type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
-async function seed() {
-  const pool = new MemoryMediaPool()
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const table = await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as Table
-  const ledger = new AgentTeamLedger(table, { rulesVersion: 2 })
-  await ledger.initialize()
+async function seed(options?: { readonly validateLedger?: boolean }) {
+  const { pool, table, ledger } = await openTestLedger({
+    ledgerOptions: { rulesVersion: 2 },
+    initialize: true,
+    ...(options?.validateLedger !== undefined ? { validateLedger: options.validateLedger } : {}),
+  })
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'delivery', description: '', memberIds: [] })).value.project.projectRef
   const add = async (name: string) => {
     const memberId = `member:${name}` as AgentTeamMemberId
@@ -210,7 +198,7 @@ describe('Task accountability in final rules version 2', () => {
   })
 
   it('rejects a recorded Task status that disagrees with its lifecycle action', async () => {
-    const team = await seed()
+    const team = await seed({ validateLedger: false })
     const started = await startTask(team, human, team.owner.memberId)
     const acceptedResult = await team.ledger.changeTask({ requestId: requestId('tampered-accept'), actor: human, workspaceId: alpha,
       taskRef: started.task.taskRef, action: 'accept', baseRevision: started.thread.revision })
@@ -362,16 +350,7 @@ describe('Task accountability in final rules version 2', () => {
     const revivedPool = new MemoryMediaPool()
     revivedPool.versions.set('agent_team', agentTeamDomainSpec.version)
     revivedPool.media.set('agent_team', { tables: new Map([['operations', new Map(records)]]), global: null })
-    const revivedTable = await (await (async () => {
-      const ctx = new Context()
-      await ctx.plugin(Storage)
-      ctx.storage.backend.register('memory', new MemoryStorageBackend(revivedPool))
-      const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-      ctx.storage.mount('domain', facility)
-      ctx.provide('storageDomain', facility)
-      cleanups.push(async () => { await facility.closeAll() })
-      return ctx.storageDomain.open(agentTeamDomainSpec)
-    })()).table('operations') as unknown as Table
+    const revivedTable = (await openTestTable({ pool: revivedPool })).table
     const revived = new AgentTeamLedger(revivedTable, { rulesVersion: 2 })
     expect(() => revived.validate()).not.toThrow()
     expect(revived.getTask(started.task.taskRef)).toMatchObject({ status: 'todo', accountable: team.reviewer.memberId })

@@ -1,11 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanups, realHarness, ScriptedAdapter, textResponse, toolCallResponse, requestId, waitFor } from './helpers/member-harness.ts'
+import { describe, expect, it } from 'vitest'
+import { realHarness, ScriptedAdapter, textResponse, toolCallResponse, requestId, waitFor } from './helpers/member-harness.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-vi.setConfig({ testTimeout: 60_000 })
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
 /** One real Member and a Thread they follow, with one ordinary Human reply waiting unread. */
 async function waitingThread(body: string) {
   const adapter = new ScriptedAdapter()

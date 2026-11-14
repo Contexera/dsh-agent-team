@@ -1,51 +1,23 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { writeFile } from 'node:fs/promises'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
+import type { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { changeBaseline, nextChange } from './helpers/change-stream.ts'
-import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import AgentTeam from '../src/index.ts'
+import { harness as bootHostHarness } from './helpers/host-harness.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { AgentTeamProjectRef, AgentTeamMemberActor, AgentTeamRequestId } from '../src/types.ts'
 
-const cleanups: Array<() => Promise<void>> = []
 const alpha = WorkspaceId('workspace:alpha')
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
-
 async function harness(): Promise<{ readonly ctx: Context }> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === alpha ? { id, path: process.cwd(), attachSession: async () => {}, archiveSession: async () => {} } : undefined,
-    list: () => [{ id: alpha, path: process.cwd() }],
-    archiveSession: async () => {},
+  const { ctx } = await bootHostHarness({
+    prepare: async c => { await c.plugin(agentTeamInvariant) },
   })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  await ctx.plugin(agentTeamInvariant)
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
-  cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx }
 }
 

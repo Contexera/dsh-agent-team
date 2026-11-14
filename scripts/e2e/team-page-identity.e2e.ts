@@ -1,7 +1,7 @@
 import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
 import type { Browser, Page } from 'playwright'
-import { CHROME, HOME, ONE_PIXEL_PNG, STAGED_BUNDLE, UI09_SHOTS, browser, closeScenario, connectFreshWorkspaceZh, focusRing, installLocalBundle, launchWebScaffold, openSettings, openTeamPage, scaffold, settleLayout, watchConsole } from './__external-agent-team-support.ts'
+import { CHROME, ONE_PIXEL_PNG, UI09_SHOTS, browser, closeScenario, connectFreshWorkspaceZh, focusRing, launchWebScaffold, openSettings, openTeamPage, scaffold, scenarioHome, settleLayout, watchConsole } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -38,7 +38,7 @@ it('configures the Team page identity from Settings in real Web', async () => {
 
   // Avatar bytes go to the persistent store, the reference into settings, and the
   // page draws what the browser can decode.
-  const avatarPath = join(HOME, 'ada-avatar.png')
+  const avatarPath = join(scenarioHome(), 'ada-avatar.png')
   await writeFile(avatarPath, Buffer.from(ONE_PIXEL_PNG, 'base64'))
   await expect.poll(() => panel.getByRole('button', { name: '上传头像', exact: true }).isEnabled()).toBe(true)
   await panel.locator('input[type="file"]').setInputFiles(avatarPath)

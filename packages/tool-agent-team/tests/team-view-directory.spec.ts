@@ -1,11 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { cleanups, EmptyAdapter, realHarness, requestId } from '../../agent-team/tests/helpers/member-harness.ts'
+import { EmptyAdapter, realHarness, requestId } from '../../agent-team/tests/helpers/member-harness.ts'
 import { teamTools } from './render-text.ts'
-
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
 
 interface ViewResult {
   projects: { projectRef: string; role: string; subscriptions: { active: number; paused: number } }[]
@@ -26,7 +22,6 @@ function rendered(tool: ToolDefinition, args: Record<string, unknown>, value: un
 describe('team_view Workspace directory', () => {
   it('shows every Project without widening Project content, Task board access, or Thread reads', async () => {
     const test = await realHarness(new EmptyAdapter())
-    cleanups.push(async () => { await test.teamFiber.dispose() })
     const tools = teamTools()
     const viewTool = tools.get('team_view')!
     const first = await test.ctx.agentTeam.createProject({ requestId: requestId('directory-first'), workspaceId: test.workspaceId,

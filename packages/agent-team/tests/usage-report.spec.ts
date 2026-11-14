@@ -99,7 +99,7 @@ describe('team-live-usage member lifecycle report', () => {
     expect(report.attention.threadCount).toBe(1)
     expect(report.attention.allMembers.max).toBe(3)
     expect(report.attention.enabledMembers.max).toBe(1)
-  }, 30_000)
+  })
 
   it('reports counts only, never Message bodies or Member handles', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'usage-report-'))
@@ -112,5 +112,5 @@ describe('team-live-usage member lifecycle report', () => {
         expect(stdout, `${mode} output must not carry '${secret}'`).not.toContain(secret)
       }
     }
-  }, 30_000)
+  })
 })

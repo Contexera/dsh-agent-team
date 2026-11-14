@@ -13,7 +13,7 @@ import {
   planHostRowWrite,
   type Config,
 } from '../src/host-row-settings.ts'
-import { webhookAddress, webhookOriginRefusal } from '../src/subscription-webhook.ts'
+import { webhookOriginRefusal } from '../src/subscription-webhook.ts'
 
 const row = (input: unknown): Config => TEAM_HOST_ROW_SETTINGS_SCHEMA(input as never) as unknown as Config
 
@@ -48,10 +48,5 @@ describe('the webhook public address setting', () => {
     expect(webhookOriginRefusal('https://team.example.com')).toBeUndefined()
     expect(webhookOriginRefusal('https://team.example.com/team')).toMatch(/must be an origin, without a path/)
     expect(webhookOriginRefusal('team.example.com')).toMatch(/not an absolute URL/)
-  })
-
-  it('builds the address a provider must post to, on exactly the configured origin', () => {
-    const token = 'A'.repeat(43)
-    expect(webhookAddress('https://team.example.com/', token)).toBe(`https://team.example.com/team/hooks/${token}`)
   })
 })

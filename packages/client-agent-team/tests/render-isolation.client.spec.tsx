@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 import { memo } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 // Mounting the Team runtime in jsdom has reached 3.0s on the windows lane (worst
-// of 11 CI runs, 2026-09-17..21) against vitest's 5s default, so the file keeps
-// headroom rather than betting on runner throughput.
-vi.setConfig({ testTimeout: 30_000 })
-import { cleanup, fireEvent, waitFor } from '@testing-library/react'
+// of 11 CI runs, 2026-09-17..21) against the unit project's 5s budget, so the
+// file runs in the integration project rather than betting on runner throughput.
+import { fireEvent, waitFor } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
@@ -44,7 +43,6 @@ vi.mock('../src/client/TeamComposer.tsx', async (importOriginal) => {
 })
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
 beforeEach(() => {
   localStorage.clear()
   counters.messages.length = 0
@@ -173,7 +171,7 @@ describe('Thread page render isolation', () => {
       expect(input.value).toBe('')
       expect(b.view.queryAllByText('seeded message 1').length).toBeGreaterThan(0)
       expect(b.view.queryAllByText(`seeded message ${count}`).length).toBeGreaterThan(0)
-      await b.runtime.dispose()
+      await b.dispose()
     }
     expect(bursts).toHaveLength(2)
     expect(arrivals).toHaveLength(2)

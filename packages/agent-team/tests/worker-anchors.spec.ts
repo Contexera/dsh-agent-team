@@ -10,11 +10,11 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session } from '@botiverse/oar'
-import { cleanups, realHarness, requestId, waitFor } from './helpers/member-harness.ts'
+import { realHarness, requestId, waitFor } from './helpers/member-harness.ts'
 import AgentTeam from '../src/index.ts'
 import { startWorkerRun, workerAnchorsOf, WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC, type WorkerSteer } from '../src/worker-runtime.ts'
 import type { Config } from '../src/host-row-settings.ts'
@@ -97,8 +97,7 @@ afterEach(async () => {
   claude.next = 1
   claude.cwd = '/fake/claude-work'
   vi.unstubAllEnvs()
-  while (cleanups.length > 0) await cleanups.pop()!()
-}, 30_000)
+})
 
 const workerRow = (): Config => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
   engines: { codex: { enabled: true, executable: '/fake/codex', sandbox: 'workspace-write' },
@@ -178,7 +177,7 @@ describe('the anchors one run\'s ending carries', () => {
     expect(inspection.native).toEqual({ threadId: boundExecution.nativeSessionId, turnId: boundExecution.nativeTurnId,
       turnIds: boundExecution.nativeTurnIds, inputIds: boundExecution.nativeInputIds, storage: boundExecution.nativeStorage })
     expect(inspection.history.kind).toBe('missing')
-  }, 60_000)
+  })
 
   it.each([true, false])('records failed cleanup after a completed run (bound: %s)', async thread => {
     const { harness, ctx, projectRef, agent, threadRef } = await setup({ thread })
@@ -202,7 +201,7 @@ describe('the anchors one run\'s ending carries', () => {
     // configured root against the session's cwd, and on Windows that turns a
     // rooted `/fake/...` into the current drive's own absolute path.
     const config = await mkdtemp(join(tmpdir(), 'claude-config-'))
-    cleanups.push(async () => { await rm(config, { recursive: true, force: true }) })
+    onTestFinished(async () => { await rm(config, { recursive: true, force: true }) })
     vi.stubEnv('CLAUDE_CONFIG_DIR', config)
     engine.turn = 'completed'
     const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'), projectRef,
@@ -217,14 +216,14 @@ describe('the anchors one run\'s ending carries', () => {
     expect(execution.nativeSessionId).toBe('native-claude-1')
     expect(execution.nativeTurnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(execution.nativeStorage).toBe(join(config, 'projects', '-fake-claude-work', 'native-claude-1.jsonl'))
-  }, 60_000)
+  })
 
   it('derives a Claude record from the environment the run opened with', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'claude-anchors-'))
     const config = await mkdtemp(join(tmpdir(), 'claude-config-'))
     const home = await mkdtemp(join(tmpdir(), 'claude-home-'))
     const hostConfig = await mkdtemp(join(tmpdir(), 'claude-host-config-'))
-    cleanups.push(async () => {
+    onTestFinished(async () => {
       await Promise.all([cwd, config, home, hostConfig].map(directory => rm(directory, { recursive: true, force: true })))
     })
     claude.cwd = cwd
@@ -254,7 +253,7 @@ describe('the anchors one run\'s ending carries', () => {
     vi.stubEnv('CLAUDE_CONFIG_DIR', hostConfig)
     expect(await open({ OAR_CLAUDE_BIN: '/fake/claude', ...moved }))
       .toBe(join(hostConfig, 'projects', slug, 'native-claude-3.jsonl'))
-  }, 60_000)
+  })
 
   it('keeps the anchors when the turn\'s own wait throws instead of reporting', async () => {
     const { harness, ctx, projectRef, agent } = await setup({ thread: false })
@@ -271,7 +270,7 @@ describe('the anchors one run\'s ending carries', () => {
     expect(execution.nativeSessionId).toBe('native-session-1')
     expect(execution.nativeTurnId).toBe('turn-native-session-1')
     expect(execution.nativeStorage).toBe('/fake/sessions/2026/11/09/rollout-native-session-1.jsonl')
-  }, 60_000)
+  })
 
   it('keeps the session anchor when the engine refuses the prompt itself', async () => {
     const { harness, ctx, projectRef, agent } = await setup({ thread: false })
@@ -286,7 +285,7 @@ describe('the anchors one run\'s ending carries', () => {
     expect(execution.nativeSessionId).toBe('native-session-1')
     expect(execution.nativeTurnId).toBeUndefined()
     expect(execution.nativeStorage).toBe('/fake/sessions/2026/11/09/rollout-native-session-1.jsonl')
-  }, 60_000)
+  })
 
   it('keeps the ending the engine reported when it hands back no record stream to read', async () => {
     const { harness, ctx, projectRef, agent } = await setup({ thread: false })
@@ -308,7 +307,7 @@ describe('the anchors one run\'s ending carries', () => {
     expect(inspection.native).toEqual({ threadId: 'native-session-1' })
     expect(inspection.history).toEqual({ kind: 'unpersisted',
       reason: 'The ending recorded no location for its native record, so there is nothing to look up.' })
-  }, 60_000)
+  })
 
   it('records a stop with no anchors when the stop cancels the start before it publishes', async () => {
     const { harness, ctx, member, agent, threadRef } = await setup({ thread: true })
@@ -333,7 +332,7 @@ describe('the anchors one run\'s ending carries', () => {
     // The record says what it recorded, not what the engine might have opened.
     expect(inspection.history).toEqual({ kind: 'unpersisted',
       reason: 'The ending recorded no native session, so there is no native record to look up.' })
-  }, 60_000)
+  })
 
   it('keeps the anchors and the cleanup verdict when the engine cannot confirm its disposal', async () => {
     const { harness, ctx, member, agent, projectRef } = await setup({ thread: false })
@@ -354,7 +353,7 @@ describe('the anchors one run\'s ending carries', () => {
     expect(execution.nativeSessionId).toBe('native-session-1')
     expect(execution.nativeTurnId).toBe('turn-native-session-1')
     expect(execution.nativeStorage).toBe('/fake/sessions/2026/11/09/rollout-native-session-1.jsonl')
-  }, 60_000)
+  })
 
   it('keeps a running Worker alive when the Host switch is turned off', async () => {
     const { harness, ctx, agent, projectRef } = await setup({ thread: false })
@@ -373,7 +372,7 @@ describe('the anchors one run\'s ending carries', () => {
     const stopped = await ctx.agentTeam.workerStopForAgent(agent, { workerRef: run.workerRef })
     expect(stopped.state).toBe('stopped')
     expect(executionOf(ctx.agentTeam, run.workerRef)?.state).toBe('stopped')
-  }, 60_000)
+  })
 
   // The sqlite arms pay a durable commit per ledger write, and that cost varies
   // wildly on the windows lane: run #235 crossed the 5s default on both arms
@@ -421,7 +420,7 @@ describe('the anchors one run\'s ending carries', () => {
     expect(deliveries).toEqual([request.instruction])
     expect(ledgerOf(ctx.agentTeam).workerExecutionsOfMember(member.memberId)).toHaveLength(1)
     expect(executionOf(ctx.agentTeam, run.workerRef)).toEqual(original)
-  }, 60_000)
+  })
 
   it('keeps the Thread facts, revision, and execution unchanged when a steer receipt is aliased', async () => {
     const { harness, ctx, agent, threadRef, member } = await setup({ thread: true })
@@ -466,5 +465,5 @@ describe('the anchors one run\'s ending carries', () => {
     expect(execution?.nativeSessionId).toBe('native-session-1')
     expect(execution?.nativeTurnId).toBe('turn-native-session-1')
     expect(execution?.nativeStorage).toBe('/fake/sessions/2026/11/09/rollout-native-session-1.jsonl')
-  }, 60_000)
+  })
 })

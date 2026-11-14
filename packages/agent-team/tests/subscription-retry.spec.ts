@@ -1,28 +1,22 @@
 import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { cleanups, EmptyAdapter, realHarness, requestId } from './helpers/member-harness.ts'
+import { EmptyAdapter, realHarness, requestId } from './helpers/member-harness.ts'
 
 const spillRoot = mkdtempSync(join(tmpdir(), 'dsh-team-retry-spill-'))
 let spillId = 0
 
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
-
-afterAll(() => {
+const removeSpillRoot = (): void => {
   rmSync(spillRoot, { recursive: true, force: true })
-})
+}
+afterAll(removeSpillRoot)
+process.once('exit', removeSpillRoot)
 
 describe('subscription request retries', () => {
   it('resolves an Agent script-path create after the file is gone, while still checking current ownership', async () => {
     const test = await realHarness(new EmptyAdapter())
-    cleanups.push(async () => {
-      await test.teamFiber.dispose()
-      rmSync(test.root, { recursive: true, force: true })
-    })
     let scriptRuns = 0
     const shell = {
       resolve: (request: ShellExecSpec) => request,

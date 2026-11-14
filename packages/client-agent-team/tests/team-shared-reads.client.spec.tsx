@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { waitFor } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 type Runtime = Awaited<ReturnType<typeof runtimeWithTeam>>
 
@@ -103,7 +101,6 @@ describe('shared client reads (issue 03)', () => {
     expect((staleDrops[0]![1] as { query?: string }).query).toBe('members:w1')
     for (const call of staleDrops) expect(JSON.stringify(call.slice(1))).not.toContain('newcomer')
     infoSpy.mockRestore()
-    await b.runtime.dispose()
   })
 
   it('shares one in-flight roster read across the consumers of one wake', async () => {
@@ -122,7 +119,6 @@ describe('shared client reads (issue 03)', () => {
     b.publishWorkspaceUpdate()
     await waitFor(() => expect(rosterCounters()?.shared ?? 0).toBeGreaterThan(sharedBefore))
     expect(b.members.mock.calls.length).toBe(before + 1)
-    await b.runtime.dispose()
   })
 
   it('a wake from outside this Workspace never re-reads the roster', async () => {
@@ -163,7 +159,6 @@ describe('shared client reads (issue 03)', () => {
     expect(issued()).toBe(1)
     // Exact: the presence wake cost one roster read and the foreign wake none.
     expect(rosterCounters()?.issued).toBe(issuedBefore + 1)
-    await b.runtime.dispose()
   })
 
   it('D5: a late-arriving stale view response never replaces the newer projects rows', async () => {
@@ -197,7 +192,6 @@ describe('shared client reads (issue 03)', () => {
     expect(issued).toBe(2)
     expect(b.view.queryByText('# stale-project')).toBeNull()
     expect(b.view.queryByText('# fresh-project')).not.toBeNull()
-    await b.runtime.dispose()
   })
 
   it('D6: a failed members read never blocks the landed view rows', async () => {
@@ -222,6 +216,5 @@ describe('shared client reads (issue 03)', () => {
     expect(alerts.some(node => node.textContent?.includes('roster unavailable'))).toBe(true)
     // ...and the previously loaded rows stay put instead of flashing empty.
     expect(b.view.queryByText('builder')).not.toBeNull()
-    await b.runtime.dispose()
   })
 })

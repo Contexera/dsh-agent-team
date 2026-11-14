@@ -13,7 +13,7 @@ import type { Session } from '@botiverse/oar'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentTeam from '../src/index.ts'
-import { cleanups, realHarness, requestId, waitFor } from './helpers/member-harness.ts'
+import { realHarness, requestId, waitFor } from './helpers/member-harness.ts'
 import type { Config } from '../src/host-row-settings.ts'
 import type { AgentTeamProjectRef, AgentTeamWorkerExecution, AgentTeamWorkerRef } from '../src/types.ts'
 
@@ -76,11 +76,10 @@ vi.mock('@botiverse/oar/observe', () => ({
   awaitTurnEnd: async () => ({ kind: 'completed' }),
 }))
 
-afterEach(async () => {
-  while (cleanups.length > 0) await cleanups.pop()!()
+afterEach(() => {
   engine.storageRoot = ''
   engine.sessions = []
-}, 30_000)
+})
 
 const workerRow = (): Config => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
   engines: { codex: { enabled: true, executable: '/fake/codex', sandbox: 'workspace-write' },
@@ -153,5 +152,5 @@ describe('Project-only Worker continuation identity', () => {
       return status?.availability === 'active' ? status : undefined
     })
     expect(restored.member.sessionId).toBe(member.sessionId)
-  }, 60_000)
+  })
 })

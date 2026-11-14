@@ -25,6 +25,7 @@
 
 | 月 | 工作项 | 一句话结论 | 链接 |
 | --- | --- | --- | --- |
+| 2026-11 | test-system-overhaul | 测试底座自托管与五层 Vitest 分层落地；16 项故障注入检出 16/16，26 个 E2E 与 195 张截图通过，复核问题已修复。 | [README](archive/2026-11/test-system-overhaul/README.md) |
 | 2026-11 | implicit-state-machines | Webhook 耗尽可恢复、订阅存储升到 v5、Task 写入与重放共享状态推导；编辑、发送、头像、附件与时间线的故障恢复通过 Web 验收。 | [README](archive/2026-11/implicit-state-machines/README.md) |
 | 2026-11 | implicit-state-machines-deep | 14 张票全部验收：Host 终态与恢复、通知覆盖、草稿发送归属和侧栏保存顺序；收口证据及重开条件已记录。 | [README](archive/2026-11/implicit-state-machines-deep/README.md) |
 | 2026-11 | member-host-tools | Team 设置按 profile 放行额外宿主工具名，下一轮生效；过滤 preset 基线候选，自有 scope 的可见未许可工具由动态 prompt 列名且执行 guard 拒绝，#143/#147 已验收。 | [README](archive/2026-11/member-host-tools/README.md) |

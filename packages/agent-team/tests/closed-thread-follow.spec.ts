@@ -1,37 +1,21 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import { describe, expect, it } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { openTestLedger } from './helpers/ledger-harness.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_RULES_VERSION, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
-import { agentTeamDomainSpec } from '../src/spec.ts'
-import type { AgentTeamAgentMember, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask } from '../src/types.ts'
+import type { AgentTeamAgentMember, AgentTeamMemberId, AgentTeamRequestId, AgentTeamTask } from '../src/types.ts'
 
 const alpha = WorkspaceId('workspace:alpha')
 const human = agentTeamHumanActor()
-const cleanups: Array<() => Promise<void>> = []
 let counter = 0
 const requestId = (label: string) => `test:closed-follow:${label}:${++counter}` as AgentTeamRequestId
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
 
 /** A ledger at the rules version under test, with one Project and one Reviewer the Task can be handed to. */
 async function seed(options?: { rulesVersion?: number }) {
-  const pool = new MemoryMediaPool()
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const table = await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as Table
-  let ledger = new AgentTeamLedger(table, { rulesVersion: options?.rulesVersion ?? AGENT_TEAM_RULES_VERSION })
-  await ledger.initialize()
+  const { pool, table, ledger } = await openTestLedger({
+    ledgerOptions: { rulesVersion: options?.rulesVersion ?? AGENT_TEAM_RULES_VERSION },
+    initialize: true,
+  })
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'delivery', description: '', memberIds: [] })).value.project.projectRef
   const memberId = 'member:reviewer' as AgentTeamMemberId
   const member: AgentTeamAgentMember = { memberId, sessionId: SessionId('session:reviewer'), workspaceId: alpha, handle: 'reviewer',

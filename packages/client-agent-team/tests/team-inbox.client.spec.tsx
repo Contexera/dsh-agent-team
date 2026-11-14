@@ -1,13 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 import { STORAGE_KEY } from '../src/client/navigation.ts'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 /** One Inbox row as the Host emits it; workspaceId tags the source Workspace. */
 function inboxRow(workspaceId: string, threadRef: string, overrides: Record<string, unknown> = {}): { readonly workspaceId: string } & Record<string, unknown> {
@@ -94,7 +92,6 @@ describe('Team Inbox surfaces', () => {
     await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w1', 'thread:w1'), inboxRow('w2', 'thread:w2', { directCount: 2, unreadCount: 5 })])
     await waitForEntryUnread(card, 6)
-    await b.runtime.dispose()
   })
 
   it('opens the Inbox page from the card with rows and marks the card as the current page', async () => {
@@ -133,7 +130,6 @@ describe('Team Inbox surfaces', () => {
     expect(b.view.getByText('1 条未读')).toBeTruthy()
     expect(b.view.getByText('1 条直接通知')).toBeTruthy()
     await waitFor(() => expect(card.getAttribute('aria-current')).toBe('page'))
-    await b.runtime.dispose()
   })
 
   it('shows a private Task reminder as a direct notification without calling it a mention', async () => {
@@ -151,7 +147,6 @@ describe('Team Inbox surfaces', () => {
     expect(row.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Team 提醒')
     expect(capsuleOf(row)?.getAttribute('aria-label')).toBe('1 条未读，其中 1 条直接通知')
     expect(b.view.getByText('1 条直接通知')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it("draws each Task's own standing behind its number, and nothing on a Thread that is only a discussion", async () => {
@@ -190,7 +185,6 @@ describe('Team Inbox surfaces', () => {
     const taskless = await rowOf('taskless row')
     expect(taskless.querySelector('[data-team-task-state]')).toBeNull()
     for (const [word] of standing) expect(taskless.textContent).not.toContain(word)
-    await b.runtime.dispose()
   })
 
   it('drops the header count line while the queue is empty', async () => {
@@ -200,7 +194,6 @@ describe('Team Inbox surfaces', () => {
     expect(b.view.getByRole('heading', { name: '收件箱' })).toBeTruthy()
     expect(b.view.queryByText(/条未读/)).toBeNull()
     expect(b.view.queryByText(/个 Thread/)).toBeNull()
-    await b.runtime.dispose()
   })
 
   it("draws the reader's own picture and name where a row names the Human", async () => {
@@ -229,7 +222,6 @@ describe('Team Inbox surfaces', () => {
     fireEvent.error(image)
     await waitFor(() => { expect(actor.textContent).toBe('A') })
     expect(actor.querySelector('img')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('marks the Thread that named the reader with the shared capsule, and one that merely moved with a hairline', async () => {
@@ -263,7 +255,6 @@ describe('Team Inbox surfaces', () => {
     expect(b.view.getByText('3 个 Thread')).toBeTruthy()
     expect(b.view.getByText('155 条未读')).toBeTruthy()
     expect(b.view.getByText('4 条直接通知')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('lists a Project Main stream as one row among the Thread rows, ordered with them and inked by the same rule', async () => {
@@ -298,7 +289,6 @@ describe('Team Inbox surfaces', () => {
     expect(b.view.getByText('1 个 Thread')).toBeTruthy()
     expect(b.view.getByText('2 个主对话')).toBeTruthy()
     expect(b.view.getByText('12 条未读')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('opens the Project page on its Main stream from a Main stream row', async () => {
@@ -314,7 +304,6 @@ describe('Team Inbox surfaces', () => {
     fireEvent.click(row)
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     expect(b.view.getByRole('tab', { name: '主对话' }).getAttribute('aria-selected')).toBe('true')
-    await b.runtime.dispose()
   })
 
   /**
@@ -345,7 +334,6 @@ describe('Team Inbox surfaces', () => {
     // The queue agrees: the read emptied it, so it comes back with no unread at all.
     fireEvent.click(card)
     await waitFor(() => expect(b.view.queryByRole('button', { name: /#engineering · 主对话/ })).toBeNull())
-    await b.runtime.dispose()
   })
 
   it('leads a row with the Task\'s live owners in the Project feed\'s own words, and with its newest actor when there are none', async () => {
@@ -378,7 +366,6 @@ describe('Team Inbox surfaces', () => {
     expect(taskless.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('最新来自 @iris')
     const tail = b.view.getByRole('button', { name: /read tail row/ })
     expect(tail.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('由 @vera 认领')
-    await b.runtime.dispose()
   })
 
   it('drops the mention segment from the header when no row names the reader', async () => {
@@ -392,7 +379,6 @@ describe('Team Inbox surfaces', () => {
     expect(await b.view.findByText('1 个 Thread')).toBeTruthy()
     expect(b.view.getByText('2 条未读')).toBeTruthy()
     expect(b.view.queryByText(/条直接通知/)).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('renders the unread queue and the recently-active tail as two sections, and a read row carries no count', async () => {
@@ -426,7 +412,6 @@ describe('Team Inbox surfaces', () => {
     // The header counts the queue; the tail is a way back in, not work waiting.
     expect(b.view.getByText('1 个 Thread')).toBeTruthy()
     expect(b.view.getByText('1 条未读')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('keeps the tail at five rows across Workspaces', async () => {
@@ -446,7 +431,6 @@ describe('Team Inbox surfaces', () => {
     // The tail is a way back into work rather than a second queue: five rows is
     // the whole of it, however many Workspaces are feeding it.
     expect(within(section).getAllByRole('button')).toHaveLength(5)
-    await b.runtime.dispose()
   })
 
   it('names the Workspace on a row only while the rows on screen span more than one', async () => {
@@ -473,7 +457,6 @@ describe('Team Inbox surfaces', () => {
     const alpha = await b.view.findByRole('button', { name: /Alpha \/ #engineering/ })
     expect(alpha.textContent).toContain('only workspace')
     expect(b.view.getByRole('button', { name: /Beta \/ #engineering/ })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('shows the empty state while nothing needs the Human', async () => {
@@ -481,7 +464,6 @@ describe('Team Inbox surfaces', () => {
     fireEvent.click(await b.view.findByRole('button', { name: '收件箱' }))
     expect(await b.view.findByText('收件箱是空的')).toBeTruthy()
     expect(b.view.getByText('你参与的 Thread 或项目主对话有新活动、或有人提到你时，会出现在这里')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('says the unread queue continues past a capped page, and stays quiet on a complete one', async () => {
@@ -491,7 +473,6 @@ describe('Team Inbox surfaces', () => {
     // of it — the rows above are the newest unread Threads, nothing more.
     b.seedInbox([inboxRow('w1', 'thread:capped')], { hasMore: true })
     expect(await b.view.findByText('未读 Thread 多于本页显示的上限；读完上面的之后，其余的会继续出现在这里')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('opens the row Thread through selectWorkspace + selectThread, drops the unread dot, and lands Back on its Project', async () => {
@@ -516,7 +497,6 @@ describe('Team Inbox surfaces', () => {
     fireEvent.click(await b.view.findByRole('button', { name: '返回项目' }))
     await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).not.toHaveProperty('threadRef'))
     expect(b.view.container.querySelector('[data-team-inbox]')).toBeNull()
-    await b.runtime.dispose()
   })
 
   /**
@@ -583,7 +563,6 @@ describe('Team Inbox surfaces', () => {
     } finally {
       if (original === undefined) Reflect.deleteProperty(window.HTMLElement.prototype, 'scrollIntoView')
       else window.HTMLElement.prototype.scrollIntoView = original
-      await b.runtime.dispose()
     }
   })
 
@@ -609,7 +588,6 @@ describe('Team Inbox surfaces', () => {
     // asks the shell to expand the sidebar again.
     fireEvent.click(inboxButton)
     await waitFor(() => expect(b.view.container.querySelector('[data-team-inbox]')).toBeTruthy())
-    await b.runtime.dispose()
   })
 
   it('reads the whole unread slice — no mention-only flag — for the dot and the Inbox page', async () => {
@@ -628,7 +606,6 @@ describe('Team Inbox surfaces', () => {
     // The fan-out still covers every visible Workspace: the dot reads one
     // slice per Workspace and merges the totals.
     expect(new Set(b.inbox.mock.calls.map(([request]) => request.workspaceId))).toEqual(new Set(['w1', 'w2']))
-    await b.runtime.dispose()
   })
 
   it('merges the Workspace slices in the Host order, mentions before merely newer rows', async () => {
@@ -648,7 +625,6 @@ describe('Team Inbox surfaces', () => {
     await waitFor(() => expect(b.view.container.querySelectorAll('[data-team-inbox] button[class*="row"]').length).toBe(3))
     const previews = [...b.view.container.querySelectorAll('[data-team-inbox] button[class*="row"] [class*="rowPreview"]')].map(node => node.textContent)
     expect(previews).toEqual(['mentioned', 'newest', 'middle'])
-    await b.runtime.dispose()
   })
 
   it('names today and yesterday on a row and dates older mentions', async () => {
@@ -674,7 +650,6 @@ describe('Team Inbox surfaces', () => {
     // The precise instant stays on the element behind the relative label.
     expect(olderTime?.getAttribute('title')).toMatch(/^\d{4}-\d{2}-\d{2} 09:30$/)
     expect(olderTime?.getAttribute('dateTime')).toBe(older.toISOString())
-    await b.runtime.dispose()
   })
 
   it('keeps the last successful unread total when a background refresh fails', async () => {
@@ -717,7 +692,6 @@ describe('Team Inbox surfaces', () => {
     await b.changeSubscriptionsReady()
     b.seedInbox(grown())
     await waitForEntryUnread(card, 6)
-    await b.runtime.dispose()
   })
 
   it('keeps a failed Workspace slice on the Inbox page instead of dropping it', async () => {
@@ -749,6 +723,5 @@ describe('Team Inbox surfaces', () => {
     expect(alerts.some(node => node.textContent?.includes('inbox w2 down'))).toBe(true)
     await b.view.findByRole('button', { name: /w1 waiting/ })
     await b.view.findByRole('button', { name: /w2 waiting/ })
-    await b.runtime.dispose()
   })
 })

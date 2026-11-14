@@ -1,14 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-vi.setConfig({ testTimeout: 30_000 })
-import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 import type { AgentTeamMemberId, AgentTeamProjectRef, AgentTeamSubscription, AgentTeamSubscriptionListEntry } from '@contexera/dsh-agent-team/types'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 const storedSubscription: AgentTeamSubscription = {
   subscriptionRef: 'subscription:ci' as AgentTeamSubscription['subscriptionRef'],
@@ -80,7 +77,6 @@ describe('Team Project board', () => {
     expect(b.view.getByRole('tab', { name: '主对话' }).getAttribute('aria-selected')).toBe('true')
     expect(b.view.getByRole('button', { name: /^打开 Task #1：/ })).toBeTruthy()
     expect(b.view.getByRole('textbox', { name: '消息内容' })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('discloses a suspended accountable owner instead of presenting the Task as normally staffed', async () => {
@@ -98,7 +94,6 @@ describe('Team Project board', () => {
     // The word marks the standing on the line; the sentence the seat speaks says who is paused and why it matters.
     await waitFor(() => expect(b.view.getByText('负责 · 已暂停')).toBeTruthy())
     expect(b.view.container.querySelector('[data-team-owner]')?.getAttribute('aria-label')).toBe('负责人已暂停')
-    await b.runtime.dispose()
   })
 
   it('moves the selection with the arrow keys and reaches every tab from the keyboard', async () => {
@@ -130,7 +125,6 @@ describe('Team Project board', () => {
     // An unrelated key is left alone: it must not steal typing or scrolling.
     fireEvent.keyDown(b.view.getByRole('tablist'), { key: 'ArrowDown' })
     expect(feedTab.getAttribute('aria-selected')).toBe('true')
-    await b.runtime.dispose()
   })
 
   /**
@@ -157,7 +151,6 @@ describe('Team Project board', () => {
     expect(b.view.getByText('main CI')).toBeTruthy()
     release()
     await waitFor(() => expect(b.view.getByText('main CI')).toBeTruthy())
-    await b.runtime.dispose()
   })
 
   // The board is a Task view, not a second reading of the loaded Message window:
@@ -230,7 +223,6 @@ describe('Team Project board', () => {
     fireEvent.click(b.view.getByRole('tab', { name: '看板' }))
     await Promise.resolve()
     expect(b.viewProjects.mock.calls.length).toBe(before)
-    await b.runtime.dispose()
   })
 
   it('expands the finished column to the whole resolved history on demand', async () => {
@@ -267,7 +259,6 @@ describe('Team Project board', () => {
     await waitFor(() => expect(b.loadTaskBoard.mock.calls.length).toBeGreaterThan(1))
     await waitFor(() => expect(b.loadTaskBoard.mock.calls.at(-1)?.[0]).toMatchObject({ finishedLimit: 100 }))
     expect(b.view.getByText('已完成 1')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   // A full page is not proof of an older one. This case and the next pin the two
@@ -292,7 +283,6 @@ describe('Team Project board', () => {
     fireEvent.click(await b.view.getByRole('tab', { name: '看板' }))
     expect(await b.view.findByText('已完成 5')).toBeTruthy()
     expect(b.view.queryByRole('button', { name: '展开全部已完成' })).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('retires the expand control at the deepest page the Host accepts', async () => {
@@ -319,6 +309,5 @@ describe('Team Project board', () => {
     expect(b.loadTaskBoard.mock.calls.at(-1)?.[0]).toMatchObject({ finishedLimit: 100 })
     // Still truncated, but there is no deeper page to ask for.
     expect(b.view.queryByRole('button', { name: '展开全部已完成' })).toBeNull()
-    await b.runtime.dispose()
   })
 })

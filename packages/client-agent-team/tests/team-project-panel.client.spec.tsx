@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-vi.setConfig({ testTimeout: 30_000 })
-import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 /** One seeded taskless discussion on the bench, with the Project page open. */
 async function seedPanel() {
@@ -35,7 +32,6 @@ describe('Team Project discussion panel', () => {
     expect(b.view.container.querySelector('[data-team-project]')).toBeTruthy()
     expect(b.view.getByRole('button', { name: /^打开讨论：/ })).toBeTruthy()
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ threadRef: 'thread:1' })))
-    await b.runtime.dispose()
   })
 
   it('lets the panel\'s read answer the card\'s unread statement while the arrival accent keeps its own clock', async () => {
@@ -66,7 +62,6 @@ describe('Team Project discussion panel', () => {
     const card = b.view.getByRole('button', { name: /^打开讨论：/ })
     expect(card.getAttribute('aria-label')).not.toContain('未读')
     expect(card.closest('[data-unread]')).not.toBeNull()
-    await b.runtime.dispose()
   })
 
   it('replies from the panel composer and renders the committed message', async () => {
@@ -77,7 +72,6 @@ describe('Team Project discussion panel', () => {
     fireEvent.click(within(panel).getByRole('button', { name: '发送' }))
     await waitFor(() => expect(b.reply).toHaveBeenCalledWith(expect.objectContaining({ threadRef: 'thread:1', body: '面板里的回复' })))
     expect(await within(panel).findByText('面板里的回复')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('offers each Message the same row actions the Thread page does', async () => {
@@ -108,7 +102,6 @@ describe('Team Project discussion panel', () => {
       body: '面板里的引用回复',
       replyToMessageRef: row.getAttribute('data-message-ref'),
     })))
-    await b.runtime.dispose()
   })
 
   it('promotes the discussion and walks the reader into the Thread page', async () => {
@@ -127,7 +120,6 @@ describe('Team Project discussion panel', () => {
     // Promotion is not a cover: there is no separate discussion left to restore.
     expect(b.runtime.ctx.teamNavigation.getSnapshot().discussionRef).toBeUndefined()
     expect(b.view.queryByRole('complementary', { name: '讨论' })).toBeNull()
-    await b.runtime.dispose()
   })
 
   /**
@@ -170,7 +162,6 @@ describe('Team Project discussion panel', () => {
     // A card is a door: it opens the Task's own page rather than the discussion it came from.
     fireEvent.click(onPage)
     await waitFor(() => expect(b.runtime.ctx.teamNavigation.getSnapshot().threadRef).toBe('thread:derived'))
-    await b.runtime.dispose()
   })
 
   /**
@@ -201,7 +192,6 @@ describe('Team Project discussion panel', () => {
       discussionRef: 'thread:c0a1b2c3', projectRef: 'project:delivery',
     }))
     expect(b.runtime.ctx.teamNavigation.getSnapshot().threadRef).toBeUndefined()
-    await b.runtime.dispose()
   })
 
   /**
@@ -227,7 +217,6 @@ describe('Team Project discussion panel', () => {
     await waitFor(() => expect(b.runtime.ctx.teamNavigation.getSnapshot()).toMatchObject({
       discussionRef: 'thread:c0a1b2c3', projectRef: 'project:delivery',
     }))
-    await b.runtime.dispose()
   })
 
   /**
@@ -279,7 +268,6 @@ describe('Team Project discussion panel', () => {
     fireEvent.click(await b.view.findByRole('button', { name: '返回项目' }))
     await waitFor(() => expect(b.view.container.querySelector('[data-team-panel="thread:1"]')).not.toBeNull())
     expect(await b.view.findByRole('complementary', { name: '讨论' })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('keeps the panel open across tab switches and closes on its own button', async () => {
@@ -297,6 +285,5 @@ describe('Team Project discussion panel', () => {
     // closed the reading column takes the width back instead of standing beside
     // an empty band.
     expect(b.view.container.querySelector('[data-panel="closed"]')).toBeTruthy()
-    await b.runtime.dispose()
   })
 })

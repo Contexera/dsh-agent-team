@@ -8,13 +8,9 @@
  * that arrangement; a spec chooses its adapter and its persistence backend and
  * describes behavior.
  *
- * `cleanups` is intentionally NOT owned here: vitest lifecycle hooks are
- * per-file, so each spec registers its own `afterEach` and drains its own
- * disposals through the array this module exposes.
+ * Teardown is self-managed via `onTestFinished` (or an explicit `registerCleanup`
+ * hook for `beforeAll` callers) and validates the ledger before closing.
  */
-
-/** Per-file teardown list: a spec drains this in its own `afterEach`. */
-export const cleanups: Array<() => Promise<void>> = []
 
 export const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 
@@ -53,7 +49,9 @@ import { ACCEPTANCE_COMPACT_TOKENS } from '../../src/acceptance-context.ts'
 import { MEMBER_COMPACT_TOKENS } from '../../src/member-compaction.ts'
 import { RECOVERY_DELAY_MS } from '../../src/recovery.ts'
 import type { AgentTeamProjectRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../../src/types.ts'
+import { TestHuman } from './domain-handles.ts'
 import { MemoryStorageBackend } from './memory-backend.ts'
+import { pushDshHome, registerAutoCleanup, runCleanupSteps } from './team-host-fixture.ts'
 import { SqliteStorageBackend } from '../../src/vendor/storage-sqlite/index.ts'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 
@@ -192,6 +190,13 @@ export class TestablePresets extends AgentPresetRegistry {
   }
 }
 
+export interface RealHarnessOptions {
+  readonly validateLedger?: boolean
+  readonly registerCleanup?: (fn: () => Promise<void>) => void
+  /** Parent for the throwaway tree, for a spec that owns the directory it inspects after cleanup. */
+  readonly tempParent?: string
+}
+
 export async function realHarness(
   adapter: LlmAdapter = new EmptyAdapter(),
   persistenceBackend: PersistenceBackend = 'jsonl',
@@ -199,6 +204,7 @@ export async function realHarness(
   realCompaction = false,
   seed?: (ctx: Context, workspaceId: WorkspaceId) => Promise<void>,
   ledgerBackend: LedgerBackend = 'memory',
+  options?: RealHarnessOptions,
 ): Promise<{
   readonly ctx: Context
   readonly workspaceId: WorkspaceId
@@ -214,106 +220,143 @@ export async function realHarness(
   readonly pressureState: { usageTokens: number; bySession: Map<string, number>; failFor: Set<string> }
   /** Writable fake owned-jobs list; tests drive the rollover guard through it. */
   readonly jobsState: { jobs: Array<{ id: string; label: string; status: string; reported: boolean }> }
+  readonly human: TestHuman
+  readonly close: () => Promise<void>
 }> {
-  const root = reopen?.root ?? await mkdtemp(join(tmpdir(), 'dsh-agent-team-member-'))
-  const checkout = join(root, 'checkout')
-  const persistence = join(root, 'sessions')
-  if (reopen === undefined) await Promise.all([mkdir(checkout), mkdir(persistence)])
-  process.env.DSH_HOME = join(root, 'dsh-home')
-  // The preset's compaction row points at a real file with a file: URL, so
-  // its health check and the `compaction` service are both genuine.
-  const compactionStub = join(root, 'compaction-stub.mjs')
-  await writeFile(compactionStub, realCompaction
-    ? `export { default } from ${JSON.stringify(pathToFileURL(resolve(import.meta.dirname, '../../src/member-compaction-engine.ts')).href)}`
-    : [
-    "export const name = 'test-compaction'",
-    "export function apply(scope) { scope.provide('compaction', { compactNow: async () => null, compactIfNeeded: async () => null }) }",
-    '',
-  ].join('\n'))
-  // The team-member definition as one declarative row, the same shape the
-  // shipped cordis.patch.yml declares; bare internal loader names resolve
-  // through the self-linked node_modules.
-  const teamMemberPlugins: PresetDefinition['plugins'] = [
-    { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
-    { id: 'member-time-context', name: '@contexera/dsh-agent-team/member-time-context' },
-    { id: 'team-tools', name: '@contexera/dsh-agent-team/tools' },
-    { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
-      { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },
-    ] },
-  ]
+  const ownsRoot = reopen === undefined
+  const shouldValidate = options?.validateLedger ?? true
+  let root: string | undefined = reopen?.root
+  let restoreDshHome: (() => void) | undefined
+  let ctx: Context | undefined
+  let teamFiber: Awaited<ReturnType<Context['plugin']>> | undefined
+  let facility: DomainFacility | undefined
+  let backend: SqliteStorageBackend | undefined
+  let closed = false
 
-  const ctx = new Context()
-  // rc.1: preset health resolves package rows by walking node_modules above
-  // ctx.baseUrl — point at this repository, where the harness and bundle
-  // packages are linked, as a real profile install would.
-  ctx.baseUrl = pathToFileURL(resolve(import.meta.dirname, '../../../')).href + '/'
-  await ctx.plugin(Loader)
-  ctx.loader.builtins.include = Include
-  ctx.loader.builtins.group = Group
-  provideWorkingDirectoryFixture(ctx)
-  await ctx.plugin(LlmRuntime)
-  ctx.llm.registerAdapter(['mock'], adapter)
-  await ctx.plugin(SessionStore)
-  await ctx.plugin(SessionProjectionRegistry)
-  await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRuntime)
-  // 0.2.2 moved tool execution behind a selected executor plugin, so a composition that runs tools must name one.
-  await ctx.plugin(NativeToolExecutor)
-  await ctx.plugin(AgentRegistry)
-  await ctx.plugin(AgentLoop, { agents: [] })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  const pressureState = { usageTokens: 0, bySession: new Map<string, number>(), failFor: new Set<string>() }
-  ctx.provide('tokenMeter', { estimateMessage: () => 0, measure: (session: { id: string }): { totalTokens: number; nodes: { seq: number; tokens: number }[] } => {
-    if (pressureState.failFor.has(session.id)) throw new Error('meter unavailable for this session')
-    // One node at the head of the surface, so any retained prefix through an
-    // anchor prices at the whole source's measured size - the shape the real
-    // meter reports, and what the engine prices a return off.
-    const totalTokens = pressureState.bySession.get(session.id) ?? pressureState.usageTokens
-    return { totalTokens, nodes: [{ seq: 0, tokens: totalTokens }] }
-  } })
-  // The generation swap's job guard reads the member-scoped jobs registry; a
-  // writable fake keeps the service present.
-  const jobsState: { jobs: Array<{ id: string; label: string; status: string; reported: boolean }> } = { jobs: [] }
-  ctx.provide('jobs', { list: () => jobsState.jobs })
-  if (persistenceBackend === 'jsonl') await ctx.plugin(JsonlSessionPersistence, { root: persistence })
-  await ctx.plugin(SessionTitle, { fallbackMaxWords: 5, fallbackMaxBytes: 40, maxTitleBytes: 80 })
-  await ctx.plugin(TestablePresets, { default: 'team-member' })
-  await ctx.plugin(AgentPresetPlugin, { id: 'team-member', plugins: teamMemberPlugins })
-  await ctx.plugin(Storage)
-  const backend = ledgerBackend === 'sqlite'
-    ? new SqliteStorageBackend({ path: join(root, 'agent-team.sqlite'), journalMode: 'delete' })
-    : undefined
-  ctx.storage.backend.register(ledgerBackend, backend ?? new MemoryStorageBackend())
-  const facility = new DomainFacility(ctx, { backend: ledgerBackend, routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  const workspaceId = WorkspaceId('workspace:member-test')
-  const archived: SessionId[] = []
-  const archiveFailures = { remaining: 0 }
-  const workspaces = new Map([[workspaceId, { id: workspaceId, path: checkout, attachSession: async () => {} }]])
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => workspaces.get(id),
-    list: () => [],
-    get archivedSessionIds(): readonly SessionId[] { return archived },
-    archiveSession: async (sessionId: SessionId) => {
-      if (archived.includes(sessionId)) return
-      if (archiveFailures.remaining > 0) {
-        archiveFailures.remaining -= 1
-        throw new Error('workspace archive failed (test seam)')
-      }
-      archived.push(sessionId)
-    },
-  })
-  // A spec that replays a ledger an older build wrote seeds the domain here, before Team boots over it.
-  if (seed !== undefined) await seed(ctx, workspaceId)
-  const teamFiber = await ctx.plugin(AgentTeam)
-  cleanups.push(async () => {
-    await ctx.fiber.dispose()
-    await facility.closeAll()
-    await backend?.close()
-    await rm(root, { recursive: true, force: true })
-  })
-  return { ctx, workspaceId, root, checkout, workspaces, teamFiber, archived, archiveFailures, presets: ctx.agentPresets as TestablePresets, pressureState, jobsState }
+  const close = async (): Promise<void> => {
+    if (closed) return
+    closed = true
+    await runCleanupSteps([
+      () => {
+        if (!shouldValidate || ctx === undefined) return
+        if (teamFiber !== undefined && teamFiber.uid === null) return
+        ctx.get('agentTeam')?.validateLedger()
+      },
+      () => ctx?.fiber.dispose(),
+      () => facility?.closeAll(),
+      () => backend?.close(),
+      () => {
+        if (ownsRoot && root !== undefined) return rm(root, { recursive: true, force: true })
+        return undefined
+      },
+      () => { restoreDshHome?.() },
+    ])
+  }
+
+  registerAutoCleanup(close, options?.registerCleanup)
+
+  try {
+    root ??= await mkdtemp(join(options?.tempParent ?? tmpdir(), 'dsh-agent-team-member-'))
+    const checkout = join(root, 'checkout')
+    const persistence = join(root, 'sessions')
+    if (reopen === undefined) await Promise.all([mkdir(checkout), mkdir(persistence)])
+    restoreDshHome = pushDshHome(join(root, 'dsh-home'))
+    // The preset's compaction row points at a real file with a file: URL, so
+    // its health check and the `compaction` service are both genuine.
+    const compactionStub = join(root, 'compaction-stub.mjs')
+    await writeFile(compactionStub, realCompaction
+      ? `export { default } from ${JSON.stringify(pathToFileURL(resolve(import.meta.dirname, '../../src/member-compaction-engine.ts')).href)}`
+      : [
+      "export const name = 'test-compaction'",
+      "export function apply(scope) { scope.provide('compaction', { compactNow: async () => null, compactIfNeeded: async () => null }) }",
+      '',
+    ].join('\n'))
+    // The team-member definition as one declarative row, the same shape the
+    // shipped cordis.patch.yml declares; bare internal loader names resolve
+    // through the self-linked node_modules.
+    const teamMemberPlugins: PresetDefinition['plugins'] = [
+      { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
+      { id: 'member-time-context', name: '@contexera/dsh-agent-team/member-time-context' },
+      { id: 'team-tools', name: '@contexera/dsh-agent-team/tools' },
+      { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
+        { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },
+      ] },
+    ]
+
+    ctx = new Context()
+    // rc.1: preset health resolves package rows by walking node_modules above
+    // ctx.baseUrl — point at this repository, where the harness and bundle
+    // packages are linked, as a real profile install would.
+    ctx.baseUrl = pathToFileURL(resolve(import.meta.dirname, '../../../')).href + '/'
+    await ctx.plugin(Loader)
+    ctx.loader.builtins.include = Include
+    ctx.loader.builtins.group = Group
+    provideWorkingDirectoryFixture(ctx)
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['mock'], adapter)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    // 0.2.2 moved tool execution behind a selected executor plugin, so a composition that runs tools must name one.
+    await ctx.plugin(NativeToolExecutor)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
+    const pressureState = { usageTokens: 0, bySession: new Map<string, number>(), failFor: new Set<string>() }
+    ctx.provide('tokenMeter', { estimateMessage: () => 0, measure: (session: { id: string }): { totalTokens: number; nodes: { seq: number; tokens: number }[] } => {
+      if (pressureState.failFor.has(session.id)) throw new Error('meter unavailable for this session')
+      // One node at the head of the surface, so any retained prefix through an
+      // anchor prices at the whole source's measured size - the shape the real
+      // meter reports, and what the engine prices a return off.
+      const totalTokens = pressureState.bySession.get(session.id) ?? pressureState.usageTokens
+      return { totalTokens, nodes: [{ seq: 0, tokens: totalTokens }] }
+    } })
+    // The generation swap's job guard reads the member-scoped jobs registry; a
+    // writable fake keeps the service present.
+    const jobsState: { jobs: Array<{ id: string; label: string; status: string; reported: boolean }> } = { jobs: [] }
+    ctx.provide('jobs', { list: () => jobsState.jobs })
+    if (persistenceBackend === 'jsonl') await ctx.plugin(JsonlSessionPersistence, { root: persistence })
+    await ctx.plugin(SessionTitle, { fallbackMaxWords: 5, fallbackMaxBytes: 40, maxTitleBytes: 80 })
+    await ctx.plugin(TestablePresets, { default: 'team-member' })
+    await ctx.plugin(AgentPresetPlugin, { id: 'team-member', plugins: teamMemberPlugins })
+    await ctx.plugin(Storage)
+    backend = ledgerBackend === 'sqlite'
+      ? new SqliteStorageBackend({ path: join(root, 'agent-team.sqlite'), journalMode: 'delete' })
+      : undefined
+    ctx.storage.backend.register(ledgerBackend, backend ?? new MemoryStorageBackend())
+    facility = new DomainFacility(ctx, { backend: ledgerBackend, routes: {} })
+    ctx.storage.mount('domain', facility)
+    ctx.provide('storageDomain', facility)
+    const workspaceId = WorkspaceId('workspace:member-test')
+    const archived: SessionId[] = []
+    const archiveFailures = { remaining: 0 }
+    const workspaces = new Map([[workspaceId, { id: workspaceId, path: checkout, attachSession: async () => {} }]])
+    ctx.provide('workspaceRegistry', {
+      get: (id: WorkspaceId) => workspaces.get(id),
+      list: () => [],
+      get archivedSessionIds(): readonly SessionId[] { return archived },
+      archiveSession: async (sessionId: SessionId) => {
+        if (archived.includes(sessionId)) return
+        if (archiveFailures.remaining > 0) {
+          archiveFailures.remaining -= 1
+          throw new Error('workspace archive failed (test seam)')
+        }
+        archived.push(sessionId)
+      },
+    })
+    // A spec that replays a ledger an older build wrote seeds the domain here, before Team boots over it.
+    if (seed !== undefined) await seed(ctx, workspaceId)
+    teamFiber = await ctx.plugin(AgentTeam)
+    return { ctx, workspaceId, root, checkout, workspaces, teamFiber, archived, archiveFailures, presets: ctx.agentPresets as TestablePresets, pressureState, jobsState, human: new TestHuman(ctx, workspaceId), close }
+  } catch (initError) {
+    try {
+      await close()
+    } catch (cleanupError) {
+      throw new AggregateError([initError, cleanupError], 'realHarness initialization and cleanup both failed')
+    }
+    throw initError
+  }
 }
 
 export async function waitFor<T>(probe: () => T | undefined, timeoutMs = 60_000): Promise<T> {

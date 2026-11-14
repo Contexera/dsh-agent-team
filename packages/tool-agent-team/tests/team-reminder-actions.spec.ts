@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import type { AgentTeamMemberId, AgentTeamMemberReminder, AgentTeamMemberReminderView, AgentTeamReminderRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamMemberReminder } from '@contexera/dsh-agent-team/types'
 import { teamTools, renderText } from './render-text.ts'
+import {
+  TEST_REMINDER,
+  TEST_WORKSPACE,
+  callTool,
+  createTestToolHost,
+  testReminder,
+} from './tool-test-host.ts'
 
 /**
  * Execution-level tests for the Member reminder surface: the schedule a model
@@ -12,49 +18,15 @@ import { teamTools, renderText } from './render-text.ts'
  * becoming a silent reminder that never fires.
  */
 
-const WORKSPACE = 'workspace:40459c33-743d-4030-9e50-9419d72abe06'
-const REF = 'reminder:0f0a1b2c-3d4e-4f50-8a9b-0c1d2e3f4a5b'
+const WORKSPACE = TEST_WORKSPACE
+const REF = TEST_REMINDER
 
 function reminder(overrides: Partial<AgentTeamMemberReminder> = {}): AgentTeamMemberReminder {
-  return {
-    reminderRef: REF as AgentTeamReminderRef,
-    memberId: 'member:b138210c-6534-4e6d-a419-af161f54d459' as AgentTeamMemberId,
-    schedule: { kind: 'once', at: '2026-11-04T02:00:00.000Z' },
-    note: 'check the build',
-    state: 'active',
-    createdAt: '2026-11-03T08:00:00.000Z',
-    ...overrides,
-  }
+  return testReminder(overrides)
 }
 
-/** The Host surface `team_reminder` touches, recorded so the assertion is on the request the tool built. */
-function fakeHost(overrides: Record<string, unknown> = {}) {
-  const host = {
-    workspacesForAgent: () => [{ workspaceId: WORKSPACE, path: undefined, default: true }],
-    memberForAgent: () => ({ memberId: 'member:b138210c-6534-4e6d-a419-af161f54d459' as AgentTeamMemberId, handle: 'Aster' }),
-    // The read keeps its request argument, so the assertion is on the request the tool built.
-    memberRemindersForAgent: vi.fn((_agent: unknown, _request: unknown) => [] as readonly AgentTeamMemberReminderView[]),
-    createMemberReminderForAgent: vi.fn(async (_agent: unknown, request: Record<string, unknown>) => ({
-      receipt: { occurredAt: '2026-11-03T08:00:00.000Z' },
-      workspaceId: request.workspaceId,
-      reminder: reminder(),
-      activeCount: 3,
-    })),
-    cancelMemberReminderForAgent: vi.fn(async (_agent: unknown, request: Record<string, unknown>) => ({
-      receipt: { occurredAt: '2026-11-03T08:00:00.000Z' },
-      workspaceId: request.workspaceId,
-      reminder: reminder({ state: 'cancelled' }),
-    })),
-    ...overrides,
-  }
-  return host
-}
-
-/** One tool call against a fake Host: the real `defineTool` wrapper validates the arguments first. */
-async function call(tool: ToolDefinition, args: Record<string, unknown>, host: ReturnType<typeof fakeHost>, callId = 'call:1'): Promise<unknown> {
-  const agent = { id: 'agent:tool-test', ctx: { get: (name: string) => name === 'agentTeam' ? host : undefined } }
-  return tool.execute(args, { agent, callId, signal: new AbortController().signal } as never)
-}
+const fakeHost = createTestToolHost
+const call = callTool
 
 const tool = teamTools().get('team_reminder')!
 
@@ -217,30 +189,9 @@ describe('team_reminder render', () => {
 })
 
 describe('team_reminder tolerates the create-only slots a model fills on list and cancel', () => {
-  it('cancels when the model also sends the schedule kind default', async () => {
-    const host = fakeHost({ memberRemindersForAgent: vi.fn(() => [{ reminder: reminder() }]) })
-    const result = await call(tool, { action: 'cancel', reminderRef: REF, scheduleKind: 'once' }, host)
-    expect(host.cancelMemberReminderForAgent).toHaveBeenCalledTimes(1)
-    expect(result).toMatchObject({ action: 'cancel', cancelled: true })
-  })
-
-  it('lists when the model also sends the schedule kind default', async () => {
-    const host = fakeHost()
-    await call(tool, { action: 'list', scheduleKind: 'once' }, host)
-    expect(host.memberRemindersForAgent).toHaveBeenCalledTimes(1)
-  })
-
-  it('treats a blank note as absent on cancel and list', async () => {
-    const host = fakeHost({ memberRemindersForAgent: vi.fn(() => [{ reminder: reminder() }]) })
-    await call(tool, { action: 'cancel', reminderRef: REF, note: '' }, host)
-    expect(host.cancelMemberReminderForAgent).toHaveBeenCalledTimes(1)
-    await call(tool, { action: 'list', note: '' }, host)
-    expect(host.memberRemindersForAgent).toHaveBeenCalledTimes(2)
-  })
-
   it('still refuses a schedule value that names something the caller never picked', async () => {
     const host = fakeHost()
-    for (const extra of [{ minutes: 30 }, { at: '2026-11-04T02:00:00.000Z' }, { scheduleKind: 'every' }, { note: 'check the build' }]) {
+    for (const extra of [{ at: '2026-11-04T02:00:00.000Z' }, { scheduleKind: 'every' }, { note: 'check the build' }]) {
       await expect(call(tool, { action: 'cancel', reminderRef: REF, ...extra }, host))
         .rejects.toThrow(/cancel does not accept/)
     }

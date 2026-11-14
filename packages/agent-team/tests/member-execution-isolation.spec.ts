@@ -1,27 +1,19 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
-vi.setConfig({ testTimeout: 60_000 })
-
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
-import { cleanups, GatedAdapter, realHarness, requestId } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-
+import { GatedAdapter, realHarness, requestId } from './helpers/member-harness.ts'
 
 describe('Agent Team member execution isolation (state-requests 02)', () => {
   it("suspends B while A's capability edit waits for A's turn boundary", async () => {
     const adapter = new GatedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('isolation-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
-    const reviewer = await ctx.agentTeam.addMember({ requestId: requestId('isolation-reviewer'), workspaceId,
-      handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
-    const agent = ctx.agents.get(builder.status.member.sessionId)!
+    const h = await realHarness(adapter)
+    const builder = await h.human.addMember('builder', { description: 'Builds changes' })
+    const reviewer = await h.human.addMember('reviewer', { description: 'Reviews changes' })
+    const agent = builder.agent
 
     // A runs a held turn: model call 1 parks until the test releases it.
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue current checkout work.' }], source: { kind: 'user' } }))
@@ -29,14 +21,14 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
 
     // A's capability edit stores its intent, then waits for the turn
     // boundary: it cannot resolve while A keeps running.
-    const edit = ctx.agentTeam.updateMember({ requestId: requestId('isolation-edit'), memberId: builder.status.member.memberId,
+    const edit = h.ctx.agentTeam.updateMember({ requestId: requestId('isolation-edit'), memberId: builder.memberId,
       handle: 'builder', description: 'Builds changes', capabilities: { tools: { allow: ['ordinary_tool'] } } })
     const editOutcome = await Promise.race([edit.then(() => 'settled' as const),
       new Promise<'pending'>(resolve => { setTimeout(() => resolve('pending'), 50) })])
 
     // B's suspension must complete while A still runs: one Member's waiting
     // execution may not block lifecycle management of another Member.
-    const suspending = ctx.agentTeam.suspendMember({ requestId: requestId('isolation-suspend'), memberId: reviewer.status.member.memberId })
+    const suspending = h.ctx.agentTeam.suspendMember({ requestId: requestId('isolation-suspend'), memberId: reviewer.memberId })
     const suspensionOutcome = await Promise.race([suspending.then(() => 'settled' as const),
       new Promise<'pending'>(resolve => { setTimeout(() => resolve('pending'), 1500) })])
 
@@ -49,34 +41,33 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     expect(suspensionOutcome).toBe('settled')
     expect(applied.effect).toBe('applied')
     expect(applied.status.availability).toBe('active')
-    expect(applied.status.member.sessionId).toBe(builder.status.member.sessionId)
+    expect(applied.status.member.sessionId).toBe(builder.sessionId)
     expect(applied.status.member.capabilities).toEqual({ tools: { allow: ['ordinary_tool'] } })
     expect(suspended.status.availability).toBe('suspended')
-    expect(ctx.agents.get(reviewer.status.member.sessionId)).toBeUndefined()
+    expect(reviewer.live).toBeUndefined()
     // A's turn ran to completion after the boundary swap, untouched by B's suspension.
     await agent.whenIdle()
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+    expect(() => h.ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
   it('keeps same-Member order: a stop queued behind a parked edit runs after the edit applies', async () => {
     const adapter = new GatedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('order-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
-    const agent = ctx.agents.get(builder.status.member.sessionId)!
+    const h = await realHarness(adapter)
+    const builder = await h.human.addMember('builder', { description: 'Builds changes' })
+    const agent = builder.agent
 
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue current checkout work.' }], source: { kind: 'user' } }))
     await adapter.started.promise
 
     const order: string[] = []
-    const edit = ctx.agentTeam.updateMember({ requestId: requestId('order-edit'), memberId: builder.status.member.memberId,
+    const edit = h.ctx.agentTeam.updateMember({ requestId: requestId('order-edit'), memberId: builder.memberId,
       handle: 'builder', description: 'Builds changes', capabilities: { tools: { allow: ['ordinary_tool'] } } })
       .then(result => { order.push('edit'); return result })
     const editOutcome = await Promise.race([edit.then(() => 'settled' as const),
       new Promise<'pending'>(resolve => { setTimeout(() => resolve('pending'), 50) })])
     expect(editOutcome).toBe('pending')
 
-    const suspending = ctx.agentTeam.suspendMember({ requestId: requestId('order-suspend'), memberId: builder.status.member.memberId })
+    const suspending = h.ctx.agentTeam.suspendMember({ requestId: requestId('order-suspend'), memberId: builder.memberId })
       .then(result => { order.push('suspend'); return result })
     const stopOutcome = await Promise.race([suspending.then(() => 'settled' as const),
       new Promise<'pending'>(resolve => { setTimeout(() => resolve('pending'), 50) })])
@@ -93,24 +84,23 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     // Stop never clears a committed configuration: the stored intent survives
     // the suspension for the next activation.
     expect(suspended.status.member.capabilities).toEqual({ tools: { allow: ['ordinary_tool'] } })
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+    expect(() => h.ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
   it('defers an edit whose stop committed first and applies the stored intent at the next activation', async () => {
     const adapter = new GatedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('deferred-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
-    const agent = ctx.agents.get(builder.status.member.sessionId)!
-    const memberId = builder.status.member.memberId
+    const h = await realHarness(adapter)
+    const builder = await h.human.addMember('builder', { description: 'Builds changes' })
+    const agent = builder.agent
+    const memberId = builder.memberId
 
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue current checkout work.' }], source: { kind: 'user' } }))
     await adapter.started.promise
 
     // The stop commits first and cancels the in-flight turn as soon as its
     // own chain slot runs — it settles while the gate is still held.
-    const suspending = ctx.agentTeam.suspendMember({ requestId: requestId('deferred-suspend'), memberId })
-    const edit = ctx.agentTeam.updateMember({ requestId: requestId('deferred-edit'), memberId,
+    const suspending = h.ctx.agentTeam.suspendMember({ requestId: requestId('deferred-suspend'), memberId })
+    const edit = h.ctx.agentTeam.updateMember({ requestId: requestId('deferred-edit'), memberId,
       handle: 'builder', description: 'Builds changes', capabilities: { tools: { allow: ['ordinary_tool'] } } })
     const requestsBefore = adapter.requests.length
 
@@ -122,13 +112,13 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     expect(deferred.status.capabilityState).toBe('pending')
     expect(adapter.requests.length).toBe(requestsBefore)
 
-    const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('deferred-resume'), memberId })
+    const resumed = await h.ctx.agentTeam.resumeMember({ requestId: requestId('deferred-resume'), memberId })
     expect(resumed.status.availability).toBe('active')
-    expect(resumed.status.member.sessionId).toBe(builder.status.member.sessionId)
+    expect(resumed.status.member.sessionId).toBe(builder.sessionId)
     expect(resumed.status.member.capabilities).toEqual({ tools: { allow: ['ordinary_tool'] } })
     expect(resumed.status.capabilityState).toBe('applied')
-    expect(ctx.agents.get(builder.status.member.sessionId)).toBeDefined()
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+    expect(builder.live).toBeDefined()
+    expect(() => h.ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
   it('activates exactly once when the same add request arrives concurrently', async () => {
@@ -172,15 +162,14 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
 
   it('drains a parked lifecycle chain on Host shutdown without waiting for the turn to end', async () => {
     const adapter = new GatedAdapter()
-    const { ctx, workspaceId, teamFiber } = await realHarness(adapter)
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('shutdown-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
-    const agent = ctx.agents.get(builder.status.member.sessionId)!
+    const h = await realHarness(adapter)
+    const builder = await h.human.addMember('builder', { description: 'Builds changes' })
+    const agent = builder.agent
 
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue current checkout work.' }], source: { kind: 'user' } }))
     await adapter.started.promise
 
-    const edit = ctx.agentTeam.updateMember({ requestId: requestId('shutdown-edit'), memberId: builder.status.member.memberId,
+    const edit = h.ctx.agentTeam.updateMember({ requestId: requestId('shutdown-edit'), memberId: builder.memberId,
       handle: 'builder', description: 'Builds changes', capabilities: { tools: { allow: ['ordinary_tool'] } } })
     const editOutcome = await Promise.race([edit.then(() => 'settled' as const),
       new Promise<'pending'>(resolve => { setTimeout(() => resolve('pending'), 50) })])
@@ -188,9 +177,9 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
 
     // The gate is never released: Host shutdown must finish anyway instead
     // of waiting out a turn that may never end.
-    const team = ctx.agentTeam
+    const team = h.ctx.agentTeam
     const requestsBefore = adapter.requests.length
-    const disposal = teamFiber.dispose().then(() => 'disposed' as const)
+    const disposal = h.teamFiber.dispose().then(() => 'disposed' as const)
     const outcome = await Promise.race([disposal,
       new Promise<'stalled'>(resolve => { setTimeout(() => resolve('stalled'), 5000) })])
     // Unblock a stalled (red) shutdown so the suite's own cleanup cannot wedge.
@@ -208,15 +197,14 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
 
   it('resolves a parked boundary wait when the turn is cancelled', async () => {
     const adapter = new GatedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('cancel-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
-    const agent = ctx.agents.get(builder.status.member.sessionId)!
+    const h = await realHarness(adapter)
+    const builder = await h.human.addMember('builder', { description: 'Builds changes' })
+    const agent = builder.agent
 
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue current checkout work.' }], source: { kind: 'user' } }))
     await adapter.started.promise
 
-    const edit = ctx.agentTeam.updateMember({ requestId: requestId('cancel-edit'), memberId: builder.status.member.memberId,
+    const edit = h.ctx.agentTeam.updateMember({ requestId: requestId('cancel-edit'), memberId: builder.memberId,
       handle: 'builder', description: 'Builds changes', capabilities: { tools: { allow: ['ordinary_tool'] } } })
     const editOutcome = await Promise.race([edit.then(() => 'settled' as const),
       new Promise<'pending'>(resolve => { setTimeout(() => resolve('pending'), 50) })])
@@ -233,24 +221,23 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     expect(applied.effect).toBe('applied')
     expect(applied.status.availability).toBe('active')
     expect(adapter.requests.length).toBe(requestsBefore)
-    expect(ctx.agentTeam['memberLifecycleTails'].size).toBe(0)
-    expect(ctx.agentTeam['memberRuntime']['turnWaitResolvers'].size).toBe(0)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+    expect(h.ctx.agentTeam['memberLifecycleTails'].size).toBe(0)
+    expect(h.ctx.agentTeam['memberRuntime']['turnWaitResolvers'].size).toBe(0)
+    expect(() => h.ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
   it('logs each lifecycle wait class with the Member, Session, and duration', async () => {
     const adapter = new GatedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('waitlog-builder'), workspaceId,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
-    const memberId = builder.status.member.memberId
-    const sessionId = builder.status.member.sessionId
-    const agent = ctx.agents.get(sessionId)!
-    const info = vi.spyOn(ctx.logger, 'info')
+    const h = await realHarness(adapter)
+    const builder = await h.human.addMember('builder', { description: 'Builds changes' })
+    const memberId = builder.memberId
+    const sessionId = builder.sessionId
+    const agent = builder.agent
+    const info = vi.spyOn(h.ctx.logger, 'info')
 
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Continue current checkout work.' }], source: { kind: 'user' } }))
     await adapter.started.promise
-    const edit = ctx.agentTeam.updateMember({ requestId: requestId('waitlog-edit'), memberId,
+    const edit = h.ctx.agentTeam.updateMember({ requestId: requestId('waitlog-edit'), memberId,
       handle: 'builder', description: 'Builds changes', capabilities: { tools: { allow: ['ordinary_tool'] } } })
     const editOutcome = await Promise.race([edit.then(() => 'settled' as const),
       new Promise<'pending'>(resolve => { setTimeout(() => resolve('pending'), 50) })])
@@ -262,13 +249,13 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     // An edit applied to an already-idle Member spends no time waiting and
     // logs no wait line: the log answers "why is this operation slow", not
     // "an operation happened".
-    const idleEdit = await ctx.agentTeam.updateMember({ requestId: requestId('waitlog-idle'), memberId,
+    const idleEdit = await h.ctx.agentTeam.updateMember({ requestId: requestId('waitlog-idle'), memberId,
       handle: 'builder', description: 'Builds changes', capabilities: { tools: { allow: ['spare_tool'] } } })
     expect(idleEdit.effect).toBe('applied')
 
     // A stop's disposal is external execution — the Agent releasing its
     // Session write path — not the Member's own turn.
-    await ctx.agentTeam.suspendMember({ requestId: requestId('waitlog-suspend'), memberId })
+    await h.ctx.agentTeam.suspendMember({ requestId: requestId('waitlog-suspend'), memberId })
 
     const lines = info.mock.calls.map(args => String(args[0]))
     const turnWaits = lines.filter(line => line.includes("stage 'wait-turn'"))

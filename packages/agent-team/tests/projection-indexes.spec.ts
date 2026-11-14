@@ -1,17 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 // Booting a real Storage-backed Host per test has reached 3.2s on the windows
-// lane (worst of 11 CI runs, 2026-09-17..21) against vitest's 5s default, so the
-// file keeps headroom rather than betting on runner throughput.
-vi.setConfig({ testTimeout: 30_000 })
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
+// lane (worst of 11 CI runs, 2026-09-17..21) against the unit project's 5s
+// budget, so the file runs in the integration project rather than betting on
+// runner throughput.
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { openTestLedger } from './helpers/ledger-harness.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
-import { agentTeamDomainSpec } from '../src/spec.ts'
 import type { AgentTeamProjectRef, AgentTeamClaimRef, AgentTeamHostActor, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
 
 /**
@@ -23,27 +19,14 @@ import type { AgentTeamProjectRef, AgentTeamClaimRef, AgentTeamHostActor, AgentT
  * so any drift between the live indexes and the replay-derived ones fails.
  */
 
-const cleanups: Array<() => Promise<void>> = []
 const alpha = WorkspaceId('workspace:alpha')
 const beta = WorkspaceId('workspace:beta')
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 const human = agentTeamHumanActor()
 
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
-
 async function openLedger(): Promise<{ readonly ledger: AgentTeamLedger; readonly table: KvTable<AgentTeamOperationId, AgentTeamOperation> }> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
-  const table = domain.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
-  return { ledger: new AgentTeamLedger(table), table }
+  const { ledger, table } = await openTestLedger()
+  return { ledger, table }
 }
 
 function memberActor(memberId: string, handle: string): AgentTeamMemberActor {

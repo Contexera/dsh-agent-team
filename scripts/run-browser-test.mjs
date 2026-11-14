@@ -1,4 +1,4 @@
-import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -15,7 +15,7 @@ const chrome = process.env.CHROME_PATH ?? '/usr/bin/google-chrome'
 // fighting a running `dsh web` instance, or the previous scenario, for the default.
 process.env.DSH_TEAM_WEBHOOK_PORT = process.env.DSH_TEAM_WEBHOOK_PORT ?? '0'
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-agent-team-browser-'))
-const home = join(temporary, 'home')
+const bundleTemplate = join(temporary, 'bundle-template', '@contexera', 'dsh-agent-team')
 /** The screenshots this run leaves for review: desktop and the 390×844 narrow lane. */
 const artifacts = join(root, 'artifacts', 'browser')
 const evidenceWidths = [1440, 390]
@@ -41,10 +41,49 @@ const run = (command, args, cwd) => new Promise((resolveRun, reject) => {
   child.once('exit', code => code === 0 ? resolveRun() : reject(new Error(`${command} exited with ${code}`)))
 })
 
+const stageBundleTemplate = async () => {
+  const startedAt = Date.now()
+  await mkdir(dirname(bundleTemplate), { recursive: true })
+  // Match both separators: on Windows cp walks backslash paths.
+  await cp(root, bundleTemplate, {
+    recursive: true,
+    filter: source => {
+      const normalized = source.replaceAll('\\', '/')
+      // .hoplite and .git hold agent-workspace state (runtime FIFOs kill fs.cp), and no installed bundle carries either.
+      return !normalized.includes('/node_modules') && !normalized.includes('/src') && !normalized.includes('/artifacts') && !normalized.includes('/.hoplite')
+        && !/\/\.git(\/|$)/.test(normalized)
+    },
+  })
+  // Stage regular dependencies inside the bundle dir, as the production installer
+  // would; the shared profiles/node_modules root is dsh-managed and rejects
+  // foreign entries.
+  const { dependencies } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  const bundleModules = join(bundleTemplate, 'node_modules')
+  for (const name of Object.keys(dependencies)) {
+    const target = join(bundleModules, ...name.split('/'))
+    if (name === '@botiverse/oar') {
+      // The engine library reaches its own runtime packages through the store
+      // this profile does not have, and a copy would leave them unresolvable. A
+      // link keeps the real path, so its dependencies resolve as they do here.
+      await mkdir(dirname(target), { recursive: true })
+      await symlink(join(root, 'node_modules', name), target, 'junction')
+      continue
+    }
+    // No filter: the source root itself lives under node_modules, and store
+    // packages never nest their own node_modules.
+    await cp(join(root, 'node_modules', name), target, {
+      recursive: true,
+      dereference: true,
+    })
+  }
+  console.log(`staged read-only bundle template once in ${Date.now() - startedAt}ms`)
+}
+
 const rendered = []
 try {
   await access(join(harness, 'apps/web/dist/index.html'), constants.R_OK)
   await access(chrome, constants.X_OK)
+  await stageBundleTemplate()
   // The run owns its screenshots, so the one clear happens here, before the
   // first scenario writes one. A scenario that cleared them would delete
   // evidence another scenario already produced, and vitest decides that order.
@@ -54,7 +93,7 @@ try {
     const target = join(harness, 'apps/web', 'tests', scenario === 'support.ts' ? '__external-agent-team-support.ts' : `__external-agent-team-${scenario}`)
     await writeFile(target, template
       .replaceAll('__TEAM_ROOT__', quote(root))
-      .replaceAll('__HOME__', quote(home))
+      .replaceAll('__BUNDLE_TEMPLATE__', quote(bundleTemplate))
       .replaceAll('__CHROME__', quote(chrome)))
     // Every rendered file is removed again, support included: a leftover in the
     // Harness checkout is a stray untracked file in a repository this bundle

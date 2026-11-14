@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import type { AgentTeamAgentMemberStatus, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import { renderText, teamTools } from './render-text.ts'
+import {
+  TEST_OWNER,
+  TEST_PROJECT,
+  TEST_TASK,
+  callTool,
+  createTestToolHost,
+  testReadThreadResult,
+  testTask,
+} from './tool-test-host.ts'
 
 /**
  * A discussion that spawned a Task renders that Task as a card at its creation
@@ -9,11 +17,11 @@ import { renderText, teamTools } from './render-text.ts'
  * state, never a fact: no unread/direct marker, no count, and no write token.
  */
 
-const THREAD = 'thread:aaaa1111-0000-4000-8000-000000000001'
-const TASK = 'task:3245ad40-43fd-4191-a416-7dcaf3a340f2'
-const PROJECT = 'project:046dd831-c679-4279-b6aa-7813476cf12e'
-const OWNER = 'member:6e8a5b10-df16-4ec0-943a-63738010953f'
-const CARD_THREAD = 'thread:bbbb2222-0000-4000-8000-000000000002'
+const THREAD = 'thread:aaaa1111-0000-4000-8000-000000000001' as AgentTeamThreadRef
+const TASK = TEST_TASK
+const PROJECT = TEST_PROJECT
+const OWNER = TEST_OWNER
+const CARD_THREAD = 'thread:bbbb2222-0000-4000-8000-000000000002' as AgentTeamThreadRef
 
 /** What the Host projects: the shared Main stream card, stamped with the sequence of the fact that created the Task. */
 const HOST_CARD = {
@@ -109,37 +117,44 @@ describe('team_thread renders a discussion\'s derived Task cards', () => {
   })
 })
 
-const READ_RESULT = {
+const READ_RESULT = testReadThreadResult({
   thread: { threadRef: THREAD, revision: 20 },
-  anchor: { messageRef: 'message:anchor', sender: 'member:reeve', body: 'Can we unify the importers?', sequence: 1 },
-  anchorMentions: [], claims: [], facts: [], readThroughSequence: 1, remainingUnreadCount: 0, consumedDirectMarkers: [], reminders: [],
-}
+  anchor: {
+    messageRef: 'message:anchor' as never,
+    projectRef: PROJECT,
+    threadRef: THREAD,
+    topLevel: true,
+    sender: 'member:reeve' as never,
+    body: 'Can we unify the importers?',
+    sequence: 1,
+    occurredAt: '2026-10-25T03:00:00.000Z',
+  },
+})
 
-const TASK_READ_RESULT = { ...READ_RESULT, task: { taskRef: TASK, projectRef: PROJECT, threadRef: THREAD, status: 'todo', resolution: 'open', accountable: OWNER, sourceThreadRefs: [] } }
+const TASK_READ_RESULT = { ...READ_RESULT, task: testTask({ threadRef: THREAD, status: 'todo', resolution: 'open' }) }
 
-/** The Host surface a Thread read touches, recorded so the assertion is on the request the tool built. */
-function fakeHost(overrides: Record<string, unknown> = {}) {
-  return {
-    workspacesForAgent: () => [{ workspaceId: 'workspace:alpha', path: undefined, default: true }],
-    humanHandle: () => 'human',
-    members: () => [],
-    resolveTaskRefs: () => ({ resolved: [] }),
-    attentionStatusForAgent: () => ({ attention: undefined }),
-    readThreadForAgent: vi.fn(async () => READ_RESULT),
-    threadHistoryForAgent: vi.fn(() => ({ thread: READ_RESULT.thread, anchor: READ_RESULT.anchor, anchorMentions: [], claims: [],
-      facts: [], cursor: 1, hasMore: false, taskCards: [HOST_CARD] })),
+function fakeHost(overrides: Parameters<typeof createTestToolHost>[0] = {}) {
+  return createTestToolHost({
+    members: (): readonly AgentTeamAgentMemberStatus[] => [],
+    threadHistoryForAgent: vi.fn(() => ({
+      thread: READ_RESULT.thread,
+      anchor: READ_RESULT.anchor,
+      anchorMentions: [] as const,
+      claims: [] as const,
+      facts: [] as const,
+      cursor: 1,
+      hasMore: false,
+      taskCards: [HOST_CARD as never],
+    })),
     ...overrides,
-  }
+  })
 }
-
-async function call(tool: ToolDefinition, args: Record<string, unknown>, host: ReturnType<typeof fakeHost>): Promise<Record<string, unknown>> {
-  const agent = { id: 'agent:tool-test', options: {}, session: Session.create(SessionId('session:tool-test')), ctx: { get: (name: string) => name === 'agentTeam' ? host : undefined } }
-  return await tool.execute(args, { agent, callId: 'call:1', signal: new AbortController().signal } as never) as Record<string, unknown>
-}
+const call = (tool: Parameters<typeof callTool>[0], args: Parameters<typeof callTool>[1], host: Parameters<typeof callTool>[2]) =>
+  callTool<Record<string, unknown>>(tool, args, host)
 
 describe('team_thread acknowledges private Task reminders', () => {
   it('renders a reminder-only read as committed work, not an empty Thread', async () => {
-    const reminder = { taskRef: TASK, kind: 'review-backlog', recipient: OWNER, baselineSequence: 8, sequence: 20, occurredAt: '2026-10-25T04:00:00.000Z' }
+    const reminder = { taskRef: TASK, kind: 'review-backlog' as const, recipient: OWNER, baselineSequence: 8, sequence: 20, occurredAt: '2026-10-25T04:00:00.000Z' }
     const host = fakeHost({ readThreadForAgent: vi.fn(async () => ({ ...TASK_READ_RESULT, reminders: [reminder] })) })
     const tool = teamTools().get('team_thread')!
     const result = await call(tool, { action: 'read', threadRef: THREAD }, host)

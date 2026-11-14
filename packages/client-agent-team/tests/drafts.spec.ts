@@ -1,17 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TEAM_DRAFTS_STORAGE_KEY, TeamDraftStore } from '../src/client/drafts.ts'
+import { memoryStorage } from './bench/client-fixtures.tsx'
 
-function storage(): Storage {
-  const values = new Map<string, string>()
-  return {
-    get length() { return values.size },
-    clear: () => { values.clear() },
-    getItem: key => values.get(key) ?? null,
-    key: index => [...values.keys()][index] ?? null,
-    removeItem: key => { values.delete(key) },
-    setItem: (key, value) => { values.set(key, value) },
-  }
-}
+const storage = memoryStorage
 
 function stored(): Record<string, unknown> {
   return JSON.parse(localStorage.getItem(TEAM_DRAFTS_STORAGE_KEY) ?? '{}') as Record<string, unknown>

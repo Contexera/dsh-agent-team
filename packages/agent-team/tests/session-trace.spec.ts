@@ -94,12 +94,12 @@ describe('session trace CLI', () => {
     const window = JSON.parse((await cli('read', 'Vera', '0', '--before', '0', '--after', '0')).stdout)
     expect(window).toMatchObject({ command: 'read', sessionId, count: 1, events: [event.event] })
     expect(await snapshot()).toEqual(before)
-  }, 30_000)
+  })
 
   it('refuses an unknown member instead of searching unrelated sessions', async () => {
     await expect(cli('timeline', 'unrelated-session')).rejects.toMatchObject({
       code: 1,
       stderr: expect.stringContaining('unknown member "unrelated-session". known handles: Vera'),
     })
-  }, 20_000)
+  })
 })

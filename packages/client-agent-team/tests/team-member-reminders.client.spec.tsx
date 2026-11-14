@@ -181,7 +181,7 @@ describe('Member detail reminder withdrawal', () => {
 describe('Member detail reminder read failure', () => {
   it('turns a refused read into a retryable error instead of endless loading', async () => {
     const { load } = harness({ load: async () => refused('Member does not participate') })
-    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect((await screen.findByRole('alert')).textContent).toContain('Member does not participate')
     expect(screen.queryByText('正在读取提醒…')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await waitFor(() => { expect(load).toHaveBeenCalledTimes(2) })

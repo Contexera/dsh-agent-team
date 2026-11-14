@@ -11,184 +11,19 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SubagentActivation, SubagentResult, SubagentRuntime } from '@deepseek-ai/dsh-subagent'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import AgentTeam from '../src/index.ts'
-import { agentTeamHumanActor } from '../src/ledger.ts'
-import * as agentTeamInvariant from '../src/invariant.ts'
-import { carryWorkerAnchors, WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC, WorkerFailure } from '../src/worker-runtime.ts'
-import type { AgentTeamMemberActor, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamRequestId,
-  AgentTeamTaskRef, AgentTeamThreadRef, AgentTeamWorkerRef } from '../src/types.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { alpha, requestId } from './helpers/host-harness.ts'
+import {
+  addWorkerMember as addMember,
+  bootWorkerHost as boot,
+  type BootedWorkerHost as BootedHost,
+} from './helpers/worker-engines-fixture.ts'
+import type AgentTeam from '../src/index.ts'
+import type { AgentTeamMemberId, AgentTeamProjectRef, AgentTeamTaskRef, AgentTeamThreadRef, AgentTeamWorkerRef } from '../src/types.ts'
 
-const alpha = WorkspaceId('workspace:alpha')
-const cleanups: Array<() => Promise<void>> = []
-const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
-
-/** A Host row with delegation allowed on Codex, which is what a Human has to switch on first. */
-const workerRow = () => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
-  engines: { codex: { enabled: true, executable: '', sandbox: 'workspace-write' },
-    claude: { enabled: false, executable: '', sandbox: '' } } } })
-
-afterEach(async () => {
+afterEach(() => {
   vi.useRealTimers()
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
 })
-
-interface FakeWorker {
-  readonly childId: string
-  readonly result: PromiseWithResolvers<SubagentResult>
-  disposed: boolean
-  /** Reject the engine's own disposal, as a process that will not confirm its exit does. */
-  disposeFails: boolean
-  /** Hold disposal open, as a process that is still shutting down does. */
-  disposeHangs: boolean
-  /** Let a held disposal finish. */
-  readonly release: () => void
-}
-
-/** One fake engine service whose starts can be held, cancelled, or cleaned up on demand. */
-interface FakeEngines {
-  readonly runtime: SubagentRuntime
-  readonly starts: Array<Parameters<SubagentRuntime['startActivation']>[0]>
-  readonly workers: Map<string, FakeWorker>
-  /** `immediate` publishes at once; `cancel-on-abort` behaves like Team's provider; `hold` ignores abort until released. */
-  startMode: 'immediate' | 'cancel-on-abort' | 'hold'
-  readonly gate: PromiseWithResolvers<void>
-  readonly order: string[]
-  readonly releases: number
-}
-
-function fakeEngines(): FakeEngines {
-  const state: FakeEngines = {
-    starts: [], workers: new Map(), startMode: 'immediate', gate: Promise.withResolvers(), order: [], releases: 0,
-    runtime: undefined as never,
-  } as unknown as FakeEngines
-  let opened = 0
-  const service = {
-    registerProvider: () => {
-      return () => { (state as { releases: number }).releases += 1; state.order.push('release') }
-    },
-    startActivation: async (spec: Parameters<SubagentRuntime['startActivation']>[0]): Promise<SubagentActivation> => {
-      state.order.push('start')
-      state.starts.push(spec)
-      if (state.startMode === 'cancel-on-abort') {
-        // Team's provider: a stop during startup disposes its partial resources
-        // and rejects with the cancellation the run records as its ending.
-        await new Promise<void>((_resolve, reject) => {
-          if (spec.signal.aborted) { reject(new WorkerFailure('startup', 'cancelled')); return }
-          spec.signal.addEventListener('abort', () => { reject(new WorkerFailure('startup', 'cancelled')) }, { once: true })
-        })
-      }
-      if (state.startMode === 'hold') await state.gate.promise
-      const childId = `session:worker-${++opened}`
-      const result = Promise.withResolvers<SubagentResult>()
-      const released = Promise.withResolvers<void>()
-      const worker: FakeWorker = { childId, result, disposed: false, disposeFails: false, disposeHangs: false,
-        release: () => { released.resolve() } }
-      state.workers.set(childId, worker)
-      return {
-        childId,
-        result: result.promise.then(outcome => carryWorkerAnchors(outcome, { nativeSessionId: `native:${childId}` })),
-        dispose: async () => {
-          worker.disposed = true
-          state.order.push(`dispose:${childId}`)
-          if (worker.disposeHangs) await released.promise
-          if (worker.disposeFails) {
-            // What Team's provider hands the Harness: the one result the parent
-            // will be told carries the cleanup verdict and the output so far.
-            result.resolve({ output: [{ type: 'text', text: 'partial output' }], stopReason: 'error',
-              diagnostic: WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC })
-            throw new WorkerFailure('dispose', 'unknown')
-          }
-          result.resolve({ output: [{ type: 'text', text: 'partial output' }], stopReason: 'aborted' })
-        },
-      } as unknown as SubagentActivation
-    },
-  }
-  return Object.assign(state, { runtime: service as unknown as SubagentRuntime })
-}
-
-interface BootedHost {
-  readonly ctx: Context
-  readonly host: AgentTeam
-  readonly engines: FakeEngines
-  readonly fiber: { dispose: () => Promise<void> }
-  readonly stop: () => Promise<void>
-}
-
-/** Boot the Team plugin over the given storage pool; booting twice is how a restart reads the same ledger. */
-async function boot(pool: MemoryMediaPool, engines: FakeEngines = fakeEngines()): Promise<BootedHost> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('subagents', engines.runtime)
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === alpha ? { id, path: process.cwd(), attachSession: async () => {}, archiveSession: async () => {} } : undefined,
-    list: () => [{ id: alpha, path: process.cwd() }],
-    archiveSession: async () => {},
-  })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  await ctx.plugin(agentTeamInvariant)
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam, workerRow())
-  let stopped = false
-  const stop = async (): Promise<void> => {
-    if (stopped) return
-    stopped = true
-    await fiber.dispose()
-    await facility.closeAll()
-  }
-  cleanups.push(stop)
-  return { ctx, host: ctx.agentTeam, engines, fiber, stop }
-}
-
-/** One durable Member of the Project, plus the live Agent surface its wake touches. */
-async function addMember(host: BootedHost, projectRef: AgentTeamProjectRef, options: {
-  readonly owner: boolean
-  readonly handle: string
-}): Promise<{ readonly actor: AgentTeamMemberActor; readonly agent: Agent; readonly wakes: UserMessage[] }> {
-  const memberId = `member:${options.handle}` as AgentTeamMemberId
-  const member = { memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle: options.handle,
-    description: 'Delegates work', presetId: 'team-member', model: { provider: 'mock', model: 'mock' },
-    privateMemoryPath: `/tmp/${options.handle}`, state: 'enabled' as const }
-  await host.host['ledger']!.addMember({ requestId: requestId(`member-${options.handle}`), actor: agentTeamHumanActor(),
-    member, handle: options.handle, description: 'Delegates work', presetId: 'team-member', workspaceId: alpha,
-    projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' } })
-  if (options.owner) {
-    await host.host['ledger']!.addProjectOwner({ requestId: requestId(`owner-${options.handle}`), actor: agentTeamHumanActor(),
-      workspaceId: alpha, projectRef, memberId })
-  }
-  const wakes: UserMessage[] = []
-  const wake = (message: UserMessage): void => { wakes.push(message) }
-  const agent = {
-    id: SessionId(`session:${memberId}`),
-    ctx: host.ctx,
-    session: Session.create(SessionId(`session:${memberId}`)),
-    status: 'idle',
-    inbox: { nextTurn: [], nextStep: [], remove: () => {} },
-    steer: wake,
-    followup: wake,
-  } as unknown as Agent
-  host.host['handles'].set(memberId, { agent, dispose: async () => {} })
-  return { actor: { kind: 'member', memberId, handle: options.handle }, agent, wakes }
-}
 
 async function createProject(host: BootedHost): Promise<AgentTeamProjectRef> {
   const project = await host.host.createProject({ requestId: requestId('project'), workspaceId: alpha,

@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { cleanups, GatedAdapter, realHarness, requestId, textResponse, waitFor } from './helpers/member-harness.ts'
+import { GatedAdapter, realHarness, requestId, textResponse, waitFor } from './helpers/member-harness.ts'
 
-afterEach(async () => {
+afterEach(() => {
   vi.useRealTimers()
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
 })
 
 describe('bounded notices retain a route to live Task reminders', () => {

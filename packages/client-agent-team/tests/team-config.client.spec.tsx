@@ -1,31 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
-import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { AgentTeamHumanProfileResult } from '@contexera/dsh-agent-team/types'
-import { TeamHumanIdentity } from '../src/client/human-identity.ts'
 import { zh } from '../src/client/locales.ts'
 import { TeamConfigController, teamConfigScope, type TeamConfigSection } from '../src/client/team-config.ts'
-import { TeamSettingsSection } from '../src/client/TeamSettingsSection.tsx'
-
-const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
-  let value: string = zh[key]
-  for (const [name, replacement] of Object.entries(params ?? {})) value = value.replace(`{${name}}`, String(replacement))
-  return value
-}) as Parameters<typeof TeamSettingsSection>[0]['t']
-
-const PROFILE = {
-  name: 'Ada',
-  version: '0.1.13',
-  repoUrl: 'https://github.com/Contexera/dsh-agent-team',
-}
-
-const INERT_ENVIRONMENT = { status: 'loading' as const }
-const INERT_ENVIRONMENT_SOURCE = {
-  getSnapshot: () => INERT_ENVIRONMENT,
-  subscribe: () => () => {},
-}
+import { renderTeamSettingsSection } from './bench/client-fixtures.tsx'
 
 /** One Host row stub: the resolved value, the composition layer under it, and the raw user layer. */
 function hostRow(options: { tokens?: number; baseTokens?: number; revision?: number } = {}) {
@@ -45,22 +24,8 @@ function hostRow(options: { tokens?: number; baseTokens?: number; revision?: num
 
 /** Render the page with the real configuration controller over one stubbed row. */
 function renderSection(row = hostRow()) {
-  const identity = new TeamHumanIdentity({
-    loadProfile: async (): Promise<RemoteResult<AgentTeamHumanProfileResult>> => ({ ok: true, value: PROFILE }),
-    loadAvatarUrl: async () => null,
-  })
   const teamConfig = new TeamConfigController(teamConfigScope(row.scope))
-  const props = {
-    close: () => {},
-    t,
-    identity,
-    environment: INERT_ENVIRONMENT_SOURCE,
-    saveName: vi.fn(async () => undefined),
-    uploadAvatar: vi.fn(async () => undefined),
-    removeAvatar: vi.fn(async () => undefined),
-    teamConfig,
-  } as unknown as Parameters<typeof TeamSettingsSection>[0]
-  const rendered = render(<TeamSettingsSection {...props} />)
+  const rendered = renderTeamSettingsSection({ teamConfig })
   return { ...rendered, row, teamConfig }
 }
 

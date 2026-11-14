@@ -1,13 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 // Every test here boots a real Host harness and waits on asynchronous session
 // transitions, so the per-test budget needs headroom on slow CI machines.
-vi.setConfig({ testTimeout: 60_000 })
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 
-import { cleanups, GatedAdapter, realHarness, ScriptedAdapter, textResponse, requestId } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
+import { GatedAdapter, realHarness, ScriptedAdapter, textResponse, requestId } from './helpers/member-harness.ts'
 
 /** Every lane a relay-form message was spliced into, in arrival order. */
 function relayLanes(agent: NonNullable<ReturnType<Context['agents']['get']>>): string[] {

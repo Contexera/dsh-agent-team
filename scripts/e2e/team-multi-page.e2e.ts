@@ -1,21 +1,28 @@
 import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
 import type { Browser } from 'playwright'
-import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, installLocalBundle, launchWebScaffold, settleLayout } from './__external-agent-team-support.ts'
+import { BROWSER_ARTIFACTS, CHROME, closeScenario, installLocalBundle, launchWebScaffold, settleLayout } from './__external-agent-team-support.ts'
 import type { Page, WebScaffold } from './__external-agent-team-support.ts'
 
 let scaffold: WebScaffold | undefined
 let browser: Browser | undefined
 
 afterEach(async () => {
-  await browser?.close(); browser = undefined
-  await scaffold?.close(); scaffold = undefined
+  try {
+    await browser?.close(); browser = undefined
+  } finally {
+    try {
+      await scaffold?.close(); scaffold = undefined
+    } finally {
+      await closeScenario()
+    }
+  }
 })
 
 
 it('keeps four same-origin Team pages responsive and independently subscribed', async () => {
-  await installLocalBundle()
-  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
+  const { home, stagedBundle } = await installLocalBundle()
+  scaffold = await launchWebScaffold({ harnessHome: home, profile: { packages: [{ dir: stagedBundle, enabled: true }] } })
   const workspace = await scaffold.ctx.workspaceRegistry.create(scaffold.workspaceCwd, 'multi-web')
   await scaffold.ctx.agentTeam.createProject({ requestId: 'multi-project' as never, workspaceId: workspace.id, name: 'multi-web', description: 'Multi-page regression' })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })

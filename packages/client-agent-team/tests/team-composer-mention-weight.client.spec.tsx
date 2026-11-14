@@ -1,50 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render } from '@testing-library/react'
-import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
+import { cleanup, render } from '@testing-library/react'
 import { TeamDraftStore } from '../src/client/drafts.ts'
-import { zh } from '../src/client/locales.ts'
 import { TeamComposer } from '../src/client/TeamComposer.tsx'
+import { composerMemberStatus, memoryStorage, openMentionMenu, zhTranslator } from './bench/client-fixtures.tsx'
 
-function translator(dict: Record<keyof typeof zh, string>): Parameters<typeof TeamComposer>[0]['t'] {
-  return ((key: keyof typeof zh, params?: Record<string, string | number>) => {
-    let value: string = dict[key]
-    for (const [name, replacement] of Object.entries(params ?? {})) value = value.replace(`{${name}}`, String(replacement))
-    return value
-  }) as Parameters<typeof TeamComposer>[0]['t']
-}
-
-const t = translator(zh)
-
-function storage(): Storage {
-  const values = new Map<string, string>()
-  return {
-    get length() { return values.size },
-    clear: () => { values.clear() },
-    getItem: key => values.get(key) ?? null,
-    key: index => [...values.keys()][index] ?? null,
-    removeItem: key => { values.delete(key) },
-    setItem: (key, value) => { values.set(key, value) },
-  }
-}
-
-function status(handle: string, memberId: string): AgentTeamClientMemberStatus {
-  return {
-    member: {
-      memberId: memberId as AgentTeamMemberId,
-      sessionId: 'session:one' as never,
-      workspaceId: 'workspace:alpha' as never,
-      handle,
-      description: '',
-      presetId: 'team-member',
-      state: 'enabled',
-    },
-    availability: 'active',
-    presence: 'available',
-    capabilityState: 'applied',
-    workspaceIds: ['workspace:alpha' as never],
-  }
-}
+const t = zhTranslator<Parameters<typeof TeamComposer>[0]['t']>()
+const storage = memoryStorage
+const status = composerMemberStatus
 
 // One Member per relation: a Project owner, a follower of this Thread, another
 // Project member, and a Workspace peer the Project does not carry.
@@ -53,14 +16,7 @@ const follower = status('@follower', 'member:follower')
 const projectPeer = status('@projectpeer', 'member:projectpeer')
 const stranger = status('@stranger', 'member:stranger')
 
-function openMenu(ui: ReturnType<typeof render>, text: string): void {
-  const textarea = ui.container.querySelector('textarea') as HTMLTextAreaElement
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-  setter?.call(textarea, text)
-  textarea.selectionStart = text.length
-  textarea.selectionEnd = text.length
-  fireEvent.change(textarea, { target: { value: text, selectionStart: text.length, selectionEnd: text.length } })
-}
+const openMenu = openMentionMenu
 
 function rows(ui: ReturnType<typeof render>): readonly HTMLElement[] {
   return [...ui.container.querySelectorAll<HTMLElement>('[role="option"][data-mention-group]')]

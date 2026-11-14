@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
-vi.setConfig({ testTimeout: 60_000 })
 import { Context } from '@deepseek-ai/cordis'
 import AgentTeam from '../src/index.ts'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
@@ -16,11 +15,7 @@ import { MEMBER_COMPACT_TOKENS } from '../src/member-compaction.ts'
 import type { AgentTeamClaimRef } from '../src/types.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 
-import { cleanups, realHarness, ScriptedAdapter, acceptanceReminders, textResponse, waitFor, waitForIdle, requestId } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-
+import { realHarness, ScriptedAdapter, acceptanceReminders, textResponse, waitFor, waitForIdle, requestId } from './helpers/member-harness.ts'
 
 describe('Agent Team Member lifecycle: context, acceptance, and activation (ticket 04)', () => {
     it('leaves an acceptance below the budget as a reminder alone', async () => {
@@ -235,71 +230,67 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
     })
 
     it('resolves the same Host policy through the real preset engine scope', async () => {
-      const { ctx, workspaceId } = await realHarness(new ScriptedAdapter(), 'jsonl', undefined, true)
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('engine-scope'), workspaceId,
-        handle: 'builder', description: '', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
-      expect(added.status.availability).toBe('active')
-      const live = ctx.agents.get(added.status.member.sessionId)!
-      const engine = ctx.agentPresets.serviceFor(live, 'compaction') as unknown as { ctx: Context }
-      expect(engine.ctx.get('agentTeam')?.config.memberCompaction).toBe(ctx.agentTeam.config.memberCompaction)
+      const h = await realHarness(new ScriptedAdapter(), 'jsonl', undefined, true)
+      const builder = await h.human.addMember('builder', { description: '' })
+      expect(h.ctx.agentTeam.members().find(entry => entry.member.memberId === builder.memberId)?.availability).toBe('active')
+      const engine = h.ctx.agentPresets.serviceFor(builder.agent, 'compaction') as unknown as { ctx: Context }
+      expect(engine.ctx.get('agentTeam')?.config.memberCompaction).toBe(h.ctx.agentTeam.config.memberCompaction)
     })
 
     it('compacts a Member through the preset engine at the configured budget', async () => {
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('hard-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('hard-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const memberId = added.status.member.memberId
-      const live = ctx.agents.get(added.status.member.sessionId)!
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
+      const live = builder.agent
 
       const compactions: string[] = []
       const engine = {
         compactIfNeeded: async (_agent: unknown, trigger: string) => {
           compactions.push(trigger)
-          pressureState.usageTokens = 0
+          h.pressureState.usageTokens = 0
           return null
         },
       }
-      const serviceFor = vi.spyOn(ctx.agentPresets, 'serviceFor').mockImplementation((_agent, service) => service === 'compaction' ? engine as never : undefined)
+      const serviceFor = vi.spyOn(h.ctx.agentPresets, 'serviceFor').mockImplementation((_agent, service) => service === 'compaction' ? engine as never : undefined)
       try {
         // Below the boundary, a turn runs to completion without compaction.
-        pressureState.usageTokens = MEMBER_COMPACT_TOKENS - 1
+        h.pressureState.usageTokens = MEMBER_COMPACT_TOKENS - 1
         adapter.enqueue(textResponse('First answer.'))
         live.followup(createUserMessage({ content: [{ type: 'text', text: 'First question?' }], source: { kind: 'user' } }))
-        await waitForIdle(ctx, live)
+        await builder.waitForIdle()
         expect(compactions).toHaveLength(0)
 
-        pressureState.usageTokens = MEMBER_COMPACT_TOKENS + 1
+        h.pressureState.usageTokens = MEMBER_COMPACT_TOKENS + 1
         adapter.enqueue(textResponse('Second answer.'))
         live.followup(createUserMessage({ content: [{ type: 'text', text: 'Second question?' }], source: { kind: 'user' } }))
         await waitFor(() => compactions.length > 0 ? compactions : undefined)
-        await waitForIdle(ctx, live)
+        await builder.waitForIdle()
         expect(compactions).toHaveLength(1)
         expect(compactions).toEqual(['context-overflow'])
       } finally {
         serviceFor.mockRestore()
       }
-      expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)).toBeDefined()
+      expect(h.ctx.agentTeam.members().find(entry => entry.member.memberId === builder.memberId)).toBeDefined()
     })
 
     it('uses the window ratio for a 272K Member instead of skipping its budget', async () => {
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('small-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('small-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const live = ctx.agents.get(added.status.member.sessionId)!
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
 
       adapter.resolveModelWindow = () => 272_000
       let compacted = 0
       const engine = {
-        compactIfNeeded: async () => { compacted += 1; pressureState.usageTokens = 0; return null },
+        compactIfNeeded: async () => { compacted += 1; h.pressureState.usageTokens = 0; return null },
       }
-      const serviceFor = vi.spyOn(ctx.agentPresets, 'serviceFor').mockImplementation((_agent, service) => service === 'compaction' ? engine as never : undefined)
+      const serviceFor = vi.spyOn(h.ctx.agentPresets, 'serviceFor').mockImplementation((_agent, service) => service === 'compaction' ? engine as never : undefined)
       try {
-        pressureState.usageTokens = 217_601
+        h.pressureState.usageTokens = 217_601
         adapter.enqueue(textResponse('Answer.'))
-        live.followup(createUserMessage({ content: [{ type: 'text', text: 'Question?' }], source: { kind: 'user' } }))
-        await waitForIdle(ctx, live)
+        builder.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Question?' }], source: { kind: 'user' } }))
+        await builder.waitForIdle()
         expect(compacted).toBe(1)
       } finally {
         serviceFor.mockRestore()
@@ -308,24 +299,21 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
 
     it('wakes a normal-accept contributor with both the accepted and completed Claim semantics', async () => {
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('notify-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const builder = await ctx.agentTeam.addMember({ requestId: requestId('notify-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const reviewer = await ctx.agentTeam.addMember({ requestId: requestId('notify-reviewer'), workspaceId, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const started = await ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('notify-task'), workspaceId, projectRef: project.project.projectRef, body: 'Ship both semantics' })
-      if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-      const builderAgent = ctx.agents.get(builder.status.member.sessionId)!
-      const reviewerAgent = ctx.agents.get(reviewer.status.member.sessionId)!
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
+      const reviewer = await h.human.addMember('reviewer', { description: 'Reviews changes', projects: [project] })
+      const task = await h.human.startTask(project, 'Ship both semantics')
       adapter.enqueue(textResponse('builder saw the task.'))
       adapter.enqueue(textResponse('reviewer saw the task.'))
-      await waitForIdle(ctx, builderAgent)
-      await waitForIdle(ctx, reviewerAgent)
+      await builder.waitForIdle()
+      await reviewer.waitForIdle()
       // Advance both members' read watermarks so their initial-start unread
       // facts are consumed: a member with no unread facts is not woken by the
       // other member's Claim mutations, which keeps the scripted wake turns
       // below attributable to exactly one member at a time.
-      await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-initial-read'), workspaceId, taskRef: started.task!.taskRef })
-      await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-initial-read'), workspaceId, taskRef: started.task!.taskRef })
+      await builder.readThread(task)
+      await reviewer.readThread(task)
 
       // builder: finished its Claim before the accept (normal flow). Each
       // mutation wakes only the OTHER following member with an unread
@@ -333,31 +321,27 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       // scripted response per commit suffices; the mutating member itself
       // stays idle and the helper resolves immediately for it.
       adapter.enqueue(textResponse('reviewer saw the claim.'))
-      const builderRead = await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-read'), workspaceId, taskRef: started.task!.taskRef })
-      const builderClaim = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('notify-builder-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: builderRead.thread.revision, direction: 'implement' })
-      if (builderClaim.kind !== 'committed') throw new Error(`expected committed claim, received ${builderClaim.kind}`)
-      await waitForIdle(ctx, builderAgent)
-      await waitForIdle(ctx, reviewerAgent)
+      const builderClaim = await builder.claimTask(task, 'implement')
+      await builder.waitForIdle()
+      await reviewer.waitForIdle()
       // Consume the claim activity so later wake turns stay attributable to
       // exactly one mutation at a time.
-      await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-claim-read'), workspaceId, taskRef: started.task!.taskRef })
+      await reviewer.readThread(task)
       adapter.enqueue(textResponse('reviewer saw the completion.'))
-      const builderRead2 = await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-read-2'), workspaceId, taskRef: started.task!.taskRef })
-      const builderDone = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('notify-builder-done'), workspaceId, taskRef: started.task!.taskRef, action: 'done', claimRef: (builderClaim as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: builderRead2.thread.revision })
+      const builderRead2 = await builder.readThread(task)
+      const builderDone = await h.ctx.agentTeam.changeClaimForAgent(builder.agent, { requestId: requestId('notify-builder-done'), workspaceId: h.workspaceId, taskRef: task.taskRef, action: 'done', claimRef: (builderClaim as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: builderRead2.thread.revision })
       if (builderDone.kind !== 'committed') throw new Error(`expected committed done, received ${builderDone.kind}`)
-      await waitForIdle(ctx, builderAgent)
-      await waitForIdle(ctx, reviewerAgent)
-      await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-done-read'), workspaceId, taskRef: started.task!.taskRef })
+      await builder.waitForIdle()
+      await reviewer.waitForIdle()
+      await reviewer.readThread(task)
       // reviewer: still holds an active Claim at accept time (early accept).
       adapter.enqueue(textResponse('builder saw the review claim.'))
-      const reviewerRead = await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-read'), workspaceId, taskRef: started.task!.taskRef })
-      const reviewerClaim = await ctx.agentTeam.changeClaimForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: reviewerRead.thread.revision, direction: 'review' })
-      if (reviewerClaim.kind !== 'committed') throw new Error(`expected committed claim, received ${reviewerClaim.kind}`)
-      await waitForIdle(ctx, reviewerAgent)
-      await waitForIdle(ctx, builderAgent)
-      await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-review-read'), workspaceId, taskRef: started.task!.taskRef })
+      const reviewerClaim = await reviewer.claimTask(task, 'review')
+      await reviewer.waitForIdle()
+      await builder.waitForIdle()
+      await builder.readThread(task)
 
-      const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('notify-human-read'), workspaceId, taskRef: started.task!.taskRef })
+      const humanRead = await h.human.readThread(task)
       adapter.enqueue(textResponse('I saw the acceptance.'))
       adapter.enqueue(textResponse('I saw the atomic completion.'))
       // Register the idle waits BEFORE the commit as pure event listeners:
@@ -365,15 +349,15 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       // so a dedicated listener-only wait is required to observe the wake
       // turns the acceptance is about to start.
       const idleAfterWake = (agent: { id: string }): Promise<void> => new Promise(resolve => {
-        const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
+        const dispose = h.ctx.on('agent/status', ({ agent: subject, status }) => {
           if (subject !== agent || status !== 'idle') return
           dispose()
           resolve()
         })
       })
-      const builderIdle = idleAfterWake(builderAgent)
-      const reviewerIdle = idleAfterWake(reviewerAgent)
-      const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('notify-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
+      const builderIdle = idleAfterWake(builder.agent)
+      const reviewerIdle = idleAfterWake(reviewer.agent)
+      const accepted = await h.ctx.agentTeam.changeTask({ requestId: requestId('notify-accept'), workspaceId: h.workspaceId, taskRef: task.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
       if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
 
       // Both contributors wake; the notice for the already-done owner names
@@ -391,42 +375,39 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       const requestsFor = (agent: { id: string }): string[] =>
         adapter.requestSessions.map((sessionId, at) => sessionId === agent.id ? at : -1)
           .filter(at => at >= 0).map(at => JSON.stringify(adapter.requests[at]!.messages))
-      const builderRequest = requestsFor(builderAgent).at(-1)!
-      const reviewerRequest = requestsFor(reviewerAgent).at(-1)!
+      const builderRequest = requestsFor(builder.agent).at(-1)!
+      const reviewerRequest = requestsFor(reviewer.agent).at(-1)!
       expect(builderRequest).toContain('accept')
       expect(builderRequest).toContain(builderClaimRef)
       expect(reviewerRequest).toContain(reviewerClaimRef)
-      expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+      expect(() => h.ctx.agentTeam.validateLedger()).not.toThrow()
     })
 
     it('names the atomic completion without an empty finished-Claim clause when the only Claim was early-accepted', async () => {
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('emptyclause-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const builder = await ctx.agentTeam.addMember({ requestId: requestId('emptyclause-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const started = await ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('emptyclause-task'), workspaceId, projectRef: project.project.projectRef, body: 'Ship the early accept' })
-      if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-      const builderAgent = ctx.agents.get(builder.status.member.sessionId)!
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
+      const task = await h.human.startTask(project, 'Ship the early accept')
       adapter.enqueue(textResponse('builder saw the task.'))
-      await waitForIdle(ctx, builderAgent)
-      await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('emptyclause-initial-read'), workspaceId, taskRef: started.task!.taskRef })
+      await builder.waitForIdle()
+      await builder.readThread(task)
       // The owner still holds an ACTIVE Claim at accept time (early accept):
       // the accept completes it atomically, so acceptedOwn === completedOwn
       // for this reader. The combined-semantics branch must not then render
       // an empty "finished Claim" list — regression against the review
       // finding on commit afd2c16.
-      const claimed = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('emptyclause-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: started.thread.revision, direction: 'implement' })
-      if (claimed.kind !== 'committed') throw new Error(`expected committed claim, received ${claimed.kind}`)
-      const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('emptyclause-human-read'), workspaceId, taskRef: started.task!.taskRef })
+      const claimed = await builder.claimTask(task, 'implement')
+      const humanRead = await h.human.readThread(task)
       adapter.enqueue(textResponse('builder saw the atomic completion.'))
       const builderIdle = new Promise<void>(resolve => {
-        const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
-          if (subject !== builderAgent || status !== 'idle') return
+        const dispose = h.ctx.on('agent/status', ({ agent: subject, status }) => {
+          if (subject !== builder.agent || status !== 'idle') return
           dispose()
           resolve()
         })
       })
-      const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('emptyclause-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
+      const accepted = await h.ctx.agentTeam.changeTask({ requestId: requestId('emptyclause-accept'), workspaceId: h.workspaceId, taskRef: task.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
       if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
       await builderIdle
       const claimRef = (claimed as { claim: { claimRef: string } }).claim.claimRef
@@ -440,31 +421,31 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       expect(builderRequest).toContain('was completed with it')
       expect(builderRequest).not.toContain('finished Claim')
       expect(builderRequest).not.toMatch(/Claim\s{2,}/)
-      expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+      expect(() => h.ctx.agentTeam.validateLedger()).not.toThrow()
     })
 
     it('blocks activation with a session-refused diagnostic when the current binding is refused, and a restart replays the deterministic refusal', async () => {
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, teamFiber: initialFiber } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('ref-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('ref-add'), workspaceId, handle: 'refused', description: 'Refused binding', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const memberId = added.status.member.memberId
-      const sessionId = added.status.member.sessionId
-      expect(added.status.availability).toBe('active')
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const refused = await h.human.addMember('refused', { description: 'Refused binding', projects: [project] })
+      const memberId = refused.memberId
+      const sessionId = refused.sessionId
+      expect(h.ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.availability).toBe('active')
 
       // The Member's own current Session becomes deterministically refused.
       // A Host restart re-activates from the persisted binding and must block
       // with the structured refusal diagnostic — not a raw error string.
-      const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
-      ctx.sessionPersistence.open = async (id, access, options) => {
+      const realOpen = h.ctx.sessionPersistence.open.bind(h.ctx.sessionPersistence)
+      h.ctx.sessionPersistence.open = async (id, access, options) => {
         if (id === sessionId) throw new SessionFormatUnsupportedError('cannot safely transform unclassified message source (test seam)')
         return realOpen(id, access, options)
       }
-      await initialFiber.dispose()
+      await h.teamFiber.dispose()
       await new Promise(resolve => setImmediate(resolve))
-      await ctx.plugin(AgentTeam)
+      await h.ctx.plugin(AgentTeam)
       const blocked = await waitFor(() => {
-        const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        const status = h.ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
         return status !== undefined && status.availability === 'unavailable' ? status : undefined
       })
       expect(blocked.diagnostic).toMatchObject({ class: 'session-refused', sessionId, detail: 'cannot safely transform unclassified message source (test seam)' })
@@ -474,58 +455,58 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       // shape. A restart therefore re-runs the activation, which replays the
       // deterministic refusal and reports it again — never silently, and never
       // claiming the refusal was healed.
-      const recovered = await ctx.agentTeam.recoverMember({ requestId: requestId('ref-recover'), workspaceId, memberId })
+      const recovered = await h.ctx.agentTeam.recoverMember({ requestId: requestId('ref-recover'), workspaceId: h.workspaceId, memberId })
       expect(recovered.status.availability).toBe('unavailable')
       expect(recovered.status.diagnostic).toMatchObject({ class: 'session-refused', sessionId, detail: 'cannot safely transform unclassified message source (test seam)' })
-      expect(ctx.agents.get(sessionId)).toBeUndefined()
+      expect(h.ctx.agents.get(sessionId)).toBeUndefined()
     })
 
     it('recovers a member by re-running activation once the refusal is gone', async () => {
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, teamFiber: initialFiber } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('heal-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('heal-add'), workspaceId, handle: 'healing', description: 'Heal retry', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const memberId = added.status.member.memberId
-      const sessionId = added.status.member.sessionId
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const healing = await h.human.addMember('healing', { description: 'Heal retry', projects: [project] })
+      const memberId = healing.memberId
+      const sessionId = healing.sessionId
 
-      const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
-      ctx.sessionPersistence.open = async (id, access, options) => {
+      const realOpen = h.ctx.sessionPersistence.open.bind(h.ctx.sessionPersistence)
+      h.ctx.sessionPersistence.open = async (id, access, options) => {
         if (id === sessionId) throw new SessionFormatUnsupportedError('cannot safely transform unclassified message source (test seam)')
         return realOpen(id, access, options)
       }
-      await initialFiber.dispose()
+      await h.teamFiber.dispose()
       await new Promise(resolve => setImmediate(resolve))
-      await ctx.plugin(AgentTeam)
+      await h.ctx.plugin(AgentTeam)
       await waitFor(() => {
-        const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        const status = h.ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
         return status !== undefined && status.availability === 'unavailable' ? status : undefined
       })
 
       // The refusal was transient (an out-of-band repair removed it): the
       // restart retry path re-runs the activation, which now succeeds.
-      ctx.sessionPersistence.open = realOpen
-      const recovered = await ctx.agentTeam.recoverMember({ requestId: requestId('heal-recover'), workspaceId, memberId })
+      h.ctx.sessionPersistence.open = realOpen
+      const recovered = await h.ctx.agentTeam.recoverMember({ requestId: requestId('heal-recover'), workspaceId: h.workspaceId, memberId })
       expect(recovered.status.availability).toBe('active')
       expect(recovered.status.diagnostic).toBeUndefined()
     })
 
     it('logs a warning with the member handle when activation fails', async () => {
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('p3-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('p3-add'), workspaceId, handle: 'p3member', description: 'P3 failure visibility', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const memberId = added.status.member.memberId
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const p3 = await h.human.addMember('p3member', { description: 'P3 failure visibility', projects: [project] })
+      const memberId = p3.memberId
 
       // A restart against a broken preset fails the activation; the operator
       // must see the member handle in a warning line, not only in the status
       // diagnostic.
-      presets.failingMount = true
-      const warn = vi.spyOn(ctx.logger, 'warn')
-      await initialFiber.dispose()
+      h.presets.failingMount = true
+      const warn = vi.spyOn(h.ctx.logger, 'warn')
+      await h.teamFiber.dispose()
       await new Promise(resolve => setImmediate(resolve))
-      await ctx.plugin(AgentTeam)
+      await h.ctx.plugin(AgentTeam)
       await waitFor(() => {
-        const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        const status = h.ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
         return status !== undefined && status.availability === 'unavailable' && status.diagnostic?.class === 'preset-composition' ? status : undefined
       })
       const failures = warn.mock.calls.map(args => String(args[0])).filter(text => text.includes('activation failed'))

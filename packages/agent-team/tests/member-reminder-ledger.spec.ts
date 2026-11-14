@@ -1,13 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility, type KvTable } from '@deepseek-ai/dsh-storage-domain'
+import { describe, expect, it } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { openTestLedger } from './helpers/ledger-harness.ts'
 import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
-import { agentTeamDomainSpec, agentTeamOperationSchema } from '../src/spec.ts'
+import { agentTeamOperationSchema } from '../src/spec.ts'
 import { reminderRefForCallId } from '../src/member-reminders.ts'
+import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {
   AgentTeamAgentMember,
   AgentTeamMemberActor,
@@ -19,30 +17,21 @@ import type {
   AgentTeamRequestId,
 } from '../src/types.ts'
 
+type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
+
 const alpha = WorkspaceId('workspace:alpha')
 const human = agentTeamHumanActor()
-const cleanups: Array<() => Promise<void>> = []
 let counter = 0
 const requestId = (label: string) => `test:member-reminder:${label}:${++counter}` as AgentTeamRequestId
 const NOW = Date.parse('2026-11-03T01:30:00.000Z')
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
 
 /** A ledger with a controllable clock, so occurrence timing is asserted, never waited for. */
 async function seed() {
-  const pool = new MemoryMediaPool()
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const table = await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as Table
   let instant = NOW - 48 * 60 * 60 * 1000
-  const ledger = new AgentTeamLedger(table, { rulesVersion: 2, occurredAt: () => new Date(instant++).toISOString() })
-  await ledger.initialize()
+  const { table, ledger } = await openTestLedger({
+    ledgerOptions: { rulesVersion: 2, occurredAt: () => new Date(instant++).toISOString() },
+    initialize: true,
+  })
   const add = async (name: string) => {
     const memberId = `member:${name}` as AgentTeamMemberId
     const member: AgentTeamAgentMember = { memberId, sessionId: SessionId(`session:${name}`), workspaceId: alpha, handle: name,

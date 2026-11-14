@@ -1,34 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
-import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { AgentTeamHumanProfileResult } from '@contexera/dsh-agent-team/types'
 import { DEFAULT_WORKER_SANDBOX, WORKER_ENGINES } from '@contexera/dsh-agent-team/worker-settings'
-import { TeamHumanIdentity } from '../src/client/human-identity.ts'
 import { zh } from '../src/client/locales.ts'
 import { WorkerConfigController, workerConfigScope, type TeamConfigSection } from '../src/client/team-config.ts'
-import { TeamSettingsSection } from '../src/client/TeamSettingsSection.tsx'
-
-const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
-  let value: string = zh[key]
-  for (const [name, replacement] of Object.entries(params ?? {})) value = value.replace(`{${name}}`, String(replacement))
-  return value
-}) as Parameters<typeof TeamSettingsSection>[0]['t']
-
-const PROFILE = {
-  name: 'Ada',
-  version: '0.1.13',
-  repoUrl: 'https://github.com/Contexera/dsh-agent-team',
-}
-
-// One frozen snapshot: useSyncExternalStore compares by identity, so a literal
-// returned per call would loop instead of stating "still loading".
-const INERT_ENVIRONMENT = { status: 'loading' as const }
-const INERT_ENVIRONMENT_SOURCE = {
-  getSnapshot: () => INERT_ENVIRONMENT,
-  subscribe: () => () => {},
-}
+import { renderTeamSettingsSection } from './bench/client-fixtures.tsx'
 
 /** The row's Worker group as the Host resolves it with nothing stored. */
 const WORKER_DEFAULTS = {
@@ -63,22 +40,8 @@ function hostRow(options: {
 
 /** Render the page with the real Worker controller over one stubbed row. */
 function renderSection(row = hostRow()) {
-  const identity = new TeamHumanIdentity({
-    loadProfile: async (): Promise<RemoteResult<AgentTeamHumanProfileResult>> => ({ ok: true, value: PROFILE }),
-    loadAvatarUrl: async () => null,
-  })
   const workerConfig = new WorkerConfigController(workerConfigScope(row.scope))
-  const props = {
-    close: () => {},
-    t,
-    identity,
-    environment: INERT_ENVIRONMENT_SOURCE,
-    saveName: vi.fn(async () => undefined),
-    uploadAvatar: vi.fn(async () => undefined),
-    removeAvatar: vi.fn(async () => undefined),
-    workerConfig,
-  } as unknown as Parameters<typeof TeamSettingsSection>[0]
-  const rendered = render(<TeamSettingsSection {...props} />)
+  const rendered = renderTeamSettingsSection({ workerConfig })
   return { ...rendered, row, workerConfig }
 }
 
@@ -239,21 +202,7 @@ describe('Team settings page: the Worker delegation group', () => {
   })
 
   it('renders nothing when the settings service is absent', () => {
-    const identity = new TeamHumanIdentity({
-      loadProfile: async (): Promise<RemoteResult<AgentTeamHumanProfileResult>> => ({ ok: true, value: PROFILE }),
-      loadAvatarUrl: async () => null,
-    })
-    render(<TeamSettingsSection
-      {...{
-        close: () => {},
-        t,
-        identity,
-        environment: INERT_ENVIRONMENT_SOURCE,
-        saveName: vi.fn(async () => undefined),
-        uploadAvatar: vi.fn(async () => undefined),
-        removeAvatar: vi.fn(async () => undefined),
-      } as unknown as Parameters<typeof TeamSettingsSection>[0]}
-    />)
+    renderTeamSettingsSection({})
     expect(screen.queryByRole('region', { name: zh.workerTitle })).toBeNull()
   })
 })

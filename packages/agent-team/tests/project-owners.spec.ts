@@ -1,38 +1,20 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import { describe, expect, it } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { openTestTable } from './helpers/ledger-harness.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
-import { agentTeamDomainSpec } from '../src/spec.ts'
-import type { AgentTeamAgentMember, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamProjectRef, AgentTeamRequestId } from '../src/types.ts'
+import type { AgentTeamAgentMember, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamRequestId } from '../src/types.ts'
 
 const alpha = WorkspaceId('workspace:alpha')
 const beta = WorkspaceId('workspace:beta')
 const human = agentTeamHumanActor()
-const cleanups: Array<() => Promise<void>> = []
 
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
-
-type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
 let counter = 0
 const requestId = (label: string) => `test:${label}:${++counter}` as AgentTeamRequestId
 
-async function openTable(pool: MemoryMediaPool): Promise<Table> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
-  return domain.table('operations') as unknown as Table
+async function openTable(pool: MemoryMediaPool) {
+  return (await openTestTable({ pool })).table
 }
 
 async function addAgent(ledger: AgentTeamLedger, handle: string): Promise<AgentTeamMemberId> {

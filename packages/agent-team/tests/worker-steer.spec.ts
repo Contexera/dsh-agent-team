@@ -15,7 +15,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session } from '@botiverse/oar'
-import { cleanups, realHarness, requestId, waitFor } from './helpers/member-harness.ts'
+import { realHarness, requestId, waitFor } from './helpers/member-harness.ts'
 import type { WorkerConfig } from '../src/worker-service.ts'
 import type { WorkerSteer } from '../src/worker-runtime.ts'
 import type { AgentTeamMemberId, AgentTeamProjectRef, AgentTeamWorkerExecution,
@@ -196,7 +196,6 @@ afterEach(async () => {
   engine.resumeOpenGate?.resolve()
   engine.steerGate?.resolve()
   engine.disposeGate?.resolve()
-  while (cleanups.length > 0) await cleanups.pop()!()
   engine.turn = 'hanging'
   engine.release = undefined
   engine.resumeRelease = undefined
@@ -222,7 +221,7 @@ afterEach(async () => {
   history.reached = undefined
   if (initialClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
   else process.env.CLAUDE_CONFIG_DIR = initialClaudeConfigDir
-}, 30_000)
+})
 
 const workerConfig = (): WorkerConfig => ({ enabled: true, defaultEngine: 'codex', timeoutMs: 0,
   engines: { codex: { enabled: true, executable: '/fake/codex', sandbox: 'workspace-write' },

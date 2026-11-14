@@ -1,13 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import type { AgentTeamWorkerStateView } from '@contexera/dsh-agent-team/types'
 import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 /**
  * One Worker run the Thread names: the start fact every run has, and the
@@ -58,7 +56,6 @@ describe('Worker runs in a Thread', () => {
     expect(text.filter(row => row.includes('派出了 Codex Worker') && !row.includes('（'))).toHaveLength(1)
     expect(text.filter(row => row.includes('完成'))).toHaveLength(1)
     expect(text.join('\n')).not.toContain('worker:')
-    await bench.runtime.dispose()
   })
 
   it('says how a run ended, and keeps the engine it ran on in the settled row', async () => {
@@ -71,6 +68,5 @@ describe('Worker runs in a Thread', () => {
     expect(failed.textContent).toContain('失败：codex 不在 PATH 里')
     // The engine travels with the run, so one Thread can hold both engines without ambiguity.
     expect(await bench.view.findByText(/Claude Worker 完成/)).toBeTruthy()
-    await bench.runtime.dispose()
   })
 })
