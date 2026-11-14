@@ -30,6 +30,6 @@ last-checked: 2026-09-17（归档；PR 已 rebase 到 master `3fad03d` 之上，
 ## Formal-doc exit
 
 - Workspace Participation 词条 + Member/Workspace 修订 → `docs/domain-model.md`。**(ticket 03)**
-- Host 参与生命周期表述 → `docs/architecture.md`。**(ticket 03)**
-- 工具 workspace 寻址参数契约 → `docs/team-collaboration.md`。**(ticket 02)**
+- Host 参与生命周期表述 → `docs/architecture/README.md`。**(ticket 03)**
+- 工具 workspace 寻址参数契约 → `docs/team-collaboration/README.md`。**(ticket 02)**
 - 过程材料：design-space-audit 保留在 materials/（含候选 commit 评估）；spec 验收后本工作项按 `.scratch` 生命周期归档。

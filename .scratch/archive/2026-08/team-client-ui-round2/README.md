@@ -1,8 +1,8 @@
 # Team Client UI Round 2 — 时间戳、排版统一、任务卡重设计
 
-- 状态：done（已实现并合入，长期结论沉淀至 docs/frontend-design.md）
+- 状态：done（已实现并合入，长期结论沉淀至 docs/frontend-design/README.md）
 - 最后核对：2026-08-21
-- 前置：round 1 已合入（`e34524b`），设计基准见 `docs/frontend-design.md`
+- 前置：round 1 已合入（`e34524b`），设计基准见 `docs/frontend-design/README.md`
 
 ## 当前前沿
 

@@ -24,7 +24,7 @@
 
 当时已完成 ledger/Host/Remote/Client 贯通、单测和浏览器 journey 验证。稳定合同已进入：
 
-- [`docs/frontend-design.md`](../../../../docs/frontend-design.md)「侧栏工作区浏览器」；
+- [`docs/frontend-design/sidebar-browser.md`](../../../../docs/frontend-design/sidebar-browser.md)「侧栏工作区浏览器」；
 - [`packages/client-agent-team/README.md`](../../../../packages/client-agent-team/README.md)；
 - 当前实现：`packages/agent-team/src/` 与 `packages/client-agent-team/src/client/`。
 

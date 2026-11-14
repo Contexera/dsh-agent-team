@@ -1,0 +1,31 @@
+# Archived-work-area gate. The main CI deliberately skips `.scratch/**`; this is
+# the one workflow that reads it — index symmetry, entry READMEs, archived README
+# links, ticket statuses, and committed residue. No install or build is needed.
+name: scratch
+
+on:
+  pull_request:
+    paths:
+      - '.scratch/**'
+      - 'scripts/check-scratch.mjs'
+      - '.github/workflows/scratch.yml'
+  push:
+    branches: [master]
+    paths:
+      - '.scratch/**'
+      - 'scripts/check-scratch.mjs'
+      - '.github/workflows/scratch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check archived work-area hygiene
+        run: node scripts/check-scratch.mjs

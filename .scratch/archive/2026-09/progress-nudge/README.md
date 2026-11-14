@@ -51,7 +51,7 @@
 ## 结束条件
 
 - 将已确认设计交给生产实现者。✅ 已完成。
-- 实现完成后把稳定 Host 行为同步到 `docs/architecture.md` 与 `docs/team-collaboration.md`（中英双份）。✅ 已完成。
+- 实现完成后把稳定 Host 行为同步到 `docs/architecture/README.md` 与 `docs/team-collaboration/README.md`（中英双份）。✅ 已完成。
 
 ## 正式文档出口
 

@@ -28,8 +28,8 @@ Team 的 context management（rollover / checkpoint / 投影 fold / 压力策略
 ## 正式文档出口
 
 - host 如何接入引擎 → 引擎仓库 `docs/integration.md`（host 契约的唯一权威）。
-- Team 侧当前机制与边界 → `docs/architecture.md`「Tools and preset」段（已随第二步更新）。
-- 引擎依赖与安装契约 → `docs/development.md`（已随第二步更新）。
+- Team 侧当前机制与边界 → `docs/architecture/tools-and-preset.md`「Tools and preset」段（已随第二步更新）。
+- 引擎依赖与安装契约 → `docs/development/environments-and-install.md`（已随第二步更新）。
 - 本工作项收尾时：仍属维护性的结论并入上述文档，其余移入 `archive/2026-09/`。
 
 ## 仍然绑定的红线（[`spec.md`](spec.md) §C.3，第三步同样适用）

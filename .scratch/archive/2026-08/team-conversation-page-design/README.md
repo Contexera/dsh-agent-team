@@ -33,7 +33,7 @@
 
 ## 正式文档出口
 
-长期结论已写入 [`docs/frontend-design.md`](../../../../docs/frontend-design.md)。新一轮设计应以该文档和当前源码为准，并在 `.scratch/active/` 建立独立工作项。
+长期结论已写入 [`docs/frontend-design/README.md`](../../../../docs/frontend-design/README.md)。新一轮设计应以该文档和当前源码为准，并在 `.scratch/active/` 建立独立工作项。
 
 ---
 

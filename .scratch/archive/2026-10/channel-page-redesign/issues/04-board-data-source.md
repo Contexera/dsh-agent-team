@@ -1,6 +1,6 @@
 # 04 — 看板的数据源与归属
 
-**What to build:** 已被 [`project-ownership-model`](../../project-ownership-model/README.md) 整体取代，不单独实施。看板不再是消息的第二种读法，而是 Task 实体的人类主视图：有 accountable owner、来源引用，项目看板显示四列、全局看板只显示未完成三列。实施见该工作项的 [issue 02](../../project-ownership-model/issues/02-task-first-class.md)。
+**What to build:** 已被 [`project-ownership-model`](../../project-ownership-model/README.md) 整体取代，不单独实施。看板不再是消息的第二种读法，而是 Task 实体的人类主视图：有 accountable owner、来源引用，项目看板显示四列、全局看板只显示未完成三列。实施见该工作项的 [issue 07](../../project-ownership-model/issues/07-task-board.md)。
 
 **Blocked by:** None — superseded
 
