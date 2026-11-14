@@ -2,7 +2,7 @@
 
 - **状态**：已完成并归档（2026-09-19）。human 2026-09-19 16:35 验收「问题不大，一行预览就行」，16:36 批准归档并删除一次性产物。
 - **交付提交**：`feat: rework the Thread header band and Claim panel`（8 文件，+200/−47）；归档材料作为同一笔提交的一部分落下（本地 amend，未重开归档提交）。
-- **正式文档出口**：`docs/frontend-design.md` + `docs/frontend-design.zh.md` 的顶层栏 / Claim 面板小节、`CHANGELOG.md` Unreleased —— 归档时已落地，本目录不再改动。
+- **正式文档出口**：`docs/frontend-design/components.md` + `.zh.md` 的顶层栏 / Claim 面板小节、`CHANGELOG.md` Unreleased —— 归档时已落地，本目录不再改动。
 - **最后核实**：2026-09-19。提交前门禁全绿（`npm test` 711 passed / 53 files、`npm run test:browser` 4 passed、`node scripts/audit-ui-parity.mjs` exit 0、`npm run check:docs` OK、`npm run lint` 0 error（2 条既有 warning）、`npm run typecheck` 通过）；归档时再用 `recipes/verify.e2e.ts` 复跑一次交付态，数值与提交前一致（见下）。
 
 ## 需求与结论
@@ -58,7 +58,7 @@ node .scratch/archive/2026-09/claim-panel-ux/recipes/run-local.mjs verify.e2e.ts
 
 - 启动器替换配方里的 `__TEAM_ROOT__` / `__OVERLAY__` / `__HOME__` / `__CHROME__` / `__LABEL__` / `__OUT__` 占位符，把配方复制进相邻 Harness checkout 的 `apps/web/tests/` 跑完再删；配方 import 该处的 `scaffold.ts` 与 `support.ts`，因此不能就地运行。
 - 产物（截图、JSON 探针）写到 Git 忽略的 `.scratch/local/claim-panel-ux/<label>/`，不落进本归档。
-- 前提见 `docs/development.md` § Sandbox and CI environments：本仓依赖已装、`npm run build` 已产出 `lib/`（配方复制 TEAM_ROOT 进临时 profile 时排除 `src/`，直接用构建产物）、相邻 `../deepseek-harness` checkout 可用、`/usr/bin/google-chrome`（可用 `CHROME_PATH` 覆盖）。
+- 前提见 `docs/development/environments-and-install.md` § Sandbox and CI environments：本仓依赖已装、`npm run build` 已产出 `lib/`（配方复制 TEAM_ROOT 进临时 profile 时排除 `src/`，直接用构建产物）、相邻 `../deepseek-harness` checkout 可用、`/usr/bin/google-chrome`（可用 `CHROME_PATH` 覆盖）。
 - 归档时删掉的一次性产物：中间 JSON（`measure-*` / `preview-*` / `verify-*` / `column-*` / `taskless-*`）、重复截图目录（`shots/`、`shots-baseline-momo/`、`preview-*`、`verify-*`、`taskless-*`、`compare-preview/`）、`run.log`，以及三个一次性启动/截图脚本（`run-measure.mjs`、`run-shots.mjs`、`claim-shots.e2e.ts`）。所以上表的「改前」数值来自归档前那一次 `measure` 运行，中间 JSON 已随一次性产物删除、无法再复核；「交付态」数值可随时用 `verify.e2e.ts` / `taskless.e2e.ts` 重跑。
 
 ## 归档说明

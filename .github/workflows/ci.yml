@@ -7,7 +7,8 @@
 # docs/development/environments-and-install.md; `npm run check:versions` gates the
 # match. The Hoplite setup derives its tag from the peer lower bound.
 #
-# Scope guard: one workflow, two jobs (linux + windows). No coverage matrix,
+# Scope guard: this workflow keeps two code jobs (linux + windows) and the
+# scratch-only workflow reads the archived work area. No coverage matrix,
 # no release automation, no test:browser (that stays a local acceptance step).
 # The windows lane is the regression fence for filesystem-identifier bugs
 # (issues #7/#8): string-level sanitizing must hold on a real Windows FS.
@@ -15,9 +16,10 @@ name: ci
 
 on:
   pull_request:
-    # A PR touching only `.scratch/` skips the gate: no CI check reads work
+    # A PR touching only `.scratch/` skips this gate: no CI check here reads work
     # history — check:docs page sets, the check:comments citation ban, the
     # check:versions exclusion, and the vitest includes all stop short of it.
+    # `.scratch/` is checked by the scratch-only workflow instead.
     # `**.md` is deliberately absent here: check:docs is a real content gate
     # for docs/ and the READMEs, so those PRs keep running both lanes.
     paths-ignore:

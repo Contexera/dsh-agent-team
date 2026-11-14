@@ -4,7 +4,7 @@
 - Last checked: 2026-09-02
 - Scope: boundary study AND execution for splitting the large Host files (`index.ts`, `types.ts`); Human authorized direct implementation in the Task Thread (2026-09-02).
 - End condition: met — `index.ts` 1552 → 1386, `types.ts` 1220 → 12-line barrel + 3 split files (357/319/596), `member-runtime.ts` 254 lines with a 3-dependency seam. Zero test edits; full verification green.
-- Formal-document exit: pending — if the split is accepted, the member-runtime module ownership note goes to `docs/architecture.md`; then this directory can close into the archive.
+- Formal-document exit: met — the member-runtime module ownership note is in `docs/architecture/package-ownership.md`.
 - `ledger.ts` still deferred (2026-08 verdict); `TeamThreadPage.tsx` untouched.
 
 ## Why now

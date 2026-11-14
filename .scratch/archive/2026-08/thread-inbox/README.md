@@ -1,6 +1,6 @@
 # Thread Inbox / Team Member Context
 
-状态：archived — 2026-08-20 已完成。这里保存 Thread Attention、durable Inbox、五工具、Human Inbox 和 Member context 切换的历史方案与 tickets；当前合同以 [`../../../../docs/team-collaboration.md`](../../../../docs/team-collaboration.md)、源码和测试为准。
+状态：archived — 2026-08-20 已完成。这里保存 Thread Attention、durable Inbox、五工具、Human Inbox 和 Member context 切换的历史方案与 tickets；当前合同以 [`../../../../docs/team-collaboration/README.md`](../../../../docs/team-collaboration/README.md)、源码和测试为准。
 
 ## 历史阅读顺序
 
@@ -24,6 +24,6 @@
 
 ## Compaction / 接续恢复
 
-发生会话 compaction、handoff 或新的 Agent 接手时，先读 `AGENTS.md`、`docs/README.md`、`docs/team-collaboration.md` 和当前源码/测试；只在需要追溯替换旧模型的原因时再读本归档。不要仅凭 M1/M2 历史资料推断注意力、未读、mention、投递或 Team prompt 行为。
+发生会话 compaction、handoff 或新的 Agent 接手时，先读 `AGENTS.md`、`docs/README.md`、`docs/team-collaboration/README.md` 和当前源码/测试；只在需要追溯替换旧模型的原因时再读本归档。不要仅凭 M1/M2 历史资料推断注意力、未读、mention、投递或 Team prompt 行为。
 
 本目录中的 tickets 已全部关闭。后续实现改变当前合同或维护流程时，更新正式 `docs/`、package README 和测试，不回写本归档来模拟现状。

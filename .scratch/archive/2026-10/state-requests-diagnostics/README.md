@@ -1,8 +1,8 @@
 # 状态机、数据请求与诊断日志
 
-**Status:** closed — 6 票全部完成（票面 Status=complete），2026-10-09 归档为 `archive/2026-10/state-requests-diagnostics/`；Vera 的工作项级一次性终审在进行中（只读，不改代码树）。
+**Status:** closed — 6 票全部完成（票面 Status=complete），2026-10-09 归档为 `archive/2026-10/state-requests-diagnostics/`；Vera 的工作项级一次性终审在归档时尚未留下结果。
 **Last checked:** 2026-10-09，代码尖端 `12e83f13`（树 `85d9072f5b5a670f4d9cc63c6494fc87e34ff662`，06 完成后；05 完成基线 `63a9e623`／树 `1fd385f632596a31eb8f5ae36c8c820b019576b0`；04 完成基线 `e02f2862`／树 `55e8cb15b2fede6086988784fed4cadb7a426180`；02 完成基线 `07083c48`／树 `eab0126afc217248ac807aa1f2e73f071a6d9435`；01/03 验收基线 `25c5d571`／树 `1bb8603eb669d077e97264dd11b047af4a2107b6`；均本地未推）。
-**Current frontier:** [06 规模与故障验收](issues/06-scale-and-failure-acceptance.md)已 complete（装置 `aster-host-scale-acceptance.mjs`：真实 sqlite 介质＋真实 Host，2 Workspace／6 Member／1000 Task／24 活跃／40 积压 Thread／长 Thread 补到 20,000 笔；读数与决定见票面完成记录）。三条实现修复：`04096133` 客户端 bench 补 `conversation` 桩与 jsdom `document.fonts` 并把「渲染出的随包 slot entry 崩溃」变成失败、`d4289ffb` Inbox 有界队列补 `hasMore` 与三处可见性、`c15c4a33` Thread 页补充读取失败后仍保留「加载更早消息」入口、`12e83f13` 修正 `activeTaskThreads` 注释。重要决定：提交后全量校验**保留**（不加快照／worker／存储迁移，20 万笔为复查阈值）、Inbox **不加游标**、地址簿目录范围与工具侧映射**保留**并记复查阈值；`WeakMap` 根因在夹具侧（含第二个潜在崩溃 `document.fonts`），未改产品代码。剩余：工作项已归档（本笔），结果与预期效果汇报在工作项级总结里交；Vera 的一次性终审进行中（对着代码树 `85d9072f…`）。
+**Current frontier:** [06 规模与故障验收](issues/06-scale-and-failure-acceptance.md)已 complete（装置 `aster-host-scale-acceptance.mjs`：真实 sqlite 介质＋真实 Host，2 Workspace／6 Member／1000 Task／24 活跃／40 积压 Thread／长 Thread 补到 20,000 笔；读数与决定见票面完成记录）。三条实现修复：`04096133` 客户端 bench 补 `conversation` 桩与 jsdom `document.fonts` 并把「渲染出的随包 slot entry 崩溃」变成失败、`d4289ffb` Inbox 有界队列补 `hasMore` 与三处可见性、`c15c4a33` Thread 页补充读取失败后仍保留「加载更早消息」入口、`12e83f13` 修正 `activeTaskThreads` 注释。重要决定：提交后全量校验**保留**（不加快照／worker／存储迁移，20 万笔为复查阈值）、Inbox **不加游标**、地址簿目录范围与工具侧映射**保留**并记复查阈值；`WeakMap` 根因在夹具侧（含第二个潜在崩溃 `document.fonts`），未改产品代码。剩余：工作项已归档（本笔），结果与预期效果汇报在工作项级总结里交；Vera 的一次性终审在归档时尚未留下结果（对着代码树 `85d9072f…`）。
 **Completion conditions:**
 
 - [x] 已提交的配置与实际执行结果可以区分；失败重试补做未完成效果，不重复提交业务事实。

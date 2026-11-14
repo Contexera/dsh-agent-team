@@ -185,12 +185,12 @@ it intact.
 The current implementation has these properties:
 
 - One logical domain, `agent_team`, with one `operations` KV table:
-  [`packages/agent-team/src/spec.ts`](../../../packages/agent-team/src/spec.ts).
+  [`packages/agent-team/src/spec.ts`](../../../../packages/agent-team/src/spec.ts).
 - Each operation has a global positive `sequence`, an `operationId`, a
   `requestId`, and a `previousOperationId` link.
 - `AgentTeamLedger` serializes mutations with an in-process promise tail,
   writes the operation first, and applies it to memory only after the durable
-  write resolves: [`packages/agent-team/src/ledger.ts`](../../../packages/agent-team/src/ledger.ts).
+  write resolves: [`packages/agent-team/src/ledger.ts`](../../../../packages/agent-team/src/ledger.ts).
 - Construction and `validate()` sort all table entries, validate the complete
   transition history, and apply the complete history again.
 - The projection contains current entities, message/activity history, Inbox

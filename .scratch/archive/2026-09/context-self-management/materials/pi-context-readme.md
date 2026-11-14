@@ -39,7 +39,7 @@ Open a visual dashboard to inspect context-window usage and token distribution (
 /context
 ```
 
-![](img/context.png)
+> 原 README 的截图（`img/context.png`）未随归档保存。
 
 ### For Agents
 
