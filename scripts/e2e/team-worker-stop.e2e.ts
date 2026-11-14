@@ -1,9 +1,8 @@
 import { afterEach, it, expect } from 'vitest'
-import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { WORKER_STOP_SHOTS, chooseMemberModel, closeScenario, maxHorizontalScroll, memberAgent, openSettings, openSidebar,
-  openTeamPage, scaffold, settleLayout, waitForMemberAgent } from './__external-agent-team-support.ts'
+  openTeamPage, scaffold, scenarioTempDir, settleLayout, waitForMemberAgent } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -70,7 +69,7 @@ it('stops one of two live Worker runs from the edit-Agent dialog and leaves the 
   const threadRef = discussion.thread.threadRef
 
   // The fake engine is installed where an operator would point the setting.
-  const directory = await mkdtemp(join(tmpdir(), 'dsh-team-fake-codex-'))
+  const directory = await scenarioTempDir('dsh-team-fake-codex-')
   const fakeCodex = join(directory, 'codex')
   await writeFile(fakeCodex, FAKE_CODEX, 'utf8')
   await chmod(fakeCodex, 0o755)

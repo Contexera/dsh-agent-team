@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.setConfig({ testTimeout: 60_000 })
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
-import { realHarness, ScriptedAdapter, textResponse, waitFor, requestId } from './helpers/member-harness.ts'
+import { cleanups, realHarness, ScriptedAdapter, textResponse, waitFor, requestId } from './helpers/member-harness.ts'
+
+afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 
 

@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
 vi.setConfig({ testTimeout: 60_000 })
 
-import { realHarness, ScriptedAdapter, requestId } from './helpers/member-harness.ts'
+import { cleanups, realHarness, ScriptedAdapter, requestId } from './helpers/member-harness.ts'
+
+afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 
 
