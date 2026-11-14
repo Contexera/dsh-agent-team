@@ -1,6 +1,6 @@
 ---
 name: ax-review
-description: Review a repository's agent experience - how smoothly a fresh agent loads context and starts working. Mechanical link/reference checks, a simulated cold-start walk, and a guardrail audit (do checks exist, do they run), over AGENTS.md, docs/, .scratch/, or whatever doc layer the repo actually has. Optionally reads a local session log for observed friction. Run when docs feel stale, before handing a repo to agents, or after a large refactor.
+description: Review a repository's agent experience - mechanical link/reference checks, a simulated cold-start walk, guardrail audit, optional session-log evidence, and optional .scratch/archive audit.
 disable-model-invocation: true
 ---
 
@@ -25,7 +25,7 @@ python3 scripts/check_links.py <repo> --include .scratch/active --exclude .scrat
 python3 scripts/check_references.py <repo> --include .scratch/active --exclude .scratch/archive
 ```
 
-Use the same scope for both. Omit `--include` when no active directory exists. `--exclude` is a repository-relative file or directory prefix, not a glob; a missing include fails rather than silently narrowing the review. Archive history enters only through an explicit scope change, such as omitting the archive exclusion for a separately requested historical audit. Do not present a scoped green run as repo-wide green.
+Use the same scope for both. Omit `--include` when no active directory exists. `--exclude` is a repository-relative file or directory prefix, not a glob; a missing include fails rather than silently narrowing the review. Historical archives stay excluded from `check_references.py` by default because old specs legitimately cite paths that later code changed; when reviewing `.scratch/archive/`, use the dedicated Archive scratch audit below instead of demanding current-code green on historical records. Do not present a scoped green run as repo-wide green.
 
 Both scripts exit non-zero on findings and print `file:line: reason`, plus the effective include/exclude scope. Findings are candidates, not verdicts: a methodology doc may cite paths of the repos it talks about, a runbook may cite paths on the target machine. Every current-scope finding gets fixed or consciously explained in the report — saying "expected, this doc cites external paths" is a valid resolution. Report archive-only findings separately and never rewrite history merely to make the current review green.
 
@@ -72,8 +72,14 @@ The method — locating the log, skipping the machinery, counting repeated reads
 
 Findings from the log use the same report format and the same classification as everything else. A fact the agent hunted for is a navigation pointer; a failure a check would have caught is a missing guardrail; a rule stated in prose but never enforced is a check waiting to be written. Do not let the log's concreteness outrank the walk's judgment — a single awkward session is an anecdote, and the walk is what tells you whether the docs are the cause.
 
-## 6. Report and fix
+## 6. Archive scratch audit (optional)
+
+`.scratch/archive/` is committed to Git, so fresh agents and repository searches still encounter it even though it is excluded from current-work reference checks. Run this audit when `.scratch/archive/` exists and the user asks to review archived scratch work, inspect a specific archived work item, or check closure hygiene before archiving (`scratch-review` still owns pre-closure design and implementation review of active work items).
+
+Follow [references/archive-audit.md](references/archive-audit.md): run `python3 scripts/check_archive.py <repo>` (with optional `--target` paths) to check index symmetry, closure status, internal/exit links, and transient noise, then walk the in-scope archive items to verify authority framing and whether durable conclusions actually landed in maintained docs. Never grade historical specs against today's source tree or rewrite history merely to match newer code.
+
+## 7. Report and fix
 
 Report findings impact-first — what hurts a fresh agent most — each with location, why it hurts, and the smallest fix. Write the report in the conversation's language. Structural gaps (no entry file at all, a root guide that should become a routing layer) point at ax-init rather than being hand-rolled here. Apply fixes only on the user's go-ahead.
 
-Done means: the report records the exact include/exclude scope, both current-scope scripts exit clean or every finding is explained, every cold-start walk is written down with its friction list, the guardrail question is answered (is there a check, does it run), and the user has the prioritized fix list. The session log is a bonus, not a gate: no log available is not a reason to hold the review.
+Done means: the report records the exact include/exclude scope, both current-scope scripts exit clean or every finding is explained, every cold-start walk is written down with its friction list, the guardrail question is answered (is there a check, does it run), and the user has the prioritized fix list. When the archive scratch audit was requested, report its target scope and findings separately from current-work findings. The session log and archive audit are optional unless requested: neither blocks a standard current-work review when not asked for.
