@@ -11,16 +11,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { MemoryMediaPool, MemoryStorageBackend, type MemoryWriteFault } from './helpers/memory-backend.ts'
-import { addLedgerMember, ledgerAtBoot, makeOwner, requestId } from './helpers/host-harness.ts'
-import AgentTeam from '../src/index.ts'
+import { MemoryMediaPool, type MemoryWriteFault } from './helpers/memory-backend.ts'
+import { addLedgerMember, harness, ledgerAtBoot, makeOwner, requestId } from './helpers/host-harness.ts'
+import { openTestTable } from './helpers/ledger-harness.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, agentTeamHumanActor } from '../src/ledger.ts'
 import { admissionKey, type SubscriptionAdmissionRecord } from '../src/subscription-admissions.ts'
 import { subscriptionDomainSpec } from '../src/subscription-store.ts'
@@ -96,30 +92,17 @@ function fakeShell(options: { readonly stdout: string; readonly exitCode?: numbe
 }
 
 async function boot(pool: MemoryMediaPool, shell: Pick<FakeShell, 'service'>) {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === workspaceId ? { id, path: process.cwd(), attachSession: async () => {} } : undefined,
-    list: () => [],
+  return harness({
+    pool,
+    workspaceIds: [workspaceId],
+    prepare: ctx => {
+      ctx.provide('shell', shell.service)
+      ctx.provide('credentials', {
+        resolve: async (ref: string) => credentialValues[ref] === undefined ? undefined : { value: credentialValues[ref], source: 'fixture' },
+        describe: async (ref: string) => ({ configured: credentialValues[ref] !== undefined, writable: false }),
+      })
+    },
   })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  ctx.provide('shell', shell.service)
-  ctx.provide('credentials', {
-    resolve: async (ref: string) => credentialValues[ref] === undefined ? undefined : { value: credentialValues[ref], source: 'fixture' },
-    describe: async (ref: string) => ({ configured: credentialValues[ref] !== undefined, writable: false }),
-  })
-  ctx.provide('tokenMeter', { estimateMessage: () => 0, measure: () => ({ totalTokens: 0, nodes: [] }) })
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
-  return { ctx, fiber, facility }
 }
 
 type Booted = Awaited<ReturnType<typeof boot>>
@@ -227,11 +210,7 @@ function deliveryInput(subscription: AgentTeamSubscription, overrides: Partial<S
 /** Seed a checkpoint before boot: a due instant in the past is exactly what a restart after a missed run reads. */
 async function seedCheckpoint(pool: MemoryMediaPool, subscriptionRef: AgentTeamSubscriptionRef,
   checkpoint: Partial<SubscriptionCheckpoint>): Promise<void> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
+  const { facility } = await openTestTable({ pool })
   const domain = await facility.open(subscriptionDomainSpec)
   await domain.table('checkpoints').put(subscriptionRef, { subscriptionRef, consecutiveFailures: 0, publishedInWindow: 0, ...checkpoint })
   await domain.close()

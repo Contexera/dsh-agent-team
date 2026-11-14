@@ -11,7 +11,7 @@ import type { SubagentRuntime as SubagentRuntimeService } from '@deepseek-ai/dsh
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@botiverse/oar'
-import { cleanups, realHarness, requestId, waitFor } from './helpers/member-harness.ts'
+import { realHarness, requestId, waitFor } from './helpers/member-harness.ts'
 import { WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC } from '../src/worker-runtime.ts'
 import type { Config } from '../src/host-row-settings.ts'
 import type { AgentTeamProjectRef } from '../src/types.ts'
@@ -47,8 +47,7 @@ afterEach(async () => {
   engine.text = 'partial output'
   engine.hangTurn = true
   engine.disposeFails = true
-  while (cleanups.length > 0) await cleanups.pop()!()
-}, 30_000)
+})
 
 /** The Host row with delegation on, which is what the Human has to switch on first. */
 const workerRow = (): Config => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
@@ -100,7 +99,7 @@ describe('the parent notice of a stop that could not confirm its cleanup', () =>
       expect(read.workerStates).toEqual([{ workerRef: run.workerRef, state: 'failed', unconfirmed: false }])
     }, { timeout: 20_000 })
     expect(delivered.filter(message => message.source.kind === 'subagent-settled')).toEqual([])
-  }, 60_000)
+  })
 
   it('carries the output and the cleanup verdict once, and never calls the run stopped', async () => {
     const harness = await realHarness()
@@ -146,5 +145,5 @@ describe('the parent notice of a stop that could not confirm its cleanup', () =>
     // The text the run already produced rides the same notice as the caveat.
     expect(text).toContain('partial output')
     expect(text).toContain(WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC)
-  }, 60_000)
+  })
 })

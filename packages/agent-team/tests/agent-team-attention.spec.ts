@@ -1,25 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 // Every test here boots a Host over a throwaway tree, and the windows lane has
-// stretched one cold replay to 2.7s against vitest's 5s default (worst of 11 CI
-// runs, 2026-09-17..21). The SQLite case below keeps its own 30s argument.
-vi.setConfig({ testTimeout: 30_000 })
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
+// stretched one cold replay to 2.7s against the unit project's 5s budget (worst
+// of 11 CI runs, 2026-09-17..21), so the file runs in the integration project.
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import AgentTeam from '../src/index.ts'
-import { agentTeamDomainSpec } from '../src/spec.ts'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
 import { fabricateLegacyThreadReadSnapshot } from './helpers/legacy-thread-read.ts'
 import { rulesV1Ledger } from './fixtures/rules-v1-ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
 import { AgentTeamLedger, agentTeamHumanActor, isThreadReadSnapshot, AGENT_TEAM_RULES_VERSION } from '../src/ledger.ts'
 import { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from '../src/index.ts'
 import type { AgentTeamThreadAttentionResult } from '../src/types.ts'
+import { openTestTable } from './helpers/ledger-harness.ts'
 import { addLedgerMember, alpha, beta, committed, harness, inFlight, ledgerAtBoot, makeOwner, requestId, sqliteHarness, storedPool, withTask } from './helpers/host-harness.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadReadData, AgentTeamThreadReadOperation, AgentTeamThreadReadReceipt, AgentTeamThreadReadResult, AgentTeamThreadRef } from '../src/types.ts'
 
@@ -34,7 +30,6 @@ function threadAttentionOf(result: { readonly value: object }): AgentTeamThreadA
   if (!('thread' in result.value)) throw new Error('expected a Thread Attention result')
   return result.value as AgentTeamThreadAttentionResult
 }
-
 
 /**
  * A frozen old ledger whose Member was enrolled into the Project by hand and
@@ -711,7 +706,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(readBack.body.length).toBeGreaterThan(120)
     expect(readBack.body).not.toContain('…')
     expect(readBack).toMatchObject({ messageRef: sent.message.messageRef, threadRef: sent.thread.threadRef, projectRef: project.project.projectRef, sender: AGENT_TEAM_HUMAN_MEMBER_ID, sequence: sent.message.sequence })
-
 
     // Identity, not position: the Message before and the Message after come
     // back as themselves, so a ref can never quietly resolve to a neighbour.
@@ -1644,7 +1638,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(replay.attentionStatus(actor, { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toMatchObject({ readThroughSequence: update.thread.revision })
     replay.validate()
     second.ctx.agentTeam.validateLedger()
-  }, 120_000)
+  })
 
   it('normalizes bare pre-occurredAt messages with the wrapping operation instant during replay', async () => {
     const test = await harness(storedPool([...rulesV1Ledger.records]))
@@ -1730,7 +1724,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('fails loud on malformed durable records and an invariant catches projection divergence', async () => {
     await expect(harness(storedPool([['operation:bad', { sequence: 'one' }]]))).rejects.toThrow(/does not match its schema/)
-    const test = await harness()
+    // Intentionally corrupts the operations sequence below to test invariant divergence detection.
+    const test = await harness(undefined, undefined, undefined, { validateLedger: false })
     await test.ctx.plugin(agentTeamInvariant)
     const domain = test.facility.get('agent_team')!
     const table = domain.table('operations')
@@ -1749,7 +1744,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   })
 
   it('fails the companion load when the mount replay finds a diverged ledger', async () => {
-    const test = await harness()
+    // Intentionally corrupts the operations sequence below to test mount replay failure.
+    const test = await harness(undefined, undefined, undefined, { validateLedger: false })
     const table = test.facility.get('agent_team')!.table('operations')
     const [id, operation] = [...table.entries()][0]!
     await table.put(id, { ...(operation as AgentTeamOperation), sequence: 9 })
@@ -1802,7 +1798,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   })
 
   it('fails closed at the mount when a commit excludes adoption and the records are invalid', async () => {
-    const test = await harness()
+    // Intentionally corrupts the operations sequence below to test mount-time failure.
+    const test = await harness(undefined, undefined, undefined, { validateLedger: false })
     await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const table = test.facility.get('agent_team')!.table('operations')
     const [id, operation] = [...table.entries()].at(-1)!
@@ -1813,7 +1810,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('keeps the mount adoption one-shot and every later validation a full replay', async () => {
     const seeded = await harness()
     const records = [...seeded.facility.get('agent_team')!.table('operations').entries()]
-    const test = await harness(storedPool(records as Array<[string, unknown]>))
+    // Intentionally corrupts the operations sequence below to test replay failure.
+    const test = await harness(storedPool(records as Array<[string, unknown]>), undefined, undefined, { validateLedger: false })
     await test.ctx.plugin(agentTeamInvariant)
     const table = test.facility.get('agent_team')!.table('operations')
     const [id, operation] = [...table.entries()][0]!
@@ -1994,17 +1992,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
 /** One stored operations table over a seeded memory pool, opened the way a Host restart opens it. */
 async function openLegacy(records: Array<[string, unknown]>): Promise<KvTable<AgentTeamOperationId, AgentTeamOperation>> {
-  const pool = new MemoryMediaPool()
-  pool.versions.set('agent_team', agentTeamDomainSpec.version)
-  pool.media.set('agent_team', { tables: new Map([['operations', new Map(records)]]), global: null })
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  return await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
+  return (await openTestTable({ pool: storedPool(records) })).table
 }
 
 describe('what established an Attention period', () => {

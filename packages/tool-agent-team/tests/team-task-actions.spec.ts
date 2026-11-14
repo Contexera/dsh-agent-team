@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { teamTools } from './render-text.ts'
+import {
+  TEST_OWNER,
+  TEST_PROJECT,
+  TEST_REVIEWER,
+  TEST_TASK,
+  TEST_THREAD,
+  callTool,
+  createTestToolHost,
+} from './tool-test-host.ts'
 
 /**
  * Execution-level tests for the Task accountability surface: the parameters a
@@ -10,75 +18,15 @@ import { teamTools } from './render-text.ts'
  * lock the call shape between the tool and the Host.
  */
 
-const THREAD = 'thread:d78400e4-4925-4065-87b1-3f81b4a4b5fb'
+const THREAD = TEST_THREAD
 const SOURCE = 'thread:aaaa1111-0000-4000-8000-000000000001'
-const TASK = 'task:3245ad40-43fd-4191-a416-7dcaf3a340f2'
-const PROJECT = 'project:046dd831-c679-4279-b6aa-7813476cf12e'
-const OWNER = 'member:6e8a5b10-df16-4ec0-943a-63738010953f'
-const REVIEWER = 'member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5'
+const TASK = TEST_TASK
+const PROJECT = TEST_PROJECT
+const OWNER = TEST_OWNER
+const REVIEWER = TEST_REVIEWER
 
-interface FakeTask {
-  taskRef: string
-  projectRef: string
-  threadRef: string
-  status: string
-  resolution: string
-  accountable: string
-  sourceThreadRefs: string[]
-}
-
-function task(overrides: Partial<FakeTask> = {}): FakeTask {
-  return { taskRef: TASK, projectRef: PROJECT, threadRef: THREAD, status: 'in_review', resolution: 'open',
-    accountable: OWNER, sourceThreadRefs: [], ...overrides }
-}
-
-/** The Host surface these actions touch, recorded so the assertion is on the request the tool built. */
-function fakeHost(overrides: Record<string, unknown> = {}) {
-  const host = {
-    workspacesForAgent: () => [{ workspaceId: 'workspace:alpha', path: undefined, default: true }],
-    humanHandle: () => 'human',
-    members: () => [
-      { member: { memberId: OWNER, handle: 'Tars' } },
-      { member: { memberId: REVIEWER, handle: 'Cole' } },
-    ],
-    listClaimsForAgent: () => ({ task: task(), thread: { threadRef: THREAD, taskRef: TASK, revision: 9100 }, claims: [] }),
-    startThreadForAgent: vi.fn(async (_agent: unknown, request: Record<string, unknown>) => ({
-      kind: 'committed',
-      receipt: { occurredAt: '2026-10-25T03:00:00.000Z' },
-      message: { messageRef: 'message:anchor' },
-      thread: { threadRef: THREAD, taskRef: TASK, revision: 9100 },
-      task: task({ status: 'todo', resolution: 'open', ...(request.accountable === undefined ? {} : { accountable: request.accountable as string }),
-        ...(request.sourceThreadRefs === undefined ? {} : { sourceThreadRefs: request.sourceThreadRefs as string[] }) }),
-      attention: [],
-      directMarkers: [],
-    })),
-    transferTaskForAgent: vi.fn(async (_agent: unknown, request: Record<string, unknown>) => ({
-      kind: 'committed',
-      receipt: { occurredAt: '2026-10-25T03:00:00.000Z' },
-      activity: { activityRef: 'activity:transfer', kind: 'transfer', taskRef: TASK, threadRef: THREAD, actor: OWNER,
-        from: OWNER, to: request.target, sequence: 9101 },
-      task: task({ accountable: request.target as string }),
-      thread: { threadRef: THREAD, taskRef: TASK, revision: 9101 },
-    })),
-    changeTaskForAgent: vi.fn(async (_agent: unknown, request: Record<string, unknown>) => ({
-      kind: 'committed',
-      receipt: { occurredAt: '2026-10-25T03:00:00.000Z' },
-      activity: { activityRef: 'activity:accept', kind: request.action, taskRef: TASK, threadRef: THREAD, actor: OWNER,
-        acceptedClaimRefs: ['claim:7ad04d38-3889-4414-ac0c-23f73c0b962a'], sequence: 9101 },
-      task: task({ status: 'done', resolution: 'accepted' }),
-      thread: { threadRef: THREAD, taskRef: TASK, revision: 9101 },
-      claims: [],
-    })),
-    ...overrides,
-  }
-  return host
-}
-
-/** One tool call against a fake Host: the real `defineTool` wrapper validates the arguments first. */
-async function call(tool: ToolDefinition, args: Record<string, unknown>, host: ReturnType<typeof fakeHost>): Promise<unknown> {
-  const agent = { id: 'agent:tool-test', ctx: { get: (name: string) => name === 'agentTeam' ? host : undefined } }
-  return tool.execute(args, { agent, callId: 'call:1', signal: new AbortController().signal } as never)
-}
+const fakeHost = createTestToolHost
+const call = callTool
 
 describe('team_message start passes Task accountability through', () => {
   it('forwards accountable and sourceThreadRefs to the Host request', async () => {

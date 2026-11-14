@@ -114,5 +114,5 @@ describe.skipIf(!enabled)('storage route benchmark', () => {
     }
     console.table(results)
     expect(results).toHaveLength(4)
-  }, 900_000)
+  })
 })

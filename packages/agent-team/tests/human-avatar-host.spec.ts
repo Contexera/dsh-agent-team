@@ -2,25 +2,18 @@ import { mkdtemp, readdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
 import { createVolatile, updateVolatile } from '@deepseek-ai/cosmokit'
-import Storage from '@deepseek-ai/dsh-storage'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import AgentTeam from '../src/index.ts'
+import type AgentTeam from '../src/index.ts'
 import * as avatarStore from '../src/human-avatar.ts'
 import { humanAvatarsRoot, readHumanAvatar, writeHumanAvatar } from '../src/human-avatar.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
+import { harness } from './helpers/host-harness.ts'
 
-const cleanups: Array<() => Promise<void>> = []
 const tempRoots: string[] = []
 const previousHome = process.env.DSH_HOME
 
 afterEach(async () => {
   vi.restoreAllMocks()
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
   await Promise.all(tempRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
   if (previousHome === undefined) delete process.env.DSH_HOME
   else process.env.DSH_HOME = previousHome
@@ -34,49 +27,32 @@ async function bootHost(home: string, stored: Record<string, unknown> = {}) {
   let failureMode: SettingsFailure | undefined
   const mutations: Array<{ readonly expected: number; readonly ops: readonly unknown[] }> = []
   let host: AgentTeam | undefined
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [], archiveSession: async () => {} })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  ctx.provide('settings', {
-    configure: () => () => {},
-    describe: () => [{ ns: HUMAN_PROFILE_SETTINGS_NAMESPACE, revision, user: { ...stored } }],
-    mutate: async (_namespace: string, ops: ReadonlyArray<{ op: 'set' | 'unset'; path: readonly string[]; value?: unknown }>, expected: number) => {
-      mutations.push({ expected, ops })
-      if (failureMode === 'conflict') {
-        throw { code: 'SETTINGS_CONFLICT', message: 'settings changed', expected, actual: expected + 1 }
-      }
-      if (failureMode === 'error') throw new Error('settings storage failed')
-      if (expected !== revision) throw { code: 'SETTINGS_CONFLICT', message: 'settings changed', expected, actual: revision }
-      for (const op of ops) {
-        if (op.op !== 'set' || op.path.length !== 1 || host === undefined) continue
-        if (op.path[0] === 'avatarRef') updateVolatile(host.config.avatarRef, createVolatile(op.value))
-        stored[op.path[0]!] = op.value
-      }
-      revision += 1
-      if (failureMode === 'after-commit') throw new Error('response path failed')
+  const { ctx, close } = await harness({
+    workspaceIds: [],
+    config: stored as never,
+    prepare: c => {
+      c.provide('settings', {
+        configure: () => () => {},
+        describe: () => [{ ns: HUMAN_PROFILE_SETTINGS_NAMESPACE, revision, user: { ...stored } }],
+        mutate: async (_namespace: string, ops: ReadonlyArray<{ op: 'set' | 'unset'; path: readonly string[]; value?: unknown }>, expected: number) => {
+          mutations.push({ expected, ops })
+          if (failureMode === 'conflict') {
+            throw { code: 'SETTINGS_CONFLICT', message: 'settings changed', expected, actual: expected + 1 }
+          }
+          if (failureMode === 'error') throw new Error('settings storage failed')
+          if (expected !== revision) throw { code: 'SETTINGS_CONFLICT', message: 'settings changed', expected, actual: revision }
+          for (const op of ops) {
+            if (op.op !== 'set' || op.path.length !== 1 || host === undefined) continue
+            if (op.path[0] === 'avatarRef') updateVolatile(host.config.avatarRef, createVolatile(op.value))
+            stored[op.path[0]!] = op.value
+          }
+          revision += 1
+          if (failureMode === 'after-commit') throw new Error('response path failed')
+        },
+      } as never)
     },
-  } as never)
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam, stored as never)
+  })
   host = ctx.agentTeam
-  let closed = false
-  const close = async (): Promise<void> => {
-    if (closed) return
-    closed = true
-    await fiber.dispose()
-  }
-  cleanups.push(close)
   return {
     host,
     close,

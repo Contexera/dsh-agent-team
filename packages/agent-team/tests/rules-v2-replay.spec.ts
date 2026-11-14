@@ -1,32 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { describe, expect, it } from 'vitest'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { openTestTable } from './helpers/ledger-harness.ts'
 import { AgentTeamLedger, agentTeamHumanActor, AGENT_TEAM_RULES_VERSION } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
-import type { AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
+import type { AgentTeamMemberActor, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { rulesV2Ledger } from './fixtures/rules-v2-ledger.ts'
 
-const cleanups: Array<() => Promise<void>> = []
 const owner = rulesV2Ledger.members.owner as AgentTeamMemberId
 const ownerActor: AgentTeamMemberActor = { kind: 'member', memberId: owner, handle: 'owner' }
 
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
-
-async function openTable(pool: MemoryMediaPool): Promise<Table> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
-  return domain.table('operations') as unknown as Table
+async function openTable(pool: MemoryMediaPool) {
+  return (await openTestTable({ pool })).table
 }
 
 /** The captured table, stamped for the domain version the build under test speaks. */

@@ -1,13 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef } from '../src/types.ts'
 import type { WorkspaceId as TeamWorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { harness } from './helpers/surface-harness.ts'
-
-vi.setConfig({ testTimeout: 30_000 })
-
+import { harness } from './helpers/host-harness.ts'
 function ledgerFor(facility: DomainFacility): AgentTeamLedger {
   return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, {})
 }

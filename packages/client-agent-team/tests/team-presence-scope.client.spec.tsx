@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, waitFor } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 describe('presence-scope wake wiring (issue #21)', () => {
   it('refreshes member rows on a presence wake without catalog or Inbox refetches', async () => {
@@ -27,7 +25,6 @@ describe('presence-scope wake wiring (issue #21)', () => {
     // A workspace commit still refreshes the sidebar catalog.
     b.publishProjectUpdate()
     await waitFor(() => expect(b.viewProjects.mock.calls.length).toBeGreaterThan(projectCalls))
-    await b.runtime.dispose()
   })
 
   it('presence wake on an open Thread refreshes only the roster, never the view', async () => {
@@ -52,6 +49,5 @@ describe('presence-scope wake wiring (issue #21)', () => {
     await new Promise(resolve => setTimeout(resolve, 300))
     expect(b.viewProjects.mock.calls.length).toBe(projectCalls)
     expect(b.inbox.mock.calls.length).toBe(inboxCalls)
-    await b.runtime.dispose()
   })
 })

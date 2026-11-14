@@ -1,7 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 // These boot real Hosts over throwaway trees; the same 30s headroom the
 // Thread-read progress suite uses for cold replays applies here.
-vi.setConfig({ testTimeout: 30_000 })
 import { agentTeamHumanActor, isThreadReadSnapshot } from '../src/ledger.ts'
 import { STALLED_PUBLIC_MS } from '../src/task-reminders.ts'
 import type { AgentTeamOperation, AgentTeamThreadReadOperation, AgentTeamThreadReadReceipt } from '../src/types.ts'

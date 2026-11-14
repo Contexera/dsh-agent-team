@@ -21,13 +21,12 @@ import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
 import { TOOL_AVAILABILITY_SECTION } from '../src/tool-availability-guidance.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
-import { mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import { cleanups as realHarnessCleanups, realHarness } from './helpers/member-harness.ts'
+import { drainCleanups, mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
+import { realHarness } from './helpers/member-harness.ts'
 
 const sharedCleanups: Array<() => Promise<void>> = []
 /** Per-test disposers (LLM adapter registrations, ordinary sessions): drained after each test. */
 let testCleanups: Array<() => Promise<void> | void> = []
-const originalDshHome = process.env.DSH_HOME
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 
 afterEach(async () => {
@@ -35,9 +34,7 @@ afterEach(async () => {
 })
 
 afterAll(async () => {
-  await Promise.all(sharedCleanups.splice(0).map(cleanup => cleanup()))
-  if (originalDshHome === undefined) delete process.env.DSH_HOME
-  else process.env.DSH_HOME = originalDshHome
+  await drainCleanups(sharedCleanups)
 })
 
 class EmptyAdapter extends LlmAdapter {
@@ -178,9 +175,9 @@ function stopResponse(text: string): StreamChunk[] {
  * per-test registration because `registerAdapter` throws on duplicate routes —
  * each test registers its own and `afterEach` disposes it.
  */
-function buildSharedHarness(cleanups: Array<() => Promise<void>> = sharedCleanups) {
+function buildSharedHarness(registerCleanup: (fn: () => Promise<void>) => void = fn => { sharedCleanups.push(fn) }) {
   return mountTeamMemberHost({
-    cleanups,
+    registerCleanup,
     prepare: provideQuietTokenMeter,
     // The distinguishable-tool fixture is a real module beside this spec,
     // where its own imports resolve.
@@ -370,10 +367,8 @@ describe('Agent Team member tool policy', () => {
   })
 
   it.each(['before', 'after'] as const)('keeps Members usable when the official Team plugin loads %s Member activation', async timing => {
-    const cleanups: Array<() => Promise<void>> = []
-    testCleanups.push(async () => { for (const cleanup of cleanups) await cleanup() })
     const { ctx, workspaceId } = await mountTeamMemberHost({
-      cleanups, prepare: provideQuietTokenMeter,
+      prepare: provideQuietTokenMeter,
       presetPlugins: [{ id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href }],
     })
     const adapter = new ScriptedAdapter()
@@ -457,10 +452,8 @@ describe('Agent Team member tool policy', () => {
   })
 
   it('admits an official Agent-scoped tool behind a profile grant', async () => {
-    const cleanups: Array<() => Promise<void>> = []
-    testCleanups.push(async () => { for (const cleanup of cleanups) await cleanup() })
     const { ctx, workspaceId } = await mountTeamMemberHost({
-      cleanups, prepare: provideQuietTokenMeter,
+      prepare: provideQuietTokenMeter,
       presetPlugins: [{ id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href }],
     })
     const adapter = new ScriptedAdapter()
@@ -1070,9 +1063,6 @@ describe('profile extra tool-name grants', () => {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
       const host = await realHarness(adapter)
-      testCleanups.push(async () => {
-        for (const cleanup of realHarnessCleanups.splice(0)) await cleanup()
-      })
       const { ctx, workspaceId, pressureState } = host
       const body = vi.fn(async () => [{ type: 'text' as const, text: 'successor grant' }])
       testCleanups.push(ctx.tools.register(defineContentToolFixture({
@@ -1137,7 +1127,7 @@ describe('profile extra tool-name grants', () => {
     } finally {
       vi.useRealTimers()
     }
-  }, 60_000)
+  })
 
   it('uses the latest grants for a second turn that starts without an idle boundary', async () => {
     const adapter = new ScriptedAdapter()
@@ -1304,7 +1294,7 @@ describe('profile extra tool-name grants', () => {
     testCleanups.push(async () => {
       for (const cleanup of cleanups.reverse()) await cleanup()
     })
-    const host = await buildSharedHarness(cleanups)
+    const host = await buildSharedHarness(fn => cleanups.push(fn))
     const adapter = new GatedAdapter()
     testCleanups.push(host.ctx.llm.registerAdapter(['mock'], adapter))
     const member = await addMember(host.ctx, host.workspaceId, `t35-shutdown-${kind}`)
@@ -1688,12 +1678,7 @@ describe('profile extra tool-name grants', () => {
 
 describe('a production plugin behind a profile grant', () => {
   it('resolves a production plugin’s relative target against the Member checkout', async () => {
-    const cleanups: Array<() => Promise<void>> = []
-    testCleanups.push(async () => {
-      for (const cleanup of cleanups.reverse()) await cleanup()
-    })
     const host = await mountTeamMemberHost({
-      cleanups,
       prepare: provideQuietTokenMeter,
       presetPlugins: [{ id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href }],
       workingDirectory: 'real',
@@ -1741,10 +1726,8 @@ describe('a production plugin behind a profile grant', () => {
 
 describe('Worker exposure at a pending turn boundary', () => {
   it('reads a capability edit accepted while the switch was waiting', async () => {
-    const cleanups: Array<() => Promise<void>> = []
-    testCleanups.push(async () => { for (const cleanup of cleanups) await cleanup() })
     const { ctx, workspaceId } = await mountTeamMemberHost({
-      cleanups, prepare: provideQuietTokenMeter,
+      prepare: provideQuietTokenMeter,
       presetPlugins: [{ id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href }],
     })
     const disposeAdapter = ctx.llm.registerAdapter(['mock'], new EmptyAdapter())

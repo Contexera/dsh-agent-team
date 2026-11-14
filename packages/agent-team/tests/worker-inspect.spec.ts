@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session } from '@botiverse/oar'
-import { cleanups, realHarness, requestId, waitFor } from './helpers/member-harness.ts'
+import { realHarness, requestId, waitFor } from './helpers/member-harness.ts'
 import type { Config } from '../src/host-row-settings.ts'
 import type { WorkerConfig } from '../src/worker-service.ts'
 import type { AgentTeamLedger } from '../src/ledger.ts'
@@ -96,9 +96,8 @@ afterEach(async () => {
   engine.claudeCwd = '/fake/claude-work'
   engine.claudeInputId = undefined
   vi.unstubAllEnvs()
-  while (cleanups.length > 0) await cleanups.pop()!()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
-}, 30_000)
+})
 
 /**
  * The Host's own execution record, which no public read exposes: the inspection
@@ -184,7 +183,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     if (inspection.history.kind !== 'read') return
     expect(inspection.history.fragments.map(fragment => fragment.kind)).toEqual(['session', 'turn', 'failure'])
     expect(inspection.history.fragments.at(-1)?.text).toBe('Native turn failed after 15674 ms: unexpected status 401 Unauthorized')
-  }, 60_000)
+  })
 
   it('reads a Claude run\'s own record after its process exited', async () => {
     const harness = await realHarness()
@@ -245,7 +244,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     if (inspection.history.kind !== 'read') return
     expect(inspection.history.fragments.map(fragment => fragment.kind)).toEqual(['session', 'turn', 'failure'])
     expect(inspection.history.fragments.at(-1)?.text).toBe('Native turn failed: 500 probe boom')
-  }, 60_000)
+  })
 
   it('refuses another Member, and answers the Human only for the Member whose surface asked', async () => {
     const harness = await realHarness()
@@ -284,7 +283,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     await expect(ctx.agentTeam.inspectWorkerForClient({ workspaceId: harness.workspaceId,
       memberId: bystander.status.member.memberId, workerRef: run.workerRef }))
       .rejects.toThrow(/delegated by another Member/)
-  }, 60_000)
+  })
 
   it('keeps the Team summary and names the stage when no native session ever opened', async () => {
     const harness = await realHarness()
@@ -315,7 +314,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     expect(inspection.summary).toBe(execution!.diagnostic)
     expect(inspection.history).toEqual({ kind: 'unpersisted',
       reason: 'The ending recorded no native session, so there is no native record to look up.' })
-  }, 60_000)
+  })
 
   it('lists the newest endings, not the newest starts, inside one bounded window', async () => {
     const harness = await realHarness()
@@ -365,7 +364,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     expect(listedRefs).toContain(refs.at(-1))
     const endings = listed.runs.map(run => Date.parse(executionOf(ctx.agentTeam, run.workerRef)!.settledAt!))
     expect(endings).toEqual([...endings].sort((left, right) => right - left))
-  }, 120_000)
+  })
 
   it('keeps a live run inside the window instead of adding it on top', async () => {
     const harness = await realHarness()
@@ -411,7 +410,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
 
     await ctx.agentTeam.stopWorkerForClient({ workspaceId: harness.workspaceId,
       memberId: member.memberId, workerRef: live.workerRef })
-  }, 120_000)
+  })
 
   it('answers a run whose ending was written before the anchors existed', async () => {
     const harness = await realHarness()
@@ -448,7 +447,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
     expect(inspection.native).toEqual({})
     expect(inspection.history).toEqual({ kind: 'unpersisted',
       reason: 'The ending recorded no native session, so there is no native record to look up.' })
-  }, 60_000)
+  })
 
   it('answers a run that has not ended without pretending it has no native session', async () => {
     const harness = await realHarness()
@@ -481,7 +480,7 @@ describe('one run\'s diagnostic, read by its Team number', () => {
       reason: 'The run has not ended yet; its native record is read once it does.' })
     await ctx.agentTeam.stopWorkerForClient({ workspaceId: harness.workspaceId,
       memberId: added.status.member.memberId, workerRef: run.workerRef })
-  }, 60_000)
+  })
 })
 
 describe('the ended-run window', () => {

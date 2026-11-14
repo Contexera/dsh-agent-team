@@ -1,12 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
 import { TEAM_INBOX_NOTICE_SUMMARY } from '../src/context-projection.ts'
 import type { AgentTeamReminderRef } from '../src/types.ts'
-import { cleanups, realHarness, requestId, ScriptedAdapter, textResponse, waitFor } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
+import { realHarness, requestId, ScriptedAdapter, textResponse, waitFor } from './helpers/member-harness.ts'
 
 /** The last Team Inbox notice the Member's Session actually carries. */
 function latestNotice(agent: Agent): string {

@@ -1,63 +1,22 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
-import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { TeamDraftStore } from '../src/client/drafts.ts'
 import { zh } from '../src/client/locales.ts'
 import { TeamComposer } from '../src/client/TeamComposer.tsx'
 import { mentionedMemberIds } from '../src/client/team-formatters.ts'
+import { composerMemberStatus, memoryStorage, openMentionMenu, zhTranslator } from './bench/client-fixtures.tsx'
 
-const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
-  let value: string = zh[key]
-  for (const [name, replacement] of Object.entries(params ?? {})) value = value.replace(`{${name}}`, String(replacement))
-  return value
-}) as Parameters<typeof TeamComposer>[0]['t']
-
-function storage(): Storage {
-  const values = new Map<string, string>()
-  return {
-    get length() { return values.size },
-    clear: () => { values.clear() },
-    getItem: key => values.get(key) ?? null,
-    key: index => [...values.keys()][index] ?? null,
-    removeItem: key => { values.delete(key) },
-    setItem: (key, value) => { values.set(key, value) },
-  }
-}
-
-function status(handle: string, memberId: string): AgentTeamClientMemberStatus {
-  return {
-    member: {
-      memberId: memberId as AgentTeamMemberId,
-      sessionId: 'session:one' as never,
-      workspaceId: 'workspace:alpha' as never,
-      handle,
-      description: '',
-      presetId: 'team-member',
-      state: 'enabled',
-    },
-    availability: 'active',
-    presence: 'available',
-    capabilityState: 'applied',
-    workspaceIds: ['workspace:alpha' as never],
-  }
-}
+const t = zhTranslator<Parameters<typeof TeamComposer>[0]['t']>()
+const storage = memoryStorage
+const status = composerMemberStatus
 
 const inside = status('@insider', 'member:insider')
 const outsider = status('@outsider', 'member:outsider')
 const follower = status('@follower', 'member:follower')
 const owner = status('@owner', 'member:owner')
 
-function openMenu(ui: ReturnType<typeof render>, text: string): void {
-  const textarea = ui.container.querySelector('textarea') as HTMLTextAreaElement
-  // The menu matches against the draft up to the caret, so the caret has to
-  // land after the token — a plain change leaves jsdom's selection at 0.
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-  setter?.call(textarea, text)
-  textarea.selectionStart = text.length
-  textarea.selectionEnd = text.length
-  fireEvent.change(textarea, { target: { value: text, selectionStart: text.length, selectionEnd: text.length } })
-}
+const openMenu = openMentionMenu
 
 function optionTexts(ui: ReturnType<typeof render>): readonly string[] {
   return [...ui.container.querySelectorAll('[role="option"]')].map(row => row.textContent ?? '')

@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, waitFor } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 describe('Team agent session open failures', () => {
   it('reports a rejected open instead of leaving the sidebar ahead of the seat', async () => {
@@ -21,7 +19,6 @@ describe('Team agent session open failures', () => {
     // The row is not marked current: the navigation did not stay switched to a
     // Session the conversation seat never showed.
     expect(b.view.getByRole('button', { name: '打开 builder 的会话' }).getAttribute('aria-current')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('marks the row current when the open succeeds', async () => {
@@ -35,7 +32,6 @@ describe('Team agent session open failures', () => {
       expect(b.view.getByRole('button', { name: '打开 builder 的会话' }).getAttribute('aria-current')).toBe('page')
     })
     expect(b.view.queryByRole('alert')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('pulls the Host catalog once before reporting a Session it has not listed yet', async () => {
@@ -53,7 +49,6 @@ describe('Team agent session open failures', () => {
     })
     expect(b.runtime.sessions.calls.filter(call => call.method === 'refresh')).toHaveLength(1)
     expect(b.view.queryByRole('alert')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('clears an earlier message once a later click opens the Session', async () => {
@@ -71,6 +66,5 @@ describe('Team agent session open failures', () => {
       expect(b.view.getByRole('button', { name: '打开 builder 的会话' }).getAttribute('aria-current')).toBe('page')
     })
     expect(b.view.queryByRole('alert')).toBeNull()
-    await b.runtime.dispose()
   })
 })

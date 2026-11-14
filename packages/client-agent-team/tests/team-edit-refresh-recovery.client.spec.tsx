@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
@@ -12,7 +12,6 @@ import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 type Runtime = Awaited<ReturnType<typeof runtimeWithTeam>>
 
@@ -58,7 +57,6 @@ describe('Agent and Project edit refresh recovery', () => {
 
     expect(await b.view.findByRole('button', { name: '打开 architect 的会话' })).toBeTruthy()
     expect(b.view.queryByText('roster refresh unavailable')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('classifies an answered Agent refusal as final and starts a new request on retry', async () => {
@@ -78,7 +76,6 @@ describe('Agent and Project edit refresh recovery', () => {
     fireEvent.click(within(editor).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(b.view.queryByRole('dialog', { name: '编辑 Agent' })).toBeNull())
     expect(b.updateMember.mock.calls[0]![0].requestId).not.toBe(b.updateMember.mock.calls[1]![0].requestId)
-    await b.runtime.dispose()
   })
 
   it('reuses the uncertain Agent write ID and proves the retry adds no second Host write', async () => {
@@ -110,7 +107,6 @@ describe('Agent and Project edit refresh recovery', () => {
     expect(b.updateMember.mock.calls[1]![0].requestId).toBe(firstRequestId)
     expect(b.updateMember).toHaveBeenCalledTimes(2)
     expect(hostWrites).toBe(1)
-    await b.runtime.dispose()
   })
 
   it.each([
@@ -145,7 +141,6 @@ describe('Agent and Project edit refresh recovery', () => {
     await waitFor(() => expect(b.view.queryByRole('dialog', { name: '编辑 Agent' })).toBeNull())
     expect(b.updateMember.mock.calls[1]![0].requestId).toBe(firstRequestId)
     expect(hostWrites).toBe(1)
-    await b.runtime.dispose()
   })
 
   it('lands the successful member half of a Project refresh when the Project read fails', async () => {
@@ -172,7 +167,6 @@ describe('Agent and Project edit refresh recovery', () => {
     fireEvent.click(b.view.getByRole('button', { name: '新建项目' }))
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     expect(await within(document.body).findByRole('menuitem', { name: /fresh/ })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('lands the successful Project half of a refresh when the member read fails, then retries the read', async () => {
@@ -189,7 +183,6 @@ describe('Agent and Project edit refresh recovery', () => {
     const alert = (await b.view.findByText(/Member refresh unavailable/)).closest<HTMLElement>('[role="alert"]')!
     fireEvent.click(within(alert).getByRole('button', { name: '重试刷新' }))
     await waitFor(() => expect(b.view.queryByText('Member refresh unavailable')).toBeNull())
-    await b.runtime.dispose()
   })
 
   it.each(['succeeds', 'fails'])('drops a save refresh when the newer workspace read %s', async outcome => {
@@ -230,7 +223,6 @@ describe('Agent and Project edit refresh recovery', () => {
     await waitFor(() => expect(b.view.queryByRole('button', { name: '# engineering' })).toBeNull())
     expect(b.view.getByRole('button', { name: '# platform' })).toBeTruthy()
     expect(b.updateProject).toHaveBeenCalledTimes(1)
-    await b.runtime.dispose()
   })
 
   it('lets the newest Agent refresh win over a late thrown read', async () => {

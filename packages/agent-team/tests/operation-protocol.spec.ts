@@ -26,17 +26,14 @@
  * protocol shape without fabricating a valid ledger history around it.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { openTestLedger } from './helpers/ledger-harness.ts'
+import { drainCleanups } from './helpers/team-host-fixture.ts'
 import { AgentTeamLedger, agentTeamHumanActor, threadReadTargetOf } from '../src/ledger.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/index.ts'
 import type { AgentTeamLedgerResult } from '../src/ledger.ts'
-import { agentTeamDomainSpec, agentTeamOperationSchema } from '../src/spec.ts'
+import { agentTeamOperationSchema } from '../src/spec.ts'
 import type {
   AgentTeamActivityRef,
   AgentTeamActor,
@@ -1888,24 +1885,20 @@ function claimRetry(claim: Op<'team/claim-created' | 'team/claim-done' | 'team/c
 
 /** One Project, one enabled Member, and two followed taskless Threads — the projection the fixtures point at. */
 async function seedLedger(): Promise<void> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
-  const table = domain.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
   const refCounts = new Map<string, number>()
-  ledger = new AgentTeamLedger(table, {
-    ref: kind => {
-      const next = (refCounts.get(kind) ?? 0) + 1
-      refCounts.set(kind, next)
-      return `${kind}:protocol-${next}`
+  const opened = await openTestLedger({
+    validateLedger: false,
+    registerCleanup: fn => cleanups.push(fn),
+    initialize: true,
+    ledgerOptions: {
+      ref: kind => {
+        const next = (refCounts.get(kind) ?? 0) + 1
+        refCounts.set(kind, next)
+        return `${kind}:protocol-${next}`
+      },
     },
   })
-  await ledger.initialize()
+  ledger = opened.ledger
   await ledger.addMember({
     requestId: requestId('seed:add-member'),
     actor: human,
@@ -1956,7 +1949,7 @@ const kindsBornAsProject: ReadonlySet<AgentTeamOperation['kind']> = new Set(['te
 
 describe('operation protocol coverage', () => {
   beforeAll(async () => { await seedLedger() })
-  afterAll(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
+  afterAll(async () => { await drainCleanups(cleanups) })
 
   it.each(Object.entries(protocol))('durable schema round-trips the stored shapes of %s', (kind, row) => {
     for (const shape of [row.stored, ...row.legacyShapes]) {

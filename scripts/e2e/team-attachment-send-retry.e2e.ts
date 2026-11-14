@@ -2,7 +2,7 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import type { AgentTeamRequestId } from '@contexera/dsh-agent-team/types'
-import { HOME, ONE_PIXEL_PNG, closeScenario, openTeamPage, scaffold } from './__external-agent-team-support.ts'
+import { ONE_PIXEL_PNG, closeScenario, openTeamPage, scaffold, scenarioHome } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -41,7 +41,7 @@ it('retries a Main stream attachment send after losing a committed response', as
   await send.click()
   await surface.getByRole('alert').waitFor()
   expect(responses[0]).toMatchObject({ ok: true, value: { kind: 'committed' } })
-  const cache = join(HOME, 'agent-team', 'attachments', 'v1')
+  const cache = join(scenarioHome(), 'agent-team', 'attachments', 'v1')
   const originalUploads = await readdir(cache)
   expect(originalUploads).toHaveLength(1)
   expect(await input.inputValue()).toBe(body)

@@ -1,20 +1,11 @@
 import { afterEach, expect, it } from 'vitest'
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { chooseMemberModel, closeScenario, openSettings, openTeamPage, scaffold, waitForMemberAgent }
+import { chooseMemberModel, closeScenario, openSettings, openTeamPage, scaffold, scenarioTempDir, waitForMemberAgent }
   from './__external-agent-team-support.ts'
 
-let replayDir: string | undefined
-
-afterEach(async () => {
-  try { await closeScenario() } finally {
-    // Only the directory allocated by this scenario; never the shared profile or evidence.
-    if (replayDir !== undefined) await rm(replayDir, { recursive: true, force: true })
-    replayDir = undefined
-  }
-})
+afterEach(closeScenario)
 
 const MASTER = '允许从成员会话派出 Worker'
 
@@ -80,7 +71,7 @@ process.on('SIGINT', () => process.exit(0))
 it('wakes an owner from a subscription, lets it delegate through the real tool, and keeps answering', async () => {
   // Only the model and native CLI are scripted. Settings, notices, tool execution,
   // parallel runs, stop confirmation, and the Thread settlement use the real composition.
-  replayDir = await mkdtemp(join(tmpdir(), 'dsh-team-worker-subscription-'))
+  const replayDir = await scenarioTempDir('dsh-team-worker-subscription-')
   const fixture = join(replayDir, 'session.jsonl')
   const override = join(replayDir, 'replay.override.json')
   const fakeCodex = join(replayDir, 'codex')

@@ -70,5 +70,5 @@ describe('performance scenario contracts', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
-  }, 35_000)
+  })
 })

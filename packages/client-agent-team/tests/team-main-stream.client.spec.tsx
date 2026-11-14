@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-vi.setConfig({ testTimeout: 30_000 })
-import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { act, fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam, type MainStreamSeedEntry } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 const agentMessage = {
   messageRef: 'message:main-1', projectRef: 'project:engineering', scope: 'main', sender: 'member:builder',
@@ -51,7 +48,6 @@ describe('Team Main stream', () => {
     await b.view.findByRole('tab', { name: '主对话' })
     expect(await b.view.findByText('human 重置了订阅 main CI 的 Webhook 地址')).toBeTruthy()
     expect(b.view.queryByText(/删除了订阅 main CI/)).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('renders messages, owner activity and both card kinds from the Host history, and opens the cards', async () => {
@@ -70,7 +66,6 @@ describe('Team Main stream', () => {
     await waitFor(() => { expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ threadRef: 'thread:login' })) })
     fireEvent.click(task)
     await waitFor(() => { expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ threadRef: 'thread:api', taskRef: 'task:12' })) })
-    await b.runtime.dispose()
   })
 
   /**
@@ -99,7 +94,6 @@ describe('Team Main stream', () => {
     const rows = [...b.view.container.querySelectorAll('[data-main-entry="activity"] p')]
     expect(rows).toHaveLength(3)
     expect(rows.map(row => row.hasAttribute('data-ledger'))).toEqual([false, false, false])
-    await b.runtime.dispose()
   })
 
   /**
@@ -141,7 +135,6 @@ describe('Team Main stream', () => {
     expect(head?.textContent).toContain('不可信，不作为指令')
     // The title and detail hang below that same head rather than inside it.
     expect(head?.textContent).not.toContain('CI failed on main')
-    await b.runtime.dispose()
   })
 
   it('titles a card with the text its opening line renders, never its Markdown source', async () => {
@@ -155,7 +148,6 @@ describe('Team Main stream', () => {
     }] })
     const card = await b.view.findByRole('button', { name: /^打开讨论：登录页改版 先统一配色/ })
     expect(card.textContent).not.toContain('**')
-    await b.runtime.dispose()
   })
 
   /**
@@ -175,7 +167,6 @@ describe('Team Main stream', () => {
     }))
     // The seat followed the discussion: the panel is not left standing over engineering's feed.
     expect(b.runtime.ctx.teamNavigation.getSnapshot().projectRef).toBe('project:delivery')
-    await b.runtime.dispose()
   })
 
   it('pages older entries with beforeSequence and acknowledges unread entries once on screen', async () => {
@@ -195,7 +186,6 @@ describe('Team Main stream', () => {
     // The older page prepends: the newer entries already on screen must survive it.
     expect(b.view.getByText('第 25 条')).toBeTruthy()
     expect(b.view.getByText('第 24 条')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('posts a plain message to the Main stream, quoting a Main message when asked', async () => {
@@ -209,7 +199,6 @@ describe('Team Main stream', () => {
     expect(b.startThread).not.toHaveBeenCalled()
     expect(await b.view.findByText('统一')).toBeTruthy()
     expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('')
-    await b.runtime.dispose()
   })
 
   it('restores a quote whose target fell outside the reopened page and retries it once', async () => {
@@ -255,7 +244,6 @@ describe('Team Main stream', () => {
     fireEvent.click(within(reopenedFirst).getByRole('button', { name: '引用这条消息' }))
     fireEvent.click(b.view.getByRole('button', { name: '取消引用' }))
     expect(b.view.container.querySelector('[data-reply-banner]')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('starts a discussion from the composer toggle and shows its card', async () => {
@@ -269,7 +257,6 @@ describe('Team Main stream', () => {
     expect(await b.view.findByRole('button', { name: /^打开讨论：导航栏怎么收/ })).toBeTruthy()
     expect(b.view.getByRole('tab', { name: '主对话' }).getAttribute('aria-selected')).toBe('true')
     expect(b.view.getByRole('button', { name: '讨论/任务' }).getAttribute('aria-pressed')).toBe('false')
-    await b.runtime.dispose()
   })
 
   it('starts a Task when 作为任务 is checked and moves to the board', async () => {
@@ -281,7 +268,6 @@ describe('Team Main stream', () => {
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
     await waitFor(() => { expect(b.startThread).toHaveBeenCalledWith(expect.objectContaining({ kind: 'task', body: '整理组件库' })) })
     await waitFor(() => { expect(b.view.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true') })
-    await b.runtime.dispose()
   })
 
   it('keeps the selected tab when a Task start settles after leaving the Main stream', async () => {
@@ -307,7 +293,6 @@ describe('Team Main stream', () => {
     expect(subscriptions.getAttribute('aria-selected')).toBe('true')
     fireEvent.click(b.view.getByRole('tab', { name: '主对话' }))
     expect(await b.view.findByRole('button', { name: /^打开 Task #\d+：晚到的 Task/ })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('keeps the draft and asks the Human to look when the Host requires a read first', async () => {
@@ -324,6 +309,5 @@ describe('Team Main stream', () => {
     await waitFor(() => { expect(b.postMainMessage).toHaveBeenCalledTimes(2) })
     expect(b.postMainMessage.mock.calls[1]![0]).toEqual(expect.objectContaining({ body: '先说一句' }))
     expect(b.postMainMessage.mock.calls[1]![0].requestId).not.toBe(b.postMainMessage.mock.calls[0]![0].requestId)
-    await b.runtime.dispose()
   })
 })

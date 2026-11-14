@@ -8,14 +8,18 @@
  * so it lives here once. A scenario owns its own `scaffold`/`browser` handles
  * and its own `afterEach`, because vitest lifecycle is per-file.
  *
- * `installLocalBundle` wipes `HOME`, which is the shared staged profile, and
- * every scenario re-stages it because each one boots its own scaffold. The
- * artifact directories belong to the run instead: `run-browser-test.mjs`
- * clears them once before the first scenario, and no scenario may remove them,
- * because vitest decides which scenario runs last and a late clear would delete
- * screenshots an earlier scenario already produced.
+ * `run-browser-test.mjs` stages the bundle and its dependency tree once into a
+ * read-only template directory (`BUNDLE_TEMPLATE`). Each scenario's
+ * `installLocalBundle` creates its own isolated per-scenario `HOME` and links
+ * that template inside it, so writable state (profiles, settings, DB, logs,
+ * Member memory, Worker artifacts) stays isolated per scenario without
+ * repeating the full copy. The artifact directories belong to the run instead:
+ * `run-browser-test.mjs` clears them once before the first scenario, and no
+ * scenario may remove them, because vitest decides which scenario runs last
+ * and a late clear would delete screenshots an earlier scenario already
+ * produced.
  */
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { expect } from 'vitest'
@@ -75,25 +79,30 @@ export async function openTeamPage(options: {
   readonly page: Page
   readonly consoleWatch: { warnings: string[]; pageErrors: string[] }
 }> {
-  await installLocalBundle()
-  // The public origin is installation config, not a page setting, so a lane that
-  // arms a webhook declares it here as the deployment would.
-  const overlay = options.webhookOrigin === undefined ? undefined : await webhookOriginOverlay(options.webhookOrigin)
-  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] },
-    ...(overlay === undefined ? {} : { extraOverlayPath: overlay }),
-    ...(options.replay === undefined ? {} : { replayFixture: options.replay.fixture, replayOverride: options.replay.override }) })
-  browser = await chromium.launch({ headless: true, executablePath: CHROME })
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN',
-    ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }) })
-  const consoleWatch = watchConsole(page)
-  // The device is read once at boot, so it is stated before the document loads.
-  if (options.platform !== undefined) {
-    await page.addInitScript((value: string) => { Object.defineProperty(navigator, 'platform', { value }) }, options.platform)
+  const { home, stagedBundle } = await installLocalBundle()
+  try {
+    // The public origin is installation config, not a page setting, so a lane that
+    // arms a webhook declares it here as the deployment would.
+    const overlay = options.webhookOrigin === undefined ? undefined : await webhookOriginOverlay(options.webhookOrigin)
+    scaffold = await launchWebScaffold({ harnessHome: home, profile: { packages: [{ dir: stagedBundle, enabled: true }] },
+      ...(overlay === undefined ? {} : { extraOverlayPath: overlay }),
+      ...(options.replay === undefined ? {} : { replayFixture: options.replay.fixture, replayOverride: options.replay.override }) })
+    browser = await chromium.launch({ headless: true, executablePath: CHROME })
+    const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN',
+      ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }) })
+    const consoleWatch = watchConsole(page)
+    // The device is read once at boot, so it is stated before the document loads.
+    if (options.platform !== undefined) {
+      await page.addInitScript((value: string) => { Object.defineProperty(navigator, 'platform', { value }) }, options.platform)
+    }
+    await page.goto(scaffold.authenticatedUrl)
+    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
+    if (!options.stayInOrdinaryMode) await page.getByRole('button', { name: '团队', exact: true }).click()
+    return { page, consoleWatch }
+  } catch (error) {
+    await closeScenario()
+    throw error
   }
-  await page.goto(scaffold.authenticatedUrl)
-  await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
-  if (!options.stayInOrdinaryMode) await page.getByRole('button', { name: '团队', exact: true }).click()
-  return { page, consoleWatch }
 }
 
 /**
@@ -115,9 +124,16 @@ async function webhookOriginOverlay(origin: string): Promise<string> {
   return path
 }
 
-/** The one scaffold and browser the current scenario owns; `openTeamPage` fills them. */
+/** The one scaffold, browser, and HOME the current scenario owns; `openTeamPage` / `installLocalBundle` fill them. */
 export let scaffold: WebScaffold | undefined
 export let browser: Browser | undefined
+let activeHome: string | undefined
+
+/** The isolated per-scenario HOME created by `installLocalBundle` / `openTeamPage`. */
+export function scenarioHome(): string {
+  if (activeHome === undefined) throw new Error('No active scenario HOME; call openTeamPage() or installLocalBundle() first')
+  return activeHome
+}
 
 /** Throwaway directories this scenario owns; `closeScenario` removes them. */
 const scenarioTempDirs: string[] = []
@@ -131,9 +147,21 @@ export async function scenarioTempDir(prefix: string): Promise<string> {
 
 /** Release the current scenario's scaffold, browser, and throwaway directories. */
 export async function closeScenario(): Promise<void> {
-  await browser?.close(); browser = undefined
-  await scaffold?.close(); scaffold = undefined
-  await Promise.all(scenarioTempDirs.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
+  const activeBrowser = browser
+  const activeScaffold = scaffold
+  const tempDirs = scenarioTempDirs.splice(0)
+  browser = undefined
+  scaffold = undefined
+  activeHome = undefined
+  try {
+    await activeBrowser?.close()
+  } finally {
+    try {
+      await activeScaffold?.close()
+    } finally {
+      await Promise.all(tempDirs.map(directory => rm(directory, { recursive: true, force: true })))
+    }
+  }
 }
 
 /** A Member record as the Host currently reports it. */
@@ -181,9 +209,8 @@ Promise<NonNullable<ReturnType<WebScaffold['ctx']['agents']['get']>>> {
 }
 
 export const TEAM_ROOT = '__TEAM_ROOT__'
-export const HOME = '__HOME__'
+export const BUNDLE_TEMPLATE = '__BUNDLE_TEMPLATE__'
 export const CHROME = '__CHROME__'
-export const STAGED_BUNDLE = join(HOME, 'profiles', 'node_modules', '@contexera', 'dsh-agent-team')
 export const BROWSER_ARTIFACTS = join(TEAM_ROOT, 'artifacts/browser')
 export const UI01_SHOTS = join(BROWSER_ARTIFACTS, 'ui-01')
 export const UI02_SHOTS = join(BROWSER_ARTIFACTS, 'ui-02')
@@ -510,63 +537,84 @@ export async function entryUnreadCapsule(page: Page, lineSelector: string): Prom
   return await capsule.count() === 0 ? null : await capsule.evaluate(readCountCapsule)
 }
 
+const WORKER_DELEGATION_MASTER = '允许从成员会话派出 Worker'
+
 /**
- * Stage this bundle and its dependency closure as `dsh plugin add` installs
- * it. A command-line overlay would shadow the profile document and make the
- * Host row's settings write fail, so every lane mounts the staged copy as a
- * profile package. Nothing here touches the artifact directories: the run owns
- * them, so a scenario can never delete evidence of the run it belongs to.
+ * Write a fake Codex executable into a scenario-owned temp directory, enable
+ * Worker delegation and the Codex engine in Settings, save, and verify the Host
+ * recorded the configured executable path.
  */
-export async function installLocalBundle(): Promise<void> {
-  await rm(HOME, { recursive: true, force: true })
-  const scope = `${HOME}/profiles/node_modules/@contexera`
+export async function installFakeCodex(
+  page: Page,
+  team: WebScaffold['ctx']['agentTeam'],
+  script: string,
+): Promise<string> {
+  const directory = await scenarioTempDir('dsh-team-fake-codex-')
+  const fakeCodex = join(directory, 'codex')
+  await writeFile(fakeCodex, script, 'utf8')
+  await chmod(fakeCodex, 0o755)
+
+  await openSettings(page)
+  const panel = page.getByRole('dialog')
+  await panel.getByRole('button', { name: '团队', exact: true }).click()
+  const group = panel.locator('[data-worker-settings]')
+  await group.waitFor()
+  await group.getByRole('button', { name: /Worker 委派/ }).click()
+  await group.getByRole('switch', { name: WORKER_DELEGATION_MASTER }).click()
+  const codex = group.locator('[data-worker-engine="codex"]')
+  const codexSwitch = codex.getByRole('switch')
+  await expect.poll(async () => await codexSwitch.isDisabled()).toBe(false)
+  await codexSwitch.click()
+  await expect.poll(async () => await codexSwitch.getAttribute('aria-checked')).toBe('true')
+  await codex.getByLabel('Codex 的可执行路径').fill(fakeCodex)
+  const save = group.getByRole('button', { name: '保存' })
+  await save.click()
+  await expect.poll(async () => await save.isDisabled(), { timeout: 20_000 }).toBe(true)
+  await panel.getByRole('button', { name: '关闭', exact: true }).click()
+  expect(team.config.worker.get().engines.codex).toMatchObject({ enabled: true, executable: fakeCodex })
+  return fakeCodex
+}
+
+/**
+ * Mount this bundle into a fresh, isolated per-scenario `HOME` as `dsh plugin add`
+ * installs it. When `run-browser-test.mjs` has pre-staged the read-only template
+ * (`BUNDLE_TEMPLATE`), each scenario links that template into its own `HOME` so
+ * writable state (profiles, settings, DB, logs, Member memory, Worker artifacts)
+ * stays isolated per scenario without repeating the full copy.
+ */
+export async function installLocalBundle(): Promise<{ readonly home: string; readonly stagedBundle: string }> {
+  const home = await scenarioTempDir('dsh-agent-team-home-')
+  const scope = join(home, 'profiles', 'node_modules', '@contexera')
   await mkdir(scope, { recursive: true })
-  // Match both separators: on Windows cp walks backslash paths.
-  await cp(TEAM_ROOT, `${scope}/dsh-agent-team`, {
-    recursive: true,
-    filter: source => {
-      const normalized = source.replaceAll('\\', '/')
-      // .hoplite and .git hold agent-workspace state (runtime FIFOs kill fs.cp), and no installed bundle carries either.
-      return !normalized.includes('/node_modules') && !normalized.includes('/src') && !normalized.includes('/artifacts') && !normalized.includes('/.hoplite')
-        && !/\/\.git(\/|$)/.test(normalized)
-    },
-  })
-  // Stage regular dependencies inside the bundle dir, as the production installer
-  // would; the shared profiles/node_modules root is dsh-managed and rejects
-  // foreign entries.
-  const { dependencies } = JSON.parse(await readFile(join(TEAM_ROOT, 'package.json'), 'utf8')) as { dependencies: Record<string, string> }
-  const bundleModules = join(scope, 'dsh-agent-team', 'node_modules')
-  for (const name of Object.keys(dependencies)) {
-    const target = join(bundleModules, ...name.split('/'))
-    if (name === '@botiverse/oar') {
-      // The engine library reaches its own runtime packages through the store
-      // this profile does not have, and a copy would leave them unresolvable. A
-      // link keeps the real path, so its dependencies resolve as they do here.
-      await mkdir(dirname(target), { recursive: true })
-      await symlink(join(TEAM_ROOT, 'node_modules', name), target, 'junction')
-      continue
-    }
-    // No filter: the source root itself lives under node_modules, and store
-    // packages never nest their own node_modules.
-    await cp(join(TEAM_ROOT, 'node_modules', name), target, {
+  const stagedBundle = join(scope, 'dsh-agent-team')
+  if (BUNDLE_TEMPLATE !== '__BUNDLE_TEMPLATE__') {
+    await symlink(BUNDLE_TEMPLATE, stagedBundle, 'junction')
+  } else {
+    // Fallback for runners that do not pre-stage BUNDLE_TEMPLATE.
+    await cp(TEAM_ROOT, stagedBundle, {
       recursive: true,
-      dereference: true,
+      filter: source => {
+        const normalized = source.replaceAll('\\', '/')
+        return !normalized.includes('/node_modules') && !normalized.includes('/src') && !normalized.includes('/artifacts') && !normalized.includes('/.hoplite')
+          && !/\/\.git(\/|$)/.test(normalized)
+      },
     })
+    const { dependencies } = JSON.parse(await readFile(join(TEAM_ROOT, 'package.json'), 'utf8')) as { dependencies: Record<string, string> }
+    const bundleModules = join(stagedBundle, 'node_modules')
+    for (const name of Object.keys(dependencies)) {
+      const target = join(bundleModules, ...name.split('/'))
+      if (name === '@botiverse/oar') {
+        await mkdir(dirname(target), { recursive: true })
+        await symlink(join(TEAM_ROOT, 'node_modules', name), target, 'junction')
+        continue
+      }
+      await cp(join(TEAM_ROOT, 'node_modules', name), target, { recursive: true, dereference: true })
+    }
   }
-  // The routed ledger backend is vendored under this bundle's own package name
-  // (see cordis.patch.yml).
-  await mkdir(UI01_SHOTS, { recursive: true })
-  await mkdir(UI02_SHOTS, { recursive: true })
-  await mkdir(UI03_SHOTS, { recursive: true })
-  await mkdir(UI04_SHOTS, { recursive: true })
-  await mkdir(UI05_SHOTS, { recursive: true })
-  await mkdir(UI06_SHOTS, { recursive: true })
-  await mkdir(UI07_SHOTS, { recursive: true })
-  await mkdir(UI08_SHOTS, { recursive: true })
-  await mkdir(UI09_SHOTS, { recursive: true })
-  await mkdir(SETTINGS_SHOTS, { recursive: true })
-  await mkdir(SUBSCRIPTION_SHOTS, { recursive: true })
-  await mkdir(WORKER_SHOTS, { recursive: true })
-  await mkdir(WORKER_STOP_SHOTS, { recursive: true })
-  await mkdir(WORKER_INSPECT_SHOTS, { recursive: true })
+  activeHome = home
+  await Promise.all([
+    UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, UI09_SHOTS,
+    SETTINGS_SHOTS, SUBSCRIPTION_SHOTS, WORKER_SHOTS, WORKER_STOP_SHOTS, WORKER_INSPECT_SHOTS,
+  ].map(dir => mkdir(dir, { recursive: true })))
+  return { home, stagedBundle }
 }
