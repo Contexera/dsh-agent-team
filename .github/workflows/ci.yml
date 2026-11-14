@@ -20,19 +20,25 @@ on:
     # check:versions exclusion, and the vitest includes all stop short of it.
     # `**.md` is deliberately absent here: check:docs is a real content gate
     # for docs/ and the READMEs, so those PRs keep running both lanes.
+    # `.agents/` joins `.scratch/` for the same reason: it holds the one-way
+    # downstream skill copies, and no gate reads them — check:core-skills
+    # covers packages/agent-team/core-skills, check:docs stops at docs/ and the
+    # READMEs, and no vitest include reaches it.
     paths-ignore:
       - '.scratch/**'
+      - '.agents/**'
   push:
     branches: [master]
     # Docs-only pushes skip the gate: README/docs/assets never reach code.
     # The [skip ci] marker achieves the same per-commit when hand-editing
-    # generated path facades on master. `.scratch/` joins them for the same
-    # reason: no gate reads it.
+    # generated path facades on master. `.scratch/` and `.agents/` join them for
+    # the same reason: no gate reads either.
     paths-ignore:
       - '**.md'
       - 'assets/**'
       - 'docs/**'
       - '.scratch/**'
+      - '.agents/**'
   workflow_dispatch:
 
 # Least privilege; the harness clone and pnpm store live in the workspace.
