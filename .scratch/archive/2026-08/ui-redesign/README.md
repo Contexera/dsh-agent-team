@@ -2,7 +2,7 @@
 
 状态：archived — 2026-08-17 已完成。这里保存 UI native-feel 重做的历史设计、实施拆分和验收上下文，不是当前工作的入口或实现规范。
 
-M2 functional baseline 已完成于 commit `9ae7cc3`；本工作项随后只重做 Client presentation，不改 Host、ledger、Remote、authority 或 persistence。当前 Client 边界和验收规则分别见 [`../../../../docs/architecture.md`](../../../../docs/architecture.md) 与 [`../../../../docs/development.md`](../../../../docs/development.md)。
+M2 functional baseline 已完成于 commit `9ae7cc3`；本工作项随后只重做 Client presentation，不改 Host、ledger、Remote、authority 或 persistence。当前 Client 边界和验收规则分别见 [`../../../../docs/architecture/README.md`](../../../../docs/architecture/README.md) 与 [`../../../../docs/development/README.md`](../../../../docs/development/README.md)。
 
 ## 历史阅读顺序
 

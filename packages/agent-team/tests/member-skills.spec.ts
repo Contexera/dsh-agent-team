@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
@@ -11,15 +11,7 @@ import AgentTeam from '../src/index.ts'
 import type { AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 
-const cleanups: Array<() => Promise<void>> = []
-const originalDshHome = process.env.DSH_HOME
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
-
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-  if (originalDshHome === undefined) delete process.env.DSH_HOME
-  else process.env.DSH_HOME = originalDshHome
-})
 
 class EmptyAdapter extends LlmAdapter {
   override resolveModel(provider: string, model: string) { return Promise.resolve({ provider, id: model, name: model }) }
@@ -29,7 +21,6 @@ class EmptyAdapter extends LlmAdapter {
 /** Boots the shared Host fixture with the skills tool row the catalog reads through. */
 function memberSkillsHarness() {
   return mountTeamMemberHost({
-    cleanups,
     // No turn runs here, but the route must resolve rather than reject.
     prepare: ctx => {
       provideQuietTokenMeter(ctx)
@@ -82,7 +73,7 @@ describe('Agent Team member-private skills', () => {
     // nothing.
     expect(await catalogNames(ctx, agent)).toEqual(['member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
     const ordinary = await ctx.agents.create({ sessionId: SessionId('ordinary-skills') })
-    cleanups.push(async () => { await ordinary.dispose() })
+    onTestFinished(async () => { await ordinary.dispose() })
     expect(await catalogNames(ctx, ordinary.agent)).toEqual([])
 
     // Self-install: a SKILL.md written into the private directory is

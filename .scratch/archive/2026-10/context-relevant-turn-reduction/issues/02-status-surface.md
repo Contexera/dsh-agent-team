@@ -1,5 +1,7 @@
 # 02 — 状态面（`context_timeline` → `context_status`）
 
+> 已归档：本票面状态与勾选是实现前的历史清单，未回填；见[工作项 README](../README.md)。
+
 **What to build:** 模型有一个"我在哪、我能做什么、代价多少"的入口。它在边界处、长间隔回来后、不确定自己站在哪里时被调用。回退的发现入口从"先有意图再看"变成"先看有没有值得回的点"。
 
 **Blocked by:** None — can start immediately。与 01 独立。

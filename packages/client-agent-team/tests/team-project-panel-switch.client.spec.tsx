@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { act, fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 async function openDiscussions(configure?: (bench: Awaited<ReturnType<typeof runtimeWithTeam>>) => void) {
   const card = (threadRef: string, sequence: number, preview: string) => ({
@@ -90,7 +88,6 @@ describe('Team Project discussion panel switching', () => {
     })
     expect(within(panel).queryByText('迟到的 A 旧消息')).toBeNull()
     expect(within(panel).getByText('第一条讨论')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it.each(['committed', 'failed'] as const)('keeps the current reply independent of a %s reply to the previous discussion', async (outcome) => {
@@ -141,7 +138,6 @@ describe('Team Project discussion panel switching', () => {
     open(0)
     await within(panel).findByText('第一条讨论')
     expect(input().value).toBe(outcome === 'failed' ? 'A 的回复' : '')
-    await b.runtime.dispose()
   })
 
   it.each(['unchanged', 'edited'] as const)('settles the previous reply against the %s draft after reopening', async (draft) => {
@@ -170,7 +166,6 @@ describe('Team Project discussion panel switching', () => {
     await act(async () => { release.resolve() })
     expect(input.value).toBe(draft === 'edited' ? '后来编辑的草稿' : '')
     expect(remove() !== null).toBe(draft === 'edited')
-    await b.runtime.dispose()
   })
 
   it.each(['committed', 'failed'] as const)('keeps the current discussion open after a %s conversion in the previous one', async (outcome) => {
@@ -207,6 +202,5 @@ describe('Team Project discussion panel switching', () => {
     await act(async () => { settledB.resolve() })
     expect(await within(panel).findByText('B 的转换失败')).toBeTruthy()
     if (outcome === 'committed') expect(await b.view.findByRole('button', { name: /^打开 Task #1：/ })).toBeTruthy()
-    await b.runtime.dispose()
   })
 })

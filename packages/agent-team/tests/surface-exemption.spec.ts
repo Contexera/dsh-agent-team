@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadReadFact } from '../src/types.ts'
 import type { WorkspaceId as TeamWorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { harness } from './helpers/surface-harness.ts'
+import { harness } from './helpers/host-harness.ts'
 
 /**
  * Project B: the visible-surface exemption, exercised through the real write
@@ -23,9 +23,6 @@ import { harness } from './helpers/surface-harness.ts'
  *  3. One fact off the surface keeps the write refused, and a ledger with no
  *     probe at all is exactly the old behaviour.
  */
-
-vi.setConfig({ testTimeout: 30_000 })
-
 /** A ledger over the same durable table, with an injected surface probe. */
 function ledgerWithProbe(facility: DomainFacility, probe: (memberId: string, fact: AgentTeamThreadReadFact) => boolean): AgentTeamLedger {
   return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, {

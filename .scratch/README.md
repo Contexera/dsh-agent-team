@@ -19,14 +19,17 @@
 
 未结束的工作项位于 `active/<work>/`（Git 忽略，不随仓库分发），本索引不列其中的本地条目；工作项结束时移入 `archive/YYYY-MM/`，其 README 会被追加到下面的已归档清单。
 
-## 已归档工作项
+## Archived 已归档工作项与证据
+
+> 2026-09-23 之前的记录使用拆分前的扁平 docs 路径（`docs/architecture.md`、`docs/frontend-design.md`、`docs/team-collaboration.md`、`docs/development.md`）；它们对应现在的同名目录。归档正文保留当时写法，入口与出口链接指向新位置。
 
 | 月 | 工作项 | 一句话结论 | 链接 |
 | --- | --- | --- | --- |
+| 2026-11 | test-system-overhaul | 测试底座自托管与五层 Vitest 分层落地；16 项故障注入检出 16/16，26 个 E2E 与 195 张截图通过，复核问题已修复。 | [README](archive/2026-11/test-system-overhaul/README.md) |
 | 2026-11 | implicit-state-machines | Webhook 耗尽可恢复、订阅存储升到 v5、Task 写入与重放共享状态推导；编辑、发送、头像、附件与时间线的故障恢复通过 Web 验收。 | [README](archive/2026-11/implicit-state-machines/README.md) |
 | 2026-11 | implicit-state-machines-deep | 14 张票全部验收：Host 终态与恢复、通知覆盖、草稿发送归属和侧栏保存顺序；收口证据及重开条件已记录。 | [README](archive/2026-11/implicit-state-machines-deep/README.md) |
 | 2026-11 | member-host-tools | Team 设置按 profile 放行额外宿主工具名，下一轮生效；过滤 preset 基线候选，自有 scope 的可见未许可工具由动态 prompt 列名且执行 guard 拒绝，#143/#147 已验收。 | [README](archive/2026-11/member-host-tools/README.md) |
-| 2026-11 | domain-owners-and-workers | 本机 Codex／Claude Worker、owner 常驻引导与开关隔离收口；完整组合和浏览器独立验收通过，Claude 同轮追加指令按原生能力阻塞关闭、不宣称完成。 | [README](archive/2026-11/domain-owners-and-workers/README.md) |
+| 2026-11 | domain-owners-and-workers | 本机 Codex／Claude Worker、owner 常驻引导与开关隔离收口；完整组合和浏览器独立验收通过，steer 两引擎同路径、回执只保证 submitted。 | [README](archive/2026-11/domain-owners-and-workers/README.md) |
 | 2026-11 | dsh-0.2.2-adaptation | DSH `0.2.2-rc.1` 适配与认证：peer 移到 `>=0.2.2-rc.1 <0.2.3`，四处上游契约变化（设置图标官方槽位、窄屏 drawer、outline inset shadow、paint inset）适配完成，2022 用例与 13 条浏览器旅程全绿，独立验收判绿，随 0.2.7 发布。 | [README](archive/2026-11/dsh-0.2.2-adaptation/README.md) |
 | 2026-11 | agent-tools-context-rendering | 七工具的上下文呈现与拒绝恢复：01–06 交付并随 v0.2.6 发布，生产日志核对输出形状无回退；付费模型理解评测未获授权、按未运行归档。 | [README](archive/2026-11/agent-tools-context-rendering/README.md) |
 | 2026-11 | project-event-notifications | Member 提醒与 Project 定时/webhook 订阅 01–06 全部验收；真实 GitHub CI 事件已唤醒 Agent owner。 | [README](archive/2026-11/project-event-notifications/README.md) |
@@ -48,6 +51,7 @@
 | 2026-08 | thermo-round2-cleanup | 第二轮质量清理（thermo）：hygiene sweep 加 Host/Client 审查，六提交合入。 | [README](archive/2026-08/thermo-round2-cleanup/README.md) |
 | 2026-08 | thread-inbox | Thread Attention、durable Inbox、五工具与 Member context 的初版方案与实施票。 | [README](archive/2026-08/thread-inbox/README.md) |
 | 2026-08 | ui-redesign | Client presentation 的 native-feel 重做，不动 Host/ledger/Remote。 | [README](archive/2026-08/ui-redesign/README.md) |
+| 2026-08 | validation | UI 里程碑证据（共享，非工作项）：桌面与窄屏截图、验收点与复跑说明。 | [README](archive/2026-08/validation/README.md) |
 | 2026-09 | agent-team-architecture | 文件与包结构审计；交付为 Client panel 去中间层、纠正「三包独立」错误表述。 | [README](archive/2026-09/agent-team-architecture/README.md) |
 | 2026-09 | agent-team-simplification-audit | 全仓简化审查（机械→消融→语义）加消融仪器；8 月审计裁决逐条复核维持。 | [README](archive/2026-09/agent-team-simplification-audit/README.md) |
 | 2026-09 | avatar-svg-assets | 12 张预设头像候选视觉方向确认，实施暂停未动代码；重启从 research.md 接续。 | [README](archive/2026-09/avatar-svg-assets/README.md) |
@@ -59,7 +63,7 @@
 | 2026-09 | global-agent-architecture | 全局 Agent Member：拆开身份与参与集合，Workspace 是地址不是位置（PR #26）。 | [README](archive/2026-09/global-agent-architecture/README.md) |
 | 2026-09 | host-file-split | Host 大文件拆分：index/types 瘦身加 MemberRuntime 提取，零测试改动。 | [README](archive/2026-09/host-file-split/README.md) |
 | 2026-09 | human-mention-inbox | Human「提到我」Inbox 与 mention prompt（PR #20 加跨 Workspace 全局降序）。 | [README](archive/2026-09/human-mention-inbox/README.md) |
-| 2026-09 | human-profile-settings | Human 可配置项（avatar/name/版本脚注）接口落地，UI 交 Iris。 | [README](archive/2026-09/human-profile-settings/README.md) |
+| 2026-09 | human-profile-settings | Human 可配置项接口落地；`My profile` 设置段（名称、头像）随 0.1.14 发布。 | [README](archive/2026-09/human-profile-settings/README.md) |
 | 2026-09 | inbox-model | Inbox 模型统一：human/agent 同一套订阅与投递，改造「提到我」为收件箱。 | [README](archive/2026-09/inbox-model/README.md) |
 | 2026-09 | member-memory-dir-drift | Member 私有目录 colon/拼写漂移修复（issue #7），真实数据回收孪生目录。 | [README](archive/2026-09/member-memory-dir-drift/README.md) |
 | 2026-09 | member-runtime-architecture | Member Runtime Phase 1：持久 capabilities、tools/skills 双接缝、九人技能装配。 | [README](archive/2026-09/member-runtime-architecture/README.md) |
@@ -82,10 +86,10 @@
 | 2026-10 | context-relevant-turn-reduction | Context 管理三动作（压缩/换代/回退）与状态面；机制落 continuity，本仓零机制代码。 | [README](archive/2026-10/context-relevant-turn-reduction/README.md) |
 | 2026-10 | inbox-write-gate-redesign | Inbox 写入门重设计：两票落地、Reeve 通过、human 定规矩，结论进 boundaries。 | [README](archive/2026-10/inbox-write-gate-redesign/README.md) |
 | 2026-10 | issue-43-triage | Issue #43 逐条复现判定：10+2 条中 5 成立/2 部分/3 不成立，按批准工单实施。 | [README](archive/2026-10/issue-43-triage/README.md) |
-| 2026-10 | member-channel-participation-redesign | Member 参与 Channel 逻辑重设计：五票落码（放宽/复用/删管理面），待 Reeve 统一验收。 | [README](archive/2026-10/member-channel-participation-redesign/README.md) |
+| 2026-10 | member-channel-participation-redesign | Member 参与 Channel 逻辑重设计：五票落码（放宽/复用/删管理面），随 0.2.4 发布；归档未记录独立验收结论。 | [README](archive/2026-10/member-channel-participation-redesign/README.md) |
 | 2026-10 | member-tool-surface-control | Member 工具面控制权：按 preset 限工具并拦截未声明工具；不隔离 prompt（用户接受边界）。 | [README](archive/2026-10/member-tool-surface-control/README.md) |
 | 2026-10 | project-ownership-model | Project 与具名 Owner：参与派生改责任派生、规则版本 2、Task board 投影等 01–09。 | [README](archive/2026-10/project-ownership-model/README.md) |
-| 2026-10 | quality-improvement | 质量改进：研究收敛为 spec 加七张依赖排序票（context 续期、lifecycle、附件幂等）。 | [README](archive/2026-10/quality-improvement/README.md) |
+| 2026-10 | quality-improvement | 质量改进：七票落地 context 续期、lifecycle 对账、附件幂等、投递与错误契约。 | [README](archive/2026-10/quality-improvement/README.md) |
 | 2026-10 | state-requests-diagnostics | 状态机/数据请求/诊断日志 6 票完成：成员隔离、共享读取、有界投影、规模与故障验收。 | [README](archive/2026-10/state-requests-diagnostics/README.md) |
 | 2026-10 | team-performance-optimization | 单次通知读取与计划复用、按 Member 保序派发；真实工具协作与固定版本评测完成，分别报告提交收益和总派发代价。 | [README](archive/2026-10/team-performance-optimization/README.md) |
 | 2026-10 | team-tools-model-eval | Team 工具 × gpt-6.1-sol 系统评测：两层 harness 加语料加修复 a03c0a0，Task #4 accept。 | [README](archive/2026-10/team-tools-model-eval/README.md) |

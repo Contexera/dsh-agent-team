@@ -24,7 +24,7 @@ Human 的收件面今天只吃「仅 mention」切片（`directOnly`），follow
 
 ### 第 1 步 — 收敛模型（已完成 2026-09-15）
 
-产物即本文件 + [`current-model.md`](current-model.md)（今天的模型取证）。
+产物即本文件 + [`materials/current-model.md`](materials/current-model.md)（今天的模型取证）。
 
 - [x] 模型取证（判定内核同一、投递/表面/控制三处差异）
 - [x] 决策点逐条拍板（Human message:12919）

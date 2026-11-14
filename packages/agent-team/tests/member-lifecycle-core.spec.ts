@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 /** The `rm` fault this spec injects into the fs mock below. */
 const rmFault = vi.hoisted(() => ({ match: '' }))
@@ -18,7 +18,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
-vi.setConfig({ testTimeout: 60_000 })
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
@@ -26,7 +25,7 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import AgentTeam from '../src/index.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
-import { cleanups, EmptyAdapter, GatedAdapter, realHarness, ScriptedAdapter, textResponse, toolCallResponse, waitFor, waitForIdle, requestId, persistenceRaceError } from './helpers/member-harness.ts'
+import { EmptyAdapter, GatedAdapter, realHarness, ScriptedAdapter, textResponse, toolCallResponse, waitFor, waitForIdle, requestId, persistenceRaceError } from './helpers/member-harness.ts'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, basename, sep } from 'node:path'
@@ -38,11 +37,6 @@ import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
 import { RECOVERY_DELAY_MS } from '../src/recovery.ts'
 import { AgentTeamLedger } from '../src/ledger.ts'
 import type { AgentTeamProjectRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-
-
 
 describe('Agent Team Member lifecycle', () => {
   it('works in a joined Workspace through the existing live Session and withdraws without disposing it', async () => {
@@ -103,17 +97,17 @@ describe('Agent Team Member lifecycle', () => {
 
   it('speaks, reads and starts through the Main stream tools', async () => {
     const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const project = await ctx.agentTeam.createProject({ requestId: requestId('main-project'), workspaceId, name: 'work', description: '', memberIds: [] })
-    const projectRef = project.project.projectRef
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('main-add'), workspaceId, handle: 'builder', description: '', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
-    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const h = await realHarness(adapter)
+    const project = await h.human.createProject('work', { description: '' })
+    const projectRef = project.projectRef
+    const builder = await h.human.addMember('builder', { description: '', projects: [project] })
+    const agent = builder.agent
     const run = async (name: string, args: Record<string, unknown>) => {
-      const result = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId(`main-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
+      const result = await executeToolFixture(h.ctx, { signal: new AbortController().signal, callId: ToolCallId(`main-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
       return result.isError ? { error: result.error.message } : { text: JSON.stringify(result) }
     }
 
-    await ctx.agentTeam.postMainMessage({ requestId: requestId('main-human'), workspaceId, projectRef, body: 'Plain note from the Human' })
+    await h.ctx.agentTeam.postMainMessage({ requestId: requestId('main-human'), workspaceId: h.workspaceId, projectRef, body: 'Plain note from the Human' })
     expect(await run('team_thread', { action: 'read', projectRef })).toMatchObject({ text: expect.stringContaining('Plain note from the Human') })
     expect(await run('team_message', { action: 'post', projectRef, body: 'Agent speaking' })).toMatchObject({ text: expect.stringContaining('Main stream message posted') })
     // Not an owner yet: starting a Thread points back to the Main stream.
@@ -123,11 +117,11 @@ describe('Agent Team Member lifecycle', () => {
     expect(await run('team_message', { action: 'start', projectRef, asTask: true, body: 'x' })).toMatchObject({ error: expect.stringMatching(/start does not accept asTask.*kind: 'task'/s) })
 
     adapter.enqueue(textResponse('Noted my new ownership.'))
-    await ctx.agentTeam.addProjectOwner({ requestId: requestId('main-owner'), workspaceId, projectRef, memberId: added.status.member.memberId })
-    await agent.whenIdle()
+    await h.ctx.agentTeam.addProjectOwner({ requestId: requestId('main-owner'), workspaceId: h.workspaceId, projectRef, memberId: builder.memberId })
+    await builder.waitForIdle()
     expect(await run('team_message', { action: 'start', projectRef, kind: 'task', body: 'Build the importer' })).toMatchObject({ text: expect.stringContaining('Thread created') })
-    expect(ctx.agentTeam.mainStreamHistory({ workspaceId, projectRef }).entries.map(entry => entry.kind)).toEqual(['message', 'message', 'activity', 'thread-card'])
-    ctx.agentTeam.validateLedger()
+    expect(h.ctx.agentTeam.mainStreamHistory({ workspaceId: h.workspaceId, projectRef }).entries.map(entry => entry.kind)).toEqual(['message', 'message', 'activity', 'thread-card'])
+    h.ctx.agentTeam.validateLedger()
   })
 
   it('accepts a unique Workspace id abbreviation and points at the fix when the abbreviation is not unique', async () => {
@@ -277,48 +271,44 @@ describe('Agent Team Member lifecycle', () => {
   })
 
   it('archives a Member: session disposed and archived, private memory kept, claims released', async () => {
-    const { ctx, workspaceId, archived } = await realHarness()
-    const project = await ctx.agentTeam.createProject({ requestId: requestId('archive-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('archive-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-    const memberId = added.status.member.memberId
-    await writeFile(join(added.status.member.privateMemoryPath, 'notes', 'kept.md'), 'persistent note')
+    const h = await realHarness()
+    const project = await h.human.createProject('engineering')
+    const builder = await h.human.addMember('builder', { description: 'Builds the implementation', projects: [project] })
+    const memberId = builder.memberId
+    await writeFile(join(builder.raw.privateMemoryPath, 'notes', 'kept.md'), 'persistent note')
 
     // Give the Member an active Claim so the release cleanup is observable
     // end-to-end.
-    const started = await ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('archive-task'), workspaceId, projectRef: project.project.projectRef, body: 'Build the feature' })
-    if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-    const live = ctx.agents.get(added.status.member.sessionId)!
-    await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('archive-read'), workspaceId, taskRef: started.task!.taskRef })
-    const claimed = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('archive-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', direction: 'implements the feature', baseRevision: started.thread.revision })
-    if (claimed.kind !== 'committed') throw new Error(`expected committed claim, received ${claimed.kind}`)
+    const task = await h.human.startTask(project, 'Build the feature')
+    const claimed = await builder.claimTask(task, 'implements the feature')
     expect(claimed.task.status).toBe('in_progress')
 
-    const result = await ctx.agentTeam.archiveMember({ requestId: requestId('archive'), memberId })
+    const result = await h.ctx.agentTeam.archiveMember({ requestId: requestId('archive'), memberId })
     expect(result.member.state).toBe('archived')
-    expect(result.member.sessionId).toBe(added.status.member.sessionId)
+    expect(result.member.sessionId).toBe(builder.sessionId)
     expect(result.releasedClaims).toEqual([expect.objectContaining({ owner: memberId, state: 'released' })])
-    expect(result.removedAttention).toEqual([expect.objectContaining({ memberId, threadRef: started.task!.threadRef })])
+    expect(result.removedAttention).toEqual([expect.objectContaining({ memberId, threadRef: task.threadRef })])
 
     // Runtime effects: the live session is disposed and its Session archived
     // from grouping surfaces; private memory stays on disk.
-    expect(ctx.agents.get(added.status.member.sessionId)).toBeUndefined()
-    expect(archived).toContain(added.status.member.sessionId)
-    await expect(access(join(added.status.member.privateMemoryPath, 'notes', 'kept.md'))).resolves.toBeUndefined()
-    expect(ctx.agentTeam.members().find(status => status.member.memberId === memberId)).toMatchObject({ availability: 'archived', presence: 'unavailable' })
+    expect(builder.live).toBeUndefined()
+    expect(h.archived).toContain(builder.sessionId)
+    await expect(access(join(builder.raw.privateMemoryPath, 'notes', 'kept.md'))).resolves.toBeUndefined()
+    expect(h.ctx.agentTeam.members().find(status => status.member.memberId === memberId)).toMatchObject({ availability: 'archived', presence: 'unavailable' })
 
     // The released Claim drops the Task back to todo in the shared view.
-    const view = ctx.agentTeam.view({ workspaceId })
-    expect(view.tasks.find(task => task.taskRef === started.task!.taskRef)).toMatchObject({ status: 'todo' })
+    const view = h.ctx.agentTeam.view({ workspaceId: h.workspaceId })
+    expect(view.tasks.find(entry => entry.taskRef === task.taskRef)).toMatchObject({ status: 'todo' })
     expect(view.members).toEqual([])
 
     // Idempotent retry returns the same receipt; removal from archived stays
     // available as the data hygiene path and deletes the private namespace.
-    const again = await ctx.agentTeam.archiveMember({ requestId: requestId('archive'), memberId })
+    const again = await h.ctx.agentTeam.archiveMember({ requestId: requestId('archive'), memberId })
     expect(again.receipt.operationId).toBe(result.receipt.operationId)
-    const removed = await ctx.agentTeam.removeMember({ requestId: requestId('archive-remove'), memberId })
+    const removed = await h.ctx.agentTeam.removeMember({ requestId: requestId('archive-remove'), memberId })
     expect(removed.member.state).toBe('inactive')
-    await expect(access(added.status.member.privateMemoryPath)).rejects.toThrow()
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+    await expect(access(builder.raw.privateMemoryPath)).rejects.toThrow()
+    expect(() => h.ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
   it('retries an archive after the post-commit Session archive fails', async () => {

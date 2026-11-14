@@ -1,10 +1,12 @@
 # PR #83：额外名称许可的替代语义
 
+> 文中链接的探针脚本位于 Git 忽略的 `artifacts/` 目录，未随仓库分发；这里保留路径作为来源记录。
+
 核对日期：2026-11-10。Human 已明确不补上游接口，并要求调查其他实现方式。本文最初记录候选方案；19:05 Human 已确认按该核心目标实施，当前契约以修订后的 [spec](../spec.md) 为准。下文实验事实保留，不把原型当生产验收。
 
 ## 独立核验
 
-Reeve 阅读 Codex 的完整[对照原型](../../../../artifacts/pr83-name-grant-codex-20261110/probe.mjs)，修正了一个正例的前置：测试声称 Member 禁用了基线工具，但原先仍把该名称列在 `memberAllow` 中。改为空名单后，重新执行语法检查和完整原型，142 项断言通过。通过包含既有缺陷与候选语义差异的复现，不是生产验收。
+Reeve 阅读 Codex 的完整对照原型（`artifacts/pr83-name-grant-codex-20261110/probe.mjs`），修正了一个正例的前置：测试声称 Member 禁用了基线工具，但原先仍把该名称列在 `memberAllow` 中。改为空名单后，重新执行语法检查和完整原型，142 项断言通过。通过包含既有缺陷与候选语义差异的复现，不是生产验收。
 
 原型调用真实 ToolsService、三层 scope 链、Native executor、声明组装与嵌套 pipeline；Agent/Session 是最小模拟身份。使用 Cordis `4.1.0`、DSH `0.2.2-rc.1` 的已安装／链接构建。Team 既有 MemberRuntime 的私有基线方法只用来复现当前分类，不能作为新公开接口；候选 guard 和 restriction 是隔离原型，不是已接入完整 MemberRuntime。
 

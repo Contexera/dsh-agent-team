@@ -1,19 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 // Every case boots the real Host harness and waits on a real turn, so the same
 // per-test budget the sibling lifecycle specs use applies here too.
-vi.setConfig({ testTimeout: 60_000 })
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage, LlmError } from '@deepseek-ai/dsh-llm'
-import { cleanups, realHarness, requestId, ScriptedAdapter, textResponse } from './helpers/member-harness.ts'
+import { realHarness, requestId, ScriptedAdapter, textResponse } from './helpers/member-harness.ts'
 import { adoptionRequestId } from '../src/index.ts'
 import type { AgentTeamMemberId, AgentTeamModelSelection } from '../src/types.ts'
-
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
 
 describe('Member model adoption from the request header', () => {
   const add = async (

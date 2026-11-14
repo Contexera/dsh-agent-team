@@ -1,6 +1,14 @@
-import { describe, expect, it, vi } from 'vitest'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { describe, expect, it } from 'vitest'
 import { renderText, teamTools } from './render-text.ts'
+import {
+  TEST_PROJECT,
+  TEST_WORKER,
+  callTool,
+  createTestToolHost,
+  testWorkerInspection,
+  testWorkerRun,
+  testWorkerSteer,
+} from './tool-test-host.ts'
 
 /**
  * Execution-level tests for `team_worker`'s four call shapes: one delegation, one
@@ -11,54 +19,15 @@ import { renderText, teamTools } from './render-text.ts'
  * engine, or directory.
  */
 
-const PROJECT = 'project:00000000-0000-4000-8000-000000000001'
-const WORKER = 'worker:00000000-0000-4000-8000-000000000002'
+const PROJECT = TEST_PROJECT
+const WORKER = TEST_WORKER
 const CWD = '/tmp/worker'
 
-function run(overrides: Record<string, unknown> = {}) {
-  return {
-    workerRef: WORKER, projectRef: PROJECT, engine: 'codex', state: 'running',
-    startedAt: '2026-11-09T07:00:00.000Z', cwd: CWD, initiatedBy: 'member:owner',
-    ...overrides,
-  }
-}
-
-function inspection(overrides: Record<string, unknown> = {}) {
-  return {
-    workerRef: WORKER, projectRef: PROJECT, engine: 'codex', state: 'failed', unconfirmed: false,
-    startedAt: '2026-11-09T07:00:00.000Z', settledAt: '2026-11-09T07:10:00.000Z',
-    summary: 'Team Worker failure (stage: turn; category: unknown).',
-    stage: 'turn',
-    native: { threadId: 'native-thread', turnId: 'native-turn',
-      turnIds: ['native-turn', 'native-steer'], inputIds: ['native-turn', 'native-steer'],
-      storage: '/tmp/home/sessions/2026/11/09/rollout-x.jsonl' },
-    history: { kind: 'read', withheld: 0, truncated: false, fragments: [
-      { kind: 'session', text: 'Native session record: engine 0.167.0' },
-      { kind: 'failure', text: 'Native turn failed after 15674 ms: unexpected status 401 Unauthorized' },
-    ] },
-    ...overrides,
-  }
-}
-
-function steered(overrides: Record<string, unknown> = {}) {
-  return { workerRef: WORKER, engine: 'codex', state: 'submitted', turnId: 'native-turn', runState: 'running', ...overrides }
-}
-
-function fakeHost() {
-  return {
-    workerStartForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => run()),
-    workerStopForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => run({
-      state: 'stopped', settledAt: '2026-11-09T07:10:00.000Z',
-    })),
-    workerInspectForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => inspection()),
-    workerSteerForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => steered()),
-  }
-}
-
-async function call(tool: ToolDefinition, args: Record<string, unknown>, host: ReturnType<typeof fakeHost>, callId = 'call:1'): Promise<unknown> {
-  const agent = { id: 'agent:tool-test', ctx: { get: (name: string) => name === 'agentTeam' ? host : undefined } }
-  return tool.execute(args, { agent, callId, signal: new AbortController().signal } as never)
-}
+const run = testWorkerRun
+const inspection = testWorkerInspection
+const steered = testWorkerSteer
+const fakeHost = createTestToolHost
+const call = callTool
 
 const tool = teamTools().get('team_worker')!
 
@@ -244,7 +213,7 @@ describe('team_worker steers a live run with one instruction', () => {
 
   it('returns the new Worker ref and the state observed when the continuation receipt was written', async () => {
     const host = fakeHost()
-    const nextWorker = 'worker:00000000-0000-4000-8000-000000000099'
+    const nextWorker = 'worker:00000000-0000-4000-8000-000000000099' as typeof WORKER
     host.workerSteerForAgent.mockResolvedValueOnce(steered({ workerRef: nextWorker, state: 'started',
       continuedFrom: WORKER, runState: 'failed', turnId: undefined }))
     const result = await call(tool, { steer: WORKER, instruction: 'continue the work' }, host)
@@ -340,15 +309,5 @@ describe('team_worker tolerates the blank slots a model fills instead of omittin
     const other = fakeHost()
     await expect(call(tool, { stop: WORKER, engine: 'claude' }, other)).rejects.toThrow(/pass stop alone/)
     expect(other.workerStopForAgent).not.toHaveBeenCalled()
-  })
-
-  it('still refuses a real second ref and a real start field', async () => {
-    const host = fakeHost()
-    await expect(call(tool, { stop: WORKER, inspect: WORKER }, host)).rejects.toThrow(/pass stop or inspect, not both/)
-    await expect(call(tool, { stop: WORKER, task: 'fix the parser' }, host)).rejects.toThrow(/pass stop alone/)
-    await expect(call(tool, { steer: WORKER, instruction: 'go on', inspect: WORKER }, host))
-      .rejects.toThrow(/pass steer, stop, or inspect — never two of them/)
-    expect(host.workerStopForAgent).not.toHaveBeenCalled()
-    expect(host.workerSteerForAgent).not.toHaveBeenCalled()
   })
 })

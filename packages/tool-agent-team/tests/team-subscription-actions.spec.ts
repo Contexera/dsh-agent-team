@@ -1,6 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import type { AgentTeamAgentMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { teamTools } from './render-text.ts'
+import {
+  TEST_PROJECT,
+  TEST_RUN,
+  TEST_SUBSCRIPTION,
+  TEST_WORKSPACE,
+  callTool,
+  createTestToolHost,
+  testMemberStatus,
+  testSubscription,
+  testSubscriptionActivity,
+} from './tool-test-host.ts'
 
 /**
  * Execution-level tests for `team_subscription` reads: what the Host answers
@@ -9,46 +20,29 @@ import { teamTools } from './render-text.ts'
  * `team-tools-render.spec.ts`; these lock the tool-to-Host mapping.
  */
 
-const WORKSPACE = 'workspace:alpha'
-const PROJECT = 'project:046dd831-c679-4279-b6aa-7813476cf12e'
-const SUBSCRIPTION = 'subscription:8f14e45f-ceea-467f-a7d3-9b0f1a4c7e21'
-const RUN = 'run:6b1f2c3d-0000-4000-8000-000000000001'
+const WORKSPACE = TEST_WORKSPACE
+const PROJECT = TEST_PROJECT
+const SUBSCRIPTION = TEST_SUBSCRIPTION
+const RUN = TEST_RUN
 const SCRIPT_HASH = 'a'.repeat(64)
 
-/** The Host surface these reads touch, recorded so the assertion is on what came back. */
-function fakeHost(overrides: Record<string, unknown> = {}) {
-  const subscription = { subscriptionRef: SUBSCRIPTION, projectRef: PROJECT, name: 'main CI', revision: 2,
-    state: 'active', triggers: { interval: { minutes: 10 } } }
-  return {
-    workspacesForAgent: () => [{ workspaceId: WORKSPACE, path: undefined, default: true }],
-    // The Member surface a caller's written name is resolved against.
-    members: () => [],
-    humanHandle: () => 'human',
-    subscriptionLogsForAgent: vi.fn((_agent: unknown, _request: Record<string, unknown>) => ({ subscription, runs: [{ runRef: RUN, trigger: 'webhook',
-      startedAt: '2026-11-03T09:00:00.000Z', durationMs: 42, category: 'accepted', succeeded: true, eventCount: 1,
-      exitCode: 0, timedOut: false, subscriptionRevision: 2, scriptHash: SCRIPT_HASH, deliveryRef: 'delivery:d1',
-      attempt: 3, stdoutTail: '{"id":"a","title":"A"}', stderrTail: '' }] })),
-    replaySubscriptionDeliveryForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => ({ kind: 'replayed', runRef: RUN, eventCount: 1,
-      delivery: { deliveryRef: 'delivery:d1', receivedRevision: 1, receivedScriptHash: SCRIPT_HASH,
-        receivedAt: '2026-11-01T00:00:00.000Z', expiresAt: '2026-11-08T00:00:00.000Z', attempts: 3, lastError: 'exit 1' } })),
-    ...overrides,
-  }
-}
-
-async function call(tool: ToolDefinition, args: Record<string, unknown>, host: ReturnType<typeof fakeHost>): Promise<unknown> {
-  const agent = { id: 'agent:tool-test', ctx: { get: (name: string) => name === 'agentTeam' ? host : undefined } }
-  return tool.execute(args, { agent, callId: 'call:1', signal: new AbortController().signal } as never)
-}
+const fakeHost = <O extends Parameters<typeof createTestToolHost>[0] = Record<never, never>>(overrides?: O) => createTestToolHost({
+  members: (): readonly AgentTeamAgentMemberStatus[] => [],
+  ...overrides,
+})
+const call = callTool
 
 describe('team_subscription optional slots', () => {
   function writerHost() {
-    const written = { kind: 'changed', subscription: { subscriptionRef: SUBSCRIPTION, projectRef: PROJECT,
-      name: 'watch', revision: 1, state: 'active', triggers: { webhook: true } } }
-    return {
-      ...fakeHost(),
-      createSubscriptionForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => written),
-      updateSubscriptionForAgent: vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => written),
+    const written = {
+      kind: 'changed' as const,
+      subscription: testSubscription({ name: 'watch', revision: 1, triggers: { webhook: true } }),
+      activity: testSubscriptionActivity({ subscriptionName: 'watch' }),
     }
+    return fakeHost({
+      createSubscriptionForAgent: vi.fn(async () => written),
+      updateSubscriptionForAgent: vi.fn(async () => written),
+    })
   }
 
   const create = { action: 'create', projectRef: PROJECT, name: 'watch', webhook: true }
@@ -173,13 +167,16 @@ describe('team_subscription arms and resets the webhook address', () => {
 })
 
 describe('team_subscription addressed events', () => {
-  const recipient = 'member:2eb79b61-1d71-4c97-823f-04b3d33f9e87'
-  const changed = (notify: readonly string[]) => ({ kind: 'changed', subscription: { subscriptionRef: SUBSCRIPTION, projectRef: PROJECT,
-    name: 'main CI', state: 'active', revision: 1, triggers: { interval: { minutes: 10 } }, notify } })
+  const recipient = 'member:2eb79b61-1d71-4c97-823f-04b3d33f9e87' as AgentTeamMemberId
+  const changed = (notify: readonly AgentTeamMemberId[]) => ({
+    kind: 'changed' as const,
+    subscription: testSubscription({ revision: 1, notify }),
+    activity: testSubscriptionActivity(),
+  })
 
   it('passes the recipients through, and keeps "not named" apart from "nobody"', async () => {
-    const create = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => changed([recipient]))
-    const update = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => changed([]))
+    const create = vi.fn(async (_agent: unknown, _request: { readonly notify?: readonly AgentTeamMemberId[] | undefined }) => changed([recipient]))
+    const update = vi.fn(async (_agent: unknown, _request: { readonly notify?: readonly AgentTeamMemberId[] | undefined }) => changed([]))
     const host = fakeHost({ createSubscriptionForAgent: create, updateSubscriptionForAgent: update })
     const tool = teamTools().get('team_subscription')!
     const created = await call(tool, { action: 'create', projectRef: PROJECT, name: 'main CI', intervalMinutes: 10,
@@ -202,12 +199,12 @@ describe('team_subscription addressed events', () => {
   it('reads a recipient the way a caller writes it: @Handle, a 6+ hex prefix, or the Human', async () => {
     // Every Member-taking field accepts the form an Agent actually sees; a
     // handle that resolved would otherwise be reported as "not a Project member".
-    const createForAgent = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => changed([]))
+    const createForAgent = vi.fn(async (_agent: unknown, _request: { readonly notify?: readonly AgentTeamMemberId[] | undefined }) => changed([]))
     const host = fakeHost({
       members: () => [
-        { member: { memberId: 'member:2eb79b61-1d71-4c97-823f-04b3d33f9e87', handle: 'Cole' } },
+        testMemberStatus('member:2eb79b61-1d71-4c97-823f-04b3d33f9e87' as AgentTeamMemberId, 'Cole'),
         // Shares its first six hex characters with Cole, so a prefix can be ambiguous.
-        { member: { memberId: 'member:2eb79baa-4a85-4e08-86bb-a41b1a0bef48', handle: 'Iris' } },
+        testMemberStatus('member:2eb79baa-4a85-4e08-86bb-a41b1a0bef48' as AgentTeamMemberId, 'Iris'),
       ],
       createSubscriptionForAgent: createForAgent,
     })
@@ -229,8 +226,7 @@ describe('team_subscription addressed events', () => {
 
   it('lists the recipients each subscription wakes', async () => {
     const host = fakeHost({
-      subscriptionsForAgent: vi.fn(() => ({ entries: [{ subscription: { subscriptionRef: SUBSCRIPTION, projectRef: PROJECT,
-        name: 'main CI', state: 'active', revision: 1, triggers: { interval: { minutes: 10 } }, notify: [] }, unpublished: 0, eventCount: 0 }] })),
+      subscriptionsForAgent: vi.fn(() => ({ entries: [{ subscription: testSubscription({ revision: 1, notify: [] }), unpublished: 0, eventCount: 0 }] })),
     })
     const result = await call(teamTools().get('team_subscription')!, { action: 'list', projectRef: PROJECT }, host) as {
       subscriptions: readonly { notify: readonly string[] }[] }

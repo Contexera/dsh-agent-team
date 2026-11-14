@@ -1,6 +1,6 @@
 # Team Client UI Round 3
 
-状态：archived — 2026-08-21 前完成并合入。这里保存消息 run、mention 强调、聊天排版刻度和任务状态点的历史实施摘要；当前 UI 合同以 [`docs/frontend-design.md`](../../../../docs/frontend-design.md) 和 Client 源码为准。
+状态：archived — 2026-08-21 前完成并合入。这里保存消息 run、mention 强调、聊天排版刻度和任务状态点的历史实施摘要；当前 UI 合同以 [`docs/frontend-design/README.md`](../../../../docs/frontend-design/README.md) 和 Client 源码为准。
 
 ## 已交付
 
@@ -15,4 +15,4 @@
 - run 的单位是一次连续发言，不是单条消息，避免把时间线切成密集卡片。
 - Agent markdown 没有安全的文本节点挂点，因此不在 Markdown 源文本中注入 mention 样式。
 
-稳定合同、可访问性和验证要求都已写入 [`docs/frontend-design.md`](../../../../docs/frontend-design.md)。后续时间线优化另行建 active 工作项；本目录只作历史溯源。
+稳定合同、可访问性和验证要求都已写入 [`docs/frontend-design/README.md`](../../../../docs/frontend-design/README.md)。后续时间线优化另行建 active 工作项；本目录只作历史溯源。

@@ -10,15 +10,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
+import type { Context } from '@deepseek-ai/cordis'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import AgentTeam from '../src/index.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { harness } from './helpers/host-harness.ts'
 import * as WebhookEntry from '../src/webhook.ts'
 import { WEBHOOK_BODY_MAX_BYTES } from '../src/subscription-webhook.ts'
 import type { AgentTeamProjectRef, AgentTeamRequestId } from '../src/types.ts'
@@ -84,29 +81,18 @@ interface StoredAdmission {
  */
 async function bootEntry(): Promise<Entry> {
   const pool = new MemoryMediaPool()
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  ctx.provide('workspaceRegistry', { get: (id: WorkspaceId) => id === workspaceId ? { id, path: process.cwd(), attachSession: async () => {} } : undefined,
-    list: () => [] })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  ctx.provide('shell', fakeShell().service as never)
-  ctx.provide('credentials', {
-    resolve: async (ref: string) => ({ value: `secret-${ref}`, source: 'fixture' }),
-    describe: async () => ({ configured: true, writable: false }),
+  const { ctx } = await harness({
+    pool,
+    workspaceIds: [workspaceId],
+    config: { webhook: { publicOrigin: origin } } as never,
+    prepare: c => {
+      c.provide('shell', fakeShell().service as never)
+      c.provide('credentials', {
+        resolve: async (ref: string) => ({ value: `secret-${ref}`, source: 'fixture' }),
+        describe: async () => ({ configured: true, writable: false }),
+      })
+    },
   })
-  ctx.provide('tokenMeter', { estimateMessage: () => 0, measure: () => ({ totalTokens: 0, nodes: [] }) })
-  await ctx.plugin(SessionProjectionRegistry)
-  const team = await ctx.plugin(AgentTeam, { webhook: { publicOrigin: origin } } as never)
-  cleanups.push(async () => { await team.dispose() })
   const server = await ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 } as never)
   cleanups.push(async () => { await server.dispose() })
   const entryFiber = await ctx.plugin(WebhookEntry)
@@ -187,5 +173,5 @@ describe('the public webhook entry', () => {
     const full = await post(entry.base, `/team/hooks/${entry.token}`, { body: '{}' })
     expect(full.status, 'the eleventh delivery').toBe(429)
     expect(full.headers.get('retry-after')).toBe('60')
-  }, 30_000)
+  })
 })

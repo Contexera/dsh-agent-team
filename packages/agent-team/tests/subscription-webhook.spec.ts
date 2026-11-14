@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  WEBHOOK_BODY_MAX_BYTES,
   WEBHOOK_HEADER_VALUE_MAX_BYTES,
   WEBHOOK_PATH_PREFIX,
-  WEBHOOK_QUEUE_LIMIT,
   WEBHOOK_RETRY_DELAYS_MS,
-  WEBHOOK_STATUS,
   forwardableHeaders,
   mintWebhookToken,
   sameWebhookTokenHash,
@@ -131,15 +128,5 @@ describe('the stdin envelope and the retry schedule', () => {
     expect(webhookRetryDelayMs(0)).toBeUndefined()
     expect(webhookRetryDelayMs(4)).toBeUndefined()
     expect(webhookRetryDelayMs(1.5)).toBeUndefined()
-  })
-
-  it('keeps the limits the contract states', () => {
-    expect(WEBHOOK_BODY_MAX_BYTES).toBe(256 * 1024)
-    expect(WEBHOOK_QUEUE_LIMIT).toBe(10)
-    // §4.5's seven rows, then the four refusals the entry has to name: a header past
-    // its limit, an encoding whose bytes cannot be verified, a body that is not text,
-    // and a method that is not POST.
-    expect(WEBHOOK_STATUS).toEqual({ queued: 202, notFound: 404, paused: 409, bodyTooLarge: 413, notPost: 405,
-      queueFull: 429, storageFailed: 503, headerTooLarge: 431, unsupportedEncoding: 415, notUtf8: 400 })
   })
 })

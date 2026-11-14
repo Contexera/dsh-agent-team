@@ -1,18 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
-vi.setConfig({ testTimeout: 60_000 })
 import { createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
-
-import { cleanups, realHarness, ScriptedAdapter, textResponse, waitFor, waitForArchive, requestId } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-
+import { realHarness, ScriptedAdapter, textResponse, waitForArchive, requestId } from './helpers/member-harness.ts'
 
 describe('Agent Team wake-slot swap safety (ticket 05)', () => {
   it('keeps a generation that still owes queued input instead of retiring it, and answers that input with the wake', async () => {
@@ -20,25 +14,23 @@ describe('Agent Team wake-slot swap safety (ticket 05)', () => {
     try {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('queued-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('queued-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const memberId = added.status.member.memberId
-      const sessionId = added.status.member.sessionId
-      const agent = ctx.agents.get(sessionId)!
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
+      const agent = builder.agent
       adapter.enqueue(textResponse('First look done.'))
       agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
-      await agent.whenIdle()
+      await builder.waitForIdle()
 
-      pressureState.bySession.set(sessionId, 130_000)
+      h.pressureState.bySession.set(builder.sessionId, 130_000)
       // Queued after the Member went idle, without waking it: the ordinary
       // input a retiring generation would cancel.
       agent.inject(createUserMessage({ content: [{ type: 'text', text: 'answer this queued question' }], source: { kind: 'user' } }))
       await vi.advanceTimersByTimeAsync(61 * 60_000)
 
       adapter.enqueue(textResponse('Answering the queued question.'))
-      const sent = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('queued-message'), workspaceId,
-        projectRef: project.project.projectRef, body: '@builder Please pick this up now' })
+      const sent = await h.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('queued-message'), workspaceId: h.workspaceId,
+        projectRef: project.projectRef, body: '@builder Please pick this up now' })
       expect(sent.kind).toBe('committed')
       await vi.waitFor(() => {
         if (agent.status !== 'idle') throw new Error('the waking turn has not finished yet')
@@ -47,8 +39,8 @@ describe('Agent Team wake-slot swap safety (ticket 05)', () => {
 
       // The generation is the same one: nothing retired it, so the queued input
       // and the waking message were both answered in its own context.
-      expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.member.sessionId).toBe(sessionId)
-      expect(ctx.workspaceRegistry.archivedSessionIds).not.toContain(sessionId)
+      expect(h.ctx.agentTeam.members().find(entry => entry.member.memberId === builder.memberId)?.member.sessionId).toBe(builder.sessionId)
+      expect(h.ctx.workspaceRegistry.archivedSessionIds).not.toContain(builder.sessionId)
       const request = JSON.stringify(adapter.requests.at(-1)!.messages)
       expect(request).toContain('answer this queued question')
     } finally {
@@ -61,43 +53,42 @@ describe('Agent Team wake-slot swap safety (ticket 05)', () => {
     try {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, pressureState, presets } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('post-commit-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('post-commit-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const memberId = added.status.member.memberId
-      const sessionId = added.status.member.sessionId
-      const agent = ctx.agents.get(sessionId)!
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
+      const memberId = builder.memberId
+      const sessionId = builder.sessionId
       adapter.enqueue(textResponse('First look done.'))
-      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
-      await agent.whenIdle()
+      builder.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+      await builder.waitForIdle()
 
-      pressureState.bySession.set(sessionId, 130_000)
+      h.pressureState.bySession.set(sessionId, 130_000)
       await vi.advanceTimersByTimeAsync(61 * 60_000)
 
       // The swap commits, then its activation fails: the durable binding has
       // moved while no live generation runs it.
-      presets.failingMount = true
-      const sent = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('post-commit-message'), workspaceId,
-        projectRef: project.project.projectRef, body: '@builder Please pick this up now' })
+      h.presets.failingMount = true
+      const sent = await h.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('post-commit-message'), workspaceId: h.workspaceId,
+        projectRef: project.projectRef, body: '@builder Please pick this up now' })
       expect(sent.kind).toBe('committed')
       const stranded = await vi.waitFor(() => {
-        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        const current = h.ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
         if (current === undefined || current.member.sessionId === sessionId) throw new Error('swap not applied yet')
         if (current.availability === 'active') throw new Error('activation unexpectedly succeeded')
         return current
       }, { timeout: 20_000 })
       const successor = stranded.member.sessionId
-      await waitForArchive(ctx, sessionId)
-      expect(ctx.agents.get(sessionId)).toBeUndefined()
+      await waitForArchive(h.ctx, sessionId)
+      expect(h.ctx.agents.get(sessionId)).toBeUndefined()
 
       // The next thing that needs this Member finishes the recorded transition
       // and rederives its Inbox; nothing retries in the background.
-      presets.failingMount = false
+      h.presets.failingMount = false
       adapter.enqueue(textResponse('Answering from the recovered context.'))
       adapter.enqueue(textResponse('Second answer.'))
-      await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('post-commit-second'), workspaceId,
-        projectRef: project.project.projectRef, body: '@builder Second message' })
+      await h.human.startDiscussion(project, '@builder Second message')
 
+      const ctx = h.ctx
       await vi.waitFor(() => {
         const current = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
         if (current?.availability !== 'active') throw new Error(`member not active yet: ${current?.availability}`)
@@ -117,15 +108,15 @@ describe('Agent Team wake-slot swap safety (ticket 05)', () => {
     try {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('legacy-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('legacy-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const memberId = added.status.member.memberId
-      const sessionId = added.status.member.sessionId
-      const agent = ctx.agents.get(sessionId)!
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
+      const memberId = builder.memberId
+      const sessionId = builder.sessionId
+      const agent = builder.agent
       adapter.enqueue(textResponse('First look done.'))
       agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
-      await agent.whenIdle()
+      await builder.waitForIdle()
 
       // A log the retired rollover tool wrote: its intent parked on a durable
       // result, an ordinary message arrived while it was parked, and the turn
@@ -156,17 +147,16 @@ describe('Agent Team wake-slot swap safety (ticket 05)', () => {
       session.append('turn/end', { turn, reason: { kind: 'completed' } })
       // The swap's replay reads the retired log back through persistence, so the
       // synthetic log has to be durable before the swap can see it.
-      await ctx.sessionPersistence.flush()
+      await h.ctx.sessionPersistence.flush()
 
-      pressureState.bySession.set(sessionId, 130_000)
+      h.pressureState.bySession.set(sessionId, 130_000)
       await vi.advanceTimersByTimeAsync(61 * 60_000)
 
       adapter.enqueue(textResponse('Reading the legacy question in the fresh context.'))
-      await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('legacy-message'), workspaceId,
-        projectRef: project.project.projectRef, body: '@builder Please pick this up now' })
+      await h.human.startDiscussion(project, '@builder Please pick this up now')
 
       const successor = await vi.waitFor(() => {
-        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        const current = h.ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
         if (current === undefined || current.member.sessionId === sessionId) throw new Error('swap not applied yet')
         return current.member.sessionId
       }, { timeout: 20_000 })
@@ -174,9 +164,9 @@ describe('Agent Team wake-slot swap safety (ticket 05)', () => {
         if (!adapter.requests.some(request => request.sessionId === successor
           && JSON.stringify(request.messages).includes('the legacy carried question'))) throw new Error('the carried input has not reached the successor yet')
       }, { timeout: 20_000 })
-      expect(ctx.agents.get(sessionId)).toBeUndefined()
-      expect(ctx.agents.get(successor)).toBeDefined()
-      expect(ctx.agentTeam['ledger']!.status().sequence).toBeGreaterThan(0)
+      expect(h.ctx.agents.get(sessionId)).toBeUndefined()
+      expect(h.ctx.agents.get(successor)).toBeDefined()
+      expect(h.ctx.agentTeam['ledger']!.status().sequence).toBeGreaterThan(0)
     } finally {
       vi.useRealTimers()
     }
@@ -187,25 +177,23 @@ describe('Agent Team wake-slot swap safety (ticket 05)', () => {
     try {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('meter-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('meter-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const memberId = added.status.member.memberId
-      const sessionId = added.status.member.sessionId
-      const agent = ctx.agents.get(sessionId)!
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
+      const memberId = builder.memberId
+      const sessionId = builder.sessionId
       adapter.enqueue(textResponse('First look done.'))
-      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
-      await agent.whenIdle()
+      builder.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+      await builder.waitForIdle()
 
-      pressureState.failFor.add(sessionId)
+      h.pressureState.failFor.add(sessionId)
       await vi.advanceTimersByTimeAsync(61 * 60_000)
-      const warn = vi.spyOn(ctx.logger, 'warn')
+      const warn = vi.spyOn(h.ctx.logger, 'warn')
       adapter.enqueue(textResponse('Continuing without a price.'))
-      await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('meter-message'), workspaceId,
-        projectRef: project.project.projectRef, body: '@builder Continue please' })
-      await agent.whenIdle()
+      await h.human.startDiscussion(project, '@builder Continue please')
+      await builder.waitForIdle()
 
-      expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.member.sessionId).toBe(sessionId)
+      expect(h.ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.member.sessionId).toBe(sessionId)
       const priced = warn.mock.calls.map(args => String(args[0])).find(line => line.includes('could not price'))
       expect(priced).toBeDefined()
       expect(priced).toContain(sessionId)

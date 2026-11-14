@@ -1,21 +1,28 @@
 import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
 import type { Browser } from 'playwright'
-import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, acknowledgeReloadConnectionLoss, actionBandGeometry, connectFreshWorkspaceZh, entryClusterEdges, entryUnreadCapsule, focusRing, inkContrast, installLocalBundle, launchWebScaffold, maxHorizontalScroll, openSidebar, readCountCapsule, resolveAliasColor, settleAnimations, settleLayout, taskEntryClusterLefts, taskEntryLineSelector, taskEntryRow, visibleSidebarWidth, watchConsole, chooseMemberModel } from './__external-agent-team-support.ts'
+import { BROWSER_ARTIFACTS, CHROME, UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, acknowledgeReloadConnectionLoss, actionBandGeometry, closeScenario, connectFreshWorkspaceZh, entryClusterEdges, entryUnreadCapsule, focusRing, inkContrast, installLocalBundle, launchWebScaffold, maxHorizontalScroll, openSidebar, readCountCapsule, resolveAliasColor, settleAnimations, settleLayout, taskEntryClusterLefts, taskEntryLineSelector, taskEntryRow, visibleSidebarWidth, watchConsole, chooseMemberModel } from './__external-agent-team-support.ts'
 import type { Locator, WebScaffold } from './__external-agent-team-support.ts'
 
 let scaffold: WebScaffold | undefined
 let browser: Browser | undefined
 
 afterEach(async () => {
-  await browser?.close(); browser = undefined
-  await scaffold?.close(); scaffold = undefined
+  try {
+    await browser?.close(); browser = undefined
+  } finally {
+    try {
+      await scaffold?.close(); scaffold = undefined
+    } finally {
+      await closeScenario()
+    }
+  }
 })
 
 
 it('drives the complete opt-in Agent Team journey in real Web', async () => {
-  await installLocalBundle()
-  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
+  const { home, stagedBundle } = await installLocalBundle()
+  scaffold = await launchWebScaffold({ harnessHome: home, profile: { packages: [{ dir: stagedBundle, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
   const consoleWatch = watchConsole(page)

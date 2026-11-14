@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-vi.setConfig({ testTimeout: 30_000 })
-import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { act, fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 /** The Thread page with one open Task whose Thread the Human can follow or unfollow. */
 async function seedThreadPage(options?: { seedFollowers?: readonly string[] }) {
@@ -67,7 +64,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     // Host's re-projected observation is what retires the button's pressed state.
     await waitFor(() => expect(b.view.queryByRole('button', { name: '取消关注此 Thread' })).toBeNull())
     expect((b.view.getByRole('button', { name: '关注此 Thread' })).getAttribute('aria-pressed')).toBe('false')
-    await b.runtime.dispose()
   })
 
   it('puts the Thread page actions in one band of two groups, with the pressed state only while followed', async () => {
@@ -105,7 +101,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     // The band's only primary is the one that resolves the Task.
     expect(hasClass(within(lifecycleGroup! as HTMLElement).getByRole('button', { name: '验收' }), 'primary')).toBe(true)
     expect(hasClass(following, 'primary')).toBe(false)
-    await b.runtime.dispose()
   })
 
   it('states a committed transfer where the control stands and retires the receipt on the next move', async () => {
@@ -120,7 +115,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     // The receipt is derived from the projection, so when responsibility moves again the line
     // retires instead of claiming the Task is still where the earlier write put it.
     expect(await b.view.findByText(/把负责人从/)).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('keeps each refusing control\'s failure on its own line inside the band', async () => {
@@ -141,7 +135,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     const bandAlert = b.view.getAllByRole('alert').find(node => node.textContent?.includes('关注状态不可用'))
     expect(bandAlert).toBeTruthy()
     expect(hasClass(bandAlert ?? null, 'actionError')).toBe(true)
-    await b.runtime.dispose()
   })
 
   it('keeps the previous follow standing and shows the failure when the write is refused', async () => {
@@ -156,7 +149,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     expect(await b.view.findByRole('alert')).toBeTruthy()
     expect(b.view.getByRole('alert').textContent).toContain('关注状态不可用')
     expect(b.view.getByRole('button', { name: '取消关注此 Thread' }).getAttribute('aria-pressed')).toBe('true')
-    await b.runtime.dispose()
   })
 
   it('commits a fresh follow after an unfollow instead of replaying the first one', async () => {
@@ -176,7 +168,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     const ids = b.changeAttention.mock.calls.map(call => call[0].requestId)
     expect(new Set(ids).size).toBe(3)
     expect((await b.view.findByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
-    await b.runtime.dispose()
   })
 
   it('follows the Host observation when another face changes the standing', async () => {
@@ -192,7 +183,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers: [] } }))
     b.publishProjectUpdate()
     await waitFor(() => expect(b.view.queryByRole('button', { name: '取消关注此 Thread' })).toBeNull())
-    await b.runtime.dispose()
   })
 
   it('keeps a confirmed follow when an older controller read returns after it', async () => {
@@ -230,7 +220,6 @@ describe('Team Human Attention and Task transfer controls', () => {
       await Promise.resolve()
     })
     expect((b.view.getByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
-    await b.runtime.dispose()
   })
 
   it('refreshes the page follower set from the confirmed write without waiting for a subscription', async () => {
@@ -259,7 +248,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     const dialog = await openTransferDialog(b)
     await waitFor(() => expect(candidateLabels(b.view.getByRole('dialog', { name: '转交负责人' }))).toEqual(['转交给你自己']))
     expect(dialog).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('offers this Thread\'s followers and hands the Task to the one the Human picks', async () => {
@@ -274,7 +262,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     // the committed write closes the dialog instead of leaving it asking for the same decision again.
     expect(await b.view.findByText(/把负责人从/)).toBeTruthy()
     await waitFor(() => expect(b.view.queryByRole('dialog', { name: '转交负责人' })).toBeNull())
-    await b.runtime.dispose()
   })
 
   it('explains an empty candidate list instead of offering nobody', async () => {
@@ -285,7 +272,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     // place that says why, which is why the control stays pressable instead of vanishing.
     expect(within(dialog).getByRole('status').textContent).toContain('没有关注者')
     expect(b.view.getByRole('button', { name: '转交负责人' })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('keeps the Task on screen when the Host fences the transfer behind the unread gate', async () => {
@@ -298,7 +284,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     // out of the way, and the band states the refusal where the write started.
     expect(await b.view.findByRole('alert').then(node => node.textContent)).toContain('未读')
     expect(b.view.queryByRole('dialog', { name: '转交负责人' })).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('keeps the transfer control on a closed Task, where a follow is what puts a target back in the offer', async () => {
@@ -333,7 +318,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     await waitFor(() => expect(candidateLabels(b.view.getByRole('dialog', { name: '转交负责人' }))).toEqual(['转交给你自己']))
     fireEvent.click(within(b.view.getByRole('dialog', { name: '转交负责人' })).getByRole('button', { name: '转交给你自己' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', target: 'member:human' })))
-    await b.runtime.dispose()
   })
 
   it('offers the Human only while the Human follows this Thread, which is how a broken Task is mended', async () => {
@@ -352,7 +336,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     await waitFor(() => expect(candidateLabels(second)).toEqual(['转交给你自己']))
     fireEvent.click(within(second).getByRole('button', { name: '转交给你自己' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:human' })))
-    await b.runtime.dispose()
   })
 
   it('re-reads the Thread after an unread fence and the wider history after a stale one', async () => {
@@ -366,7 +349,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     await waitFor(() => expect(b.readThread.mock.calls.length).toBeGreaterThan(readsBefore))
     // The Task's accountable stays the Human: a fence moves nothing.
     expect(await b.view.findByRole('alert').then(node => node.textContent)).toContain('未读')
-    await b.runtime.dispose()
   })
 
   it('re-reads the wider history after a stale revision so the retry sees the current Task', async () => {
@@ -379,7 +361,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     await waitFor(() => expect(b.transferTask).toHaveBeenCalled())
     await waitFor(() => expect(b.loadThreadHistory.mock.calls.length).toBeGreaterThan(historyBefore))
     expect(await b.view.findByRole('alert').then(node => node.textContent)).toContain('发生变化')
-    await b.runtime.dispose()
   })
 
   it('shows a failed follow write on the discussion panel beside the untouched control', async () => {
@@ -396,7 +377,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     expect(alert.textContent).toContain('关注状态不可用')
     // The control keeps its previous standing instead of claiming a follow that never landed.
     expect(within(panel).getByRole('button', { name: '关注此 Thread' }).getAttribute('aria-pressed')).toBe('false')
-    await b.runtime.dispose()
   })
 
   it('offers the same follow control on the discussion panel and writes through the same Remote', async () => {
@@ -414,7 +394,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     // The panel is a taskless Thread's face: the transfer control belongs to the
     // Thread page, so the panel offers no responsibility entry point at all.
     expect(within(panel).queryByRole('button', { name: '转交负责人' })).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('keeps a stale transfer recoverable: the refusal re-reads and the Task stands', async () => {
@@ -429,7 +408,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     await waitFor(() => expect(b.loadThreadHistory.mock.calls.length).toBeGreaterThan(readsBefore))
     // The Human stays the accountable, and the control stays available for a retry.
     expect(b.view.getByRole('button', { name: '转交负责人' })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('shows a failed transfer as an error that leaves the control usable', async () => {
@@ -445,7 +423,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     })
     // The second failure keeps the same recoverable surface rather than locking the control.
     expect(within(dialog).getByRole('alert').textContent).toContain('transfer unavailable (spec)')
-    await b.runtime.dispose()
   })
 
   it('announces a running write in the full phrase the shortened visible word cannot say', async () => {
@@ -482,7 +459,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     expect((within(dialog).getByRole('button', { name: '转交给 @builder' }) as HTMLButtonElement).disabled).toBe(true)
     releaseTransfer()
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
-    await b.runtime.dispose()
   })
 
   it('announces a running follow write on the discussion panel the same way', async () => {
@@ -502,7 +478,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     expect(pending.textContent).toBe('更新中…')
     release()
     expect((await within(panel).findByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
-    await b.runtime.dispose()
   })
 
   it('restores the follow standing a reload answers with, from the Host observation alone', async () => {
@@ -513,7 +488,6 @@ describe('Team Human Attention and Task transfer controls', () => {
     expect(following.getAttribute('aria-pressed')).toBe('true')
     // No write happened on this visit: the standing came from the observation read.
     expect(b.changeAttention).not.toHaveBeenCalled()
-    await b.runtime.dispose()
   })
 
   // The follower set the Host projects is every Member's Attention, not the Human's row alone. Each
@@ -529,14 +503,12 @@ describe('Team Human Attention and Task transfer controls', () => {
       // The visible verb says the same thing the attribute does: a mismatch between the two is
       // the exact defect, where the label read 「关注」 while the button stayed pressed.
       expect(follow.textContent).toBe('关注')
-      await b.runtime.dispose()
     })
 
     it('is following when the set holds the Human among other Members', async () => {
       const b = await seedThreadPage({ seedFollowers: ['member:builder', 'member:human', 'member:reviewer'] })
       const follow = await b.view.findByRole('button', { name: '取消关注此 Thread' })
       expect(follow.getAttribute('aria-pressed')).toBe('true')
-      await b.runtime.dispose()
     })
 
     it('stays unfollowed after the unfollow, even though other Members still follow', async () => {
@@ -556,7 +528,6 @@ describe('Team Human Attention and Task transfer controls', () => {
       // the Host double, so the set it answers with is the one the control also read.
       const observation = await b.threadObservations.getMockImplementation()!({ taskRef: 'task:1' })
       expect(observation.value.followers).toEqual(['member:builder', 'member:reviewer'])
-      await b.runtime.dispose()
     })
 
     it('does not claim an existing follow when only other Members follow', async () => {
@@ -566,7 +537,6 @@ describe('Team Human Attention and Task transfer controls', () => {
       fireEvent.click(await b.view.findByRole('button', { name: '关注此 Thread' }))
       await waitFor(() => expect(b.changeAttention).toHaveBeenCalledWith(expect.objectContaining({ action: 'follow', taskRef: 'task:1' })))
       expect((await b.view.findByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
-      await b.runtime.dispose()
     })
   })
 })

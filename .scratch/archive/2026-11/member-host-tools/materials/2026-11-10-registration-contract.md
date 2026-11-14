@@ -1,10 +1,12 @@
 # PR #83：原注册识别的最小上游前置
 
+> 文中链接的探针脚本位于 Git 忽略的 `artifacts/` 目录，未随仓库分发；这里保留路径作为来源记录。
+
 最后核对：2026-11-10。设计为 PR #83 的 `6e3e212`；Harness 源码为 `dsh-v0.2.2-rc.1`（`66491b05`）。本文是待讨论的接口要求，不是现有 API，也不是修改 Harness 的授权。
 
 ## 复核结论与证据边界
 
-Codex Worker 编写了[注册准入探针](../../../../artifacts/pr83-admission-codex-20261110/probe.mjs)，Reeve 阅读全部探针并独立执行 `node --check` 和运行命令，78 项断言通过。这里的通过包含“成功复现候选对象比对 guard 的缺陷”，不代表 PR #83 已实现或已通过验收。
+Codex Worker 编写了注册准入探针（`artifacts/pr83-admission-codex-20261110/probe.mjs`），Reeve 阅读全部探针并独立执行 `node --check` 和运行命令，78 项断言通过。这里的通过包含“成功复现候选对象比对 guard 的缺陷”，不代表 PR #83 已实现或已通过验收。
 
 实跑使用本机已安装／链接的 Cordis `4.1.0`、DSH `0.2.2-rc.1` 构建，以及 Team 的既有 MemberRuntime 构建。Agent 是最小身份对象；真实 ToolsService、scope 链、Native executor、声明组装和嵌套 pipeline 被调用，没有完整 Team Session、Web、第三方插件、认证／sandbox 流程或连续回合验收。探针没有改写注册表实现；基线检查单独调用了当前 MemberRuntime 的私有实现方法，不把该方法当成公开接入点。
 

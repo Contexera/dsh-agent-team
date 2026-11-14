@@ -1,13 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
-import { cleanups, realHarness, ScriptedAdapter, textResponse, toolCallResponse, requestId, waitFor } from './helpers/member-harness.ts'
+import { realHarness, ScriptedAdapter, textResponse, toolCallResponse, requestId, waitFor } from './helpers/member-harness.ts'
 import { visibleTeamSurface } from '../src/surface-visibility.ts'
-
-vi.setConfig({ testTimeout: 60_000 })
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
 describe('a complete Activity rejection lets the writer reconsider without a read', () => {
   it('shows a transfer with both Members beside the mixed Message, then commits and keeps both unread', async () => {
     const adapter = new ScriptedAdapter()

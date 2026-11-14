@@ -1,18 +1,15 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 // Rendering the whole Team surface in jsdom has reached 3.4s on the windows lane
-// (worst of 11 CI runs, 2026-09-17..21) against vitest's 5s default, so the file
-// keeps headroom rather than betting on runner throughput.
-vi.setConfig({ testTimeout: 30_000 })
-import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+// (worst of 11 CI runs, 2026-09-17..21) against the unit project's 5s budget, so
+// the file runs in the integration project rather than betting on runner throughput.
+import { fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { runtimeWithTeam, pressStartTask, pressStartThread } from './harness.tsx'
 import { TEAM_DRAFTS_STORAGE_KEY } from '../src/client/drafts.ts'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 describe('Team conversation surfaces', () => {
   it('opens a selected Project in the Team center and sends only after Host commit', async () => {
@@ -98,7 +95,6 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: '返回项目' }))
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     await waitFor(() => expect(b.view.queryByText('agent reply')).toBeNull())
-    await b.runtime.dispose()
   })
 
   it("shows the Host's own unread on the board's Task cards and drops it with the slice", async () => {
@@ -123,7 +119,6 @@ describe('Team conversation surfaces', () => {
     b.seedInbox([])
     await waitFor(() => expect(within(card).queryByText('99+')).toBeNull())
     expect(b.view.getByRole('button', { name: '打开 Task #1' })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('keeps the last successful unread counts when the inbox read fails', async () => {
@@ -151,7 +146,6 @@ describe('Team conversation surfaces', () => {
     expect(alerts.some(node => node.textContent?.includes('inbox read failed'))).toBe(true)
     const card = await b.view.findByRole('button', { name: '打开 Task #1（150 条新动态）' })
     expect(within(card).getByText('99+')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('linkifies branded refs in agent plain-prose bodies that skip the mention path', async () => {
@@ -170,7 +164,6 @@ describe('Team conversation surfaces', () => {
     const link = await b.view.findByRole('button', { name: 'Task #1' })
     fireEvent.click(link)
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ taskRef })))
-    await b.runtime.dispose()
   })
 
   it('resolves unknown task refs to task numbers and navigates on click', async () => {
@@ -190,7 +183,6 @@ describe('Team conversation surfaces', () => {
     expect(link.getAttribute('title')).toBe(citedRef)
     fireEvent.click(link)
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ taskRef: citedRef })))
-    await b.runtime.dispose()
   })
 
   it('resolves abbreviated task refs in agent bodies and navigates with the full ref', async () => {
@@ -208,7 +200,6 @@ describe('Team conversation surfaces', () => {
     expect(b.view.getByText('task:cafe', { exact: false })).toBeTruthy()
     fireEvent.click(link)
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ taskRef: citedRef })))
-    await b.runtime.dispose()
   })
 
   it('confirms early acceptance and lists the Claims completed with it', async () => {
@@ -244,7 +235,6 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(within(b.view.getByRole('dialog', { name: '提前验收任务' })).getByRole('button', { name: '验收' }))
     await waitFor(() => expect(b.changeTask).toHaveBeenCalledTimes(1))
     expect(b.changeTask).toHaveBeenCalledWith(expect.objectContaining({ action: 'accept' }))
-    await b.runtime.dispose()
   })
 
   it('quotes an author the Host delivers to, and nobody when the reader quotes themselves', async () => {
@@ -286,7 +276,6 @@ describe('Team conversation surfaces', () => {
     // composer that has not finished resolving anything at all.
     await waitFor(() => expect(b.view.container.querySelector('[data-reply-banner]')?.textContent).toContain('human opener'))
     expect(b.view.container.querySelector('[data-team-notify]')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('previews a hand-typed mention without turning it into an explicit recipient', async () => {
@@ -315,7 +304,6 @@ describe('Team conversation surfaces', () => {
     await waitFor(() => expect(b.postMainMessage).toHaveBeenLastCalledWith(expect.objectContaining({
       body: '请 @builder 看一下',
     })))
-    await b.runtime.dispose()
   })
 
   it('accepts an unclaimed todo Task directly without a confirm dialog', async () => {
@@ -333,7 +321,6 @@ describe('Team conversation surfaces', () => {
     await waitFor(() => expect(b.changeTask).toHaveBeenCalledTimes(1))
     expect(b.changeTask).toHaveBeenCalledWith(expect.objectContaining({ action: 'accept' }))
     expect(b.view.queryByRole('dialog', { name: '提前验收任务' })).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('renders resolved Task refs inline in rich Agent Markdown, styled code spans included', async () => {
@@ -373,7 +360,6 @@ describe('Team conversation surfaces', () => {
 
     fireEvent.click(links[0]!)
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ taskRef })))
-    await b.runtime.dispose()
   })
 
   it('renders a Lead-style dispatch: doubled-colon ref resolves and the spelled mention chipifies inline', async () => {
@@ -409,7 +395,6 @@ describe('Team conversation surfaces', () => {
     expect(link.getAttribute('title')).toBe(auditRef)
     fireEvent.click(link)
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ taskRef: auditRef })))
-    await b.runtime.dispose()
   })
 
   it('uploads composer attachments as chips, sends their ids, and renders the strip', async () => {
@@ -458,7 +443,6 @@ describe('Team conversation surfaces', () => {
       const chips = [...b.view.container.querySelectorAll('[class*="attachmentChip"]')]
       return expect(chips.some(chip => chip.textContent?.includes('文件已过期清理'))).toBe(true)
     }, { timeout: 4000 })
-    await b.runtime.dispose()
   })
 
   it('keeps a failed image retryable and opens it only after browser decode succeeds', async () => {
@@ -504,7 +488,6 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(secondThumb)
     expect(await b.view.findByRole('dialog', { name: 'broken.png' })).toBeTruthy()
     expect(b.getAttachment).toHaveBeenCalledTimes(3)
-    await b.runtime.dispose()
   })
 
   it('uploads thread reply attachments and passes their ids to reply', async () => {
@@ -528,7 +511,6 @@ describe('Team conversation surfaces', () => {
     // Committed reply clears the chips along with the draft.
     await waitFor(() => { expect(chipCount()).toBe(0) })
     expect(await b.view.findByText('带截图的回复')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('turns pasted clipboard files into composer chips and sends their ids', async () => {
@@ -563,7 +545,6 @@ describe('Team conversation surfaces', () => {
     await waitFor(() => { expect(b.putAttachment).toHaveBeenCalledWith(expect.objectContaining({ name: 'image.png', mediaType: 'image/png' })) })
     await waitFor(() => { expect(b.postMainMessage).toHaveBeenCalledWith(expect.objectContaining({ body: '粘贴的截图', attachments: ['attachment:1'] })) })
     await waitFor(() => { expect(chipCount()).toBe(0) })
-    await b.runtime.dispose()
   })
 
   it('takes a dropped file as the same attachment a paste or picker adds', async () => {
@@ -590,7 +571,6 @@ describe('Team conversation surfaces', () => {
     await waitFor(() => { expect(chipCount()).toBe(1) })
     expect(b.view.container.querySelector('[class*="fileChipName"]')?.textContent).toContain('dragged.png')
     expect(b.view.container.querySelector('[data-drop-active]')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('caches composer drafts across view switches and clears them on committed sends', async () => {
@@ -635,7 +615,6 @@ describe('Team conversation surfaces', () => {
       expect(stored['project:project:engineering']).toBeUndefined()
     })
     expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('')
-    await b.runtime.dispose()
   })
 
   it('rehydrates drafts from localStorage and ignores the legacy recipient list', async () => {
@@ -674,7 +653,6 @@ describe('Team conversation surfaces', () => {
     // ...and the legacy recipient list in the stored entry is ignored: body
     // mentions are the sole authority, so the restored state is the text alone.
     expect(b.runtime.ctx.teamDrafts.getSnapshot(`project:${projectRef}` as never)).toEqual({ draft: 'hello team @builder' })
-    await b.runtime.dispose()
   })
 
   it('opens a Thread and performs one baseline catch-up without repeated reads', async () => {
@@ -726,7 +704,6 @@ describe('Team conversation surfaces', () => {
     expect(scopes.some(scope => scope.kind === 'thread' && scope.threadRef === 'thread:1')).toBe(true)
     expect(scopes.some(scope => scope.kind === 'workspace')).toBe(false)
     for (const [, signal] of scopedCalls) expect(signal).toBeInstanceOf(AbortSignal)
-    await b.runtime.dispose()
   })
 
   it('keeps the older-facts affordance when the history read fails, and recovers through it', async () => {
@@ -747,7 +724,6 @@ describe('Team conversation surfaces', () => {
     b.failThreadHistory(undefined)
     fireEvent.click(b.view.getByRole('button', { name: '加载更早消息' }))
     await waitFor(() => expect(b.view.queryByRole('button', { name: '加载更早消息' })).toBeNull())
-    await b.runtime.dispose()
   })
 
   it('ranks Thread followers first among mention candidates and scrolls the highlighted row into view', async () => {
@@ -786,7 +762,6 @@ describe('Team conversation surfaces', () => {
     } finally {
       if (originalScrollIntoView === undefined) delete prototype.scrollIntoView
       else prototype.scrollIntoView = originalScrollIntoView
-      await b.runtime.dispose()
     }
   })
 
@@ -807,7 +782,6 @@ describe('Team conversation surfaces', () => {
     // baseline double's text.
     expect(b.view.container.querySelector('[data-composer-seat]')).toBeTruthy()
     expect(await b.view.findByText('设置')).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('states the current Workspace on one line and switches through its menu', async () => {
@@ -848,7 +822,6 @@ describe('Team conversation surfaces', () => {
     // Picking closes the menu and leaves the content sections standing.
     expect(b.view.getByRole('button', { name: '工作区，Beta' }).getAttribute('aria-expanded')).toBe('false')
     expect(b.view.getByRole('button', { name: '项目' })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('opens a Thread on the first unread Message that names the reader', async () => {
@@ -897,7 +870,6 @@ describe('Team conversation surfaces', () => {
     } finally {
       if (originalScrollIntoView === undefined) delete prototype.scrollIntoView
       else prototype.scrollIntoView = originalScrollIntoView
-      await b.runtime.dispose()
     }
   })
 
@@ -948,7 +920,6 @@ describe('Team conversation surfaces', () => {
     await waitFor(() => expect(row('message:b')!.querySelector('[data-gutter-time]')!.textContent).not.toBe(gapTime))
     expect(document.querySelector('[role="separator"]')).toBeNull()
 
-    await b.runtime.dispose()
   })
 
   it('acknowledges off-screen arrivals automatically and keeps only a pure jump hint', async () => {
@@ -982,7 +953,6 @@ describe('Team conversation surfaces', () => {
     const backfillFact = { kind: 'message', sequence: 1, message: { messageRef: 'message:old-1', projectRef: 'project:1', threadRef: 'thread:1',
       taskRef: 'task:1', sender: 'member:human', body: 'old backfill', topLevel: false, sequence: 1, occurredAt: '' }, mentions: [] }
 
-
     // Backfill from the wider passive window is already-read material, not news.
     historyWith([backfillFact])
     b.publishAgentReply()
@@ -1010,7 +980,6 @@ describe('Team conversation surfaces', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(b.readThread).toHaveBeenCalledTimes(2)
     expect(b.view.queryByText(/↓ \d+ 条新更新/)).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('drops the jump hint the moment the reader returns to the tail', async () => {
@@ -1065,7 +1034,6 @@ describe('Team conversation surfaces', () => {
     b.publishAgentReply()
     expect(await b.view.findByText('fresh arrival two')).toBeTruthy()
     await waitFor(() => expect(b.view.queryByText(/↓ \d+ 条新更新/)).toBeNull())
-    await b.runtime.dispose()
   })
 
   it('acknowledges arrivals a bottom-pinned reader is watching instead of prompting a manual read', async () => {
@@ -1100,7 +1068,6 @@ describe('Team conversation surfaces', () => {
       thread: { threadRef: 'thread:1', revision: 3 }, anchor, claims: [], facts: [watchedFact], cursor: 0, hasMore: false,
     } } as never))
 
-
     // jsdom never scrolls the reader away from the bottom, so the arriving
     // fact renders in front of them and must be acknowledged durably rather
     // than surfaced as a jump hint.
@@ -1109,7 +1076,6 @@ describe('Team conversation surfaces', () => {
     expect(await b.view.findByText('watched live')).toBeTruthy()
     await waitFor(() => expect(b.readThread).toHaveBeenCalledTimes(2))
     expect(b.view.queryByRole('button', { name: '标记为已读' })).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('drains a multi-round unread backlog automatically with fresh request ids', async () => {
@@ -1133,7 +1099,6 @@ describe('Team conversation surfaces', () => {
     expect(b.view.queryByText(/仍有未读更新未能自动读取/)).toBeNull()
     await new Promise(resolve => setTimeout(resolve, 30))
     expect(b.readThread).toHaveBeenCalledTimes(3)
-    await b.runtime.dispose()
   })
 
   it('keeps the jump hint when the automatic acknowledgment read fails', async () => {
@@ -1162,7 +1127,6 @@ describe('Team conversation surfaces', () => {
       thread: { threadRef: 'thread:1', revision: 3 }, anchor, claims: [], facts: [failedFact], cursor: 0, hasMore: false,
     } } as never))
 
-
     // The reader sits away from the tail, so the arrival raises the hint;
     // the failed acknowledgment must not rob them of it — the hint is the
     // only affordance (with no manual read control to substitute for the
@@ -1181,7 +1145,6 @@ describe('Team conversation surfaces', () => {
     expect(await b.view.findByText('unacknowledged')).toBeTruthy()
     expect(await b.view.findByRole('alert')).toBeTruthy()
     expect(b.view.queryByRole('button', { name: '标记为已读' })).toBeNull()
-    await b.runtime.dispose()
   })
   it('refreshes the sidebar Project list from one workspace change', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
@@ -1191,7 +1154,6 @@ describe('Team conversation surfaces', () => {
     b.publishProjectUpdate()
     await b.view.findByRole('button', { name: '# gamma' })
     expect(b.view.queryByText('还没有项目')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('anchors timeline days when messages span dates', async () => {
@@ -1205,7 +1167,6 @@ describe('Team conversation surfaces', () => {
     // the timeline opens its day without a leading marker.
     const dayAnchors = Array.from(b.view.container.querySelectorAll('p span')).filter(node => /^\d{2}-\d{2}$/.test(node.textContent ?? ''))
     expect(dayAnchors.map(node => node.textContent)).toEqual(['08-21'])
-    await b.runtime.dispose()
   })
 
   it('states a wide same-sender gap in the Main stream row itself, not on a line', async () => {
@@ -1225,7 +1186,6 @@ describe('Team conversation surfaces', () => {
     expect(projectDividers[0]!.querySelector('time')).toBeNull()
     expect(rowOf('later publication')!.querySelector('[data-gutter-time]')?.textContent).toBeTruthy()
 
-    await b.runtime.dispose()
   })
 
   it('linkifies branded refs in plain bodies and navigates on click', async () => {
@@ -1244,7 +1204,6 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(link)
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ taskRef })))
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('starts a discussion from the composer unless the Task box is checked', async () => {
@@ -1275,7 +1234,6 @@ describe('Team conversation surfaces', () => {
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ threadRef: 'thread:1' })))
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
     expect(b.view.queryByRole('complementary', { name: '讨论' })).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('leaves thread-start mode after a committed Task start and keeps it after a failed one', async () => {
@@ -1299,6 +1257,5 @@ describe('Team conversation surfaces', () => {
     // The started Task lands on the board and the composer leaves with the Main tab.
     expect(await b.view.findByRole('button', { name: '打开 Task #1' })).toBeTruthy()
     expect(b.view.queryByRole('button', { name: '讨论/任务' })).toBeNull()
-    await b.runtime.dispose()
   })
 })

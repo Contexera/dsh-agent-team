@@ -3,7 +3,7 @@
 ## Status
 
 **已完成并归档（2026-09-13）。** 交付 `0326ca6`（PR #20：Host direct-only 切片、四面 Inbox、mention prompt 收窄）与 `2ee8224`（跨 Workspace 全局降序、队列行卡片、今天/昨天时间语义、页头计数行）。
-durable conclusions 已移入 `docs/frontend-design.md` 的 `### Mention Inbox (提到我)`（含 `.zh.md` 镜像）与 `CHANGELOG.md` `[Unreleased]`；本目录只保留设计过程与验收痕迹。
+durable conclusions 已移入 `docs/frontend-design/thread-and-composer.md` 的 `### Mention Inbox (提到我)`（含 `.zh.md` 镜像）与 `CHANGELOG.md` `[Unreleased]`；本目录只保留设计过程与验收痕迹。
 
 last-checked: 2026-09-13（当日门禁实跑 + Vera 独立复验）。
 

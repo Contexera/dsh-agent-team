@@ -1,5 +1,7 @@
 # 05 — 读路径索引与 copy-on-write（含多轮 drain 合并的评估）
 
+> 已归档：本票面状态是归档时的历史记录，未回填；见[工作项 README](../README.md)。
+
 **What to build:** 一次读不再复制整个全局 marker projection；`claimsByTask`、`activeClaimsByMember`、Thread tail/sequence、marker bucket 走索引；同时评估「让一批读落在同一个回合里」，把重复的全量重放压成一次。
 **Blocked by:** 04 优先（否则省下的都会被胖记录放大）；索引部分可先做
 **Status:** in-progress — Tars 2026-09-13 23:2x 起（04 已落 `06569e6`）。**第一片 `956011a`**（读路径去克隆）+ **第二片 `e38c6be`**（校验路径 ref 索引）都已落地，并**由 Vera 独立验收通过**（2026-09-13 23:5x：per-kind 同会话前后档、曲线做直、变异臂、(b)/(c) 复现、真实账本 marker 普查，见文末「Vera 独立验收」与 [`../materials/phase0/findings.md`](../materials/phase0/findings.md) §3g）；**drain 合并仍待对齐用户可见口径**，不在已落 commit 里。靶子定位（读源码后，含具体函数与反模式）见 [`../materials/05-residual-hotspots.md`](../materials/05-residual-hotspots.md)。

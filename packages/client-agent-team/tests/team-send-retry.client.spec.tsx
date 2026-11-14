@@ -1,15 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, waitFor } from '@testing-library/react'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import type { AgentTeamPostMainMessageRequest, AgentTeamPutAttachmentRequest, AgentTeamReplyRequest } from '@contexera/dsh-agent-team/types'
 import { pressStartTask, runtimeWithTeam } from './harness.tsx'
-
-vi.setConfig({ testTimeout: 30_000 })
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 type Runtime = Awaited<ReturnType<typeof runtimeWithTeam>>
 type PutRequestFixture = Omit<AgentTeamPutAttachmentRequest, 'mediaType'> & { readonly mediaType?: string | undefined }
@@ -108,7 +104,6 @@ describe('Team send retry', () => {
     const posts = runtime.postMainMessage.mock.calls.map(([request]) => request)
     expect(posts[1]).toEqual(posts[0])
     expect(posts[1]!.attachments).toEqual(['attachment:1', 'attachment:2'])
-    await runtime.runtime.dispose()
   })
 
   it('replays a thrown Task start with the same request and attachment', async () => {
@@ -128,7 +123,6 @@ describe('Team send retry', () => {
     expect(second).toEqual(first)
     expect(second).toMatchObject({ kind: 'task', attachments: ['attachment:1'] })
     expect(runtime.putAttachment).toHaveBeenCalledTimes(1)
-    await runtime.runtime.dispose()
   })
 
   it('replays a Thread reply after its committed message refreshes the revision', async () => {
@@ -180,7 +174,6 @@ describe('Team send retry', () => {
     expect(second).toMatchObject({ baseRevision: 2, attachments: ['attachment:1'] })
     expect(runtime.putAttachment).toHaveBeenCalledTimes(1)
     expect(await runtime.view.findByText('已完成')).toBeTruthy()
-    await runtime.runtime.dispose()
   })
 
   it('starts a new Main request after the draft changes', async () => {
@@ -198,7 +191,6 @@ describe('Team send retry', () => {
     const second = runtime.postMainMessage.mock.calls[1]![0]
     expect(second.body).toBe('第二版')
     expect(second.requestId).not.toBe(first.requestId)
-    await runtime.runtime.dispose()
   })
 
   it('guards a rapid second Main submit', async () => {
@@ -212,7 +204,6 @@ describe('Team send retry', () => {
       expect((runtime.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).readOnly).toBe(false)
     })
     expect(runtime.postMainMessage).toHaveBeenCalledTimes(1)
-    await runtime.runtime.dispose()
   })
 
   it('does not let an old Main completion clear a newer draft', async () => {
@@ -241,7 +232,6 @@ describe('Team send retry', () => {
     const [newRequest] = runtime.postMainMessage.mock.calls[1]!
     expect(newRequest.body).toBe('新草稿')
     expect(newRequest.requestId).not.toBe(oldRequest.requestId)
-    await runtime.runtime.dispose()
   })
 
   it('clears a confirmed Main draft before a failing refresh', async () => {
@@ -255,7 +245,6 @@ describe('Team send retry', () => {
     expect((await runtime.view.findAllByText('refresh failed')).length).toBeGreaterThan(0)
     expect((runtime.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('')
     expect(runtime.view.container.querySelectorAll('ul[aria-label="添加附件"] > li')).toHaveLength(0)
-    await runtime.runtime.dispose()
   })
 
   it('does not open the board for a superseded Task start', async () => {
@@ -281,7 +270,6 @@ describe('Team send retry', () => {
     expect(input.value).toBe('新任务草稿')
     expect(runtime.view.getByRole('heading', { name: '# engineering' })).toBeTruthy()
     expect(runtime.view.queryByRole('heading', { name: 'Task #1' })).toBeNull()
-    await runtime.runtime.dispose()
   })
 
   it('guards a rapid Thread submit and keeps an edit made while the reply is in flight', async () => {
@@ -319,6 +307,5 @@ describe('Team send retry', () => {
     const [newRequest] = runtime.reply.mock.calls[1]!
     expect(newRequest.body).toBe('新回复')
     expect(newRequest.requestId).not.toBe(oldRequest.requestId)
-    await runtime.runtime.dispose()
   })
 })

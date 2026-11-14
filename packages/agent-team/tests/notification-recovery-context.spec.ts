@@ -1,9 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
-import { cleanups, GatedAdapter, ScriptedAdapter, realHarness, requestId, textResponse, waitFor } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
+import { GatedAdapter, ScriptedAdapter, realHarness, requestId, textResponse, waitFor } from './helpers/member-harness.ts'
 
 describe('recovery notifications retain unread work within the whole-output budget', () => {
   it('does not let an omitted notice attest after the original full Message leaves the surface', async () => {

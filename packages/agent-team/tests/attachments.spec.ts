@@ -7,17 +7,14 @@ import { join, sep } from 'node:path'
 /** Escape a literal string for embedding in a RegExp (path separators differ per platform). */
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
+import type { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { harness as bootHostHarness } from './helpers/host-harness.ts'
 import { ATTACHMENT_MAX_BYTES, attachmentsRoot, mediaTypeForPath, pathAttachmentId, readAttachment, requestScopedAttachmentId, sanitizeFileName, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, writeAttachment } from '../src/attachments.ts'
 import AgentTeam from '../src/index.ts'
 import { AgentTeamLedger } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
-import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import type { AgentTeamAttachmentId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -33,35 +30,17 @@ afterEach(async () => {
 })
 
 async function harness(): Promise<{ readonly ctx: Context; readonly facility: DomainFacility; readonly restart: () => Promise<void> }> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === alpha ? { id, path: process.cwd(), attachSession: async () => {}, archiveSession: async () => {} } : undefined,
-    list: () => [{ id: alpha, path: process.cwd() }],
-    archiveSession: async () => {},
+  const booted = await bootHostHarness({
+    prepare: async ctx => {
+      await ctx.plugin(agentTeamInvariant)
+    },
   })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  await ctx.plugin(agentTeamInvariant)
-  await ctx.plugin(SessionProjectionRegistry)
-  let fiber = await ctx.plugin(AgentTeam)
-  // Restart the Host in place: the ledger and the attachment cache are durable,
-  // so a fresh plugin instance must converge on the entries the old one wrote.
-  // The cleanup below always disposes whichever instance is live at the end.
+  let fiber = booted.fiber
   const restart = async (): Promise<void> => {
     await fiber.dispose()
-    fiber = await ctx.plugin(AgentTeam)
+    fiber = await booted.ctx.plugin(AgentTeam)
   }
-  cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
-  return { ctx, facility, restart }
+  return { ctx: booted.ctx, facility: booted.facility, restart }
 }
 
 /** Every attachment cache entry this spec's shared DSH home currently holds, order-independent. */
@@ -487,7 +466,9 @@ describe('Agent Team attachment remotes', () => {
     const replayed = await ctx.agentTeam.putAttachment(request)
     expect(replayed.attachmentId).toBe(first.attachmentId)
     expect(replayed.path).toBe(first.path)
-    expect(await cacheEntries()).toEqual(before)
+    // The restart also runs the boot sweep, which can retire entries an earlier
+    // test left in this file's shared cache; the retry itself must mint none.
+    expect((await cacheEntries()).filter(id => !before.includes(id))).toEqual([])
     await expect(ctx.agentTeam.getAttachment({ attachmentId: first.attachmentId }))
       .resolves.toMatchObject({ name: 'restart.png', bytesBase64: Buffer.from('png-bytes').toString('base64') })
   })

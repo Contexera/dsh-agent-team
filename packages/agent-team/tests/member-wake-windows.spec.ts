@@ -1,16 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
-vi.setConfig({ testTimeout: 60_000 })
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
-import { cleanups, realHarness, ScriptedAdapter, textResponse, waitFor, requestId } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-
+import { realHarness, ScriptedAdapter, textResponse, requestId } from './helpers/member-harness.ts'
 
 describe('Agent Team wake-slot swap delivery windows (ticket 05)', () => {
   it('hands a DM to the swapped-in generation instead of reporting a delivery failure', async () => {
@@ -18,29 +13,27 @@ describe('Agent Team wake-slot swap delivery windows (ticket 05)', () => {
     try {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('dm-wake-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-      const sender = await ctx.agentTeam.addMember({ requestId: requestId('dm-wake-sender'), workspaceId, handle: 'sender', description: 'Sends', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const receiver = await ctx.agentTeam.addMember({ requestId: requestId('dm-wake-receiver'), workspaceId, handle: 'receiver', description: 'Receives', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-      const senderAgent = ctx.agents.get(sender.status.member.sessionId)!
-      const receiverAgent = ctx.agents.get(receiver.status.member.sessionId)!
+      const h = await realHarness(adapter)
+      const project = await h.human.createProject('engineering')
+      const sender = await h.human.addMember('sender', { description: 'Sends', projects: [project] })
+      const receiver = await h.human.addMember('receiver', { description: 'Receives', projects: [project] })
       adapter.enqueue(textResponse('First look done.'))
-      receiverAgent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
-      await receiverAgent.whenIdle()
-      pressureState.bySession.set(receiver.status.member.sessionId, 130_000)
+      receiver.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+      await receiver.waitForIdle()
+      h.pressureState.bySession.set(receiver.sessionId, 130_000)
       await vi.advanceTimersByTimeAsync(61 * 60_000)
 
       adapter.enqueue(textResponse('Answering the DM from the fresh context.'))
-      await expect(ctx.agentTeam.dmForAgent(senderAgent, { requestId: requestId('dm-wake'), workspaceId,
-        recipientMemberId: receiver.status.member.memberId, body: 'are you back?' })).resolves.toBeDefined()
+      await expect(h.ctx.agentTeam.dmForAgent(sender.agent, { requestId: requestId('dm-wake'), workspaceId: h.workspaceId,
+        recipientMemberId: receiver.memberId, body: 'are you back?' })).resolves.toBeDefined()
 
       const successor = await vi.waitFor(() => {
-        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === receiver.status.member.memberId)
-        if (current === undefined || current.member.sessionId === receiver.status.member.sessionId) throw new Error('swap not applied yet')
+        const current = h.ctx.agentTeam.members().find(entry => entry.member.memberId === receiver.memberId)
+        if (current === undefined || current.member.sessionId === receiver.sessionId) throw new Error('swap not applied yet')
         return current.member.sessionId
       }, { timeout: 20_000 })
       const fresh = await vi.waitFor(() => {
-        const live = ctx.agents.get(successor)
+        const live = h.ctx.agents.get(successor)
         if (live === undefined || live.status !== 'idle') throw new Error('successor not idle yet')
         return live
       }, { timeout: 20_000 })

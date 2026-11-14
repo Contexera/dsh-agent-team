@@ -1,8 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 // Every test here boots a Host over a throwaway tree, and the windows lane has
-// stretched one cold replay to 2.7s against vitest's 5s default (worst of 11 CI
-// runs, 2026-09-17..21). The SQLite case below keeps its own 30s argument.
-vi.setConfig({ testTimeout: 30_000 })
+// stretched one cold replay to 2.7s against the unit project's 5s budget (worst
+// of 11 CI runs, 2026-09-17..21), so the file runs in the integration project.
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { legacyJoinLedger } from './fixtures/legacy-membership-ledgers.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/index.ts'
@@ -11,13 +10,6 @@ import { addLedgerMember, alpha, beta, committed, harness, ledgerAtBoot, request
 import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import { AGENT_TEAM_HUMAN_HANDLE } from '../src/index.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamRequestId } from '../src/types.ts'
-
-const cleanups: Array<() => Promise<void>> = []
-
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
-
 
 describe('body-authored mentions', () => {
   /** One Project and every write in it run through the same ledger projection. */

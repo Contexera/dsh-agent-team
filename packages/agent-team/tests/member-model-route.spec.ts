@@ -1,15 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
-vi.setConfig({ testTimeout: 60_000 })
-
-import { cleanups, realHarness, ScriptedAdapter, requestId } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-
+import { realHarness, ScriptedAdapter, requestId } from './helpers/member-harness.ts'
 
 describe('Agent Team model route rejection (issue #43 #6)', () => {
   it('rejects an unregistered provider at creation instead of deferring to the first turn', async () => {
@@ -22,14 +16,13 @@ describe('Agent Team model route rejection (issue #43 #6)', () => {
   })
 
   it('rejects an unregistered provider on update too', async () => {
-    const { ctx, workspaceId } = await realHarness(new ScriptedAdapter())
-    const added = await ctx.agentTeam.addMember({
-      requestId: requestId('bad-provider-seed'), workspaceId, handle: 'builder',
-      description: 'Builds the implementation', presetId: 'team-member', projectRefs: [],
+    const h = await realHarness(new ScriptedAdapter())
+    const builder = await h.human.addMember('builder', {
+      description: 'Builds the implementation',
       model: { provider: 'mock', model: 'fine' },
     })
-    await expect(ctx.agentTeam.updateMember({
-      requestId: requestId('bad-provider-edit'), memberId: added.status.member.memberId,
+    await expect(h.ctx.agentTeam.updateMember({
+      requestId: requestId('bad-provider-edit'), memberId: builder.memberId,
       handle: 'builder', description: 'Builds the implementation',
       model: { provider: 'no-such-provider', model: 'whatever' },
     })).rejects.toThrow(/provider 'no-such-provider' is not registered/)

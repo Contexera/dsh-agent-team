@@ -10,14 +10,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it, vi as fakeTimers } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import AgentTeam from '../src/index.ts'
+import { harness } from './helpers/host-harness.ts'
+import { openTestTable } from './helpers/ledger-harness.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
 import { admissionKey } from '../src/subscription-admissions.ts'
 import { subscriptionDomainSpec } from '../src/subscription-store.ts'
 import type { SubscriptionCheckpoint, SubscriptionScheduler } from '../src/subscription-runtime.ts'
@@ -34,7 +31,9 @@ const shellSpill = (stdout: string): string => {
   writeFileSync(path, `__DSH_TEAM_RAW_STDOUT__${stdout}`)
   return path
 }
-afterAll(() => { rmSync(shellSpillRoot, { recursive: true, force: true }) })
+const removeShellSpillRoot = (): void => { rmSync(shellSpillRoot, { recursive: true, force: true }) }
+afterAll(removeShellSpillRoot)
+process.once('exit', removeShellSpillRoot)
 
 interface FakeShell {
   readonly requests: ShellExecSpec[]
@@ -129,28 +128,19 @@ const credentialValues: Record<string, string> = { GH_TOKEN: 'secret-value' }
 
 async function boot(pool: MemoryMediaPool, shell: Pick<FakeShell, 'service'>, workspaceRoot = process.cwd(),
   config?: Readonly<Record<string, unknown>>) {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('workspaceRegistry', { get: (id: WorkspaceId) => id === workspaceId ? { id, path: workspaceRoot, attachSession: async () => {} } : undefined,
-    list: () => [] })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  ctx.provide('shell', shell.service)
-  ctx.provide('credentials', {
-    resolve: async (ref: string) => credentialValues[ref] === undefined ? undefined : { value: credentialValues[ref], source: 'fixture' },
-    describe: async (ref: string) => ({ configured: credentialValues[ref] !== undefined, writable: false }),
+  return harness({
+    pool,
+    workspaceIds: [workspaceId],
+    workspaceRoot,
+    config: config as never,
+    prepare: ctx => {
+      ctx.provide('shell', shell.service)
+      ctx.provide('credentials', {
+        resolve: async (ref: string) => credentialValues[ref] === undefined ? undefined : { value: credentialValues[ref], source: 'fixture' },
+        describe: async (ref: string) => ({ configured: credentialValues[ref] !== undefined, writable: false }),
+      })
+    },
   })
-  ctx.provide('tokenMeter', { estimateMessage: () => 0, measure: () => ({ totalTokens: 0, nodes: [] }) })
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = config === undefined ? await ctx.plugin(AgentTeam) : await ctx.plugin(AgentTeam, config as never)
-  return { ctx, fiber, facility }
 }
 
 interface Disposable { dispose(): Promise<void> }
@@ -323,31 +313,14 @@ describe('a timer run', () => {
     // The second boot inherits the ledger and the checkpoint: a due instant in
     // the past is exactly what a Host restart after a missed run reads.
     const runShell = fakeShell({ stdout: '{"id":"b","title":"B"}\n' })
-    const ctx = new Context()
-    await ctx.plugin(Storage)
-    ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-    const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-    ctx.storage.mount('domain', facility)
+    const { facility, close } = await openTestTable({ pool })
     const domain = await facility.open(subscriptionDomainSpec)
     await domain.table('checkpoints').put(subscriptionRef as AgentTeamSubscriptionRef,
       { subscriptionRef: subscriptionRef as AgentTeamSubscriptionRef, dueAt: Date.now() - 1, consecutiveFailures: 0, publishedInWindow: 0 })
     // The plugin opens the domain itself at boot; a seeded row must not hold it.
     await domain.close()
-    ctx.provide('storageDomain', facility)
-    ctx.provide('workspaceRegistry', { get: (id: WorkspaceId) => id === workspaceId ? { id, path: process.cwd(), attachSession: async () => {} } : undefined, list: () => [] })
-    ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-    ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-    ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-    ctx.provide('tools', { schemas: () => [] })
-    ctx.provide('sessionPersistence', { list: async () => [] })
-    ctx.provide('shell', runShell.service)
-    ctx.provide('credentials', {
-      resolve: async (ref: string) => credentialValues[ref] === undefined ? undefined : { value: credentialValues[ref], source: 'fixture' },
-      describe: async (ref: string) => ({ configured: credentialValues[ref] !== undefined, writable: false }),
-    })
-    ctx.provide('tokenMeter', { estimateMessage: () => 0, measure: () => ({ totalTokens: 0, nodes: [] }) })
-    await ctx.plugin(SessionProjectionRegistry)
-    const fiber = await ctx.plugin(AgentTeam)
+    await close()
+    const { ctx, fiber } = await boot(pool, runShell)
     live.push({ dispose: async () => { await fiber.dispose() } })
 
     const published = await waitFor(() => {
@@ -457,7 +430,7 @@ describe('the terminal barrier a queued trial obeys', () => {
     // Refusing is not enough: the script itself never ran a second time.
     expect(executions(shell)).toBe(1)
     await Promise.all(burst)
-  }, 30_000)
+  })
 
   it('refuses a trial that was still queued when the Project was archived, and never runs the script', async () => {
     const pool = new MemoryMediaPool()
@@ -486,7 +459,7 @@ describe('the terminal barrier a queued trial obeys', () => {
     // The four creates that were already in flight lose their write to the same
     // archive; their trials ran, so only the victim's script matters here.
     await Promise.allSettled(burst)
-  }, 30_000)
+  })
 })
 
 describe('the terminal barrier a run in flight obeys', () => {
@@ -501,11 +474,7 @@ describe('the terminal barrier a run in flight obeys', () => {
     await first.fiber.dispose()
 
     const seededDueAt = Date.now() - 1
-    const seedCtx = new Context()
-    await seedCtx.plugin(Storage)
-    seedCtx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-    const seedFacility = new DomainFacility(seedCtx, { backend: 'memory', routes: {} })
-    seedCtx.storage.mount('domain', seedFacility)
+    const { facility: seedFacility } = await openTestTable({ pool })
     const seedDomain = await seedFacility.open(subscriptionDomainSpec)
     await seedDomain.table('checkpoints').put(subscriptionRef,
       { subscriptionRef, dueAt: seededDueAt, consecutiveFailures: 0, publishedInWindow: 0 })
@@ -532,7 +501,7 @@ describe('the terminal barrier a run in flight obeys', () => {
     expect(seam.checkpointFor(subscriptionRef).dueAt).toBeUndefined()
     const row = await seam.subscriptionTable?.get(subscriptionRef) as { readonly dueAt?: number } | undefined
     expect(row === undefined || row.dueAt === seededDueAt).toBe(true)
-  }, 30_000)
+  })
 })
 
 describe('the scheduler checkpoint and Host shutdown', () => {
@@ -578,11 +547,7 @@ describe('the scheduler checkpoint and Host shutdown', () => {
 
     // A restart whose stored due instant is already past: the timer run starts
     // at boot, and this shell holds it open until the test says so.
-    const seedCtx = new Context()
-    await seedCtx.plugin(Storage)
-    seedCtx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-    const seedFacility = new DomainFacility(seedCtx, { backend: 'memory', routes: {} })
-    seedCtx.storage.mount('domain', seedFacility)
+    const { facility: seedFacility } = await openTestTable({ pool })
     const seedDomain = await seedFacility.open(subscriptionDomainSpec)
     await seedDomain.table('checkpoints').put(subscriptionRef,
       { subscriptionRef, dueAt: Date.now() - 1, consecutiveFailures: 0, publishedInWindow: 0 })
@@ -605,7 +570,7 @@ describe('the scheduler checkpoint and Host shutdown', () => {
     // The run's acceptance reached the durable table before the store closed.
     const records = [...pool.media.get('agent_team')?.tables.get('operations')?.values() ?? []] as Array<{ kind?: string }>
     expect(records.filter(record => record.kind === 'team/subscription-events-accepted')).toHaveLength(1)
-  }, 30_000)
+  })
 })
 
 async function waitFor<T>(probe: () => T | undefined, timeoutMs = 10_000): Promise<T> {
@@ -829,7 +794,7 @@ describe('the webhook trigger', () => {
     await expect(bare.ctx.agentTeam.testSubscriptionDraft({ workspaceId, projectRef: bareProject, name: 'draft', webhook: true,
       scriptContent: 'json-body\n', credentials: [] })).rejects.toThrow(/webhook\.publicOrigin/)
     expect(shell.requests.filter(request => request.stdin !== undefined)).toHaveLength(0)
-  }, 30_000)
+  })
 
   it('runs a queued delivery under the Host admission id and retires it once its output is accepted', async () => {
     const pool = new MemoryMediaPool()
@@ -855,7 +820,7 @@ describe('the webhook trigger', () => {
     // The accepted output is ledger fact, and the row is gone: no work is owed.
     await waitFor(() => admissionRows(pool).length === 0 ? true : undefined)
     expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!.eventCount).toBe(1)
-  }, 30_000)
+  })
 
   it('runs the definition the delivery arrived under, not the one an edit replaced it with', async () => {
     const pool = new MemoryMediaPool()
@@ -881,7 +846,7 @@ describe('the webhook trigger', () => {
     const logs = booted.ctx.agentTeam.subscriptionLogsForClient({ workspaceId, projectRef, subscriptionRef })
     expect(logs.runs.find(entry => entry.trigger === 'webhook'),
       'the delivery run says which revision it pinned').toMatchObject({ subscriptionRevision: 1, eventCount: 1 })
-  }, 30_000)
+  })
 
   it('keeps the armed address when an edit says nothing about the trigger', async () => {
     const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
@@ -909,7 +874,7 @@ describe('the webhook trigger', () => {
     expect(disarmed.subscription.webhook, 'the explicit false is what drops it').toBeUndefined()
     expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' }), 'and the address stops resolving')
       .toEqual({ kind: 'not-found' })
-  }, 30_000)
+  })
 
   it('finishes a delivery already accepted when the subscription stops receiving them', async () => {
     const pool = new MemoryMediaPool()
@@ -936,7 +901,7 @@ describe('the webhook trigger', () => {
       'the queued request still owes its run, under the definition it arrived with').toHaveLength(1)
     expect(admissionRows(pool), 'and it leaves the queue once its output is accepted').toHaveLength(0)
     expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!.eventCount).toBe(1)
-  }, 30_000)
+  })
 
   it('holds a batch with no room yet, and retries only the accept', async () => {
     const pool = new MemoryMediaPool()
@@ -997,7 +962,7 @@ describe('the webhook trigger', () => {
       && record.data?.events?.some(event => event.id === 'late0'))
     expect(lateAccept?.data?.subscriptionRevision, 'the batch is attributed to the revision it ran under').toBe(1)
     expect(lateAccept?.data?.scriptHash).toBe(created.subscription.script.sha256)
-  }, 30_000)
+  })
 
   it('refuses a batch no queue could ever take instead of holding it', async () => {
     const pool = new MemoryMediaPool()
@@ -1016,7 +981,7 @@ describe('the webhook trigger', () => {
     const deliveries = [...(pool.media.get('agent_team_subscriptions')?.tables.get('deliveries')?.values() ?? [])] as Array<Record<string, unknown>>
     expect(deliveries[0], 'the request becomes a failed delivery an owner can replay').toMatchObject({ attempts: 1 })
     expect(admissionRows(pool), 'not a held batch').toHaveLength(0)
-  }, 30_000)
+  })
 
   it.each([
     { table: 'deliveries', operation: 'put', paused: false },
@@ -1239,7 +1204,7 @@ describe('the webhook trigger', () => {
     const fresh = addressToken(resetResult.webhookAddress)
     expect(fresh, 'the reset moved the address').not.toBe(oldToken)
     await expect(booted.ctx.agentTeam.intakeWebhookDelivery({ token: fresh, headers: {}, body: '{}' })).resolves.toMatchObject({ kind: 'queued' })
-  }, 30_000)
+  })
 
   it('retries a failed delivery on the 1/5/30 ladder and hands every attempt the same id', async () => {
     fakeTimers.useFakeTimers({ toFake: ['Date'] })
@@ -1279,7 +1244,7 @@ describe('the webhook trigger', () => {
     const deliveries = [...(pool.media.get('agent_team_subscriptions')?.tables.get('deliveries')?.values() ?? [])] as Array<Record<string, unknown>>
     expect(deliveries[0]).toMatchObject({ admissionRef: queued.admissionRef, attempts: 4 })
     expect(String(deliveries[0]!.lastError)).toMatch(/line 1/)
-  }, 30_000)
+  })
 
   it('accepts a batch of several hundred events once, and publishes it without running the script again', async () => {
     const pool = new MemoryMediaPool()
@@ -1305,7 +1270,7 @@ describe('the webhook trigger', () => {
     await pump(booted)
     expect(shell.requests.filter(request => request.stdin !== undefined), 'a lagging publication never re-runs the script').toHaveLength(1)
     expect(listed().unpublished, 'the events are still the ledger queue, not a second run').toBe(300)
-  }, 30_000)
+  })
 
   it('turns one run past the unpublished ceiling into a failed delivery instead of retrying it', async () => {
     const pool = new MemoryMediaPool()
@@ -1340,7 +1305,7 @@ describe('the webhook trigger', () => {
     expect(listed().subscription.state).toBe('active')
     await queueOne()
     expect(listed().subscription).toMatchObject({ state: 'paused', pausedReason: 'failures' })
-  }, 30_000)
+  })
 
   it('finishes the bookkeeping of an accepted delivery without running its script again', async () => {
     const pool = new MemoryMediaPool()
@@ -1371,7 +1336,7 @@ describe('the webhook trigger', () => {
       'the accept is the run: the script is not executed a second time for it').toHaveLength(1)
     expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!.eventCount,
       'the same output is not accepted a second time').toBe(1)
-  }, 30_000)
+  })
 
   it('settles one spent delivery per pass, and runs nothing while one is still owed', async () => {
     const pool = new MemoryMediaPool()
@@ -1408,7 +1373,7 @@ describe('the webhook trigger', () => {
     expect(checkpointRow(pool, subscriptionRef)?.consecutiveFailures, 'legacy rows do not backfill failures').toBe(1)
     expect(booted.ctx.agentTeam.subscriptionDeliveriesForClient({ workspaceId, projectRef, subscriptionRef }).deliveries)
       .toHaveLength(3)
-  }, 30_000)
+  })
 
   it('drops queued deliveries when the subscription is deleted, so a late result cannot revive the queue', async () => {
     const pool = new MemoryMediaPool()
@@ -1450,7 +1415,7 @@ describe('the webhook trigger', () => {
     await pump(booted)
     expect(shell.requests.filter(request => request.stdin !== undefined)).toHaveLength(0)
     expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).toEqual({ kind: 'not-found' })
-  }, 30_000)
+  })
 
   it('keeps the list readable over an archived Project, while its writes refuse', async () => {
     const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
@@ -1467,7 +1432,7 @@ describe('the webhook trigger', () => {
     await expect(booted.ctx.agentTeam.pauseSubscription({ requestId: requestId('pause-archived'), workspaceId, projectRef,
       subscriptionRef: created.subscription.subscriptionRef, expectedRevision: created.subscription.revision }))
       .rejects.toThrow(/is archived/)
-  }, 30_000)
+  })
 
   it('ends a delivery on its retry succeeding, without counting a failure against it', async () => {
     fakeTimers.useFakeTimers({ toFake: ['Date'] })
@@ -1496,7 +1461,7 @@ describe('the webhook trigger', () => {
     expect(listed).toMatchObject({ eventCount: 1, unpublished: 1 })
     expect(listed.subscription.state, 'one failed attempt is not a failure of the subscription').toBe('active')
     expect(booted.ctx.agentTeam.subscriptionDeliveriesForClient({ workspaceId, projectRef, subscriptionRef }).deliveries).toHaveLength(0)
-  }, 30_000)
+  })
 
   it('replays an exhausted delivery under the id its first attempt saw, and refuses one while paused', async () => {
     fakeTimers.useFakeTimers({ toFake: ['Date'] })
@@ -1536,7 +1501,7 @@ describe('the webhook trigger', () => {
     const run = shell.requests.filter(request => request.stdin !== undefined).at(-1)
     expect(run!.env?.DSH_TEAM_DELIVERY_ID).toBe(queued.admissionRef)
     expect(listed().deliveries, 'a delivery that replayed successfully leaves the list').toHaveLength(0)
-  }, 30_000)
+  })
 
   it('keeps the queue across a restart, so an accepted delivery is never lost', async () => {
     const pool = new MemoryMediaPool()
@@ -1617,7 +1582,7 @@ describe('the webhook trigger', () => {
     expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]?.subscription.state).toBe('active')
     expect(admissionRows(pool)).toHaveLength(0)
     expect(pool.media.get('agent_team_subscriptions')?.tables.get('deliveries')?.size).toBe(2)
-  }, 30_000)
+  })
 
   it('waits for a stalled webhook admission pass before closing the stores', async () => {
     const pool = new MemoryMediaPool()
@@ -1833,5 +1798,5 @@ describe('the webhook trigger', () => {
       ?.failureSuccessEpoch).toBeGreaterThan(successEpoch)
     expect(second.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]?.subscription.state).toBe('active')
     expect(secondShell.requests.filter(request => request.env?.DSH_TEAM_TRIGGER === 'interval')).toHaveLength(0)
-  }, 30_000)
+  })
 })

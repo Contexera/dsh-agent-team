@@ -1,15 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 // The generation-swap case boots a real Host harness and waits on asynchronous
 // Session transitions, so both this budget and the waitFor deadline need headroom.
-vi.setConfig({ testTimeout: 60_000 })
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Context } from '@deepseek-ai/cordis'
 import { PROJECT_OWNER_SECTION } from '../src/project-owner-guidance.ts'
-import { cleanups, realHarness, ScriptedAdapter, textResponse, requestId, waitFor, waitForIdle } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
+import { realHarness, ScriptedAdapter, textResponse, requestId, waitFor, waitForIdle } from './helpers/member-harness.ts'
 
 /** The text one assembly carries for the owner section; empty when the scope registers none. */
 async function sectionText(agent: Agent): Promise<string> {
@@ -211,7 +208,7 @@ describe('Project-owner guidance section', () => {
   it('leaves an ordinary Session without the section', async () => {
     const { ctx } = await ownedMember('ordinary-owner', true)
     const ordinary = await ctx.agents.create({ sessionId: SessionId('owner-guidance-ordinary') })
-    cleanups.push(async () => { await ordinary.dispose() })
+    onTestFinished(async () => { await ordinary.dispose() })
     const assembly = await ordinary.agent.ctx.systemPrompt.assemble({ scope: ordinary.agent })
     expect(assembly.sections.map(section => section.name)).not.toContain(PROJECT_OWNER_SECTION)
   })
