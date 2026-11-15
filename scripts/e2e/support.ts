@@ -22,8 +22,8 @@
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { expect } from 'vitest'
-import { chromium, type Browser, type Page } from 'playwright'
+import { afterAll, expect } from 'vitest'
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { connectFreshWorkspaceZh } from './support.ts'
 
@@ -91,9 +91,14 @@ export async function openTeamPage(options: {
         replayOverride: options.replay.override,
         ...options.replay.childFixtures === undefined ? {} : { replayChildFixtures: [...options.replay.childFixtures] },
       }) })
-    browser = await chromium.launch({ headless: true, executablePath: CHROME })
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN',
-      ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }) })
+    const activeBrowser = await acquireBrowser()
+    const context = await activeBrowser.newContext({
+      viewport: { width: 1440, height: 960 },
+      locale: 'zh-CN',
+      ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }),
+    })
+    activeContext = context
+    const page = await context.newPage()
     const consoleWatch = watchConsole(page)
     // The device is read once at boot, so it is stated before the document loads.
     if (options.platform !== undefined) {
@@ -128,10 +133,30 @@ async function webhookOriginOverlay(origin: string): Promise<string> {
   return path
 }
 
-/** The one scaffold, browser, and HOME the current scenario owns; `openTeamPage` / `installLocalBundle` fill them. */
+/** The one scaffold, shared browser, isolated context, and HOME the current scenario owns. */
 export let scaffold: WebScaffold | undefined
 export let browser: Browser | undefined
+let sharedBrowser: Browser | undefined
+let activeContext: BrowserContext | undefined
 let activeHome: string | undefined
+
+/** Reuse one Chromium process per Worker; scenarios isolate state via `BrowserContext`. */
+async function acquireBrowser(): Promise<Browser> {
+  if (sharedBrowser === undefined || !sharedBrowser.isConnected()) {
+    sharedBrowser = await chromium.launch({ headless: true, executablePath: CHROME })
+  }
+  browser = sharedBrowser
+  return sharedBrowser
+}
+
+async function closeSharedBrowser(): Promise<void> {
+  const closing = sharedBrowser
+  sharedBrowser = undefined
+  browser = undefined
+  await closing?.close()
+}
+
+afterAll(closeSharedBrowser)
 
 /** The isolated per-scenario HOME created by `installLocalBundle` / `openTeamPage`. */
 export function scenarioHome(): string {
@@ -149,16 +174,16 @@ export async function scenarioTempDir(prefix: string): Promise<string> {
   return directory
 }
 
-/** Release the current scenario's scaffold, browser, and throwaway directories. */
+/** Release the current scenario's context, scaffold, and throwaway directories (the Worker keeps `sharedBrowser` until `afterAll`). */
 export async function closeScenario(): Promise<void> {
-  const activeBrowser = browser
+  const closingContext = activeContext
   const activeScaffold = scaffold
   const tempDirs = scenarioTempDirs.splice(0)
-  browser = undefined
+  activeContext = undefined
   scaffold = undefined
   activeHome = undefined
   try {
-    await activeBrowser?.close()
+    await closingContext?.close()
   } finally {
     try {
       await activeScaffold?.close()
@@ -233,7 +258,6 @@ export const WORKER_SHOTS = join(BROWSER_ARTIFACTS, 'worker-thread')
 export const WORKER_STOP_SHOTS = join(BROWSER_ARTIFACTS, 'worker-stop')
 export const WORKER_INSPECT_SHOTS = join(BROWSER_ARTIFACTS, 'worker-inspect')
 export const MANAGER_SHOTS = join(BROWSER_ARTIFACTS, 'team-manager')
-export const MANAGER_WRITES_SHOTS = join(BROWSER_ARTIFACTS, 'team-manager-writes')
 /**
  * Wait until no finite animation is running: a screenshot taken mid-collapse
  * captures the expanded column clipped to the rail. Infinite animations
@@ -618,9 +642,5 @@ export async function installLocalBundle(): Promise<{ readonly home: string; rea
     }
   }
   activeHome = home
-  await Promise.all([
-    UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, UI09_SHOTS,
-    SETTINGS_SHOTS, SUBSCRIPTION_SHOTS, WORKER_SHOTS, WORKER_STOP_SHOTS, WORKER_INSPECT_SHOTS, MANAGER_SHOTS, MANAGER_WRITES_SHOTS,
-  ].map(dir => mkdir(dir, { recursive: true })))
   return { home, stagedBundle }
 }

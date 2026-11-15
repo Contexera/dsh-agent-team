@@ -5407,7 +5407,7 @@ export default class AgentTeam extends TypertRemoteService {
     if (claimed === undefined) return Object.freeze({ kind: 'not-found' })
     const table = this.subscriptionAdmissionsTable
     if (table === undefined) throw new Error('the subscription store is not open, so this delivery cannot be queued')
-    return this.serializeSubscriptionWrite(claimed.subscriptionRef, async () => {
+    const result = await this.serializeSubscriptionWrite(claimed.subscriptionRef, async () => {
       // Read the barriers under the write lock: a delete, archive or pause that
       // landed while this request waited must win over it.
       const live = this.writableSubscription(claimed.subscriptionRef)
@@ -5440,6 +5440,8 @@ export default class AgentTeam extends TypertRemoteService {
       await table.put(admissionKey(live.subscriptionRef, admissionRef), record)
       return Object.freeze({ kind: 'queued', admissionRef })
     })
+    if (result.kind === 'queued') void this.pumpWebhookAdmissions()
+    return result
   }
 
   /**

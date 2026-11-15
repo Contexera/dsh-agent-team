@@ -37,6 +37,10 @@ describe('Member avatar initial', () => {
     // The same handle without its `@` reads the same, and `@` before an emoji is not a cut point.
     expect(initialOf('@🎈builder')).toBe('🎈')
     expect(LONE_SURROGATE.test(initialOf('🎈builder'))).toBe(false)
+    // Deseret lowercase U+10428 uppercases to U+10400 without splitting the surrogate pair.
+    const deseret = initialOf('𐐨builder')
+    expect(deseret.codePointAt(0)).toBe(0x10400)
+    expect(LONE_SURROGATE.test(deseret)).toBe(false)
   })
 
   it('keeps an ASCII initial uppercased', () => {

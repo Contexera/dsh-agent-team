@@ -1,8 +1,21 @@
-import { afterEach, it, expect } from 'vitest'
-import { MAIN_STREAM_SHOTS, closeScenario, focusRing, maxHorizontalScroll, openTeamPage, scaffold, settleAnimations, settleLayout, chooseMemberModel } from './__external-agent-team-support.ts'
+import { join } from 'node:path'
+import { afterEach, expect, it } from 'vitest'
+import {
+  MAIN_STREAM_SHOTS,
+  UI02_SHOTS,
+  UI04_SHOTS,
+  chooseMemberModel,
+  closeScenario,
+  focusRing,
+  maxHorizontalScroll,
+  openSidebar,
+  openTeamPage,
+  scaffold,
+  settleAnimations,
+  settleLayout,
+} from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
-
 
 it('posts, starts a discussion and a Task, and opens cards in the Main stream under rules version 2 in real Web', async () => {
   const { page, consoleWatch } = await openTeamPage()
@@ -26,7 +39,6 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await page.getByText('配色要不要跟设置页统一？', { exact: true }).waitFor()
   await expect.poll(() => composer.inputValue()).toBe('')
 
-  // Discussion: the toggle turns the send into a new Thread whose card lands in the stream.
   const toggle = page.getByRole('button', { name: '讨论/任务' })
   await toggle.click()
   expect(await toggle.getAttribute('aria-pressed')).toBe('true')
@@ -34,14 +46,11 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await send.click()
   const discussionCard = page.getByRole('button', { name: /^打开讨论：登录页改版 先统一配色/ })
   await discussionCard.waitFor()
-  // The composer keeps this Human body literal, but the card is a one-line gist:
-  // it shows the text the line renders, never the Markdown source.
   expect(await discussionCard.textContent()).toContain('登录页改版 先统一配色')
   expect(await discussionCard.textContent()).not.toContain('**')
   expect(await toggle.getAttribute('aria-pressed')).toBe('false')
   expect(await page.getByRole('checkbox', { name: '作为任务' }).count()).toBe(0)
 
-  // Task: checking 作为任务 sends a Task and moves to the board.
   await toggle.click()
   await page.getByRole('checkbox', { name: '作为任务' }).check()
   await composer.fill('实现 API 网关')
@@ -55,15 +64,10 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await mainTab.click()
   const taskCard = page.getByRole('button', { name: /^打开 Task #1：实现 API 网关/ })
   await taskCard.waitFor()
-  // A Task card names who holds it, face and words together, and its accessible name states the same responsibility.
   expect(await taskCard.locator('[data-team-owner]').textContent()).toBe('H你负责')
   expect(await taskCard.getAttribute('aria-label')).toContain('你负责')
-  // The owner's face is the stack's own circle, and it wears no ring: the loop that paints one around a group is pinned
-  // where a real group stands, in the Inbox row below.
   expect(await taskCard.locator('[data-team-owner] > *').first().evaluate(node => getComputedStyle(node).boxShadow)).toBe('none')
   expect(await discussionCard.getAttribute('data-main-card')).toBe('discussion')
-  // The feed's large target answers on its own surface, not on one edge: the border alone used to lighten under the
-  // pointer, which left the fill untouched and made the only reacting edge fainter.
   const cardRestFill = await discussionCard.evaluate(element => getComputedStyle(element).backgroundColor)
   expect(cardRestFill).not.toBe('rgba(0, 0, 0, 0)')
   await discussionCard.hover()
@@ -77,7 +81,6 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await page.mouse.move(0, 0)
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-desktop.png'), fullPage: true })
 
-  // Keyboard: a card is a real button that opens the Thread side panel from Enter.
   await page.keyboard.press('Tab')
   await discussionCard.focus()
   const ring = await focusRing(page, '[data-main-card="discussion"]')
@@ -88,7 +91,6 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'panel-desktop.png'), fullPage: true })
   await page.getByRole('button', { name: '关闭讨论' }).click()
 
-  // An owner grant is a Main stream activity row.
   await page.getByRole('button', { name: '添加 Agent' }).click()
   const createAgent = page.getByRole('dialog', { name: '添加 Agent' })
   await createAgent.getByLabel('名称').fill('steward')
@@ -106,53 +108,36 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await page.getByText('human 指定 @steward 为项目负责人').waitFor()
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-owner-desktop.png'), fullPage: true })
 
-  // A Main stream read moves the same private watermark a Thread read does, and
-  // the Host derives both Inbox slices from it — so the sidebar's unread mark must
-  // go when this page acknowledges a Main stream arrival. It used to survive the
-  // read that consumed it: the Inbox emptied while the mark stayed, which is the
-  // drift the Human reported. The arrival is written by the Project's own Agent so
-  // the unread is a real Host marker, not a Client guess. It is written while the
-  // reader stands on the Inbox instead, because the Project page acknowledges on
-  // its own — a reader parked there would consume the mark before it was drawn.
-  const mainWorkspace = scaffold.ctx.workspaceRegistry.list()[0]!
-  const streamProject = scaffold.ctx.agentTeam.view({ workspaceId: mainWorkspace.id }).projects
+  const activeScaffold = scaffold!
+  const mainWorkspace = activeScaffold.ctx.workspaceRegistry.list()[0]!
+  const streamProject = activeScaffold.ctx.agentTeam.view({ workspaceId: mainWorkspace.id }).projects
     .find((project: { name: string }) => project.name === 'stream-web')!
-  const stewardMember = scaffold.ctx.agentTeam.members({ workspaceId: mainWorkspace.id })
+  const stewardMember = activeScaffold.ctx.agentTeam.members({ workspaceId: mainWorkspace.id })
     .find((status: { member: { handle: string } }) => status.member.handle === 'steward')!
-  const stewardAgent = scaffold.ctx.agents.get(stewardMember.member.sessionId)!
-  // The owner grant arrived while it was idle, so its own Main stream standing holds
-  // that marker: a writer reads its backlog before it may write (rules version 2).
-  await scaffold.ctx.agentTeam.readMainStreamForAgent(stewardAgent, {
+  const stewardAgent = activeScaffold.ctx.agents.get(stewardMember.member.sessionId)!
+  await activeScaffold.ctx.agentTeam.readMainStreamForAgent(stewardAgent, {
     requestId: 'm2-11-steward-read' as never, workspaceId: mainWorkspace.id, projectRef: streamProject.projectRef,
   })
   await page.getByRole('button', { name: '收件箱' }).click()
   await page.locator('[data-team-inbox]').waitFor()
-  const mainUnreadBefore = scaffold.ctx.agentTeam.inbox({ workspaceId: mainWorkspace.id }).totalUnreadCount
-  const arrivalPost = await scaffold.ctx.agentTeam.postMainMessageForAgent(stewardAgent, {
+  const mainUnreadBefore = activeScaffold.ctx.agentTeam.inbox({ workspaceId: mainWorkspace.id }).totalUnreadCount
+  const arrivalPost = await activeScaffold.ctx.agentTeam.postMainMessageForAgent(stewardAgent, {
     requestId: 'm2-11-main-arrival' as never, workspaceId: mainWorkspace.id,
     projectRef: streamProject.projectRef, body: '网关灰度已经就绪，等你确认',
   })
   expect(arrivalPost.kind).toBe('committed')
-  expect(scaffold.ctx.agentTeam.inbox({ workspaceId: mainWorkspace.id }).totalUnreadCount).toBe(mainUnreadBefore + 1)
+  expect(activeScaffold.ctx.agentTeam.inbox({ workspaceId: mainWorkspace.id }).totalUnreadCount).toBe(mainUnreadBefore + 1)
   const streamInboxCard = page.locator('button[class*="inboxCard"]')
-  // The card's name is the only place the quantity is written; the dot is its visible half.
   await expect.poll(async () => await streamInboxCard.getAttribute('aria-label'), { timeout: 20_000 }).toBe(`收件箱，${mainUnreadBefore + 1} 条未读`)
   await expect.poll(async () => await streamInboxCard.locator('[data-team-inbox-dot]').count()).toBe(1)
-  // The queue names the Project's Main stream: this is the row a reader follows to
-  // the very arrival they are being told about.
   const streamMainRow = page.locator('[data-team-inbox] button').filter({ hasText: '#stream-web · 主对话' })
   await streamMainRow.waitFor()
   await streamMainRow.click()
   await page.getByText('网关灰度已经就绪，等你确认', { exact: true }).waitFor()
-  // The page acknowledges the arrival on its own; once the Host watermark has moved,
-  // the mark and the count must clear together — one unread fact, one number.
   await expect.poll(async () => await streamInboxCard.getAttribute('aria-label'), { timeout: 20_000 }).toBe('收件箱')
   await expect.poll(async () => await streamInboxCard.locator('[data-team-inbox-dot]').count()).toBe(0)
-  expect(scaffold.ctx.agentTeam.inbox({ workspaceId: mainWorkspace.id }).totalUnreadCount).toBe(mainUnreadBefore)
+  expect(activeScaffold.ctx.agentTeam.inbox({ workspaceId: mainWorkspace.id }).totalUnreadCount).toBe(mainUnreadBefore)
 
-  // A quoted line in the Main stream is the same gesture as in a Thread: it names a Message already in this timeline, so
-  // it is a button that centres that row and pulses it. Without the wiring the row degrades to inert text — the defect
-  // the Human reported here.
   await composer.fill('引用测试：这条会被引用')
   await send.click()
   const quotedRow = page.locator('article').filter({ hasText: '引用测试：这条会被引用' }).first()
@@ -165,11 +150,7 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await mainQuotedRow.waitFor()
   const mainQuoteLine = mainQuotedRow.locator('[data-quote-line]')
   await expect.poll(() => mainQuoteLine.count()).toBe(1)
-  // A button, not a div: the inert fallback is exactly what the defect looked like.
   expect(await mainQuoteLine.evaluate(element => element.tagName)).toBe('BUTTON')
-  // The Main stream keeps its rows inert under the pointer — a feed row is an entry row, not the Thread's reading seat —
-  // while the action card still reveals. This is the deliberate split, so the journey states both halves: no row layer,
-  // card present.
   await quotedRow.hover()
   await settleAnimations(page)
   const mainHoverFacts = await quotedRow.evaluate(element => {
@@ -184,21 +165,15 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   expect(mainHoverFacts.cardOpacity).toBe('1')
   await mainQuoteLine.click()
   await expect.poll(async () => await quotedRow.getAttribute('data-reply-flash')).toBe('true')
-  // The attribute is the wiring; the pulse is the feedback. The Main stream takes the pulse without the row layer its
-  // Thread seat has, so the fill is read here rather than assumed from the attribute.
   await expect.poll(async () => quotedRow.evaluate(element => {
     const fill = getComputedStyle(element).backgroundColor
     return fill === 'rgba(0, 0, 0, 0)' ? 'none' : fill
   })).not.toBe('none')
 
-  // The composer picks no @all at version 2.
   await composer.fill('@')
   expect(await page.getByRole('option', { name: /通知所有成员/ }).count()).toBe(0)
   await composer.fill('')
 
-  // Chinese prose spaces no words, so an @ typed straight after it opens the
-  // picker — the same boundary delivery reads a call on. Inside an ASCII word
-  // the body is an address and the picker stays shut.
   const picker = page.getByRole('listbox', { name: '提及成员建议' })
   await composer.pressSequentially('把这个给@')
   await picker.waitFor()
@@ -217,7 +192,6 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await taskCard.waitFor()
   await toggle.click()
   await page.getByRole('checkbox', { name: '作为任务' }).check()
-  // The narrow lane reaches the same picker from the same boundary.
   await composer.pressSequentially('把这个给@')
   await picker.waitFor()
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'mention-picker-mobile.png'), fullPage: true })
@@ -230,18 +204,12 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
     .filter(element => element.getBoundingClientRect().right > window.innerWidth + 0.5).length)
   expect(overflowing).toBe(0)
 
-  // The global Task board: the cross-Workspace face the sidebar's board row
-  // opens. Exactly one sidebar row carries aria-current — the board itself,
-  // never the Workspace selector, because no Workspace overview stands under a
-  // global face (the collapsed states the Human screenshotted).
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
   const boardRow = page.getByRole('button', { name: '任务看板' })
   await boardRow.click()
   const boardPage = page.locator('[data-team-task-board]')
   await boardPage.waitFor()
-  // The stacked band is one band on every face: title line, 3px step, description line, and a stated height so the band
-  // cannot move with the data. Measured here across two of those faces in one render.
   const bandOf = async (): Promise<{ h: number; titleY: number; subY: number } | null> => page.evaluate(() => {
     const band = document.querySelector('[class*="surfaceHeader"]') as HTMLElement | null
     if (band === null) return null
@@ -253,8 +221,6 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   })
   const boardBand = await bandOf()
   expect(boardBand).not.toBeNull()
-  // The Inbox is the other stacked face, measured in the same render: identical band height and identical baselines, so a
-  // reader switching between them sees the feed start in the same place.
   await page.getByRole('button', { name: '收件箱' }).click()
   await page.waitForTimeout(400)
   const inboxBand = await bandOf()
@@ -266,9 +232,6 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   const globalCard = boardPage.getByRole('button', { name: /Task #1/ })
   await globalCard.waitFor()
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'task-board-page.png'), fullPage: true })
-  // The three cross-Workspace controls and the Workspace selector stand as one
-  // stack: every gap between them is some control's 2px top step, so all
-  // top-to-top distances must measure equal in this one render.
   const stackSteps = await page.evaluate(() => {
     const tops = ['button[aria-label="收件箱"]', 'button[aria-label="任务看板"]', 'button[aria-label="团队管理"]', '[data-team-workspace-trigger]']
       .map(selector => document.querySelector(selector)?.getBoundingClientRect().top)
@@ -276,14 +239,9 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   })
   expect(stackSteps[0]).toBeGreaterThan(0)
   expect(stackSteps).toEqual([stackSteps[0], stackSteps[0], stackSteps[0]])
-  // A card opens the Task's own Thread level, and the sidebar marker follows
-  // it off the board row: the board is a face, not a standing selection.
   await globalCard.click()
   await page.getByRole('heading', { name: /Task #1/ }).waitFor()
   await expect.poll(async () => await boardRow.getAttribute('aria-current')).toBe(null)
-  // Back to the board face, then the narrow width keeps the page itself free
-  // of horizontal overflow: the columns become the Project board's own sideways
-  // strip, so the containment that must hold is the document's, not the strip's.
   await boardRow.click()
   await boardPage.waitFor()
   await page.setViewportSize({ width: 390, height: 844 })
@@ -291,11 +249,6 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'task-board-page-narrow.png'), fullPage: true })
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
 
-  // Pointer capability is the one thing this sheet used to state unconditionally: every hover style
-  // now sits inside a hover-capable media query, so the bundled rules — not just the source the audit
-  // reads — keep them out of reach of a touch tap that never lifts. A second context with `hasTouch`
-  // cannot stand in here: the Team navigation a scenario builds is not in storage state, and the lane
-  // would have to rebuild it at 390 to find this page again.
   const pointerRules = await page.evaluate(() => {
     const rules = [...document.styleSheets].flatMap(sheet => {
       try { return [...sheet.cssRules] } catch { return [] }
@@ -309,4 +262,202 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   expect(pointerRules.bareHover).toBe(0)
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)
-import { join } from 'node:path'
+
+it('edits Project owners from the Project dialog under rules version 2 in real Web', async () => {
+  const { page, consoleWatch } = await openTeamPage()
+  const activeScaffold = scaffold!
+
+  await page.getByRole('button', { name: '新建项目' }).click()
+  const createProject = page.getByRole('dialog', { name: '新建项目' })
+  await createProject.getByLabel('名称').fill('owners-web')
+  await createProject.getByRole('button', { name: '创建项目' }).click()
+  await page.getByRole('button', { name: '# owners-web', exact: true }).waitFor()
+
+  await page.getByRole('button', { name: '添加 Agent' }).click()
+  const createAgent = page.getByRole('dialog', { name: '添加 Agent' })
+  await createAgent.getByLabel('名称').fill('steward')
+  await createAgent.getByLabel('说明').fill('负责交付')
+  await chooseMemberModel(page, createAgent)
+  await createAgent.getByRole('button', { name: '创建 Agent' }).click()
+  await page.getByText('steward', { exact: true }).waitFor({ timeout: 20_000 })
+
+  const openEditor = async () => {
+    await page.getByRole('button', { name: '# owners-web', exact: true }).hover()
+    await page.getByRole('button', { name: 'owners-web 的操作' }).click()
+    await page.getByRole('menuitem', { name: '编辑项目' }).click()
+    const editor = page.getByRole('dialog', { name: '编辑项目' })
+    await editor.waitFor()
+    return editor
+  }
+  const editor = await openEditor()
+  const owners = editor.getByRole('group', { name: '负责人' })
+  await owners.waitFor()
+  await owners.getByText('始终是负责人').waitFor()
+  expect(await owners.getByRole('button', { name: /^移除负责人/ }).count()).toBe(0)
+
+  await owners.getByLabel('新负责人的责任（可留空）').fill('负责交付与验收')
+  await owners.getByRole('button', { name: '添加负责人 @steward' }).click()
+  const remove = owners.getByRole('button', { name: '移除负责人 @steward' })
+  await remove.waitFor()
+  await owners.getByText('负责交付与验收').waitFor()
+  expect(await owners.getByRole('button', { name: '添加负责人 @steward' }).count()).toBe(0)
+  const workspaceId = activeScaffold.ctx.workspaceRegistry.list()[0]!.id
+  expect(activeScaffold.ctx.agentTeam.view({ workspaceId }).owners).toHaveLength(1)
+  expect(activeScaffold.ctx.agentTeam.view({ workspaceId }).owners[0]!.responsibility).toBe('负责交付与验收')
+
+  await owners.getByRole('button', { name: '编辑 @steward 的责任' }).click()
+  const field = owners.getByLabel('@steward 的责任')
+  await expect.poll(() => field.evaluate(element => element === element.ownerDocument.activeElement)).toBe(true)
+  const nameField = editor.getByLabel('名称')
+  await field.evaluate(element => { (element as HTMLElement).blur() })
+  const fieldSurface = await field.evaluate(element => {
+    const style = getComputedStyle(element)
+    return { size: style.fontSize, leading: style.lineHeight, radius: style.borderRadius, stroke: style.borderColor, fill: style.backgroundColor }
+  })
+  const inputSurface = await nameField.evaluate(element => {
+    const style = getComputedStyle(element)
+    const frame = getComputedStyle(element.parentElement as HTMLElement)
+    return { size: style.fontSize, leading: style.lineHeight, radius: frame.borderRadius, stroke: frame.borderColor, fill: frame.backgroundColor }
+  })
+  expect(fieldSurface).toEqual(inputSurface)
+  await nameField.focus()
+  const inputFocusStroke = await nameField.evaluate(element => getComputedStyle(element.parentElement as HTMLElement).borderColor)
+  await field.focus()
+  const fieldFocus = await field.evaluate(element => {
+    const style = getComputedStyle(element)
+    return { stroke: style.borderColor, outline: style.outlineStyle }
+  })
+  expect(fieldFocus.stroke).toBe(inputFocusStroke)
+  expect(fieldFocus.outline).toBe('none')
+  await field.fill('负责交付、验收与发布')
+  const [cancelBox, saveBox, fieldBox] = await Promise.all([
+    owners.getByRole('button', { name: '取消' }).boundingBox(),
+    owners.getByRole('button', { name: '保存' }).boundingBox(),
+    field.boundingBox(),
+  ])
+  expect(saveBox!.x).toBeCloseTo(cancelBox!.x + cancelBox!.width + 8, 0)
+  expect(saveBox!.x + saveBox!.width).toBeCloseTo(fieldBox!.x + fieldBox!.width, 0)
+  await settleLayout(page)
+  await page.screenshot({ path: join(UI04_SHOTS, 'project-owners-responsibility-edit.png'), fullPage: true })
+  await owners.getByRole('button', { name: '保存' }).click()
+  await owners.getByText('负责交付、验收与发布').waitFor()
+  expect(activeScaffold.ctx.agentTeam.view({ workspaceId }).owners[0]!.responsibility).toBe('负责交付、验收与发布')
+  await expect.poll(() => owners.getByRole('button', { name: '编辑 @steward 的责任' })
+    .evaluate(element => element === element.ownerDocument.activeElement)).toBe(true)
+  await page.screenshot({ path: join(UI04_SHOTS, 'project-owners-desktop.png'), fullPage: true })
+  await editor.getByRole('button', { name: '关闭', exact: true }).click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('[data-sidebar-collapsed="true"]').waitFor()
+  await openSidebar(page)
+  const narrowEditor = await openEditor()
+  const narrowOwners = narrowEditor.getByRole('group', { name: '负责人' })
+  await narrowOwners.getByRole('button', { name: '移除负责人 @steward' }).waitFor()
+  await narrowOwners.getByText('负责交付、验收与发布').waitFor()
+  await settleLayout(page)
+  await page.screenshot({ path: join(UI04_SHOTS, 'project-owners-mobile.png'), fullPage: true })
+
+  await narrowOwners.getByRole('button', { name: '移除负责人 @steward' }).click()
+  await narrowOwners.getByRole('button', { name: '添加负责人 @steward' }).waitFor()
+  expect(activeScaffold.ctx.agentTeam.view({ workspaceId }).owners).toHaveLength(0)
+  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
+}, 180_000)
+
+it('lands a started Task on its board card, keyboard and mouse', async () => {
+  const { page, consoleWatch } = await openTeamPage()
+
+  await page.getByRole('button', { name: '新建项目' }).click()
+  const createProject = page.getByRole('dialog', { name: '新建项目' })
+  await createProject.getByLabel('名称').fill('delivery')
+  await createProject.getByRole('button', { name: '创建项目' }).click()
+  await page.getByRole('button', { name: '# delivery', exact: true }).click()
+
+  const active = () => page.evaluate(() => {
+    const element = document.activeElement as HTMLElement | null
+    return {
+      role: element?.getAttribute('role') ?? null,
+      label: element?.getAttribute('aria-label') ?? null,
+      taskRef: element?.getAttribute('data-team-task-ref') ?? null,
+      focusVisible: element?.matches(':focus-visible') ?? false,
+    }
+  })
+
+  const startTask = async (body: string, send: 'enter' | 'click'): Promise<void> => {
+    const composer = page.getByRole('textbox', { name: '消息内容' })
+    await composer.waitFor()
+    const toggle = page.getByRole('button', { name: '讨论/任务' })
+    await toggle.focus()
+    await page.keyboard.press('Space')
+    await expect.poll(() => toggle.getAttribute('aria-pressed')).toBe('true')
+    await page.getByRole('checkbox', { name: '作为任务' }).check()
+    await composer.fill(body)
+    if (send === 'enter') await composer.press('Enter')
+    else await page.getByRole('button', { name: '发送', exact: true }).click()
+    await expect.poll(() => page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true')
+  }
+
+  await startTask('键盘发送的任务', 'enter')
+  await expect.poll(async () => (await active()).label).toBe('打开 Task #1')
+  const keyboard = await active()
+  expect(keyboard.role).not.toBe('tab')
+  expect(keyboard.taskRef).toMatch(/^task:/)
+  expect(keyboard.focusVisible).toBe(true)
+  await settleLayout(page)
+  await page.screenshot({ path: join(UI04_SHOTS, 'task-focus-card-desktop.png'), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('[data-sidebar-collapsed="true"]').waitFor()
+  await settleLayout(page)
+  await page.screenshot({ path: join(UI04_SHOTS, 'task-focus-card-narrow.png'), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 960 })
+
+  await page.getByRole('tab', { name: '主对话' }).click()
+  await startTask('鼠标发送的任务', 'click')
+  await expect.poll(async () => (await active()).label).toBe('打开 Task #2')
+  const mouse = await active()
+  expect(mouse.role).not.toBe('tab')
+  expect(mouse.taskRef).toMatch(/^task:/)
+  expect(mouse.focusVisible).toBe(false)
+  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
+}, 180_000)
+
+it('opens a taskless thread from its ref chip in real Web', async () => {
+  const { page, consoleWatch } = await openTeamPage()
+  const activeScaffold = scaffold!
+  await page.getByRole('button', { name: '新建项目' }).click()
+  const projectDialog = page.getByRole('dialog', { name: '新建项目' })
+  await projectDialog.getByLabel('名称').fill('ref-repro')
+  await projectDialog.getByLabel('说明').fill('thread ref chips')
+  await projectDialog.getByRole('button', { name: '创建项目' }).click()
+  await page.getByRole('button', { name: '# ref-repro', exact: true }).click()
+  await page.getByRole('heading', { name: '# ref-repro', exact: true }).waitFor()
+  const projectComposer = page.getByRole('textbox', { name: '消息内容' })
+  const workspaceId = activeScaffold.ctx.workspaceRegistry.list()[0]!.id
+  const refProject = activeScaffold.ctx.agentTeam.view({ workspaceId }).projects.find((entry: { name: string }) => entry.name === 'ref-repro')!
+  const started = await activeScaffold.ctx.agentTeam.startThread({
+    requestId: 'e2e-thread-ref' as never, workspaceId,
+    projectRef: refProject.projectRef, kind: 'discussion', body: '**ALPHA-ROOT-MARKER** alpha discussion opens here',
+  })
+  const alphaRef = (started as { thread: { threadRef: string } }).thread.threadRef
+  const alphaShort = `thread:${(alphaRef.slice('thread:'.length) as string).replaceAll('-', '').slice(0, 8).toLowerCase()}`
+  await projectComposer.fill(`BETA-ROOT-MARKER citing ${alphaShort} for the chip`)
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  const betaArticle = page.locator('[data-team-project] article').filter({ hasText: 'BETA-ROOT-MARKER' })
+  await betaArticle.waitFor()
+  const chip = betaArticle.locator(`button[title="${alphaShort}"]`)
+  await chip.waitFor()
+  await expect.poll(() => chip.textContent()).toMatch(/ALPHA-ROOT-MARKER alpha discussion open…/)
+  expect(await chip.textContent()).not.toContain('**')
+  await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip.png'), fullPage: true })
+  await chip.click()
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { discussionRef?: string }).discussionRef), { timeout: 10_000 }).toBe(alphaRef)
+  await page.locator(`[data-team-panel="${alphaRef}"]`).waitFor({ timeout: 20_000 })
+  await page.locator(`main[data-team-thread="${alphaRef}"]`).waitFor({ state: 'detached', timeout: 5_000 })
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { discussionRef?: string; threadRef?: string }).discussionRef)).toBe(alphaRef)
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { threadRef?: string }).threadRef)).toBeUndefined()
+  await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip-opened.png'), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip-opened-narrow.png'), fullPage: true })
+  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
+}, 180_000)

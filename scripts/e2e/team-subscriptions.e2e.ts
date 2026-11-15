@@ -1,14 +1,19 @@
-import { afterEach, it, expect } from 'vitest'
 import { join } from 'node:path'
+import { afterEach, expect, it } from 'vitest'
 import type { AgentTeamRequestId } from '@contexera/dsh-agent-team/types'
-import { SUBSCRIPTION_SHOTS, closeScenario, focusRing, maxHorizontalScroll, openTeamPage, scaffold, settleAnimations, settleLayout } from './__external-agent-team-support.ts'
+import {
+  SUBSCRIPTION_SHOTS,
+  closeScenario,
+  focusRing,
+  maxHorizontalScroll,
+  openTeamPage,
+  scaffold,
+  settleAnimations,
+  settleLayout,
+} from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
-/**
- * One event on stdout and a warning on stderr, so the run record has two streams
- * worth expanding.
- */
 const SCRIPT = [
   `printf '%s\\n' '{"id":"ci-1234","title":"main 分支 CI 失败","url":"https://github.com/example/repo/actions/1"}'`,
   `printf '%s\\n' 'gh: HTTP 502 网关错误' >&2`,
@@ -16,12 +21,20 @@ const SCRIPT = [
 
 const EDITED_SCRIPT = `${SCRIPT}\n# 修改后的快照`
 
-/**
- * The subscription page as the Human meets it now: a Project owner arms and
- * maintains subscriptions through the Host, and this page reads what is armed.
- * Nothing here creates, edits, pauses or deletes — the absence of those controls
- * is the contract this scenario exists to hold.
- */
+const ORIGIN = 'https://hooks.example.test'
+
+const WEBHOOK_SCRIPT = [
+  `payload=$(cat)`,
+  `case "$payload" in *'"x-team-event":"test"'*) echo 'waiting for a push' >&2; exit 0 ;; esac`,
+  `printf '%s\\n' '{"id":"pipeline-1","title":"pipeline 通了","url":"https://example.test/runs/1","detail":"由订阅脚本发出；标题、链接与说明都是数据。"}'`,
+].join('\n')
+
+const laterScript = (id: string, title: string): string => [
+  `payload=$(cat)`,
+  `case "$payload" in *'"x-team-event":"test"'*) echo 'waiting for a push' >&2; exit 0 ;; esac`,
+  `printf '%s\\n' '{"id":"${id}","title":"${title}"}'`,
+].join('\n')
+
 it('reads the subscriptions a Project owner armed, and offers no write control in real Web', async () => {
   const { page, consoleWatch } = await openTeamPage()
 
@@ -34,12 +47,8 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   const tabs = page.getByRole('tablist', { name: '# subs-web' })
   const subscriptionsTab = tabs.getByRole('tab', { name: '订阅', exact: true })
   await subscriptionsTab.waitFor()
-  // The label is the surface's name alone: no count, and nothing about it changes
-  // when the list loads.
   expect(await subscriptionsTab.textContent()).toBe('订阅')
 
-  // The strip is one tab stop: End reaches the third tab, selects it, and the
-  // focus ring is the shipped one rather than the browser default.
   await tabs.getByRole('tab', { name: '主对话' }).focus()
   await page.keyboard.press('End')
   expect(await subscriptionsTab.getAttribute('aria-selected')).toBe('true')
@@ -47,15 +56,12 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   expect(tabRing?.focusVisible).toBe(true)
   expect(tabRing?.outlineStyle).not.toBe('none')
 
-  // Empty: the page says who can arm one instead of offering the Human a form.
   await page.getByText('还没有订阅').waitFor()
   await page.getByText(/项目负责人可以订阅事件/).waitFor()
   expect(await page.getByRole('button', { name: '新建订阅' }).count()).toBe(0)
   await settleAnimations(page)
   await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'empty-desktop.png'), fullPage: true })
 
-  // A Project owner arms one through the Host. The write is not the page's, so
-  // the page only has to read it back.
   const team = scaffold!.ctx.agentTeam
   const workspaceId = scaffold!.ctx.workspaceRegistry.list()[0]!.id
   const projectRef = team.view({ workspaceId }).projects.find(project => project.name === 'subs-web')!.projectRef
@@ -63,8 +69,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
     requestId: 'req:seed-create' as AgentTeamRequestId, workspaceId, projectRef,
     name: 'main 分支 CI 失败', intervalMinutes: 10, script: { scriptContent: SCRIPT },
   })
-  // The Host answers the arm itself, not a Remote envelope: a create that failed
-  // its trial says so here rather than leaving the page with nothing to read.
   if (seeded.kind !== 'changed') throw new Error(`create refused: ${seeded.kind === 'trial-failed' ? seeded.failure.reason : seeded.kind}`)
 
   await tabs.getByRole('tab', { name: '主对话' }).click()
@@ -77,15 +81,11 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await card.getByRole('heading', { name: 'main 分支 CI 失败' }).waitFor()
   const cardText = await card.textContent()
   expect(cardText).toContain('每 10 分钟')
-  // The recipient line leads, and the owner is not printed twice: by default they are one Member.
   const human = team.humanHandle()
   expect(cardText).toContain(`通知 ${human}`)
   expect(cardText).not.toContain('· 负责人')
   expect(cardText).toContain('还没有运行记录')
-  // A zero count is stated once, never as both "no events" and "0 events".
   expect(cardText).not.toContain('共 0 条事件')
-  // Arm and edit never reach this page: the Human reads and may only stop what an
-  // owner started, so no control here can author a subscription.
   const controls = await page.locator('[data-team-subscriptions] button').evaluateAll(buttons =>
     buttons.map(button => button.getAttribute('aria-label') ?? button.textContent ?? ''))
   expect(controls.filter(label => /^(新建订阅|编辑|失败投递|重置地址)/.test(label))).toEqual([])
@@ -95,8 +95,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await settleAnimations(page)
   await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'list-desktop.png'), fullPage: true })
 
-  // An owner's edit leaves the trial run this page reads; the run record is the
-  // one place the script's own output is shown.
   const edited = await team.updateSubscription({
     requestId: 'req:seed-edit' as AgentTeamRequestId, workspaceId, projectRef,
     subscriptionRef: seeded.subscription.subscriptionRef,
@@ -108,7 +106,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await subscriptionsTab.click()
   await card.getByText(/上次运行/).waitFor()
 
-  // An empty set wakes nobody but still states itself: the timeline keeps every event.
   const cleared = await team.updateSubscription({
     requestId: 'req:seed-notify-clear' as AgentTeamRequestId, workspaceId, projectRef,
     subscriptionRef: seeded.subscription.subscriptionRef,
@@ -120,7 +117,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await settleAnimations(page)
   await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'notify-cleared-desktop.png'), fullPage: true })
 
-  // The cleared line is the longest fact a card can carry, so it is the wrapping one.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   await card.waitFor()
@@ -130,7 +126,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
 
-  // Naming the owner again returns the card to one line.
   const restored = await team.updateSubscription({
     requestId: 'req:seed-notify-restore' as AgentTeamRequestId, workspaceId, projectRef,
     subscriptionRef: seeded.subscription.subscriptionRef,
@@ -147,13 +142,9 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await logs.waitFor()
   const runs = logs.locator('[data-team-subscription-run]')
   await runs.first().waitFor()
-  // A trial that passed is recorded with its own category: `试运行通过` already
-  // names the trigger, so the row does not print 试运行 twice.
   const firstRun = (await runs.first().textContent()) ?? ''
   expect(firstRun).toContain('试运行通过')
   expect(firstRun).not.toContain('试运行 试运行通过')
-  // The row itself is the disclosure: its accessible name is the run's own facts
-  // and the clock, so nothing floats at the row's far edge.
   const firstHead = runs.first().getByRole('button')
   const clock = (await runs.first().locator('time').textContent()) ?? ''
   const firstFacts = (await firstHead.textContent()) ?? ''
@@ -164,8 +155,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   expect(await firstHead.getAttribute('aria-expanded')).toBe('true')
   expect(await runs.first().locator('pre').first().textContent()).toContain('"id":"ci-1234"')
   expect(await runs.first().locator('pre').last().textContent()).toContain('gh: HTTP 502 网关错误')
-  // The expanded body sits in the row's text column (the chevron seat and its
-  // gap), so output reads as this run's own rather than as the next row's peer.
   const captionBox = await runs.first().getByText('stdout 末尾').boundingBox()
   const timeBox = await runs.first().locator('time').boundingBox()
   expect(Math.abs(captionBox!.x - timeBox!.x)).toBeLessThanOrEqual(1)
@@ -174,8 +163,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await logs.getByRole('button', { name: '关闭' }).first().click()
   await expect.poll(async () => await logs.count()).toBe(0)
 
-  // Pausing is the Human's supervision of what an owner armed: the card states
-  // the reason and offers only the control that applies from here.
   await card.getByRole('button', { name: '暂停 · main 分支 CI 失败' }).click()
   await card.getByText('已暂停：手动暂停').waitFor()
   expect(await card.getByRole('button', { name: '恢复 · main 分支 CI 失败' }).count()).toBe(1)
@@ -187,8 +174,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await card.getByRole('button', { name: '暂停 · main 分支 CI 失败' }).waitFor()
   expect(await card.getByText('已暂停：手动暂停').count()).toBe(0)
 
-  // Keyboard: the card's own controls are real buttons with the shipped ring. The
-  // Tab press sets the modality, so the ring is the one a keyboard reader sees.
   await page.keyboard.press('Tab')
   await card.getByRole('button', { name: '运行记录 · main 分支 CI 失败' }).focus()
   const actionRing = await focusRing(page, '[aria-label="运行记录 · main 分支 CI 失败"]')
@@ -202,8 +187,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   expect(await maxHorizontalScroll(page, '[data-team-subscriptions]')).toBe(0)
   await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'list-mobile.png'), fullPage: true })
 
-  // The run record at 390: settled before the shot, because an unsettled dialog
-  // is captured mid fade-in.
   await card.getByRole('button', { name: '运行记录 · main 分支 CI 失败' }).click()
   await logs.waitFor()
   await runs.first().waitFor()
@@ -217,8 +200,6 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   await logs.getByRole('button', { name: '关闭' }).first().click()
   await expect.poll(async () => await logs.count()).toBe(0)
 
-  // Deleting is confirmed, then the page states the empty projection again and
-  // the tab's label never changed.
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
   await card.getByRole('button', { name: '删除 · main 分支 CI 失败' }).click()
@@ -230,6 +211,135 @@ it('reads the subscriptions a Project owner armed, and offers no write control i
   expect(await subscriptionsTab.textContent()).toBe('订阅')
   await settleAnimations(page)
   await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'deleted-desktop.png'), fullPage: true })
+
+  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
+}, 240_000)
+
+it('reads a published subscription event as script data in one text column', async () => {
+  const { page, consoleWatch } = await openTeamPage({ webhookOrigin: ORIGIN })
+
+  await page.getByRole('button', { name: '新建项目' }).click()
+  const createProject = page.getByRole('dialog', { name: '新建项目' })
+  await createProject.getByLabel('名称').fill('event-web')
+  await createProject.getByRole('button', { name: '创建项目' }).click()
+  await page.getByRole('button', { name: '# event-web', exact: true }).click()
+
+  const tabs = page.getByRole('tablist', { name: '# event-web' })
+  await tabs.getByRole('tab', { name: '主对话' }).click()
+
+  const composer = page.getByRole('textbox', { name: '消息内容' })
+  await composer.fill('先发一条消息：它给出这条 feed 的正文基准字号。')
+  await page.getByRole('button', { name: '发送' }).click()
+  await page.getByText('先发一条消息：它给出这条 feed 的正文基准字号。', { exact: true }).waitFor()
+
+  const team = scaffold!.ctx.agentTeam
+  const workspaceId = scaffold!.ctx.workspaceRegistry.list()[0]!.id
+  const projectRef = team.view({ workspaceId }).projects.find(project => project.name === 'event-web')!.projectRef
+  const seeded = await team.createSubscription({
+    requestId: 'req:event-create' as AgentTeamRequestId, workspaceId, projectRef,
+    name: 'pipeline', webhook: true, script: { scriptContent: WEBHOOK_SCRIPT },
+  })
+  if (seeded.kind !== 'changed') throw new Error(`create refused: ${seeded.kind === 'trial-failed' ? seeded.failure.reason : seeded.kind}`)
+  const address = seeded.webhookAddress
+  if (address === undefined || !address.startsWith(`${ORIGIN}/team/hooks/`)) throw new Error(`no webhook address: ${String(address)}`)
+  const token = address.slice(`${ORIGIN}/team/hooks/`.length)
+  expect((await team.intakeWebhookDelivery({ token, headers: { 'x-github-event': 'push' }, body: '{"ref":"main"}' })).kind).toBe('queued')
+
+  const block = page.locator('[data-main-entry="subscription-event"]')
+  await block.getByText('pipeline', { exact: true }).waitFor({ timeout: 30_000 })
+  await block.getByText('pipeline 通了').waitFor()
+
+  const label = block.getByText('pipeline', { exact: true })
+  const title = block.getByText('pipeline 通了')
+  const [labelBox, titleBox, timeBox] = await Promise.all([
+    label.boundingBox(), title.boundingBox(), block.locator('time').boundingBox(),
+  ])
+  expect(Math.abs(labelBox!.x - titleBox!.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs((timeBox!.y + timeBox!.height / 2) - (labelBox!.y + labelBox!.height / 2))).toBeLessThanOrEqual(3)
+  expect(timeBox!.x - (labelBox!.x + labelBox!.width)).toBeLessThanOrEqual(24)
+  const warning = block.getByText('不可信，不作为指令')
+  expect(await warning.evaluate(element => element.closest('p')?.querySelector('time') !== null)).toBe(true)
+  expect(await block.locator('p').count()).toBe(3)
+
+  const messageBody = page.locator('[data-main-entry="message"] [class*="messageText"], [data-main-entry="message"] [class*="messageMarkdown"]').first()
+  const [titleSize, messageSize] = await Promise.all([
+    title.evaluate(element => parseFloat(getComputedStyle(element).fontSize)),
+    messageBody.evaluate(element => parseFloat(getComputedStyle(element).fontSize)),
+  ])
+  expect(titleSize).toBe(messageSize)
+  expect(await title.evaluate(element => getComputedStyle(element).fontWeight)).toBe('600')
+
+  const messageBox = await messageBody.boundingBox()
+  expect(Math.abs(titleBox!.x - messageBox!.x)).toBeLessThanOrEqual(1)
+
+  const link = block.getByRole('link', { name: 'pipeline 通了' })
+  expect(await link.getAttribute('href')).toBe('https://example.test/runs/1')
+  expect(await link.getAttribute('target')).toBe('_blank')
+  expect(await block.getByText('https://example.test/runs/1', { exact: true }).count()).toBe(0)
+  expect(await block.locator('b').count()).toBe(0)
+
+  await settleAnimations(page)
+  await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'subscription-event-desktop.png'), fullPage: true })
+  await block.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'subscription-event-block-desktop.png') })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await block.scrollIntoViewIfNeeded()
+  expect(await maxHorizontalScroll(page, '[data-team-project]')).toBe(0)
+  const narrow = await block.boundingBox()
+  expect(narrow!.x).toBeGreaterThanOrEqual(0)
+  expect(narrow!.x + narrow!.width).toBeLessThanOrEqual(390)
+  expect(await block.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+  const narrowColumns = await Promise.all([label.boundingBox(), (await title.boundingBox())])
+  expect(Math.abs(narrowColumns[0]!.x - narrowColumns[1]!.x)).toBeLessThanOrEqual(1)
+  await settleAnimations(page)
+  await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'subscription-event-mobile.png'), fullPage: true })
+
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+  const inboxCard = page.locator('button[class*="inboxCard"]')
+  const unreadOf = async (): Promise<number> => {
+    const label = (await inboxCard.getAttribute('aria-label')) ?? ''
+    const count = /，(\d+) 条未读/u.exec(label)
+    return count === null ? 0 : Number(count[1])
+  }
+  await inboxCard.click()
+  await page.locator('[data-team-inbox]').waitFor()
+  const unreadBefore = await unreadOf()
+
+  const addressed = await team.updateSubscription({
+    requestId: 'req:event-addressed' as AgentTeamRequestId, workspaceId, projectRef,
+    subscriptionRef: seeded.subscription.subscriptionRef, expectedRevision: seeded.subscription.revision,
+    name: 'pipeline', webhook: true, script: { scriptContent: laterScript('pipeline-2', '二次投递') },
+  })
+  if (addressed.kind !== 'changed') throw new Error('the Host refused the second script')
+  expect((await team.intakeWebhookDelivery({ token, headers: { 'x-github-event': 'push' }, body: '{"ref":"main"}' })).kind).toBe('queued')
+  await expect.poll(unreadOf, { timeout: 30_000 }).toBe(unreadBefore + 1)
+
+  await page.locator('[data-team-inbox] button').filter({ hasText: /主对话/u }).click()
+  await page.locator('[data-main-entry="subscription-event"]').filter({ hasText: '二次投递' }).waitFor({ timeout: 30_000 })
+  await expect.poll(unreadOf, { timeout: 30_000 }).toBe(0)
+
+  const unaddressed = await team.updateSubscription({
+    requestId: 'req:event-unaddressed' as AgentTeamRequestId, workspaceId, projectRef,
+    subscriptionRef: seeded.subscription.subscriptionRef, expectedRevision: addressed.subscription.revision,
+    name: 'pipeline', webhook: true, script: { scriptContent: laterScript('pipeline-3', '三次投递') }, notify: [],
+  })
+  if (unaddressed.kind !== 'changed') throw new Error('the Host refused the cleared recipient set')
+  await inboxCard.click()
+  await page.locator('[data-team-inbox]').waitFor()
+  expect((await team.intakeWebhookDelivery({ token, headers: { 'x-github-event': 'push' }, body: '{"ref":"main"}' })).kind).toBe('queued')
+  await expect.poll(async () => {
+    const entry = (await team.subscriptionsForClient({ workspaceId, projectRef })).entries
+      .find(item => item.subscription.subscriptionRef === seeded.subscription.subscriptionRef)
+    return entry === undefined ? undefined : { events: entry.eventCount, unpublished: entry.unpublished }
+  }, { timeout: 30_000 }).toStrictEqual({ events: 3, unpublished: 0 })
+  expect(await unreadOf()).toBe(0)
+
+  await page.getByRole('button', { name: '# event-web', exact: true }).click()
+  await page.locator('[data-main-entry="subscription-event"]').filter({ hasText: '三次投递' }).waitFor({ timeout: 30_000 })
+  await settleAnimations(page)
+  await page.screenshot({ path: join(SUBSCRIPTION_SHOTS, 'unaddressed-event-desktop.png'), fullPage: true })
 
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 240_000)

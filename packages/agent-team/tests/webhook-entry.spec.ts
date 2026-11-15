@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
@@ -167,10 +167,13 @@ describe('the public webhook entry', () => {
     expect((await post(entry.base, `/team/hooks/${entry.token}`, { body: '{}' })).status, 'a paused subscription').toBe(409)
     await entry.ctx.agentTeam.resumeSubscription({ requestId: requestId('resume'), workspaceId, projectRef: entry.projectRef,
       subscriptionRef: entry.subscriptionRef as never, expectedRevision: 1 })
+    const pumpSpy = vi.spyOn(entry.ctx.agentTeam as unknown as { pumpWebhookAdmissions(): Promise<void> }, 'pumpWebhookAdmissions')
+      .mockResolvedValue(undefined)
     for (let index = 0; index < 10; index += 1) {
       expect((await post(entry.base, `/team/hooks/${entry.token}`, { body: `{"n":${index}}` })).status).toBe(202)
     }
     const full = await post(entry.base, `/team/hooks/${entry.token}`, { body: '{}' })
+    pumpSpy.mockRestore()
     expect(full.status, 'the eleventh delivery').toBe(429)
     expect(full.headers.get('retry-after')).toBe('60')
   })

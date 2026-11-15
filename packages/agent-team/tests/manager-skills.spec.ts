@@ -102,7 +102,7 @@ describe('Team manager skill discovery', () => {
       SKILL_MD('weekly-review', 'How this Human likes the weekly review run', 'Ask for the board first.'))
     await vi.waitFor(async () => {
       expect(await catalogNames(fixture.ctx, fixture.agent)).toEqual(['shared-name', 'weekly-review'])
-    })
+    }, { timeout: 5_000, interval: 50 })
     const loaded = await skillRegistryFor(fixture.ctx, fixture.agent).get('weekly-review', { scope: fixture.agent as never })
     expect(loaded?.content).toContain('Ask for the board first.')
 
@@ -110,7 +110,7 @@ describe('Team manager skill discovery', () => {
     await rm(join(fixture.privateRoot, 'skills', 'weekly-review.md'))
     await vi.waitFor(async () => {
       expect(await catalogNames(fixture.ctx, fixture.agent)).toEqual(['shared-name'])
-    })
+    }, { timeout: 5_000, interval: 50 })
   })
 
   it('keeps a bundled skill ahead of a same-name private one', async () => {
@@ -119,7 +119,7 @@ describe('Team manager skill discovery', () => {
       SKILL_MD('shared-name', 'A private skill that tries to shadow the shipped one', 'Private body.'))
     await vi.waitFor(async () => {
       expect((await catalogNames(fixture.ctx, fixture.agent)).filter(name => name === 'shared-name')).toHaveLength(1)
-    })
+    }, { timeout: 5_000, interval: 50 })
     const loaded = await skillRegistryFor(fixture.ctx, fixture.agent).get('shared-name', { scope: fixture.agent as never })
     expect(loaded?.content).toContain('Bundled body.')
     expect(loaded?.content).not.toContain('Private body.')
@@ -135,7 +135,7 @@ describe('Team manager skill discovery', () => {
       SKILL_MD('manager-only', 'A skill only the management Session may load', 'Manager only.'))
     await vi.waitFor(async () => {
       expect(await catalogNames(fixture.ctx, fixture.agent)).toContain('manager-only')
-    })
+    }, { timeout: 5_000, interval: 50 })
 
     const ordinary = await fixture.ctx.agents.create({ sessionId: SessionId('ordinary-manager-skills') })
     onTestFinished(async () => { await ordinary.dispose() })

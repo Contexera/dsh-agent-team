@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { fireEvent, waitFor } from '@testing-library/react'
+import { fireEvent, waitFor, within } from '@testing-library/react'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import type { AgentTeamPostMainMessageRequest, AgentTeamPutAttachmentRequest, AgentTeamReplyRequest } from '@contexera/dsh-agent-team/types'
-import { pressStartTask, runtimeWithTeam } from './harness.tsx'
+import { pressStartTask, pressStartThread, runtimeWithTeam } from './harness.tsx'
 usePinnedBrowserLanguages('zh-CN')
 
 type Runtime = Awaited<ReturnType<typeof runtimeWithTeam>>
@@ -307,5 +307,132 @@ describe('Team send retry', () => {
     const [newRequest] = runtime.reply.mock.calls[1]!
     expect(newRequest.body).toBe('新回复')
     expect(newRequest.requestId).not.toBe(oldRequest.requestId)
+  })
+
+  it('keeps one Main message when a tab remount happens before its delayed receipt', async () => {
+    const runtime = await openProject()
+    const originalPost = runtime.postMainMessage.getMockImplementation()!
+    let resolvePost!: () => void
+    runtime.postMainMessage.mockImplementationOnce(async request => {
+      const result = await originalPost(request)
+      return new Promise<Awaited<ReturnType<typeof originalPost>>>(resolve => {
+        resolvePost = () => { resolve(result) }
+      })
+    })
+
+    const body = 'mounted send remains one Main message'
+    typeDraft(runtime, body)
+    fireEvent.click(await waitForSend(runtime))
+    await waitFor(() => { expect(runtime.postMainMessage).toHaveBeenCalledTimes(1) })
+
+    fireEvent.click(runtime.view.getByRole('tab', { name: '看板' }))
+    await waitFor(() => { expect(runtime.view.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true') })
+    fireEvent.click(runtime.view.getByRole('tab', { name: '主对话' }))
+    await waitFor(() => { expect(runtime.view.getByRole('tab', { name: '主对话' }).getAttribute('aria-selected')).toBe('true') })
+
+    const input = runtime.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
+    expect(input.value).toBe(body)
+    fireEvent.click(runtime.view.getByRole('button', { name: '发送' }))
+    resolvePost()
+
+    await waitFor(() => { expect(input.value).toBe('') })
+    expect(runtime.postMainMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores a lost-ack Task attempt, its attachment, and one Host fact on tab remount', async () => {
+    const runtime = await openProject()
+    const originalStart = runtime.startThread.getMockImplementation()!
+    let resolveStart!: () => void
+    let firstResult!: Awaited<ReturnType<typeof originalStart>>
+    runtime.startThread.mockImplementationOnce(async request => {
+      firstResult = await originalStart(request)
+      return new Promise<Awaited<ReturnType<typeof originalStart>>>(resolve => {
+        resolveStart = () => { resolve(carrierFailure('agentTeam/startThread') as never) }
+      })
+    })
+    runtime.startThread.mockImplementationOnce(async () => firstResult)
+
+    const body = 'lost-ack Task keeps its mode and file'
+    typeDraft(runtime, body)
+    pressStartTask(runtime.view)
+    await addFiles(runtime, [new File(['png'], 'main-reopen.png', { type: 'image/png' })])
+    fireEvent.click(await waitForSend(runtime))
+    await waitFor(() => { expect(runtime.startThread).toHaveBeenCalledTimes(1) })
+
+    fireEvent.click(runtime.view.getByRole('tab', { name: '看板' }))
+    await waitFor(() => { expect(runtime.view.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true') })
+    fireEvent.click(runtime.view.getByRole('tab', { name: '主对话' }))
+    await waitFor(() => { expect(runtime.view.getByRole('tab', { name: '主对话' }).getAttribute('aria-selected')).toBe('true') })
+
+    const input = runtime.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
+    expect(input.value).toBe(body)
+    expect(runtime.view.getByRole('button', { name: '移除 main-reopen.png' })).toBeTruthy()
+    fireEvent.click(runtime.view.getByRole('button', { name: '发送' }))
+    resolveStart()
+
+    await runtime.view.findByRole('alert')
+    fireEvent.click(await waitForSend(runtime))
+    await waitFor(() => { expect(input.value).toBe('') })
+    expect(runtime.startThread).toHaveBeenCalledTimes(2)
+    expect(runtime.startThread.mock.calls[1]![0]).toEqual(runtime.startThread.mock.calls[0]![0])
+    expect(runtime.startThread.mock.calls[1]![0]).toMatchObject({ kind: 'task', attachments: ['attachment:1'] })
+    expect(runtime.putAttachment).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['delayed', 'lost'] as const)('resumes a discussion reply after reopening with a %s receipt', async receipt => {
+    const runtime = await openProject()
+    pressStartThread(runtime.view)
+    typeDraft(runtime, '讨论回复重试')
+    fireEvent.click(await waitForSend(runtime))
+    const card = await runtime.view.findByRole('button', { name: /^打开讨论：讨论回复重试/ })
+    fireEvent.click(card)
+    await runtime.view.findByRole('button', { name: '关闭讨论' })
+    const panel = () => runtime.view.container.querySelector('[data-team-panel]') as HTMLElement
+
+    const originalReply = runtime.reply.getMockImplementation()!
+    let resolveReply!: () => void
+    let firstResult!: Awaited<ReturnType<typeof originalReply>>
+    runtime.reply.mockImplementationOnce(async request => {
+      firstResult = await originalReply(request)
+      return new Promise<Awaited<ReturnType<typeof originalReply>>>(resolve => {
+        resolveReply = () => {
+          resolve(receipt === 'lost' ? carrierFailure('agentTeam/reply') as never : firstResult)
+        }
+      })
+    })
+    if (receipt === 'lost') runtime.reply.mockImplementationOnce(async () => firstResult)
+
+    const body = '关掉再打开，仍是同一笔回复'
+    fireEvent.change(within(panel()).getByRole('textbox', { name: '消息内容' }), { target: { value: body } })
+    if (receipt === 'lost') {
+      const fileInput = panel().querySelector('input[type="file"]') as HTMLInputElement
+      fireEvent.change(fileInput, { target: { files: [new File(['original file'], 'reply.txt', { type: 'text/plain' })] } })
+      await within(panel()).findByRole('button', { name: '移除 reply.txt' })
+    }
+    fireEvent.click(within(panel()).getByRole('button', { name: '发送' }))
+    await waitFor(() => { expect(runtime.reply).toHaveBeenCalledTimes(1) })
+
+    fireEvent.click(within(panel()).getByRole('button', { name: '关闭讨论' }))
+    fireEvent.click(card)
+    await runtime.view.findByRole('button', { name: '关闭讨论' })
+    const panelInput = () => within(panel()).getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
+    expect(panelInput().value).toBe(body)
+    fireEvent.click(within(panel()).getByRole('button', { name: '发送' }))
+    if (receipt === 'lost') expect(within(panel()).getByRole('button', { name: '移除 reply.txt' })).toBeTruthy()
+    resolveReply()
+
+    if (receipt === 'lost') {
+      await within(panel()).findByRole('alert')
+      await waitFor(() => {
+        expect(within(panel()).getByRole('button', { name: '发送' }).hasAttribute('disabled')).toBe(false)
+      })
+      fireEvent.click(within(panel()).getByRole('button', { name: '发送' }))
+    }
+    await waitFor(() => { expect(panelInput().value).toBe('') })
+    expect(runtime.reply).toHaveBeenCalledTimes(receipt === 'lost' ? 2 : 1)
+    if (receipt === 'lost') {
+      expect(runtime.reply.mock.calls[1]![0].requestId).toBe(runtime.reply.mock.calls[0]![0].requestId)
+      expect(runtime.putAttachment).toHaveBeenCalledTimes(1)
+    }
   })
 })

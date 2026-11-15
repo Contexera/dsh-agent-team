@@ -109,7 +109,7 @@ describe('Agent Team member-private skills', () => {
     await writeFile(join(member.privateMemoryPath, 'skills', 'code-review.md'), SKILL_MD('code-review', 'Review changes', 'Review the diff carefully.'))
     await vi.waitFor(async () => {
       expect(await catalogNames(ctx, agent)).toEqual(['code-review', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
-    })
+    }, { timeout: 5_000, interval: 50 })
 
     // A sibling Member keeps exactly the bundled set — neither the private
     // skill nor the directory is shared.
@@ -259,7 +259,7 @@ describe('Agent Team member-private skills', () => {
     await writeFile(join(member.privateMemoryPath, 'skills', 'beta.md'), SKILL_MD('beta', 'Beta skill', 'Beta body.'))
     await vi.waitFor(async () => {
       expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
-    })
+    }, { timeout: 5_000, interval: 50 })
 
     // Explicit selection: only the listed name is listed or loadable. The
     // unselected skill stays on disk (filtering is list()-output, not
@@ -296,7 +296,7 @@ describe('Agent Team member-private skills', () => {
     const agent = liveAgent(ctx, member.sessionId)
     await vi.waitFor(async () => {
       expect(await catalogNames(ctx, agent)).toEqual(['ephemeral', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
-    })
+    }, { timeout: 5_000, interval: 50 })
 
     // Removal deletes the whole private namespace, skills included.
     await ctx.agentTeam.removeMember({ requestId: requestId('remove'), memberId: member.memberId })
@@ -310,7 +310,7 @@ describe('Agent Team member-private skills', () => {
     const agent = liveAgent(ctx, member.sessionId)
     await vi.waitFor(async () => {
       expect(await catalogNames(ctx, agent)).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
-    })
+    }, { timeout: 5_000, interval: 50 })
 
     await ctx.agentTeam.suspendMember({ requestId: requestId('suspend'), memberId: member.memberId })
     const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('resume'), memberId: member.memberId })

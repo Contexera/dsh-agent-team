@@ -19,16 +19,39 @@ const bundleTemplate = join(temporary, 'bundle-template', '@contexera', 'dsh-age
 /** The screenshots this run leaves for review: desktop and the 390×844 narrow lane. */
 const artifacts = join(root, 'artifacts', 'browser')
 const evidenceWidths = [1440, 390]
-// Extra arguments narrow the run (a filename, or a `-t` pattern), so it owes no
-// whole-run evidence set; the full run is what the acceptance lane stands on.
-const narrowed = process.argv.slice(2).some(argument => !argument.startsWith('-') || /^--?(t|testNamePattern|test-name-pattern)(=|$)/.test(argument))
+
+const VALUE_FLAGS = new Set(['-t', '--testNamePattern', '--test-name-pattern', '--reporter', '-r', '--config', '-c', '--bail', '--testTimeout'])
+const fileFilters = []
+const vitestFlags = []
+const rawArgs = process.argv.slice(2)
+for (let index = 0; index < rawArgs.length; index += 1) {
+  const argument = rawArgs[index]
+  if (argument.startsWith('-')) {
+    vitestFlags.push(argument)
+    if (VALUE_FLAGS.has(argument) && !argument.includes('=') && index + 1 < rawArgs.length) {
+      index += 1
+      vitestFlags.push(rawArgs[index])
+    }
+  } else {
+    fileFilters.push(argument)
+  }
+}
+const narrowed = fileFilters.length > 0 || vitestFlags.some(argument => /^--?(t|testNamePattern|test-name-pattern)(=|$)/.test(argument))
+
 // Every scenario is its own file under scripts/e2e/, so the runner renders and
 // runs each one inside the harness checkout. Keeping them separate means one
 // slow journey cannot widen another's budget, and a failure names its file.
 // `support.ts` rides along as a sibling, because the rendered files import it
 // relatively — exactly where the one monolithic script used to sit.
 const sourceDir = join(root, 'scripts', 'e2e')
-const scenarios = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts') || name === 'support.ts').sort()
+const allE2eFiles = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts')).sort()
+const matchedE2eFiles = fileFilters.length === 0
+  ? allE2eFiles
+  : allE2eFiles.filter(name => fileFilters.some(token => name.includes(token)))
+if (matchedE2eFiles.length === 0) {
+  throw new Error(`No E2E lane matched filter [${fileFilters.join(', ')}]. Available: ${allE2eFiles.join(', ')}`)
+}
+const scenarios = ['support.ts', ...matchedE2eFiles]
 
 const quote = value => value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
 
@@ -40,6 +63,18 @@ const run = (command, args, cwd) => new Promise((resolveRun, reject) => {
   child.once('error', reject)
   child.once('exit', code => code === 0 ? resolveRun() : reject(new Error(`${command} exited with ${code}`)))
 })
+
+const runPnpm = async (args, cwd) => {
+  try {
+    await run('corepack', ['pnpm', ...args], cwd)
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      await run('pnpm', args, cwd)
+      return
+    }
+    throw error
+  }
+}
 
 const stageBundleTemplate = async () => {
   const startedAt = Date.now()
@@ -100,12 +135,17 @@ try {
     // must not modify.
     rendered.push(target)
   }
-  await run('corepack', ['pnpm', 'exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
+  await runPnpm(['exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
     ...rendered.filter(path => path.endsWith('.e2e.ts')).map(path => path.slice(harness.length + 1).replaceAll('\\', '/')),
-    '--reporter=verbose', ...process.argv.slice(2)], harness)
+    '--reporter=verbose', ...vitestFlags], harness)
   // A green suite whose directory is empty or unreadable is the failure this
   // gate exists for: the screenshots are the acceptance evidence.
-  if (!narrowed) console.log(`browser evidence: ${await assertScreenshotEvidence(artifacts, evidenceWidths)} screenshots`)
+  if (!narrowed) {
+    console.log(`browser evidence: ${await assertScreenshotEvidence(artifacts, evidenceWidths)} screenshots`)
+  } else {
+    const hasArtifacts = await access(artifacts).then(() => true, () => false)
+    console.log(`browser evidence (filtered): ${hasArtifacts ? await assertScreenshotEvidence(artifacts, []) : 0} screenshots`)
+  }
 } finally {
   await Promise.all(rendered.map(path => rm(path, { force: true })))
   await rm(temporary, { recursive: true, force: true })

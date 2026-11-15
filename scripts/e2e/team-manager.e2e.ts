@@ -401,3 +401,67 @@ it('keeps failures retryable and ignores a manager resolution that arrives after
   team.openManagerSession = original
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 120_000)
+
+it('projects manager-written Member and Project owner into the Sidebar and Project dialog', async () => {
+  const { page, consoleWatch } = await openTeamPage()
+  await page.locator('button[data-team-action="manager"]').click()
+  await expect.poll(async () => (await currentSessionId(page))?.startsWith('agent-team-manager-') ?? false, { timeout: 30_000 }).toBe(true)
+  const managerId = (await currentSessionId(page))!
+  await page.locator(`[data-conversation-session="${managerId}"]`).waitFor({ timeout: 20_000 })
+  const manager = scaffold!.ctx.agents.get(managerId as SessionId)
+  expect(manager).toBeDefined()
+
+  const workspaceId = scaffold!.ctx.workspaceRegistry.list()[0]!.id
+  const route = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
+  const call = async (name: string, callId: string, args: Record<string, unknown>) => {
+    const batch = await scaffold!.ctx.tools.execute({
+      calls: [{ type: 'tool-call', id: ToolCallId(callId), name, arguments: JSON.stringify(args) }],
+      agent: manager, signal: new AbortController().signal,
+    })
+    expect(batch.results).toHaveLength(1)
+    expect(batch.results[0]!.result.isError).toBe(false)
+    return batch.results[0]!.result.value as Record<string, unknown>
+  }
+
+  const memberValue = await call('member_create', 'manager-write-member', {
+    workspaceId, handle: 'Iris', description: '长期负责评审与验收', model: route, requestId: 'manager-write-member-1',
+  }) as { memberRef: string }
+  const projectValue = await call('project_create', 'manager-write-project', {
+    workspaceId, name: 'Parser v2', description: '把解析收敛到一个权威实现', memberIds: [memberValue.memberRef],
+    requestId: 'manager-write-project-1',
+  }) as { projectRef: string }
+  const responsibility = '对解析器的交付节奏与评审结论负责'
+  await call('project_owner', 'manager-write-owner', {
+    action: 'add', workspaceId, projectRef: projectValue.projectRef, memberRef: memberValue.memberRef,
+    responsibility, requestId: 'manager-write-owner-1',
+  })
+
+  await page.getByText('Iris', { exact: true }).first().waitFor({ timeout: 20_000 })
+  await page.getByRole('button', { name: '# Parser v2', exact: true }).hover()
+  await page.getByRole('button', { name: 'Parser v2 的操作' }).click()
+  await page.getByRole('menuitem', { name: '编辑项目', exact: true }).click()
+  const editor = page.getByRole('dialog', { name: '编辑项目' })
+  await editor.waitFor()
+  const owners = editor.getByRole('group', { name: '负责人' })
+  await owners.getByRole('button', { name: '移除负责人 @Iris' }).waitFor({ timeout: 20_000 })
+  await owners.getByText(responsibility).waitFor()
+  await editor.getByRole('button', { name: '关闭', exact: true }).click()
+  await settleAnimations(page)
+  await settleLayout(page)
+  await page.screenshot({ path: join(MANAGER_SHOTS, 'manager-writes-desktop.png'), fullPage: true, animations: 'disabled' })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('[data-sidebar-collapsed="true"]').waitFor()
+  await openSidebar(page)
+  await page.getByRole('button', { name: '# Parser v2', exact: true }).hover()
+  await page.getByRole('button', { name: 'Parser v2 的操作' }).click()
+  await page.getByRole('menuitem', { name: '编辑项目', exact: true }).click()
+  const narrowEditor = page.getByRole('dialog', { name: '编辑项目' })
+  await narrowEditor.waitFor()
+  await narrowEditor.getByRole('group', { name: '负责人' }).getByText(responsibility).waitFor()
+  await settleAnimations(page)
+  await settleLayout(page)
+  await page.screenshot({ path: join(MANAGER_SHOTS, 'manager-writes-mobile.png'), fullPage: true, animations: 'disabled' })
+  await narrowEditor.getByRole('button', { name: '关闭', exact: true }).click()
+  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
+}, 120_000)
