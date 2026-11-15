@@ -45,9 +45,18 @@ const narrowed = fileFilters.length > 0 || vitestFlags.some(argument => /^--?(t|
 // relatively — exactly where the one monolithic script used to sit.
 const sourceDir = join(root, 'scripts', 'e2e')
 const allE2eFiles = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts')).sort()
+// Keep a renamed surface selector usable after lane consolidation; resolve it
+// to the current lane before staging files.
+const laneAliases = new Map([
+  ['team-settings-nav-icon', 'team-settings-and-tools'],
+])
+const resolvedFileFilters = fileFilters.flatMap(token => {
+  const alias = laneAliases.get(token)
+  return alias === undefined ? [token] : [token, alias]
+})
 const matchedE2eFiles = fileFilters.length === 0
   ? allE2eFiles
-  : allE2eFiles.filter(name => fileFilters.some(token => name.includes(token)))
+  : allE2eFiles.filter(name => resolvedFileFilters.some(token => name.includes(token)))
 if (matchedE2eFiles.length === 0) {
   throw new Error(`No E2E lane matched filter [${fileFilters.join(', ')}]. Available: ${allE2eFiles.join(', ')}`)
 }

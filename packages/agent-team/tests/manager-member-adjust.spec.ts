@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -63,28 +63,10 @@ function memberOf(ctx: Context, workspaceId: WorkspaceId, memberRef: string) {
 }
 
 describe('Team manager Member adjustment', () => {
-  const sharedCleanups: Array<() => Promise<void>> = []
-  let shared!: Awaited<ReturnType<typeof realHarness>> & { readonly manager: Agent }
-
-  beforeAll(async () => {
-    const booted = await realHarness(undefined, undefined, undefined, undefined, undefined, undefined, {
-      registerCleanup: fn => { sharedCleanups.push(fn) },
-    })
-    provideModelCatalog(booted.ctx)
-    const manager = await openManager(booted.ctx)
-    shared = { ...booted, manager }
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  afterAll(async () => {
-    for (const cleanup of sharedCleanups.splice(0).reverse()) await cleanup()
-  })
-
   it('patches one field at a time and keeps every stored value the call left out', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'adjust', { model: { provider: 'mock', model: 'first' } })
 
     const described = await runTool(ctx, manager, 'member_update', 'adjust-description', {
@@ -116,7 +98,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('replays the same patch to its original receipt after a later edit, and refuses a changed patch', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'replay')
 
     const first = await runTool(ctx, manager, 'member_update', 'replay-first', {
@@ -183,7 +167,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('clears a capability override only when asked, and keeps it otherwise', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'caps', {
       capabilities: { tools: { allow: ['team_view'] } },
     })
@@ -204,7 +190,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('answers a committed write whose live capability apply failed, then finishes it on a replay', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'apply', {
       capabilities: { tools: { allow: ['team_view'] } },
     })
@@ -243,7 +231,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('answers a committed model edit whose live route apply failed, then retries it on a replay', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'route')
     const member = memberOf(ctx, workspaceId, memberRef)!
     const agent = ctx.agents.get(member.member.sessionId)!
@@ -285,7 +275,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('never re-applies an old route patch after the route moved on', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'moved-route')
     const member = memberOf(ctx, workspaceId, memberRef)!
     const agent = ctx.agents.get(member.member.sessionId)!
@@ -316,7 +308,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('suspends, resumes, and archives through the lifecycle tool', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'lifecycle')
 
     const suspended = await runTool(ctx, manager, 'member_state', 'state-suspend', {
@@ -352,7 +346,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('recovers a Member whose activation failed, including after a model repair', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const originalCreate = ctx.agents.create.bind(ctx.agents)
     let activationRefused = false
     vi.spyOn(ctx.agents, 'create').mockImplementation(async options => {
@@ -392,7 +388,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('requires a Workspace for recover and verifies the Member participates in it', async () => {
-    const { ctx, workspaceId, workspaces, root, manager } = shared
+    const { ctx, workspaceId, workspaces, root } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'recover-scope')
     const second = WorkspaceId('workspace:second')
     workspaces.set(second, { id: second, path: `${root}/second`, attachSession: async () => {} })
@@ -415,7 +413,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('joins and leaves another Workspace without moving the Session', async () => {
-    const { ctx, workspaceId, workspaces, root, manager } = shared
+    const { ctx, workspaceId, workspaces, root } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'traveller')
     const second = WorkspaceId('workspace:second')
     workspaces.set(second, { id: second, path: `${root}/second`, attachSession: async () => {} })
@@ -446,7 +446,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('replays a suspend without undoing a resume that landed after it', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'replay-suspend')
 
     const suspended = await runTool(ctx, manager, 'member_state', 'replay-suspend-1', {
@@ -479,7 +481,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('replays a resume without reviving a suspend that landed after it', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'replay-resume')
     const sessionId = memberOf(ctx, workspaceId, memberRef)!.member.sessionId
 
@@ -504,7 +508,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('replays a suspend after the Member was archived', async () => {
-    const { ctx, workspaceId, manager } = shared
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'replay-archive')
 
     const suspended = await runTool(ctx, manager, 'member_state', 'replay-archive-suspend', {
@@ -615,7 +621,9 @@ describe('Team manager Member adjustment', () => {
   })
 
   it('refuses the new tools on a Session that is not the live manager', async () => {
-    const { ctx, workspaceId, checkout, manager } = shared
+    const { ctx, workspaceId, checkout } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
     const memberRef = await createMember(ctx, manager, workspaceId, 'auth')
     const ordinary = await ctx.agents.create({
       sessionId: SessionId('session-adjust-ordinary'),

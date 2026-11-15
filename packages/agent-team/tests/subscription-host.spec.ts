@@ -834,6 +834,7 @@ describe('the webhook trigger', () => {
     const pumpSpy = fakeTimers.spyOn(booted.ctx.agentTeam as unknown as { pumpWebhookAdmissions(): Promise<void> }, 'pumpWebhookAdmissions')
       .mockResolvedValueOnce(undefined)
     const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    expect(pumpSpy).toHaveBeenCalledTimes(1)
     pumpSpy.mockRestore()
     if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
     // The owner rewrites the script while the request is still in the queue.
@@ -891,6 +892,7 @@ describe('the webhook trigger', () => {
     const pumpSpy = fakeTimers.spyOn(booted.ctx.agentTeam as unknown as { pumpWebhookAdmissions(): Promise<void> }, 'pumpWebhookAdmissions')
       .mockResolvedValueOnce(undefined)
     const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
+    expect(pumpSpy).toHaveBeenCalledTimes(1)
     pumpSpy.mockRestore()
     if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
     // The owner turns the subscription into a timer: the address goes, the queue
@@ -1363,6 +1365,7 @@ describe('the webhook trigger', () => {
     for (let index = 0; index < 2; index += 1) {
       expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).toMatchObject({ kind: 'queued' })
     }
+    expect(pumpSpy).toHaveBeenCalledTimes(2)
     pumpSpy.mockRestore()
     const rows = (booted.ctx.agentTeam as unknown as { subscriptionAdmissionsTable: {
       put(key: string, record: unknown): Promise<unknown> } }).subscriptionAdmissionsTable
@@ -1524,6 +1527,7 @@ describe('the webhook trigger', () => {
       .mockResolvedValue(undefined)
     const intake = (host: typeof first) => host.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
     for (let index = 0; index < 10; index += 1) expect(await intake(first)).toMatchObject({ kind: 'queued' })
+    expect(pumpSpy).toHaveBeenCalledTimes(10)
     pumpSpy.mockRestore()
     // A restart, not a reload: the store closes and a new Host opens the same medium.
     await first.fiber.dispose()

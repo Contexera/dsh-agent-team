@@ -173,6 +173,7 @@ describe('the public webhook entry', () => {
       expect((await post(entry.base, `/team/hooks/${entry.token}`, { body: `{"n":${index}}` })).status).toBe(202)
     }
     const full = await post(entry.base, `/team/hooks/${entry.token}`, { body: '{}' })
+    expect(pumpSpy).toHaveBeenCalledTimes(10)
     pumpSpy.mockRestore()
     expect(full.status, 'the eleventh delivery').toBe(429)
     expect(full.headers.get('retry-after')).toBe('60')
