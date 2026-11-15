@@ -9,6 +9,7 @@
 
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 /** The context budget for one private memory index; past it the body is not injected at all. */
 export const PRIVATE_MEMORY_MAX_BYTES = 16 * 1024
@@ -70,9 +71,14 @@ export function privateMemoryBody(memory: PrivateMemoryState): string {
   return memory.kind === 'index' && privateMemoryAvailable(memory) ? memory.raw.toString('utf8') : ''
 }
 
-/** The four private paths plus the caller's own sentence about where they sit relative to the cwd. */
+/**
+ * The four private paths plus the caller's own sentence about where they sit
+ * relative to the cwd. The children are joined, not appended with a literal
+ * separator: `root` comes from the Host's own `join`, and a block that mixed
+ * separators would name a path the Session never sees anywhere else.
+ */
 export function privateMemoryPathsBlock(root: string, locationSentence: string): string {
-  return `Private memory directory: ${root}\nMemory index: ${root}/memory.md\nNotes directory: ${root}/notes\nPrivate skills directory: ${root}/skills\n${locationSentence}`
+  return `Private memory directory: ${root}\nMemory index: ${join(root, 'memory.md')}\nNotes directory: ${join(root, 'notes')}\nPrivate skills directory: ${join(root, 'skills')}\n${locationSentence}`
 }
 
 /**

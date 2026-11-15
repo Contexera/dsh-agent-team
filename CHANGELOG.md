@@ -46,6 +46,7 @@ All notable changes to this project are documented in this file. The format foll
 - The Project dialog's owner-responsibility edit reads as the dialog's own field instead of a second one — the same text size, radius, stroke, fill and placeholder as the Input above it, its cancel and save at the row's end in the footer's order — and opening or closing it moves focus between that field and the row's Edit control.
 - The manager gate's failure is the surface failure the rest of the Client draws — the message and its retry on one line, at that failure's own size — instead of a third arrangement of its own, and a long Host diagnostic wraps inside the band instead of pushing the retry control off it.
 - The extra-tool settings catalog no longer offers the nine manager-owned Team tools as Member grants. Foreign global and Agent-scoped tools remain discoverable and grantable.
+- A private-memory block names its `memory.md`, `notes/`, and `skills/` paths with the platform separator the Host joins them with, so a Windows Session is given `C:\…\manager\memory.md` instead of a mixed `C:\…\manager/memory.md`, and the stale-copy notice names the same file the baseline did.
 
 ## [0.2.8] - 2026-11-12
 

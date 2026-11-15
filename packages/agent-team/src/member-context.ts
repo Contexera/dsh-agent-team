@@ -229,7 +229,7 @@ function renderMemberMemoryUpdate(memory: PrivateMemoryState, privateMemoryPath:
   const guidance = anomaly === ''
     ? 'Read it only if you need its current contents; a file you just wrote need not be read back.'
     : 'Inspect or repair it at that path when you need it.'
-  return `${BEGIN}\nPrivate memory update: the earlier private-memory context no longer represents the latest memory.md. Memory index: ${privateMemoryPath}/memory.md\n${state}\n${guidance}\n${END}`
+  return `${BEGIN}\nPrivate memory update: the earlier private-memory context no longer represents the latest memory.md. Memory index: ${join(privateMemoryPath, 'memory.md')}\n${state}\n${guidance}\n${END}`
 }
 
 function renderUnavailableMemory(privateMemoryPath: string, reason: string): string {

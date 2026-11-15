@@ -127,7 +127,7 @@ describe('Team Member private memory composition', () => {
     expect(workspaces).toContain('workspace:default (creation Workspace)')
     expect(workspaces).toContain(JSON.stringify(join(root, 'AGENTS.md')))
     expect(memory).toContain('index v1')
-    expect(memory).toContain(`Memory index: ${root}/memory.md`)
+    expect(memory).toContain(`Memory index: ${join(root, 'memory.md')}`)
 
     expect(await step(ctx, agent)).toEqual([])
     await ctx.fiber.dispose()
@@ -167,7 +167,7 @@ describe('Team Member private memory composition', () => {
     expect(update).toHaveLength(1)
     expect(texts(update)[0]).toContain('Private memory update')
     expect(texts(update)[0]).toContain('no longer represents the latest memory.md')
-    expect(texts(update)[0]).toContain(`Memory index: ${root}/memory.md`)
+    expect(texts(update)[0]).toContain(`Memory index: ${join(root, 'memory.md')}`)
     expect(texts(update)[0]).not.toContain('index v2')
     expect(await step(ctx, agent)).toEqual([])
 
@@ -282,19 +282,19 @@ describe('Team Member private memory composition', () => {
     expect(overBudget).toHaveLength(1)
     expect(overBudget[0]).toContain('exceeds the 16 KiB context budget')
     expect(overBudget[0]).toContain('contents were not injected')
-    expect(overBudget[0]).toContain(`Memory index: ${root}/memory.md`)
+    expect(overBudget[0]).toContain(`Memory index: ${join(root, 'memory.md')}`)
 
     await rm(memoryFile)
     const absent = texts(await step(ctx, agent))
     expect(absent).toHaveLength(1)
     expect(absent[0]).toContain('memory.md is absent')
-    expect(absent[0]).toContain(`Memory index: ${root}/memory.md`)
+    expect(absent[0]).toContain(`Memory index: ${join(root, 'memory.md')}`)
 
     await mkdir(memoryFile)
     const unreadable = texts(await step(ctx, agent))
     expect(unreadable).toHaveLength(1)
     expect(unreadable[0]).toContain('memory.md is currently unreadable')
-    expect(unreadable[0]).toContain(`Memory index: ${root}/memory.md`)
+    expect(unreadable[0]).toContain(`Memory index: ${join(root, 'memory.md')}`)
     await ctx.fiber.dispose()
   })
 

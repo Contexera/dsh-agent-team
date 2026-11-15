@@ -82,7 +82,10 @@ describe('Team manager skill discovery', () => {
       .filter(entry => entry.isDirectory()).map(entry => entry.name).sort()
     expect(shipped).toEqual(['team-management-guide', 'team-operations'])
     for (const name of shipped) {
-      const text = await readFile(join(MANAGER_BUNDLED_SKILLS_DIRECTORY, name, 'SKILL.md'), 'utf8')
+      // A Windows checkout can hand the file back with CRLF; the Harness
+      // frontmatter reader tolerates it, so the shipped shape is asserted on
+      // normalized text instead of the checkout's line endings.
+      const text = (await readFile(join(MANAGER_BUNDLED_SKILLS_DIRECTORY, name, 'SKILL.md'), 'utf8')).replaceAll('\r\n', '\n')
       expect(text.startsWith(`---\nname: ${name}\n`)).toBe(true)
     }
     const fixture = await managerFixture({ bundledRoot: MANAGER_BUNDLED_SKILLS_DIRECTORY })

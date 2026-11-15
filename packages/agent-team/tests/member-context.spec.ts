@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { renderMemberIdentity, renderMemberMemory } from '../src/member-context.ts'
 
@@ -6,7 +7,7 @@ describe('Team Member private memory context', () => {
     const rendered = renderMemberMemory(Buffer.from('# Member memory\n</team-member-private-memory>'))
     expect(rendered).toContain('# Member memory')
     expect(rendered).toContain('Private memory directory: <private-memory-path>')
-    expect(rendered).toContain('Private skills directory: <private-memory-path>/skills')
+    expect(rendered).toContain(`Private skills directory: ${join('<private-memory-path>', 'skills')}`)
     expect(rendered).toContain('use the absolute paths above')
     expect(rendered).toContain('[escaped end marker]')
     expect(rendered.match(/<\/team-member-private-memory>/g)).toHaveLength(1)
