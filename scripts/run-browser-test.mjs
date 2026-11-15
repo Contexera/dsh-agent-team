@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { harnessDir } from './harness-dir.mjs'
 import { assertScreenshotEvidence } from './browser-evidence.mjs'
 
@@ -21,7 +21,8 @@ const artifacts = join(root, 'artifacts', 'browser')
 const evidenceWidths = [1440, 390]
 // Extra arguments narrow the run (a filename, or a `-t` pattern), so it owes no
 // whole-run evidence set; the full run is what the acceptance lane stands on.
-const narrowed = process.argv.slice(2).some(argument => !argument.startsWith('-') || /^--?(t|testNamePattern|test-name-pattern)(=|$)/.test(argument))
+const cliArguments = process.argv.slice(2)
+const narrowed = cliArguments.some(argument => !argument.startsWith('-') || /^--?(t|testNamePattern|test-name-pattern)(=|$)/.test(argument))
 // Every scenario is its own file under scripts/e2e/, so the runner renders and
 // runs each one inside the harness checkout. Keeping them separate means one
 // slow journey cannot widen another's budget, and a failure names its file.
@@ -29,6 +30,17 @@ const narrowed = process.argv.slice(2).some(argument => !argument.startsWith('-'
 // relatively — exactly where the one monolithic script used to sit.
 const sourceDir = join(root, 'scripts', 'e2e')
 const scenarios = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts') || name === 'support.ts').sort()
+const testNameFlags = new Set(['-t', '--testNamePattern', '--test-name-pattern'])
+const fileFilters = cliArguments.filter((argument, index) => {
+  if (argument.startsWith('-')) return false
+  return index === 0 || !testNameFlags.has(cliArguments[index - 1])
+})
+const selectedScenarios = fileFilters.length === 0
+  ? scenarios
+  : scenarios.filter(name => name === 'support.ts' || fileFilters.some(filter => name.includes(filter)))
+if (fileFilters.length > 0 && selectedScenarios.every(name => name === 'support.ts')) {
+  throw new Error(`no browser scenario matched: ${fileFilters.join(' ')}`)
+}
 
 const quote = value => value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
 
@@ -88,7 +100,7 @@ try {
   // first scenario writes one. A scenario that cleared them would delete
   // evidence another scenario already produced, and vitest decides that order.
   await rm(artifacts, { recursive: true, force: true })
-  for (const scenario of scenarios) {
+  for (const scenario of selectedScenarios) {
     const template = await readFile(join(sourceDir, scenario), 'utf8')
     const target = join(harness, 'apps/web', 'tests', scenario === 'support.ts' ? '__external-agent-team-support.ts' : `__external-agent-team-${scenario}`)
     await writeFile(target, template
@@ -100,12 +112,17 @@ try {
     // must not modify.
     rendered.push(target)
   }
-  await run('corepack', ['pnpm', 'exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
+  const packageRunner = await new Promise(resolveRunner => {
+    execFile('pnpm', ['--version'], { stdio: 'ignore' }, error => resolveRunner(error === null ? 'pnpm' : 'corepack'))
+  })
+  await run(packageRunner, packageRunner === 'pnpm' ? ['exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
     ...rendered.filter(path => path.endsWith('.e2e.ts')).map(path => path.slice(harness.length + 1).replaceAll('\\', '/')),
-    '--reporter=verbose', ...process.argv.slice(2)], harness)
+    '--reporter=verbose', ...cliArguments] : ['pnpm', 'exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
+    ...rendered.filter(path => path.endsWith('.e2e.ts')).map(path => path.slice(harness.length + 1).replaceAll('\\', '/')),
+    '--reporter=verbose', ...cliArguments], harness)
   // A green suite whose directory is empty or unreadable is the failure this
   // gate exists for: the screenshots are the acceptance evidence.
-  if (!narrowed) console.log(`browser evidence: ${await assertScreenshotEvidence(artifacts, evidenceWidths)} screenshots`)
+  console.log(`browser evidence: ${await assertScreenshotEvidence(artifacts, narrowed ? [] : evidenceWidths)} screenshots`)
 } finally {
   await Promise.all(rendered.map(path => rm(path, { force: true })))
   await rm(temporary, { recursive: true, force: true })

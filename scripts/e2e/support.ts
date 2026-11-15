@@ -23,7 +23,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { expect } from 'vitest'
-import { chromium, type Browser, type Page } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { connectFreshWorkspaceZh } from './support.ts'
 
@@ -91,9 +91,10 @@ export async function openTeamPage(options: {
         replayOverride: options.replay.override,
         ...options.replay.childFixtures === undefined ? {} : { replayChildFixtures: [...options.replay.childFixtures] },
       }) })
-    browser = await chromium.launch({ headless: true, executablePath: CHROME })
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN',
+    browser ??= await chromium.launch({ headless: true, executablePath: CHROME })
+    context = await browser.newContext({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN',
       ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }) })
+    const page = await context.newPage()
     const consoleWatch = watchConsole(page)
     // The device is read once at boot, so it is stated before the document loads.
     if (options.platform !== undefined) {
@@ -131,6 +132,7 @@ async function webhookOriginOverlay(origin: string): Promise<string> {
 /** The one scaffold, browser, and HOME the current scenario owns; `openTeamPage` / `installLocalBundle` fill them. */
 export let scaffold: WebScaffold | undefined
 export let browser: Browser | undefined
+let context: BrowserContext | undefined
 let activeHome: string | undefined
 
 /** The isolated per-scenario HOME created by `installLocalBundle` / `openTeamPage`. */
@@ -151,14 +153,14 @@ export async function scenarioTempDir(prefix: string): Promise<string> {
 
 /** Release the current scenario's scaffold, browser, and throwaway directories. */
 export async function closeScenario(): Promise<void> {
-  const activeBrowser = browser
+  const activeContext = context
   const activeScaffold = scaffold
   const tempDirs = scenarioTempDirs.splice(0)
-  browser = undefined
+  context = undefined
   scaffold = undefined
   activeHome = undefined
   try {
-    await activeBrowser?.close()
+    await activeContext?.close()
   } finally {
     try {
       await activeScaffold?.close()
@@ -618,9 +620,5 @@ export async function installLocalBundle(): Promise<{ readonly home: string; rea
     }
   }
   activeHome = home
-  await Promise.all([
-    UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, UI09_SHOTS,
-    SETTINGS_SHOTS, SUBSCRIPTION_SHOTS, WORKER_SHOTS, WORKER_STOP_SHOTS, WORKER_INSPECT_SHOTS, MANAGER_SHOTS, MANAGER_WRITES_SHOTS,
-  ].map(dir => mkdir(dir, { recursive: true })))
   return { home, stagedBundle }
 }
