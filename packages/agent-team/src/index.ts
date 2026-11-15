@@ -3347,7 +3347,7 @@ export default class AgentTeam extends TypertRemoteService {
     const ledger = this.requireLedger()
     if (!ledger.hasCommitted(request.requestId)) await this.assertManagerModelRoute(agent, request.model)
     const authorize = () => this.requireManagerAgent(agent)
-    const written = await this.commitManagerWrite(request.requestId, () => this.addMemberInternal({
+    const written = await this.commitManagerWrite(agent.id, request.requestId, () => this.addMemberInternal({
       requestId: request.requestId,
       workspaceId: request.workspaceId,
       handle: request.handle,
@@ -3378,7 +3378,7 @@ export default class AgentTeam extends TypertRemoteService {
     const description = request.description.trim()
     if (description === '') throw new Error('a Project the manager creates needs its shared goal as the description')
     const authorize = () => this.requireManagerAgent(agent)
-    const written = await this.commitManagerWrite(request.requestId, () => this.createProjectInternal({
+    const written = await this.commitManagerWrite(agent.id, request.requestId, () => this.createProjectInternal({
       requestId: request.requestId,
       workspaceId: request.workspaceId,
       name: request.name,
@@ -3416,7 +3416,7 @@ export default class AgentTeam extends TypertRemoteService {
     if (request.action === 'update' && request.responsibility === undefined) {
       throw new Error('an owner responsibility update needs the new responsibility; an empty one records that it is unspecified')
     }
-    const written = await this.commitManagerWrite(request.requestId, async () => {
+    const written = await this.commitManagerWrite(agent.id, request.requestId, async () => {
       const base = { requestId: request.requestId, workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberRef }
       if (request.action === 'add') {
         const result = await this.addProjectOwnerInternal({ ...base, responsibility: responsibility ?? '' }, { authorize })
@@ -3463,7 +3463,7 @@ export default class AgentTeam extends TypertRemoteService {
     }
     const authorize = () => this.requireManagerAgent(agent)
     if (request.action === 'update') {
-      const written = await this.commitManagerWrite(request.requestId, async () => {
+      const written = await this.commitManagerWrite(agent.id, request.requestId, async () => {
         const result = await this.updateProjectInternal({
           requestId: request.requestId,
           workspaceId: request.workspaceId,
@@ -3489,7 +3489,7 @@ export default class AgentTeam extends TypertRemoteService {
         state: project.state,
       })
     }
-    const written = await this.commitManagerWrite(request.requestId, async () => {
+    const written = await this.commitManagerWrite(agent.id, request.requestId, async () => {
       const result = await this.archiveProjectInternal({
         requestId: request.requestId, workspaceId: request.workspaceId, projectRef: request.projectRef,
       }, { authorize })
@@ -3530,7 +3530,7 @@ export default class AgentTeam extends TypertRemoteService {
     const ledger = this.requireLedger()
     if (!ledger.hasCommitted(request.requestId) && request.model !== undefined) await this.assertManagerModelRoute(agent, request.model)
     const authorize = () => this.requireManagerAgent(agent)
-    const written = await this.commitManagerWrite(request.requestId, () => this.updateMemberInternal({
+    const written = await this.commitManagerWrite(agent.id, request.requestId, () => this.updateMemberInternal({
       requestId: request.requestId,
       memberId: request.memberRef,
       ...(description === undefined ? {} : { description }),
@@ -3574,7 +3574,7 @@ export default class AgentTeam extends TypertRemoteService {
         status: recovered.status,
       })
     }
-    const written = await this.commitManagerWrite(request.requestId, async () => {
+    const written = await this.commitManagerWrite(agent.id, request.requestId, async () => {
       if (request.action === 'suspend') {
         const result = await this.suspendMemberInternal({ requestId: request.requestId, memberId: request.memberRef }, { authorize })
         return { receipt: result.receipt, status: result.status }
@@ -3612,7 +3612,7 @@ export default class AgentTeam extends TypertRemoteService {
     this.requireManagerAgent(agent)
     this.requireWorkspace(request.workspaceId)
     const authorize = () => this.requireManagerAgent(agent)
-    const written = await this.commitManagerWrite(request.requestId, async () => {
+    const written = await this.commitManagerWrite(agent.id, request.requestId, async () => {
       if (request.action === 'join') {
         const result = await this.joinWorkspaceInternal({ requestId: request.requestId, workspaceId: request.workspaceId, memberId: request.memberRef }, { authorize })
         return { receipt: result.receipt }
@@ -3642,14 +3642,19 @@ export default class AgentTeam extends TypertRemoteService {
    * rather than retried into a duplicate.
    */
   private async commitManagerWrite<R extends { readonly receipt: AgentTeamOperationReceipt }>(
+    sessionId: SessionId,
     requestId: AgentTeamRequestId,
     write: () => Promise<R>,
   ): Promise<R & { readonly requestId: AgentTeamRequestId }> {
     try {
-      return Object.freeze({ requestId, ...await write() })
+      const result = Object.freeze({ requestId, ...await write() })
+      this.ctx.logger.info(`agent-team: manager write committed sessionId=${sessionId} requestId=${requestId} operationId=${result.receipt.operationId}`)
+      return result
     } catch (error) {
       if (!this.requireLedger().hasCommitted(requestId)) throw error
-      return Object.freeze({ requestId, ...await write() })
+      const result = Object.freeze({ requestId, ...await write() })
+      this.ctx.logger.info(`agent-team: manager write replayed sessionId=${sessionId} requestId=${requestId} operationId=${result.receipt.operationId}`)
+      return result
     }
   }
 
@@ -4105,10 +4110,10 @@ export default class AgentTeam extends TypertRemoteService {
       // that landed while this activation ran must not leave a live handle
       // behind, because that handle is what every surface reads as "present".
       const current = this.requireLedger().getMember(member.memberId)
-      if (current === undefined || current.state === 'archived') {
+      if (current === undefined || current.state !== 'enabled') {
         await this.disposeWithWakeGuard(created)
         this.memberRuntime.forgetMember(member.memberId)
-        this.ctx.logger.warn(`agent-team: activation of ${this.memberLabel(member.memberId)} finished after the Member was ${current === undefined ? 'removed' : 'archived'}; no live handle was kept`)
+        this.ctx.logger.warn(`agent-team: activation of ${this.memberLabel(member.memberId)} finished after the Member was ${current === undefined ? 'removed' : current.state}; no live handle was kept`)
         return
       }
       this.handles.set(member.memberId, created)

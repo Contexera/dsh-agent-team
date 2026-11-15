@@ -276,7 +276,13 @@ async function openResolvedManagerSessionImpl(
   openedManagerSessions.set(ctx, managerSessions)
   managerSessions.add(sessionId)
   if (returnTo !== undefined || snapshot.returnToSessionId !== undefined) return returnTo
-  return latestOrdinarySessionId(ctx, workspaceId)
+  try {
+    return await latestOrdinarySessionId(ctx, workspaceId)
+  } catch {
+    // Ownership is only a best-effort return target; the manager session is
+    // already open and must still be recorded when the lookup is unavailable.
+    return undefined
+  }
 }
 
 /** No usable Workspace is not a manager error: hand the seat to the shipped choose/create-Workspace flow. */

@@ -37,6 +37,11 @@ export function privateMemoryDigest(memory: PrivateMemoryState): string {
   return memory.kind === 'index' ? createHash('sha256').update(memory.raw).digest('hex') : memory.kind
 }
 
+/** Digest rendered memory text so its source tag can be checked after projection. */
+export function privateMemoryTextDigest(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
 /** Whether the index is small enough to inject its body; the gauge and warning still render when it is not. */
 export function privateMemoryAvailable(memory: PrivateMemoryState): boolean {
   return memory.kind === 'index' && memory.raw.byteLength <= PRIVATE_MEMORY_MAX_BYTES
@@ -105,5 +110,5 @@ export interface PrivateMemoryTag {
  * for a complete baseline nor vouch for an update digest.
  */
 export function privateMemoryTextMatches(tag: PrivateMemoryTag, text: string): boolean {
-  return createHash('sha256').update(text).digest('hex') === tag.textDigest
+  return privateMemoryTextDigest(text) === tag.textDigest
 }
