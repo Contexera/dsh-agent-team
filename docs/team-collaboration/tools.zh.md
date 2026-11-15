@@ -262,3 +262,11 @@ Human 的「编辑 Agent」弹窗给出五行以内：本 Host 仍持有的执�
 活动投递控制归本 Host 的执行注册表所有：引擎会话打开时建立，该执行结束时摘除，Host 释放执行时清空；续跑作为自己的执行持久化。steer 的私有账本回执与续跑都不改 Thread revision、Task、Claim、前驱终态或既有执行；只有续跑会增加自己的 Worker start 与 settle 事实。
 
 卸载插件会拒绝新的委派，先取消仍在启动的执行（包括还在写 started 记录的），活动 steer 调用也共用这段有界启动等待，随后用屏障拒绝迟到的回执写入；再等待本 Host 仍持有的执行清理并落终态后才关闭存储。到界限仍未确认的执行保留 `running` 记录并封口，关闭存储后不会再写入迟到的终态。已经开始的持久写入会在 provider 释放前等待完成；五秒生命周期界限不会取消一个不再回答的存储写入。
+
+## Team manager 工具面
+
+九个 manager 工具不属于这份 Member 协议，也从不声明给 Member：`team_overview`、`team_models`、`member_create`、`project_create`、`project_owner`、`project_update`、`member_update`、`member_state` 与 `member_workspace` 只挂在隔离的 `team-manager` preset 里，每个 handler 都会拒绝任何不是当前 manager 的 Session。
+
+它们沿用本文的规则——已提交的写操作答回自己的回执，拒绝会说明原因且什么都没写；`requestId` 让重试保持幂等，而同一个 id 下改了参数就是冲突；省略的可选字段保留已存的值，而不是清空它——并且校验两次：工具入口一次，账本串行段落内、幂等重放分支之后再校验一次。
+
+它们的契约、挂载它们的 preset，以及它们运行所依据的 manager 权限，归 [Team manager preset](../architecture/tools-and-preset.zh.md#team-manager-preset) 所有。

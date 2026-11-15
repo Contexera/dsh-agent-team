@@ -233,6 +233,7 @@ export const WORKER_SHOTS = join(BROWSER_ARTIFACTS, 'worker-thread')
 export const WORKER_STOP_SHOTS = join(BROWSER_ARTIFACTS, 'worker-stop')
 export const WORKER_INSPECT_SHOTS = join(BROWSER_ARTIFACTS, 'worker-inspect')
 export const MANAGER_SHOTS = join(BROWSER_ARTIFACTS, 'team-manager')
+export const MANAGER_WRITES_SHOTS = join(BROWSER_ARTIFACTS, 'team-manager-writes')
 /**
  * Wait until no finite animation is running: a screenshot taken mid-collapse
  * captures the expanded column clipped to the rail. Infinite animations
@@ -619,7 +620,7 @@ export async function installLocalBundle(): Promise<{ readonly home: string; rea
   activeHome = home
   await Promise.all([
     UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, UI09_SHOTS,
-    SETTINGS_SHOTS, SUBSCRIPTION_SHOTS, WORKER_SHOTS, WORKER_STOP_SHOTS, WORKER_INSPECT_SHOTS, MANAGER_SHOTS,
+    SETTINGS_SHOTS, SUBSCRIPTION_SHOTS, WORKER_SHOTS, WORKER_STOP_SHOTS, WORKER_INSPECT_SHOTS, MANAGER_SHOTS, MANAGER_WRITES_SHOTS,
   ].map(dir => mkdir(dir, { recursive: true })))
   return { home, stagedBundle }
 }

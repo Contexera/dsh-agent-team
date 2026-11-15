@@ -19,7 +19,7 @@
 | [`architecture/README.zh.md`](architecture/README.zh.md) | Host、tools、command、typed Remote、Client plugin 和 authority 边界 | 修改运行时、RPC、preset、Client 或持久化 |
 | [`architecture/package-ownership.zh.md`](architecture/package-ownership.zh.md) | 三个 package 目录、唯一的发布 manifest，以及各接缝之间单向的依赖方向 | 修改 package 接缝、manifest 或 import 方向 |
 | [`architecture/host-authority.zh.md`](architecture/host-authority.zh.md) | Host 拥有什么：ledger、生命周期、projection、Session 持久化、Attention、上下文压力、私有记忆与 member capabilities | 修改 Host 运行时、持久化、重放、Attention 或记忆行为 |
-| [`architecture/tools-and-preset.zh.md`](architecture/tools-and-preset.zh.md) | 十个 model-facing 工具、各自定义在哪个模块，以及隔离的 `team-member` preset | 修改某个 model-facing 工具或 preset 挂载的内容 |
+| [`architecture/tools-and-preset.zh.md`](architecture/tools-and-preset.zh.md) | 各 model-facing 工具、各自定义在哪个模块，以及隔离的 `team-member` 与 `team-manager` preset | 修改某个 model-facing 工具或 preset 挂载的内容 |
 | [`architecture/client-and-remote.zh.md`](architecture/client-and-remote.zh.md) | typed Remote 声明、Client plugin 与 slot composition、Client 数据与呈现边界 | 修改 RPC、Client plugin 加载、slot 或 projection |
 | [`architecture/workspace-session-storage.zh.md`](architecture/workspace-session-storage.zh.md) | 复用 Harness 的 Workspace、Session 和存储，而不另建并行 Team 状态 | 修改 Workspace 选择、Session 存储或 ledger 路由 |
 | [`domain-model.zh.md`](domain-model.zh.md) | 稳定的 Agent Team 领域词汇 | 修改领域语义、类型命名或正式协作合同 |

@@ -22,7 +22,7 @@ import { TOOL_AVAILABILITY_SECTION } from '../src/tool-availability-guidance.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { drainCleanups, mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import { realHarness } from './helpers/member-harness.ts'
+import { MANAGER_TEAM_TOOLS, realHarness } from './helpers/member-harness.ts'
 
 const sharedCleanups: Array<() => Promise<void>> = []
 /** Per-test disposers (LLM adapter registrations, ordinary sessions): drained after each test. */
@@ -1664,6 +1664,13 @@ describe('profile extra tool-name grants', () => {
     testCleanups.push(ctx.tools.register(defineContentToolFixture({
       name: 't30_not a grant name', description: 'registered with a space', parameters: {}, execute: async () => [{ type: 'text', text: 'never' }],
     })))
+    const scoped = await ctx.agents.create({ sessionId: SessionId('t30-manager-tool-scope') })
+    testCleanups.push(() => scoped.dispose())
+    for (const name of MANAGER_TEAM_TOOLS) {
+      testCleanups.push(scoped.agent.ctx.tools.register(defineContentToolFixture({
+        name, description: 'manager-owned', parameters: {}, execute: async () => [{ type: 'text', text: 'never' }],
+      })))
+    }
     const catalog = ctx.agentTeam.toolCatalogForClient({})
     expect(catalog.names).toContain('t30_catalogued')
     expect(catalog.names).toContain('t30_not a grant name')
@@ -1672,6 +1679,7 @@ describe('profile extra tool-name grants', () => {
     expect(catalog.names).not.toContain('team_worker')
     expect(catalog.names).not.toContain('working_directory')
     for (const name of AGENT_TEAM_TOOL_NAMES) expect(catalog.names).not.toContain(name)
+    for (const name of MANAGER_TEAM_TOOLS) expect(catalog.names).not.toContain(name)
     expect(catalog.names).toEqual([...catalog.names].sort())
   })
 })

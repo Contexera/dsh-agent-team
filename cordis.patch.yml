@@ -199,8 +199,27 @@
               config:
                 refreshIntervalMs: 1800000
 
+            # Every preset declares its own Team surface as an exact list. The
+            # model's visible tool list is read from the registering scope's own
+            # schemas, so this enumeration — not a later restriction — is what a
+            # Member may call; the two read-only manager tools are deliberately
+            # absent because their handler serves only the manager Session.
+            # `team_worker` stays declared here and is withdrawn from a live
+            # Member's surface by the Host Worker switch.
             - id: team-tools
               name: '@contexera/dsh-agent-team/tools'
+              config:
+                only:
+                - team_inbox
+                - team_attention
+                - team_thread
+                - team_message
+                - team_dm
+                - team_task
+                - team_view
+                - team_subscription
+                - team_reminder
+                - team_worker
 
             # The host owns the Web service and both providers; the Team preset exposes only
             # the model-facing tools. Fetch resolves the host's anonymous HTTP provider, so
@@ -241,10 +260,10 @@
                     headChars: 4096
                     tailChars: 1024
         # The Host-owned manager destination composes this explicit preset. It
-        # keeps the ordinary coding surface but deliberately omits Team tools,
-        # Member context/time, Member memory, Worker and rollover policy, and
-        # profile extra grants. The isolated registry's default stays
-        # `team-member`; only the manager runtime mounts this id.
+        # keeps the ordinary coding surface but deliberately omits Member
+        # context/time, Member memory, Worker and rollover policy, and profile
+        # extra grants. The isolated registry's default stays `team-member`;
+        # only the manager runtime mounts this id.
         - id: contexera-agent-team-preset-team-manager
           name: '@deepseek-ai/dsh-agent-preset'
           config:
@@ -313,6 +332,25 @@
 
             - id: tool-ask-user
               name: '@deepseek-ai/dsh-tool-ask-user'
+
+            # Team surface for the manager destination. The read tools stay
+            # read-only; the write tools are the ones 04 delivered, and both
+            # handlers additionally require the caller to be the current
+            # manager Session, so a Member preset or an ordinary Session that
+            # reached a tool by some other route is still refused.
+            - id: team-tools
+              name: '@contexera/dsh-agent-team/tools'
+              config:
+                only:
+                - team_overview
+                - team_models
+                - member_create
+                - project_create
+                - project_owner
+                - project_update
+                - member_update
+                - member_state
+                - member_workspace
 
             - id: compaction
               name: cordis:group

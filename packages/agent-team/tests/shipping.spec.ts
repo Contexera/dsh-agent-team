@@ -12,6 +12,7 @@ import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { HUMAN_PROFILE_SETTINGS_SCHEMA } from '../src/human-profile.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA } from '../src/index.ts'
+import { AGENT_TEAM_TOOL_NAMES } from '../src/member-runtime.ts'
 import { dshPeerRanges } from '../../../scripts/dsh-peers.mjs'
 import { teamTools } from '../../tool-agent-team/tests/render-text.ts'
 
@@ -84,6 +85,30 @@ function teamManagerPresetText(patch: string): string {
   const start = id < 0 ? -1 : text.lastIndexOf('- id: ', id)
   const end = rowStartByName(text, '@contexera/dsh-agent-team/host')
   return start >= 0 && end > start ? text.slice(start, end) : ''
+}
+
+/**
+ * The exact Team tool names the `only:` list of one preset's Team tools row
+ * declares, in shipped order. The list is what reaches the model, so it is
+ * asserted rather than assumed: a preset that drifts from the surface it claims
+ * must fail here instead of silently widening or narrowing a Session.
+ */
+function teamToolsOnlyList(preset: string): string[] {
+  const text = preset.replaceAll('\r\n', '\n')
+  const rowAt = text.indexOf("name: '@contexera/dsh-agent-team/tools'")
+  const onlyAt = rowAt < 0 ? -1 : text.indexOf('only:', rowAt)
+  if (onlyAt < 0) return []
+  const names: string[] = []
+  for (const line of text.slice(onlyAt + 'only:'.length).split('\n')) {
+    // The list opens on the next line, so blank lines before the first item are
+    // layout rather than the end of the list; the first line that is neither
+    // blank nor an item is.
+    if (line.trim() === '') continue
+    const item = /^\s+- (\S+)\s*$/.exec(line)
+    if (item === null || item[1] === undefined) break
+    names.push(item[1])
+  }
+  return names
 }
 
 function personaInstructionText(preset: string): string {
@@ -350,9 +375,22 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('Keep `memory.md` a bounded index, not a store')
     expect(preset).toContain('past 16 KiB it is not injected at all')
     expect(preset).toContain('the bundled `member-memory-manager` skill')
+    // The plugin's unconfigured default is the whole Team surface: every tool it
+    // defines. Neither shipped preset relies on that default — each declares its
+    // own exact subset through the plugin's `only` config, which is the only
+    // narrowing that reaches the model, because the visible list is read from
+    // the registering scope's schemas.
     expect([...teamTools().keys()].sort()).toEqual([
       'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view', 'team_subscription', 'team_reminder', 'team_worker',
+      'team_overview', 'team_models',
+      'member_create', 'project_create', 'project_owner', 'project_update',
+      'member_update', 'member_state', 'member_workspace',
     ].sort())
+    // The Member row names exactly the Host's own Member tool list, so the
+    // shipped preset cannot drift from the surface Member activation validates:
+    // adding a tool to the default set leaves the Member preset short until this
+    // assertion is updated deliberately, and removing one cannot go unnoticed.
+    expect(teamToolsOnlyList(preset).sort()).toEqual([...AGENT_TEAM_TOOL_NAMES].sort())
 
     const manifest = JSON.parse(manifestText) as {
       name: string
@@ -460,11 +498,21 @@ describe('Agent Team shipping contract', () => {
     ]) expect(preset).toContain(`name: '${row}'`)
     expect(preset).toMatch(/- id: tool-fs\n\s+name: '@deepseek-ai\/dsh-tool-fs'\n\s+config:\n\s+applyPatch: false\n/)
     expect(preset).toContain('mode: native')
-    // No Member identity, Team tool family, Member context/time, Member memory
-    // or compaction engine, todo tool, rollover/Worker policy, grants, or
-    // Project-owner authority enters this composition.
+    // No Member identity, Member context/time, Member memory or compaction
+    // engine, todo tool, rollover/Worker policy, grants, or Project-owner
+    // authority enters this composition. The Team tool family enters only as
+    // the subset the manager needs: the two read tools plus the three write
+    // tools 04 delivered, and nothing else.
+    expect(preset).toContain("name: '@contexera/dsh-agent-team/tools'")
+    expect(preset).toMatch(/- id: team-tools\n\s+name: '@contexera\/dsh-agent-team\/tools'\n\s+config:\n\s+only:\n\s+- team_overview\n\s+- team_models\n\s+- member_create\n\s+- project_create\n\s+- project_owner\n/)
+    // The two shipped presets partition the plugin's default surface exactly:
+    // the Member row asserted above plus this one is every tool it defines, so a
+    // new tool can reach no Session until a preset names it, and neither preset
+    // can silently drop one it used to declare.
+    expect([...teamToolsOnlyList(preset), ...AGENT_TEAM_TOOL_NAMES].sort())
+      .toEqual([...teamTools().keys()].sort())
     for (const absent of [
-      '@contexera/dsh-agent-team/tools',
+      ...AGENT_TEAM_TOOL_NAMES,
       '@contexera/dsh-agent-team/member-context',
       '@contexera/dsh-agent-team/member-time-context',
       '@contexera/dsh-agent-team/member-compaction-engine',

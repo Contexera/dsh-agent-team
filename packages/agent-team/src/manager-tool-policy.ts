@@ -14,8 +14,29 @@ import { scopeOf, scopeParentOf, type ScopeKey } from '@deepseek-ai/dsh-scope'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 
+/** Team tools declared only by the manager preset; they are never Member grant candidates. */
+export const MANAGER_TOOL_NAMES = Object.freeze([
+  'team_overview',
+  'team_models',
+  'member_create',
+  'project_create',
+  'project_owner',
+  'project_update',
+  'member_update',
+  'member_state',
+  'member_workspace',
+] as const)
+
 /** The isolated preset mounted for the Host-managed manager Session. */
 export const MANAGER_SESSION_PRESET_ID = 'team-manager'
+
+/**
+ * The one preset a Member may compose. The Host's Member-creation guard and the
+ * manager's model list both read this, so "which presets can a Member use" has
+ * exactly one answer. The manager's own preset is deliberately absent from it:
+ * it is Host-owned, never member-selectable.
+ */
+export const MEMBER_SESSION_PRESET_ID = 'team-member'
 
 /** The default manager Session title. It is cosmetic and only set when no title exists. */
 export const MANAGER_SESSION_TITLE = '团队管理'

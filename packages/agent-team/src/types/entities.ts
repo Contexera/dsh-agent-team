@@ -123,7 +123,8 @@ export type AgentTeamMemberDiagnosticClass =
   | 'rollover' // transient context-rollover window
   | 'runtime' // live runtime or compaction failure
   | 'activation' // unclassified activation failure
-  | 'capability-apply' // post-commit configuration apply failed at the runtime
+  | 'capability-apply' // post-commit capability apply failed at the runtime
+  | 'model-apply' // post-commit model route apply failed at the runtime
 
 /** One Member failure's structured reason; rendered, never persisted. */
 export interface AgentTeamMemberDiagnostic {

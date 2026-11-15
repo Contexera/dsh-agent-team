@@ -108,6 +108,8 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - 这项删除，以及 activation 时对旧式 colon 目录的改名，都限定在当前进程自己的 members root 之内。记录里的 `privateMemoryPath` 是一条 durable 绝对事实，指向「当初添加这个 Member 的那个 DSH home」里的目录。因此解析到另一个 home 的进程会拒绝搬移或删除这个目录（并告警），而不是把 Member 的真实私有记忆搬出 Member 自己的 home。
 - Member 与 Project 的归档是介于 suspend 与 remove 之间的可逆第三态。`archiveMember` 提交 `team/member-archived`。dispose live session，私有 memory 与 Session log 留在磁盘，并把 Session 从分组 surface 归档。`archiveMember` 再以公开 `claims_released` Activity 加上 Attention/marker 清理，释放这个 Member 的 active Claims。被隐藏的 Member 不得让 Task 卡在 in progress，也不得留下幻影 unread 计数。`archiveProject` 提交 `team/project-archived`，对 Project 上所有 Thread 的 owner 施加同样的释放形态。两种归档形态下 Membership 都保留（隐藏态，非退出）。
 
+  局部的 Project 编辑在账本的串行段落内合并：请求没写的名字或描述，`updateProject` 保留已存的值；重放只比较它自己写明的字段，所以排在并发编辑之后的写，不会把调用方入队前读到的快照写回去。
+
   Archived 实体从所有 Team API surface 消失：
   - projection：view projects/threads/tasks/members、mention 候选、Project join、编辑。
   - ref 解析：`resolveTaskRefs`/`resolveThreadRefs` 跳过 Archived 实体，message 正文渲染为纯文本。
@@ -129,7 +131,9 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
   等待按类别记日志，带 Member、Session 与时长：等自己的回合是 `stage 'wait-turn'`，等外部执行（例如 Agent 释放自己的 Session 写路径）是 `stage 'wait-external'`。activation 期间的 restriction 失败只表现为这个 Member 的 activation failure。
 - live 应用 Member capability 失败不会放宽面：编辑保留其 ledger commit，不含额外许可的编辑保留旧 restriction，Remote 调用照常暴露失败。同 requestId 重试会重新应用已存储配置且不产生第二次业务提交。profile 许可策略安装失败则收紧到该 Member 的无额外许可基线，绝不恢复到上一份含许可的 restriction；若该基线也失败，下一步会在模型请求前被拒绝。Host 比较的是存储意图与运行时实际已应用的效果，绝不与该次请求自身的历史比较。
-- 配置编辑把「效果」与「提交」分开回报：`updateMember` 返回 `effect`，取值 `applied`、`already-applied`、`deferred:no-live-handle` 或 `deferred:generation-changed`（先落账、下次激活生效）。失败不进取值——保持响亮拒绝，同时留一条可路由的 `capability-apply` diagnostic。`detail` 带 requestId、operationId、阶段与原因，Session 结构化放在 `sessionId`，日志用同一组关联 id。
+- 配置编辑把「效果」与「提交」分开回报：`updateMember` 返回 `effect`，取值 `applied`、`already-applied`、`deferred:no-live-handle` 或 `deferred:generation-changed`（先落账、下次激活生效）。失败不进取值——保持响亮拒绝，同时按失败阶段留一条可路由的 `model-apply` 或 `capability-apply` diagnostic。`detail` 带 requestId、operationId、阶段与原因，Session 结构化放在 `sessionId`，日志用同一组关联 id。
+- manager 面对已提交但运行时应用失败的编辑给出不同答案：`member_update` 按失败阶段把 `failed:model-apply` 或 `failed:capability-apply` 作为 effect 答回，并在 `status` 里带上同类别的 Member 自身诊断——它的写已经提交，而调用者是模型、会把拒绝当成重试信号。已存的意图留给下次激活重试，重放同一请求也会重试：效果取自活代实际在跑的状态与当前 Member 行的比较，而不是这次请求出发时的那条记录。
+- 生命周期重放只补做自己这次操作欠下的效果：`suspendMember`、`resumeMember` 与 `archiveMember` 在写完之后读取当前 Member 行，并把运行态收敛到那个状态，所以晚到的 suspend 重放不会 dispose resume 刚激活的那一代，重放的 resume 也不会复活被后来的 suspend 停掉的 Member。答案报告同一行，回执仍是原来那一个。
 - Member 始终跑一条显式路由。创建必须给出一条，编辑只能替换、不能清除回 Host 默认；写入者只有两个：Human 的编辑（本节）与该 Member 自己的 Session（下条）。在此契约之前写入的账本记录没有 `model`，仍可读取，并按当时 Host 的默认选择唤醒。
 - 模型编辑的落账与回报和其他编辑一样，但新路由是否生效由上游决定：切换后新窗口在压缩之后仍装不下当前 Session 时会被拒绝并保留原路由，pending 选择就等到换回兼容模型为止，而记录在案意图两种情况下都在。
 - composer 是另一个入口，且不靠选择事件落账。真正证明切换越过了 Host 的压缩检查、进入一次真实请求的是 Member Session 的 `request/header`，所以 Host 以 `header.config` 的路由写一条 Human 的 `team/member-updated`。只写路由：推理档位是 Session 日志里的事实，activation 对同一条路由重新读取。

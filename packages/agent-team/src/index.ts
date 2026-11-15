@@ -11,12 +11,12 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
-import { isDeepStrictEqual } from 'node:util'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { installModelSelection, type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-api-workspace-controller'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
@@ -69,6 +69,7 @@ import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
 import { ManagerSessionStore, managerSessionDomainSpec } from './manager-session-store.ts'
 import { ManagerSessionRuntime } from './manager-session.ts'
+import { MANAGER_SESSION_PRESET_ID, MEMBER_SESSION_PRESET_ID } from './manager-tool-policy.ts'
 import { INITIAL_CHECKPOINT, SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
 import { baselineIdsOf, failureCategory, failureTail, missingCredentials, probeShellFamily, runSubscriptionScript, type ShellFamilyProbe, type SubscriptionCredentials, type SubscriptionRunCategory, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
 import { deliveryEntryOf, deliveryKey, deliveryKeysOf, deliveryRecordOf, evictedDeliveries, evictedRunKeys, failedDeliveries, replayKey, replayKeysOf, runRecordOf, runSummaryOf, subscriptionRunKey, subscriptionRunKeysOf, SUBSCRIPTION_DELIVERY_LIMIT, SUBSCRIPTION_RUN_HISTORY_LIMIT, type SubscriptionDeliveryInput, type SubscriptionDeliveryRecord, type SubscriptionReplayRecord, type SubscriptionRunRecord, type SubscriptionRunTrigger } from './subscription-runs.ts'
@@ -258,6 +259,26 @@ import type {
   AgentTeamMemberReminderCancelResult,
   AgentTeamManagerSessionRequest,
   AgentTeamManagerSessionResult,
+  AgentTeamManagerOverviewRequest,
+  AgentTeamManagerOverview,
+  AgentTeamManagerModels,
+  AgentTeamManagerMemberEntry,
+  AgentTeamManagerMemberDetail,
+  AgentTeamManagerMemberCreateRequest,
+  AgentTeamManagerMemberCreateResult,
+  AgentTeamManagerMemberEffect,
+  AgentTeamManagerMemberStateRequest,
+  AgentTeamManagerMemberStateResult,
+  AgentTeamManagerMemberUpdateRequest,
+  AgentTeamManagerMemberUpdateResult,
+  AgentTeamManagerMemberWorkspaceRequest,
+  AgentTeamManagerMemberWorkspaceResult,
+  AgentTeamManagerProjectCreateRequest,
+  AgentTeamManagerProjectCreateResult,
+  AgentTeamManagerProjectOwnerRequest,
+  AgentTeamManagerProjectOwnerResult,
+  AgentTeamManagerProjectUpdateRequest,
+  AgentTeamManagerProjectUpdateResult,
   AgentTeamNewManagerSessionRequest,
   AgentTeamUnreadMemberReminder,
   AgentTeamWebhookIntakeRequest,
@@ -318,6 +339,13 @@ const MAX_MEMBER_REMINDER_CONSUME_RETRIES = 3
 /** Node caps one `setTimeout` delay at 2^31-1 ms and silently shortens a longer one to 1 ms, so a farther wake arms in capped slices and re-evaluates when a slice ends. */
 const MEMBER_REMINDER_TIMER_MAX_DELAY_MS = 2 ** 31 - 1
 
+/**
+ * How many Workspaces, Projects and Members one manager overview returns per
+ * collection. A large installation is paged by scope instead of by an unbounded
+ * dump, and a collection this bound cut says so through `truncated`.
+ */
+const MANAGER_OVERVIEW_LIMIT = 50
+
 /** Read one profile or settings document, or `undefined` when it is absent or unreadable; both are steady states on a first boot. */
 async function readProfileDocument(path: string): Promise<string | undefined> {
   try {
@@ -360,6 +388,22 @@ class PresetCompositionError extends Error {
   constructor(message: string, options: ErrorOptions) {
     super(message, options)
     this.name = 'PresetCompositionError'
+  }
+}
+
+/** A committed edit whose live model-route apply failed; the stage names the answer's effect. */
+class MemberModelApplyError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'MemberModelApplyError'
+  }
+}
+
+/** A committed edit whose live capability apply failed; the stage names the answer's effect. */
+class MemberCapabilityApplyError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'MemberCapabilityApplyError'
   }
 }
 
@@ -560,6 +604,7 @@ export default class AgentTeam extends TypertRemoteService {
     preTurnCancellation?: AgentTeamMemberDiagnostic
     /** The post-commit configuration apply failed; the stored row is ahead of the live surface. */
     capabilityApply?: AgentTeamMemberDiagnostic
+    modelApply?: AgentTeamMemberDiagnostic
   }>()
   /**
    * The Workers this Host started. Team owns the execution record and the refusal
@@ -864,10 +909,17 @@ export default class AgentTeam extends TypertRemoteService {
     // here would turn an inherited tier into a permanent one that later edits cannot lower.
     const model: AgentTeamModelSelection = Object.freeze({ provider: config.provider, model: config.model })
     const requestId = adoptionRequestId(member.memberId, sessionId, event.seq)
-    void ledger.updateMember({
-      requestId, memberId: member.memberId, handle: member.handle, description: member.description,
-      model, actor: agentTeamHumanActor(),
-    }).then((result) => {
+    // The write joins the Member's lifecycle chain, and it states only the route: the ledger keeps the handle and
+    // description exactly as they stand when the serialized section runs, never the snapshot this event was prepared
+    // against, so an adoption cannot write back a rename that landed while it was queued.
+    void this.enqueueLifecycle(memberId, async () => {
+      const current = this.requireLedger().getMember(memberId)
+      if (current === undefined || current.state !== 'enabled') return
+      const runningNow = current.model ?? this.ctx.agentDefaultModel.currentSelection()
+      if (runningNow.provider === config.provider && runningNow.model === config.model) return
+      const result = await this.requireLedger().updateMember({
+        requestId, memberId, model, actor: agentTeamHumanActor(),
+      })
       if (result.committed) this.emitCommitted(result.value.receipt)
     }).catch((error: unknown) => {
       this.ctx.logger.warn(`agent-team: could not adopt the request route for member '${this.memberLabel(memberId)}' requestId '${requestId}': ${failureDetail(error)}`)
@@ -1534,11 +1586,24 @@ export default class AgentTeam extends TypertRemoteService {
 
   @Remote('createProject')
   async createProject(request: AgentTeamCreateProjectRequest): Promise<AgentTeamCreateProjectResult> {
+    return this.createProjectInternal(request, {})
+  }
+
+  /**
+   * The one Project-creation path. `authorize` is re-run inside the ledger's
+   * serialized section, so a write that queued behind another one still
+   * refuses once its caller lost the right to write.
+   */
+  private async createProjectInternal(
+    request: AgentTeamCreateProjectRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamCreateProjectResult> {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
     const ledger = this.requireLedger()
     if (!ledger.hasCommitted(request.requestId)) this.assertProjectMembersAvailable(request.memberIds)
-    const result = await ledger.createProject({ ...request, actor: agentTeamHumanActor() })
+    const result = await ledger.createProject({ ...request, actor: agentTeamHumanActor() },
+      options.authorize === undefined ? {} : { authorize: options.authorize })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
@@ -1546,9 +1611,18 @@ export default class AgentTeam extends TypertRemoteService {
   /** Human rename of one Project's display facts; identity refs are immutable. */
   @Remote('updateProject')
   async updateProject(request: AgentTeamUpdateProjectRequest): Promise<AgentTeamUpdateProjectResult> {
+    return this.updateProjectInternal(request, {})
+  }
+
+  /** The one Project-edit path; see `createProjectInternal` for the `authorize` seam. */
+  private async updateProjectInternal(
+    request: AgentTeamUpdateProjectRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamUpdateProjectResult> {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
-    const result = await this.requireLedger().updateProject({ ...request, actor: agentTeamHumanActor() })
+    const result = await this.requireLedger().updateProject({ ...request, actor: agentTeamHumanActor() },
+      options.authorize === undefined ? {} : { authorize: options.authorize })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
@@ -1559,29 +1633,61 @@ export default class AgentTeam extends TypertRemoteService {
    */
   @Remote('archiveProject')
   async archiveProject(request: AgentTeamArchiveProjectRequest): Promise<AgentTeamArchiveProjectResult> {
-    this.requireAccepting()
-    this.requireWorkspace(request.workspaceId)
-    const result = await this.requireLedger().archiveProject({ ...request, actor: agentTeamHumanActor() })
-    if (result.committed) this.emitCommitted(result.value.receipt)
+    const result = await this.archiveProjectInternal(request, {})
     // Archiving stops every subscription the Project owns, so their queues and
     // history are cleared at the decision instead of waiting for the next boot.
-    if (result.committed) await this.forgetProjectSubscriptions(request.projectRef)
+    await this.forgetProjectSubscriptions(request.projectRef)
+    return result
+  }
+
+  /** The one Project-archival path: the durable decision and its event, without the subscription cleanup that follows it. */
+  private async archiveProjectInternal(
+    request: AgentTeamArchiveProjectRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamArchiveProjectResult> {
+    this.requireAccepting()
+    this.requireWorkspace(request.workspaceId)
+    const result = await this.requireLedger().archiveProject({ ...request, actor: agentTeamHumanActor() },
+      options.authorize === undefined ? {} : { authorize: options.authorize })
+    if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
 
-  /** Drop the private state of every subscription a Project owns: none of it can run or publish again. */
-  private async forgetProjectSubscriptions(projectRef: AgentTeamProjectRef): Promise<void> {
+  /**
+   * Drop the private state of every subscription a Project owns: none of it can
+   * run or publish again. A caller that must answer a committed archival names
+   * the failure through `warn` instead of throwing, because the decision is
+   * already durable.
+   */
+  private async forgetProjectSubscriptions(projectRef: AgentTeamProjectRef, warn?: (message: string) => void): Promise<number> {
+    let cleared = 0
     for (const subscription of this.requireLedger().subscriptionsOfProject(projectRef)) {
-      await this.forgetSubscriptionPrivateState(subscription.subscriptionRef)
+      try {
+        await this.forgetSubscriptionPrivateState(subscription.subscriptionRef)
+        cleared += 1
+      } catch (error) {
+        if (warn === undefined) throw error
+        warn(failureDetail(error))
+      }
     }
+    return cleared
   }
 
   /** Human grant of Project ownership to one Agent Member of the Project's Workspace. */
   @Remote('addProjectOwner')
   async addProjectOwner(request: AgentTeamProjectOwnerRequest): Promise<AgentTeamProjectOwnerResult> {
+    return this.addProjectOwnerInternal(request, {})
+  }
+
+  /** The one ownership-grant path; see `createProjectInternal` for the `authorize` seam. */
+  private async addProjectOwnerInternal(
+    request: AgentTeamProjectOwnerRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamProjectOwnerResult> {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
-    const result = await this.requireLedger().addProjectOwner({ ...request, actor: agentTeamHumanActor() })
+    const result = await this.requireLedger().addProjectOwner({ ...request, actor: agentTeamHumanActor() },
+      options.authorize === undefined ? {} : { authorize: options.authorize })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
@@ -1589,9 +1695,18 @@ export default class AgentTeam extends TypertRemoteService {
   /** Human edit of what one Agent owner answers for; the ownership itself and its Attention stay. */
   @Remote('updateProjectOwner')
   async updateProjectOwner(request: AgentTeamProjectOwnerUpdateRequest): Promise<AgentTeamProjectOwnerResult> {
+    return this.updateProjectOwnerInternal(request, {})
+  }
+
+  /** The one ownership-responsibility path; see `createProjectInternal` for the `authorize` seam. */
+  private async updateProjectOwnerInternal(
+    request: AgentTeamProjectOwnerUpdateRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamProjectOwnerResult> {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
-    const result = await this.requireLedger().updateProjectOwner({ ...request, actor: agentTeamHumanActor() })
+    const result = await this.requireLedger().updateProjectOwner({ ...request, actor: agentTeamHumanActor() },
+      options.authorize === undefined ? {} : { authorize: options.authorize })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
@@ -1599,9 +1714,18 @@ export default class AgentTeam extends TypertRemoteService {
   /** Human withdrawal of one Agent Member's Project ownership; the Human owner cannot be removed. */
   @Remote('removeProjectOwner')
   async removeProjectOwner(request: AgentTeamProjectOwnerRequest): Promise<AgentTeamProjectOwnerResult> {
+    return this.removeProjectOwnerInternal(request, {})
+  }
+
+  /** The one ownership-withdrawal path; see `createProjectInternal` for the `authorize` seam. */
+  private async removeProjectOwnerInternal(
+    request: AgentTeamProjectOwnerRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamProjectOwnerResult> {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
-    const result = await this.requireLedger().removeProjectOwner({ ...request, actor: agentTeamHumanActor() })
+    const result = await this.requireLedger().removeProjectOwner({ ...request, actor: agentTeamHumanActor() },
+      options.authorize === undefined ? {} : { authorize: options.authorize })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
@@ -1609,15 +1733,33 @@ export default class AgentTeam extends TypertRemoteService {
   /** Create a durable Member and atomically grant its declared initial Projects. */
   @Remote('addMember')
   async addMember(request: AgentTeamAddMemberRequest): Promise<AgentTeamAddMemberResult> {
+    return this.addMemberInternal(request, {})
+  }
+
+  /**
+   * The one Member-creation path. `modelValidated` records that the caller
+   * already checked the route against the model catalog; `authorize` is
+   * re-run inside the ledger's serialized section, so a creation queued behind
+   * another one still refuses once its caller lost the right to write.
+   */
+  private async addMemberInternal(
+    request: AgentTeamAddMemberRequest,
+    options: { readonly modelValidated?: boolean; readonly authorize?: () => void },
+  ): Promise<AgentTeamAddMemberResult> {
     return this.enqueueAddition(request.requestId, async () => {
       // The manager composition is Host-owned and never an ordinary Member.
       // Reject here, before model validation or any ledger write, so a row the
       // Host could never activate is not recorded.
-      if (request.presetId !== 'team-member') {
-        throw new Error("only the 'team-member' preset can create an Agent Team Member")
+      if (request.presetId !== MEMBER_SESSION_PRESET_ID) {
+        throw new Error(`only the '${MEMBER_SESSION_PRESET_ID}' preset can create an Agent Team Member`)
       }
       const workspace = this.requireWorkspace(request.workspaceId)
-      await this.assertModelRoute(request.model)
+      const ledger = this.requireLedger()
+      // Idempotency before the route check: a replay of a committed request
+      // answers with the original receipt even when the catalog moved since.
+      if (!ledger.hasCommitted(request.requestId) && options.modelValidated !== true) {
+        await this.assertModelRoute(request.model)
+      }
       const memberId = `member:${randomUUID()}` as AgentTeamMemberId
       const member: AgentTeamAgentMember = Object.freeze({
         memberId,
@@ -1631,36 +1773,71 @@ export default class AgentTeam extends TypertRemoteService {
         privateMemoryPath: dshHomePath('agent-team', 'members', memberMemoryDirectoryName(memberId)),
         state: 'enabled',
       })
-      const ledger = this.requireLedger()
-      const result = await ledger.addMember({ ...request, actor: agentTeamHumanActor(), member })
+      const result = await ledger.addMember({ ...request, actor: agentTeamHumanActor(), member },
+        options.authorize === undefined ? {} : { authorize: options.authorize })
       if (result.committed) this.emitCommitted(result.value.receipt)
       const stored = result.value.member
       if (!this.handles.has(stored.memberId)) await this.activateMember(stored, workspace.path)
+      // Report the Member as it stands after activation, not as the write saw
+      // it: an archive that landed mid-activation is the row the caller must
+      // read, and the re-read also drops the handle the guard refused to seed.
+      const current = ledger.getMember(stored.memberId) ?? stored
       // Creation seeds exactly the creation Workspace participation; attach it
       // here (like membersForClient) so the Client never synthesizes it.
-      return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(stored), workspaceIds: ledger.workspacesOf(stored.memberId) })
+      return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(current), workspaceIds: ledger.workspacesOf(stored.memberId) })
     })
   }
 
   /** Commit suspended intent, then dispose the owned AgentHandle; the Session stays. */
   async suspendMember(request: AgentTeamSetMemberStateRequest): Promise<AgentTeamMemberResult> {
+    return this.suspendMemberInternal(request, {})
+  }
+
+  /** The one suspend path; see `createProjectInternal` for the `authorize` seam. */
+  private async suspendMemberInternal(
+    request: AgentTeamSetMemberStateRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamMemberResult> {
     return this.enqueueLifecycle(request.memberId, async () => {
-      const result = await this.requireLedger().suspendMember({ ...request, actor: agentTeamHumanActor() })
+      const ledger = this.requireLedger()
+      const result = await ledger.suspendMember({ ...request, actor: agentTeamHumanActor() },
+        options.authorize === undefined ? {} : { authorize: options.authorize })
       if (result.committed) this.emitCommitted(result.value.receipt)
-      await this.convergeMemberEffects(result.value.member)
-      return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(result.value.member) })
+      // A replay resolves to the Member as it was at its own commit. Driving the
+      // runtime from that history would let a late retry undo a resume that
+      // landed after it, so the effects and the answer read the row as it stands.
+      const current = ledger.getMember(request.memberId) ?? result.value.member
+      await this.convergeMemberEffects(current)
+      return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(current) })
     })
   }
 
   async resumeMember(request: AgentTeamSetMemberStateRequest): Promise<AgentTeamMemberResult> {
+    return this.resumeMemberInternal(request, {})
+  }
+
+  /** The one resume path; see `createProjectInternal` for the `authorize` seam. */
+  private async resumeMemberInternal(
+    request: AgentTeamSetMemberStateRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamMemberResult> {
     return this.enqueueLifecycle(request.memberId, async () => {
-      const result = await this.requireLedger().resumeMember({ ...request, actor: agentTeamHumanActor() })
+      const ledger = this.requireLedger()
+      const result = await ledger.resumeMember({ ...request, actor: agentTeamHumanActor() },
+        options.authorize === undefined ? {} : { authorize: options.authorize })
       if (result.committed) this.emitCommitted(result.value.receipt)
-      this.dropInboxCoverage(result.value.member.memberId)
+      // Same rule as suspend: a replay finishes what its own operation owes
+      // against the row as it stands, so a suspend that landed later still wins.
+      const current = ledger.getMember(request.memberId) ?? result.value.member
+      if (current.state !== 'enabled') {
+        await this.convergeMemberEffects(current)
+        return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(current) })
+      }
+      this.dropInboxCoverage(current.memberId)
       // The suspended Session's log is durable once its retirement completes, and agents.resume() waits for exactly that.
       // Re-listing the persistence tree would race the retirement on Windows (transient staging entries surface as ENOENT), so pass the known session.
-      await this.activateMember(result.value.member, undefined, new Set([result.value.member.sessionId]))
-      return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(result.value.member) })
+      await this.activateMember(current, undefined, new Set([current.sessionId]))
+      return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(current) })
     })
   }
 
@@ -1672,7 +1849,21 @@ export default class AgentTeam extends TypertRemoteService {
    */
   @Remote('recoverMember')
   async recoverMember(request: AgentTeamRecoverMemberRequest): Promise<AgentTeamRecoverMemberResult> {
+    return this.recoverMemberInternal(request, {})
+  }
+
+  /**
+   * The one recovery path. It writes no ledger record, so `authorize` is the
+   * only caller check that can run inside the lifecycle section it actually
+   * executes in; the manager surface passes its own gate here rather than
+   * relying on the tool entry alone.
+   */
+  private async recoverMemberInternal(
+    request: AgentTeamRecoverMemberRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamRecoverMemberResult> {
     this.requireAccepting()
+    options.authorize?.()
     const member = this.requireLedger().getMember(request.memberId)
     if (member === undefined || !this.requireLedger().participatesIn(request.memberId, request.workspaceId)) throw new Error(`unknown Member '${request.memberId}' in workspace '${request.workspaceId}'`)
     this.recovery.stopTracking(request.memberId, 'manual')
@@ -1979,47 +2170,125 @@ export default class AgentTeam extends TypertRemoteService {
    */
   @Remote('updateMember')
   async updateMember(request: AgentTeamUpdateMemberRequest): Promise<AgentTeamUpdateMemberResult> {
+    const written = await this.updateMemberInternal(request, {})
+    // The Human path re-throws a failed live apply (reportApplyFailure is off),
+    // so this answer only ever carries the shared effect states.
+    return Object.freeze({ receipt: written.receipt, status: written.status, effect: written.effect as AgentTeamMemberEffect })
+  }
+
+  /**
+   * The one Member-edit path. The route check sits after the idempotency
+   * answer, so a replay of a committed edit never fails on a provider registry
+   * that moved since. The ledger merges the fields the request leaves absent
+   * inside its own serialized section, so a partial edit never writes back an
+   * older snapshot. `authorize` is re-run inside that section for the manager
+   * surface, and `modelValidated` records that the caller checked the route
+   * against the Session controller's catalog instead.
+   */
+  private async updateMemberInternal(
+    request: AgentTeamUpdateMemberRequest,
+    options: { readonly authorize?: () => void; readonly modelValidated?: boolean; readonly reportApplyFailure?: boolean },
+  ): Promise<{ readonly receipt: AgentTeamOperationReceipt; readonly status: AgentTeamAgentMemberStatus; readonly effect: AgentTeamManagerMemberEffect }> {
     return this.enqueueLifecycle(request.memberId, async () => {
-      await this.assertModelRoute(request.model)
-      const previous = this.requireLedger().getMember(request.memberId)
-      const result = await this.requireLedger().updateMember({ ...request, actor: agentTeamHumanActor() })
+      const ledger = this.requireLedger()
+      if (!ledger.hasCommitted(request.requestId) && options.modelValidated !== true) await this.assertModelRoute(request.model)
+      const result = await ledger.updateMember({ ...request, actor: agentTeamHumanActor() },
+        options.authorize === undefined ? {} : { authorize: options.authorize })
       if (result.committed) this.emitCommitted(result.value.receipt)
       // A replayed request resolves to the member as it was at its own commit; driving the runtime from that history would let a late retry roll back a newer configuration.
       // Apply and report the currently accepted member instead (lifecycle calls serialize).
-      const current = this.requireLedger().getMember(request.memberId)
+      const current = ledger.getMember(request.memberId)
       if (current === undefined) throw new Error(`Agent Member '${request.memberId}' no longer exists`)
-      const active = this.handles.get(request.memberId)
-      let effect: AgentTeamMemberEffect = 'deferred:no-live-handle'
-      if (active !== undefined) {
-        effect = 'already-applied'
-        if (!isDeepStrictEqual(previous?.model ?? undefined, current.model ?? undefined)) {
-          // The public model-selection seam records the new route in the Session log: the current turn keeps its fixed route and the next step picks this one up, so no Agent disposal is needed.
-          active.agent.model.select(current.model ?? this.ctx.agentDefaultModel.currentSelection())
-          effect = 'applied'
-        }
-        if (!this.memberRuntime.appliedCapabilitiesMatch(current.memberId, current.capabilities)) {
-          try {
-            effect = await this.applyCapabilityEdit(active, current)
-          } catch (error) {
-            // The rejection stays loud for the caller; the failure is also kept as a routable, member-visible diagnostic and logged before it escapes.
-            const message = error instanceof Error ? error.message : String(error)
-            this.setCapabilityApplyDiagnostic(current.memberId, Object.freeze({
-              class: 'capability-apply' as const,
-              sessionId: active.agent.session.id,
-              detail: `requestId=${request.requestId} operationId=${result.value.receipt.operationId} stage=apply error=${message}`,
-            }))
-            this.ctx.logger.warn(`agent-team: capability apply failed for member '${this.memberLabel(current.memberId)}' session '${active.agent.session.id}' requestId '${request.requestId}' operationId '${result.value.receipt.operationId}' stage 'apply': ${message}`)
-            throw error
-          }
-        }
-        // The failure slot exists to bridge the gap until the stored intent is
-        // actually in force; an already-applied row retires a stale one too.
-        if (this.memberRuntime.appliedCapabilitiesMatch(current.memberId, current.capabilities)) {
-          this.clearMemberFailure(current.memberId, 'capabilityApply')
-        }
+      let effect: AgentTeamManagerMemberEffect
+      try {
+        effect = await this.applyMemberEditEffects(request.memberId, current, result.value.receipt, request.requestId)
+      } catch (error) {
+        // The manager surface answers a committed write whose live apply failed
+        // with the stage named; the Member's own diagnostic carries the reason.
+        if (options.reportApplyFailure !== true) throw error
+        effect = error instanceof MemberModelApplyError ? 'failed:model-apply' : 'failed:capability-apply'
       }
       return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(current), effect })
     })
+  }
+
+  /**
+   * Drive one committed Member edit's runtime effects from the record as it
+   * stands now, never from the request's history: a replayed request resolves
+   * to the Member as it was at its own commit, and driving the runtime from
+   * that history would let a late retry roll back a newer configuration.
+   *
+   * Returns how far the stored configuration reached the live generation. An
+   * apply failure is recorded as the Member's own diagnostic and re-thrown: the
+   * Human Remote reports it as a rejection, while the manager surface answers
+   * the committed write with the failure named.
+   */
+  private async applyMemberEditEffects(
+    memberId: AgentTeamMemberId,
+    current: AgentTeamAgentMember,
+    receipt: AgentTeamOperationReceipt,
+    requestId: AgentTeamRequestId,
+  ): Promise<AgentTeamMemberEffect> {
+    const active = this.handles.get(memberId)
+    if (active === undefined) return 'deferred:no-live-handle'
+    let effect: AgentTeamMemberEffect = 'already-applied'
+    // The stored route against the route the live generation actually runs, not
+    // against the record this request started from: a replayed edit whose apply
+    // failed still owes that effect, while a route the ledger no longer names is
+    // never re-applied by replaying an older patch.
+    const wanted = current.model ?? this.ctx.agentDefaultModel.currentSelection()
+    const live = active.agent.model.current()
+    if (live === undefined || live.provider !== wanted.provider || live.model !== wanted.model) {
+      try {
+        // The public model-selection seam records the new route in the Session log: the current turn keeps its fixed route and the next step picks this one up, so no Agent disposal is needed.
+        active.agent.model.select(wanted)
+      } catch (error) {
+        this.recordApplyFailure(current.memberId, 'model-apply', active, receipt, requestId, error)
+        throw new MemberModelApplyError(error)
+      }
+      effect = 'applied'
+    }
+    // The live route now runs the stored one, so a failure recorded by an
+    // earlier attempt is retired whether this call applied it or found it in force.
+    this.clearMemberFailure(current.memberId, 'modelApply')
+    if (!this.memberRuntime.appliedCapabilitiesMatch(current.memberId, current.capabilities)) {
+      try {
+        effect = await this.applyCapabilityEdit(active, current)
+      } catch (error) {
+        this.recordApplyFailure(current.memberId, 'capability-apply', active, receipt, requestId, error)
+        throw new MemberCapabilityApplyError(error)
+      }
+    }
+    // The failure slot exists to bridge the gap until the stored intent is
+    // actually in force; an already-applied row retires a stale one too.
+    if (this.memberRuntime.appliedCapabilitiesMatch(current.memberId, current.capabilities)) {
+      this.clearMemberFailure(current.memberId, 'capabilityApply')
+    }
+    return effect
+  }
+
+  /**
+   * Record one post-commit apply failure as the Member's own diagnostic: the
+   * class names the stage that failed, and the detail carries the correlation
+   * the Human and the manager both read.
+   */
+  private recordApplyFailure(
+    memberId: AgentTeamMemberId,
+    stage: 'model-apply' | 'capability-apply',
+    active: AgentHandle,
+    receipt: AgentTeamOperationReceipt,
+    requestId: AgentTeamRequestId,
+    error: unknown,
+  ): void {
+    const message = error instanceof Error ? error.message : String(error)
+    const diagnostic: AgentTeamMemberDiagnostic = Object.freeze({
+      class: stage,
+      sessionId: active.agent.session.id,
+      detail: `requestId=${requestId} operationId=${receipt.operationId} stage=${stage} error=${message}`,
+    })
+    if (stage === 'model-apply') this.setModelApplyDiagnostic(memberId, diagnostic)
+    else this.setCapabilityApplyDiagnostic(memberId, diagnostic)
+    this.ctx.logger.warn(`agent-team: ${stage} failed for member '${this.memberLabel(memberId)}' session '${active.agent.session.id}' requestId '${requestId}' operationId '${receipt.operationId}': ${message}`)
   }
 
   /**
@@ -2074,11 +2343,24 @@ export default class AgentTeam extends TypertRemoteService {
    */
   @Remote('archiveMember')
   async archiveMember(request: AgentTeamArchiveMemberRequest): Promise<AgentTeamArchiveMemberResult> {
+    return this.archiveMemberInternal(request, {})
+  }
+
+  /** The one archival path; see `createProjectInternal` for the `authorize` seam. */
+  private async archiveMemberInternal(
+    request: AgentTeamArchiveMemberRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamArchiveMemberResult> {
     return this.enqueueLifecycle(request.memberId, async () => {
-      const result = await this.requireLedger().archiveMember({ ...request, actor: agentTeamHumanActor() })
+      const ledger = this.requireLedger()
+      const result = await ledger.archiveMember({ ...request, actor: agentTeamHumanActor() },
+        options.authorize === undefined ? {} : { authorize: options.authorize })
       if (result.committed) this.emitCommitted(result.value.receipt)
-      await this.convergeMemberEffects(result.value.member)
-      return result.value
+      // A replayed archive answers and converges the row as it stands: the
+      // operation's own record is history, and a later resume owns the runtime.
+      const current = ledger.getMember(request.memberId) ?? result.value.member
+      await this.convergeMemberEffects(current)
+      return Object.freeze({ ...result.value, member: current })
     })
   }
 
@@ -2121,8 +2403,17 @@ export default class AgentTeam extends TypertRemoteService {
   /** Human-only Workspace participation grant; a pure relation — no Session moves. */
   @Remote('joinWorkspace')
   async joinWorkspace(request: AgentTeamJoinWorkspaceRequest): Promise<AgentTeamJoinWorkspaceResult> {
+    return this.joinWorkspaceInternal(request, {})
+  }
+
+  /** The one participation-grant path; see `createProjectInternal` for the `authorize` seam. */
+  private async joinWorkspaceInternal(
+    request: AgentTeamJoinWorkspaceRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamJoinWorkspaceResult> {
     const actor = this.humanCall(request.workspaceId)
-    const result = await this.requireLedger().joinWorkspace({ ...request, actor })
+    const result = await this.requireLedger().joinWorkspace({ ...request, actor },
+      options.authorize === undefined ? {} : { authorize: options.authorize })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
@@ -2130,8 +2421,17 @@ export default class AgentTeam extends TypertRemoteService {
   /** Human-only Workspace participation withdrawal and Workspace-scoped cleanup. */
   @Remote('leaveWorkspace')
   async leaveWorkspace(request: AgentTeamLeaveWorkspaceRequest): Promise<AgentTeamLeaveWorkspaceResult> {
+    return this.leaveWorkspaceInternal(request, {})
+  }
+
+  /** The one participation-withdrawal path; see `createProjectInternal` for the `authorize` seam. */
+  private async leaveWorkspaceInternal(
+    request: AgentTeamLeaveWorkspaceRequest,
+    options: { readonly authorize?: () => void },
+  ): Promise<AgentTeamLeaveWorkspaceResult> {
     const actor = this.humanCall(request.workspaceId)
-    const result = await this.requireLedger().leaveWorkspace({ ...request, actor })
+    const result = await this.requireLedger().leaveWorkspace({ ...request, actor },
+      options.authorize === undefined ? {} : { authorize: options.authorize })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
@@ -2952,6 +3252,435 @@ export default class AgentTeam extends TypertRemoteService {
     })) })
   }
 
+  /**
+   * The whole Team as the manager reads it. `viewForAgent` cannot answer for the
+   * manager: it is a Member projection, and the manager holds no Member identity,
+   * so participation, Project membership and message visibility have no meaning
+   * here. This read carries no message body, Thread fact, credential or private
+   * file content — only the directory, standing and switches a management
+   * decision needs. Authorization is the live manager Agent itself, resolved
+   * here rather than trusted from any request field.
+   */
+  managerOverviewForAgent(agent: Agent, request: AgentTeamManagerOverviewRequest): AgentTeamManagerOverview {
+    this.requireManagerAgent(agent)
+    const limit = request.limit ?? MANAGER_OVERVIEW_LIMIT
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('overview limit must be an integer between 1 and 100')
+    const ledger = this.requireLedger()
+    const registry = this.ctx.workspaceRegistry.list().slice().sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+    if (request.workspaceId !== undefined && !registry.some(workspace => workspace.id === request.workspaceId)) {
+      throw new Error(`unknown Workspace '${request.workspaceId}'`)
+    }
+    const scoped = request.workspaceId === undefined ? registry : registry.filter(workspace => workspace.id === request.workspaceId)
+    const directories = scoped.map(workspace => Object.freeze({
+      workspace,
+      directory: ledger.managerDirectory(workspace.id, request.projectRef),
+    }))
+    const projects = directories.flatMap(entry => entry.directory.projects)
+    const members = [...new Set(directories.flatMap(entry => entry.directory.memberIds))].sort()
+      .map(memberId => this.managerMemberEntry(ledger, memberId))
+    const workspaces = directories.map(entry => Object.freeze({
+      workspaceId: entry.workspace.id,
+      ...(entry.workspace.title === undefined ? {} : { title: entry.workspace.title }),
+      path: entry.workspace.path,
+      projectCount: entry.directory.projects.length,
+      memberCount: entry.directory.memberIds.length,
+    }))
+    const detail = request.memberRef === undefined ? undefined : this.managerMemberDetail(ledger, request.memberRef)
+    return Object.freeze({
+      workspaces: Object.freeze(workspaces.slice(0, limit)),
+      projects: Object.freeze(projects.slice(0, limit)),
+      members: Object.freeze(members.slice(0, limit)),
+      switches: Object.freeze({ worker: this.workerEnabled() }),
+      truncated: Object.freeze({
+        workspaces: workspaces.length > limit,
+        projects: projects.length > limit,
+        members: members.length > limit,
+      }),
+      ...(detail === undefined ? {} : { member: detail }),
+    })
+  }
+
+  /**
+   * The model routes a Member may run, in the Session controller's own catalog.
+   * Reusing that read instead of restating it is what keeps this list identical
+   * to the Web member editor: one provider grouping, one reasoning-effort list,
+   * and one isolated-failure channel a manager must never read as an empty
+   * catalog. The member-selectable presets come from the isolated Team registry,
+   * which deliberately does not carry the manager's own preset.
+   */
+  managerModelsForAgent(agent: Agent): Promise<AgentTeamManagerModels> {
+    this.requireManagerAgent(agent)
+    const sessionController = agent.ctx.get('sessionController')
+    if (sessionController === undefined) throw new Error('Session controller is unavailable')
+    return sessionController.modelCatalog().then(catalog => Object.freeze({
+      catalog,
+      memberPresets: Object.freeze([MEMBER_SESSION_PRESET_ID]),
+    }))
+  }
+
+  /**
+   * Create one Member for the manager. The write reuses the Host's own
+   * addition path — same queue, same activation, same receipt — so a Member
+   * created here and one created in the Web Client are the same record; what
+   * this adds is the manager authorization and the standing checks the manager
+   * surface owes. The model route is checked against the Session controller's
+   * catalog after the idempotency answer, so a replay of a committed request
+   * never fails on a catalog that moved since.
+   */
+  async managerCreateMemberForAgent(agent: Agent, request: AgentTeamManagerMemberCreateRequest): Promise<AgentTeamManagerMemberCreateResult> {
+    this.requireManagerAgent(agent)
+    const description = request.description.trim()
+    if (description === '') throw new Error('a Member the manager creates needs a description of its standing')
+    const ledger = this.requireLedger()
+    if (!ledger.hasCommitted(request.requestId)) await this.assertManagerModelRoute(agent, request.model)
+    const authorize = () => this.requireManagerAgent(agent)
+    const written = await this.commitManagerWrite(request.requestId, () => this.addMemberInternal({
+      requestId: request.requestId,
+      workspaceId: request.workspaceId,
+      handle: request.handle,
+      description,
+      presetId: MEMBER_SESSION_PRESET_ID,
+      ...(request.model === undefined ? {} : { model: request.model }),
+      ...(request.capabilities === undefined ? {} : { capabilities: request.capabilities }),
+      projectRefs: [],
+    }, { modelValidated: true, authorize }))
+    return Object.freeze({
+      requestId: written.requestId,
+      outcome: 'committed' as const,
+      receipt: written.receipt,
+      memberRef: written.status.member.memberId,
+      workspaceIds: written.workspaceIds,
+      status: written.status,
+    })
+  }
+
+  /**
+   * Record one Project's shared goal for the manager. Creation admits only
+   * Members that are already active in the Workspace — the Host's own
+   * admission rule — so a Member whose activation failed is reported through
+   * its own receipt instead of silently joining the Project.
+   */
+  async managerCreateProjectForAgent(agent: Agent, request: AgentTeamManagerProjectCreateRequest): Promise<AgentTeamManagerProjectCreateResult> {
+    this.requireManagerAgent(agent)
+    const description = request.description.trim()
+    if (description === '') throw new Error('a Project the manager creates needs its shared goal as the description')
+    const authorize = () => this.requireManagerAgent(agent)
+    const written = await this.commitManagerWrite(request.requestId, () => this.createProjectInternal({
+      requestId: request.requestId,
+      workspaceId: request.workspaceId,
+      name: request.name,
+      description,
+      ...(request.memberIds === undefined ? {} : { memberIds: request.memberIds }),
+    }, { authorize }))
+    return Object.freeze({
+      requestId: written.requestId,
+      outcome: 'committed' as const,
+      receipt: written.receipt,
+      projectRef: written.project.projectRef,
+      memberIds: written.memberIds,
+    })
+  }
+
+  /**
+   * Change one Agent Member's ownership of one Project for the manager: grant
+   * it, replace what it answers for, or withdraw it. Eligibility is the
+   * ledger's own rule — the Member must participate in the Workspace and be
+   * enabled or suspended — and the grant itself constitutes Project
+   * participation. A responsibility edit appends a new record instead of
+   * withdrawing and re-granting, so the Member keeps its grant, its Main stream
+   * attention and its history across the change.
+   */
+  async managerChangeProjectOwnerForAgent(agent: Agent, request: AgentTeamManagerProjectOwnerRequest): Promise<AgentTeamManagerProjectOwnerResult> {
+    this.requireManagerAgent(agent)
+    this.requireWorkspace(request.workspaceId)
+    const authorize = () => this.requireManagerAgent(agent)
+    // `add` names what the owner answers for; `update` replaces it and an empty
+    // one records "unspecified"; `remove` describes nothing.
+    const responsibility = request.action === 'remove' ? undefined : (request.responsibility ?? '').trim()
+    if (request.action === 'add' && (responsibility === undefined || responsibility === '')) {
+      throw new Error('an owner the manager grants needs the responsibility it answers for')
+    }
+    if (request.action === 'update' && request.responsibility === undefined) {
+      throw new Error('an owner responsibility update needs the new responsibility; an empty one records that it is unspecified')
+    }
+    const written = await this.commitManagerWrite(request.requestId, async () => {
+      const base = { requestId: request.requestId, workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberRef }
+      if (request.action === 'add') {
+        const result = await this.addProjectOwnerInternal({ ...base, responsibility: responsibility ?? '' }, { authorize })
+        return { receipt: result.receipt, projectRef: result.projectRef, responsibility: responsibility ?? '' }
+      }
+      if (request.action === 'update') {
+        const result = await this.updateProjectOwnerInternal({ ...base, responsibility: responsibility ?? '' }, { authorize })
+        return { receipt: result.receipt, projectRef: result.projectRef, responsibility: responsibility ?? '' }
+      }
+      const result = await this.removeProjectOwnerInternal(base, { authorize })
+      return { receipt: result.receipt, projectRef: result.projectRef }
+    })
+    return Object.freeze({
+      requestId: written.requestId,
+      action: request.action,
+      outcome: 'committed' as const,
+      receipt: written.receipt,
+      projectRef: written.projectRef,
+      memberRef: request.memberRef,
+      ...(written.responsibility === undefined ? {} : { responsibility: written.responsibility }),
+    })
+  }
+
+  /**
+   * Edit one Project for the manager: its display facts, or archival. A name or
+   * goal the call leaves out keeps the value stored when the ledger's
+   * serialized section runs, so a rename cannot write back a description the
+   * Human changed while it was queued. Archival keeps every fact, releases the
+   * Project's active Claims, clears the related Attention, and stops and clears
+   * every subscription the Project owns; a cleanup that fails after the commit
+   * is named in the answer instead of turning the durable decision into a
+   * rejection.
+   */
+  async managerUpdateProjectForAgent(agent: Agent, request: AgentTeamManagerProjectUpdateRequest): Promise<AgentTeamManagerProjectUpdateResult> {
+    this.requireManagerAgent(agent)
+    this.requireWorkspace(request.workspaceId)
+    const name = request.name?.trim()
+    if (request.action === 'update' && name === '') throw new Error('a Project the manager renames needs a non-empty name')
+    if (request.action === 'update' && request.name === undefined && request.description === undefined) {
+      throw new Error('project_update needs a name or a description to change; an archive changes the lifecycle instead')
+    }
+    if (request.action === 'archive' && (request.name !== undefined || request.description !== undefined)) {
+      throw new Error('project_update archives a Project by ref alone; a name or goal belongs to the update action')
+    }
+    const authorize = () => this.requireManagerAgent(agent)
+    if (request.action === 'update') {
+      const written = await this.commitManagerWrite(request.requestId, async () => {
+        const result = await this.updateProjectInternal({
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          projectRef: request.projectRef,
+          ...(name === undefined ? {} : { name }),
+          ...(request.description === undefined ? {} : { description: request.description }),
+        }, { authorize })
+        return { receipt: result.receipt }
+      })
+      // A replay resolves to the Project as it was at its own commit; the answer
+      // reads the row as it stands, so a retry never reports a name or goal a
+      // later edit already replaced.
+      const project = this.requireLedger().getProject(request.projectRef)
+      if (project === undefined) throw new Error(`unknown Project '${request.projectRef}'`)
+      return Object.freeze({
+        requestId: written.requestId,
+        action: request.action,
+        outcome: 'committed' as const,
+        receipt: written.receipt,
+        projectRef: project.projectRef,
+        name: project.name,
+        description: project.description,
+        state: project.state,
+      })
+    }
+    const written = await this.commitManagerWrite(request.requestId, async () => {
+      const result = await this.archiveProjectInternal({
+        requestId: request.requestId, workspaceId: request.workspaceId, projectRef: request.projectRef,
+      }, { authorize })
+      return { receipt: result.receipt, project: result.project, releasedClaims: result.releasedClaims.length }
+    })
+    // The decision is durable; the cleanup that follows it is a separate effect.
+    let cleanupWarning: string | undefined
+    const subscriptionsCleared = await this.forgetProjectSubscriptions(request.projectRef, (message) => { cleanupWarning ??= message })
+    return Object.freeze({
+      requestId: written.requestId,
+      action: request.action,
+      outcome: 'committed' as const,
+      receipt: written.receipt,
+      projectRef: written.project.projectRef,
+      name: written.project.name,
+      description: written.project.description,
+      state: written.project.state,
+      releasedClaims: written.releasedClaims,
+      subscriptionsCleared,
+      ...(cleanupWarning === undefined ? {} : { cleanupWarning }),
+    })
+  }
+
+  /**
+   * Edit one Member's mutable facts for the manager: description, model, and
+   * capabilities, never its handle or preset. Every field left absent keeps the
+   * value stored when the ledger's serialized section runs, so a partial edit
+   * never writes back an older snapshot; a capability override is cleared only
+   * by an explicit `null`, so "unchanged" and "cleared" stay different
+   * requests. The route is checked against the Session controller's catalog
+   * only while the request is new, so a replay of a committed edit answers its
+   * original receipt even when the catalog moved since.
+   */
+  async managerUpdateMemberForAgent(agent: Agent, request: AgentTeamManagerMemberUpdateRequest): Promise<AgentTeamManagerMemberUpdateResult> {
+    this.requireManagerAgent(agent)
+    const description = request.description?.trim()
+    if (description === '') throw new Error('a Member the manager edits needs a non-empty description of its standing')
+    const ledger = this.requireLedger()
+    if (!ledger.hasCommitted(request.requestId) && request.model !== undefined) await this.assertManagerModelRoute(agent, request.model)
+    const authorize = () => this.requireManagerAgent(agent)
+    const written = await this.commitManagerWrite(request.requestId, () => this.updateMemberInternal({
+      requestId: request.requestId,
+      memberId: request.memberRef,
+      ...(description === undefined ? {} : { description }),
+      ...(request.model === undefined ? {} : { model: request.model }),
+      ...(request.capabilities === undefined ? {} : { capabilities: request.capabilities }),
+    }, { authorize, modelValidated: true, reportApplyFailure: true }))
+    return Object.freeze({
+      requestId: written.requestId,
+      outcome: 'committed' as const,
+      receipt: written.receipt,
+      memberRef: request.memberRef,
+      status: written.status,
+      effect: written.effect,
+    })
+  }
+
+  /**
+   * Change one Member's lifecycle for the manager. `suspend`, `resume`, and
+   * `archive` are the ledger's own operations, re-authorized inside its
+   * serialized section; `recover` writes no ledger record, so it re-checks the
+   * manager inside the lifecycle section it actually runs in and names the
+   * Workspace whose participation the Host verifies.
+   */
+  async managerSetMemberStateForAgent(agent: Agent, request: AgentTeamManagerMemberStateRequest): Promise<AgentTeamManagerMemberStateResult> {
+    this.requireManagerAgent(agent)
+    const authorize = () => this.requireManagerAgent(agent)
+    if (request.action === 'recover') {
+      if (request.workspaceId === undefined) throw new Error('member_state recover needs the Workspace id the Member participates in')
+      const workspaceId = request.workspaceId
+      // A recovery has no ledger section of its own: this queue entry is the
+      // critical section, so the manager is re-checked inside it (by the
+      // internal path, which owns the one authorize call) and not only at the
+      // tool entry.
+      const recovered = await this.enqueueLifecycle(request.memberRef, async () =>
+        this.recoverMemberInternal({ requestId: request.requestId, workspaceId, memberId: request.memberRef }, { authorize }))
+      return Object.freeze({
+        requestId: request.requestId,
+        action: request.action,
+        outcome: 'runtime-only' as const,
+        memberRef: request.memberRef,
+        status: recovered.status,
+      })
+    }
+    const written = await this.commitManagerWrite(request.requestId, async () => {
+      if (request.action === 'suspend') {
+        const result = await this.suspendMemberInternal({ requestId: request.requestId, memberId: request.memberRef }, { authorize })
+        return { receipt: result.receipt, status: result.status }
+      }
+      if (request.action === 'resume') {
+        const result = await this.resumeMemberInternal({ requestId: request.requestId, memberId: request.memberRef }, { authorize })
+        return { receipt: result.receipt, status: result.status }
+      }
+      const result = await this.archiveMemberInternal({ requestId: request.requestId, memberId: request.memberRef }, { authorize })
+      return {
+        receipt: result.receipt,
+        status: this.memberStatus(result.member),
+        releasedClaims: result.releasedClaims.length,
+        removedAttention: result.removedAttention.length,
+      }
+    })
+    return Object.freeze({
+      requestId: written.requestId,
+      action: request.action,
+      outcome: 'committed' as const,
+      receipt: written.receipt,
+      memberRef: request.memberRef,
+      status: written.status,
+      ...(written.releasedClaims === undefined ? {} : { releasedClaims: written.releasedClaims }),
+      ...(written.removedAttention === undefined ? {} : { removedAttention: written.removedAttention }),
+    })
+  }
+
+  /**
+   * Change one Member's Workspace participation for the manager. Joining is a
+   * pure relation and never moves the Member's Session; leaving the creation
+   * Workspace stays refused by the ledger, which points at archival instead.
+   */
+  async managerChangeMemberWorkspaceForAgent(agent: Agent, request: AgentTeamManagerMemberWorkspaceRequest): Promise<AgentTeamManagerMemberWorkspaceResult> {
+    this.requireManagerAgent(agent)
+    this.requireWorkspace(request.workspaceId)
+    const authorize = () => this.requireManagerAgent(agent)
+    const written = await this.commitManagerWrite(request.requestId, async () => {
+      if (request.action === 'join') {
+        const result = await this.joinWorkspaceInternal({ requestId: request.requestId, workspaceId: request.workspaceId, memberId: request.memberRef }, { authorize })
+        return { receipt: result.receipt }
+      }
+      const result = await this.leaveWorkspaceInternal({ requestId: request.requestId, workspaceId: request.workspaceId, memberId: request.memberRef }, { authorize })
+      return { receipt: result.receipt, releasedClaims: result.releasedClaims.length, removedAttention: result.removedAttention.length }
+    })
+    return Object.freeze({
+      requestId: written.requestId,
+      outcome: 'committed' as const,
+      receipt: written.receipt,
+      memberRef: request.memberRef,
+      workspaceId: request.workspaceId,
+      workspaceIds: this.requireLedger().workspacesOf(request.memberRef),
+      ...(written.releasedClaims === undefined ? {} : { releasedClaims: written.releasedClaims }),
+      ...(written.removedAttention === undefined ? {} : { removedAttention: written.removedAttention }),
+    })
+  }
+
+  /**
+   * Run one management write and answer its durable result. A refusal throws
+   * before any append, so an error whose text names a reason means nothing was
+   * written. An error raised after the ledger recorded the intent — a failed
+   * activation, notification, or projection — still answers committed: the
+   * same requestId is replayed, which the ledger resolves to the original
+   * receipt instead of writing twice, so a half-finished write is reported
+   * rather than retried into a duplicate.
+   */
+  private async commitManagerWrite<R extends { readonly receipt: AgentTeamOperationReceipt }>(
+    requestId: AgentTeamRequestId,
+    write: () => Promise<R>,
+  ): Promise<R & { readonly requestId: AgentTeamRequestId }> {
+    try {
+      return Object.freeze({ requestId, ...await write() })
+    } catch (error) {
+      if (!this.requireLedger().hasCommitted(requestId)) throw error
+      return Object.freeze({ requestId, ...await write() })
+    }
+  }
+
+  /** One Member's standing for the manager overview: runtime state from the Host, ownership from the ledger. */
+  private managerMemberEntry(ledger: AgentTeamLedger, memberId: AgentTeamMemberId): AgentTeamManagerMemberEntry {
+    const member = ledger.requireMember(memberId)
+    const status = this.memberStatus(member)
+    return Object.freeze({
+      memberRef: member.memberId,
+      handle: member.handle,
+      description: member.description,
+      workspaceIds: ledger.workspacesOf(memberId),
+      availability: status.availability,
+      presence: status.presence,
+      ...(status.diagnostic === undefined ? {} : { diagnostic: status.diagnostic }),
+      capabilityState: status.capabilityState,
+      ...(status.capabilityWarnings === undefined ? {} : { capabilityWarnings: status.capabilityWarnings }),
+      owns: ledger.ownedProjects(memberId),
+    })
+  }
+
+  /** One Member read by ref: the private directory a later write targets, and nothing beyond it. */
+  private managerMemberDetail(ledger: AgentTeamLedger, memberId: AgentTeamMemberId): AgentTeamManagerMemberDetail {
+    const member = ledger.requireMember(memberId)
+    return Object.freeze({
+      memberRef: member.memberId,
+      handle: member.handle,
+      privateMemoryPath: member.privateMemoryPath,
+      owns: ledger.ownedProjects(memberId),
+    })
+  }
+
+  /**
+   * The one authorization a manager tool performs itself. The tool policy already
+   * denies every other Session at execution; this is the handler's own check, so
+   * a tool reached through any other path still refuses. `ownsSession` cannot
+   * serve here: it answers lineage, which a replaced generation still satisfies.
+   */
+  private requireManagerAgent(agent: Agent): void {
+    if (this.managerRuntime === undefined || !this.managerRuntime.isCurrentManagerAgent(agent)) {
+      throw new Error('team manager tool requires the live Team manager Session')
+    }
+  }
+
   validateLedger(): void {
     this.requireLedger().validate()
   }
@@ -3191,6 +3920,34 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
+   * Reject a model route the Session controller's own catalog cannot serve.
+   * Unlike `assertModelRoute`, this reads the same catalog `team_models`
+   * reports, so the manager can never name a route the Web member editor does
+   * not offer, and a provider whose lookup failed is a failure with its reason
+   * rather than a silently empty list.
+   */
+  private async assertManagerModelRoute(agent: Agent, model: AgentTeamModelSelection | null | undefined): Promise<void> {
+    // No route to check: absent keeps the stored selection and null clears it.
+    if (model === undefined || model === null) return
+    const sessionController = agent.ctx.get('sessionController')
+    if (sessionController === undefined) throw new Error('Session controller is unavailable')
+    const catalog = await sessionController.modelCatalog()
+    const failure = catalog.failures.find(provider => provider.id === model.provider)
+    if (failure !== undefined) {
+      throw new Error(`the model catalog for provider '${model.provider}' could not be read: ${failure.message}`)
+    }
+    const group = catalog.groups.find(provider => provider.id === model.provider)
+    if (group === undefined) throw new Error(`provider '${model.provider}' is not in the model catalog`)
+    const entry = group.models.find(candidate => candidate.id === model.model)
+    if (entry === undefined) throw new Error(`model '${model.model}' is not offered by provider '${model.provider}'`)
+    if (model.reasoningEffort === undefined) return
+    const efforts = entry.reasoning?.efforts ?? []
+    if (efforts.length > 0 && !efforts.some(effort => effort.id === model.reasoningEffort)) {
+      throw new Error(`reasoning effort '${model.reasoningEffort}' is not supported by ${model.provider}/${model.model}`)
+    }
+  }
+
+  /**
    * Session headers currently durable in the persistence backend. A disposed Session's log is retired without awaiting,
    * so the JSONL backend's transient win32 staging directories (.dsh-mkdir-*) can surface as ENOENT; the idempotent read backs off briefly.
    */
@@ -3331,11 +4088,22 @@ export default class AgentTeam extends TypertRemoteService {
       // Both capability effects are now live: record the intent the surface reflects so a later edit or retry compares against reality.
       this.memberRuntime.recordAppliedCapabilities(member.memberId, member.capabilities)
       await workspace.attachSession(member.sessionId)
+      // Re-read the durable state before seeding the live handle: an archive
+      // that landed while this activation ran must not leave a live handle
+      // behind, because that handle is what every surface reads as "present".
+      const current = this.requireLedger().getMember(member.memberId)
+      if (current === undefined || current.state === 'archived') {
+        await this.disposeWithWakeGuard(created)
+        this.memberRuntime.forgetMember(member.memberId)
+        this.ctx.logger.warn(`agent-team: activation of ${this.memberLabel(member.memberId)} finished after the Member was ${current === undefined ? 'removed' : 'archived'}; no live handle was kept`)
+        return
+      }
       this.handles.set(member.memberId, created)
       this.memberIdle.status(member.memberId, created.agent.status, Date.now())
       this.clearMemberFailure(member.memberId, 'activation')
       this.clearMemberFailure(member.memberId, 'preTurnCancellation')
       this.clearMemberFailure(member.memberId, 'capabilityApply')
+      this.clearMemberFailure(member.memberId, 'modelApply')
       this.nameMemberSession(member, created.agent)
       const generationStarted = created.agent.session.ownEvents().some(event => event.type === 'turn/start')
       // A restart between a durable rollover intent and its swap replays the
@@ -3463,6 +4231,9 @@ export default class AgentTeam extends TypertRemoteService {
     // error: the Member runs, yet its stored configuration is ahead of the
     // surface until the effect lands. The warning digest rides along — the
     // unknown-name signal and the apply failure answer different questions.
+    if (failures?.modelApply !== undefined) {
+      return Object.freeze({ member, availability: 'active', presence: 'error', capabilityState, diagnostic: failures.modelApply })
+    }
     if (failures?.capabilityApply !== undefined) {
       const capabilityWarnings = this.memberRuntime.capabilityWarningsFor(member.memberId)
       return Object.freeze({
@@ -3490,7 +4261,14 @@ export default class AgentTeam extends TypertRemoteService {
     this.memberFailures.set(memberId, failures)
   }
 
-  /** Store the post-commit configuration apply failure; cleared when the effect lands or a later activation succeeds. */
+  /** Store the post-commit model-route apply failure; cleared when the effect lands or a later activation succeeds. */
+  private setModelApplyDiagnostic(memberId: AgentTeamMemberId, diagnostic: AgentTeamMemberDiagnostic): void {
+    const failures = this.memberFailures.get(memberId) ?? {}
+    failures.modelApply = Object.freeze(diagnostic)
+    this.memberFailures.set(memberId, failures)
+  }
+
+  /** Store the post-commit capability apply failure; cleared when the effect lands or a later activation succeeds. */
   private setCapabilityApplyDiagnostic(memberId: AgentTeamMemberId, diagnostic: AgentTeamMemberDiagnostic): void {
     const failures = this.memberFailures.get(memberId) ?? {}
     failures.capabilityApply = Object.freeze(diagnostic)
@@ -3511,7 +4289,7 @@ export default class AgentTeam extends TypertRemoteService {
     return { class: 'activation' as const, detail: error instanceof Error ? error.message : String(error) }
   }
 
-  private clearMemberFailure(memberId: AgentTeamMemberId, slot: 'activation' | 'runtime' | 'preTurnCancellation' | 'capabilityApply'): boolean {
+  private clearMemberFailure(memberId: AgentTeamMemberId, slot: 'activation' | 'runtime' | 'preTurnCancellation' | 'capabilityApply' | 'modelApply'): boolean {
     const failures = this.memberFailures.get(memberId)
     if (failures === undefined || failures[slot] === undefined) return false
     if (Object.keys(failures).length === 1) this.memberFailures.delete(memberId)

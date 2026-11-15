@@ -24,6 +24,7 @@ const RISK_CLASS_KEYS = {
   'runtime': ['riskClassRuntime', 'riskRuntime'],
   'activation': ['riskClassActivation', 'riskActivation'],
   'capability-apply': ['riskClassCapabilityApply', 'riskCapabilityApply'],
+  'model-apply': ['riskClassModelApply', 'riskModelApply'],
 } as const satisfies Record<AgentTeamMemberDiagnosticClass, readonly [TeamKey, TeamKey]>
 
 /**

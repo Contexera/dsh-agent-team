@@ -300,3 +300,11 @@ The live delivery control belongs to this Host's run registry: it is created whe
 Unloading the bundle refuses new delegations, cancels starts that are still opening (including one still writing its opening record), and gives active steer calls the same bounded opening wait before fencing off late receipt writes. It then waits for the runs this Host holds to report and record their endings before it closes storage.
 
 A run still unconfirmed at that boundary keeps its `running` record and is sealed, so no late ending is written after storage closes. Durable writes already in flight are awaited before providers are released; the five-second lifecycle deadline does not cancel a storage write that stopped answering.
+
+## Team manager surface
+
+The nine manager tools are not part of this Member protocol and are never declared to a Member: `team_overview`, `team_models`, `member_create`, `project_create`, `project_owner`, `project_update`, `member_update`, `member_state`, and `member_workspace` are mounted only inside the isolated `team-manager` preset, and each handler refuses any Session that is not the current manager.
+
+They share this document's rules — a committed write answers with its receipt and a refusal names its reason and wrote nothing, `requestId` makes a retry idempotent while a changed parameter under a reused id is a collision, and an omitted optional field keeps what is stored rather than clearing it — and they authorize twice: at the tool entry, and again inside the ledger's serialized section after the idempotency replay branch resolves.
+
+The [Team manager preset](../architecture/tools-and-preset.md#team-manager-preset) owns their contracts, the preset that mounts them, and the manager authority they run under.

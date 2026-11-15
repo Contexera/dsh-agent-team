@@ -128,7 +128,17 @@ it('drives the manager through shipped Conversation, replacement, reload, and or
   expect(firstAgent).toBeDefined()
   expect(firstAgent!.session.header.agentPreset).toBe('team-manager')
   expect(scaffold!.ctx.tools.schemas(firstAgent! as never).some(tool => tool.name === 'ask_user_question')).toBe(true)
-  expect(scaffold!.ctx.tools.schemas(firstAgent! as never).some(tool => tool.name.startsWith('team_'))).toBe(false)
+  // The manager holds the nine manager Team tools and none of the Member
+  // family. The preset's `only` list is the only narrowing that reaches the
+  // model, because the visible list is read from the registering scope's
+  // schemas — so an exact set here is what proves a Member tool never leaks
+  // into the manager composition. The set is named, not filtered by prefix:
+  // the seven write tools carry no `team_` prefix, so a prefix filter would
+  // quietly drop them and pass on the two reads alone.
+  const managerToolNames = scaffold!.ctx.tools.schemas(firstAgent! as never).map(tool => tool.name)
+  expect(managerToolNames).toEqual(expect.arrayContaining(['team_overview', 'team_models', 'member_create', 'project_create', 'project_owner', 'project_update', 'member_update', 'member_state', 'member_workspace']))
+  expect(managerToolNames.filter(name => ['team_inbox', 'team_attention', 'team_thread', 'team_message', 'team_dm',
+    'team_task', 'team_view', 'team_subscription', 'team_reminder', 'team_worker'].includes(name))).toEqual([])
   const directSelectError = await scaffold!.ctx.agentPresets.select(firstAgent!, 'minimal').then(() => undefined, (error: unknown) => error)
   expect(directSelectError).toBeInstanceOf(Error)
   expect(String(directSelectError)).toContain('scope key is already bound')

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-面向 Agent Team Member 的模型工具。本包在调用方 Agent preset scope 内注册工具，不提供或替换 Host service。它不含 context 工具：Session 由引擎就地压缩，冷下来的一代由 Host 换代，两者都不是模型的决定。
+面向 Agent Team 的模型工具：Member 协作工具面，加上 Host 自持的 Team manager Session 使用的读与写工具。本包在调用方 Agent preset scope 内注册工具，不提供或替换 Host service。它不含 context 工具：Session 由引擎就地压缩，冷下来的一代由 Host 换代，两者都不是模型的决定。
 
 ## 工具
 
@@ -19,6 +19,21 @@
 
 只有 Host 的 Worker 实验开关开启时才声明 `team_worker`；关闭后，工具在下一个回合边界收回，不中断已在执行的 Worker。Project owner 的职责与委派判断常驻动态 `team:project-owner` system-prompt section，其中的 Worker 段落在每次组装时读取开关。压缩与换代不会把该 section 丢掉；普通 Session 两者都不会收到。
 
+- `team_overview` 以 Team manager 的身份只读整个 Agent Team：Host 目录里的每个 Workspace 及其 checkout 路径、每个 Project 的共享目标、它的 owners 与各自负责什么、活跃与暂停的订阅计数、board 摘要，以及每个 Member 参与哪些 Workspace、以什么方式运行、负责哪些 Project。它不带消息正文、Thread 事实、凭据或私有文件内容，并可用 `workspaceId`、`projectRef` 或 `memberRef` 收窄；`memberRef` 读取只补上该 Member 的私有目录路径，不多给。每个集合都以 `limit` 为界，被截断的集合通过 `truncated` 说明，所以大型 Team 是按范围翻页，而不是被悄悄截短。空答案意味着 Team 为空，而未知的 `workspaceId` 或 `projectRef` 会被拒绝，不会答成空。同名成员在两个 Workspace 里是两个 Member，因此只能按 `memberRef` 寻址；授权没记 responsibility 的 owner 读作 `unspecified`，只有 Human 一个 owner 的 Project 是事实而非缺陷，长期没有 owner 关系的 Member 也照实报告。Thread 与 Task 的完整细节仍归 `team_thread` 与 `team_task`。
+- `team_models` 列出 Team Member 可以跑的模型路由：每个 provider 分组的模型、每个模型的 reasoning efforts、部署默认值，以及 catalog 查询失败的 provider。它直接读 Session controller 自己的 catalog，不做二次陈述，所以这里点名的路由在 Web member 编辑器里同样可选；查询失败的 provider 记在 `failures` 里，绝不会被折成一个空列表。`memberPresets` 点名 Member 唯一可组合的 preset；manager 自己的 preset 归 Host 所有、从不可被 Member 选择，因此绝不出现。
+
+- `member_create` 以 Team manager 的身份在一个 Workspace 内创建一个 Agent Member。这次写走 Host 自己的新增路径——与 Web Client 相同的串行队列、激活与回执——所以它答回的记录就是其他所有面读到的记录。它接受 handle（在该 Workspace 内唯一）、非空的成员全局身份描述、与 `team_models` 列出完全一致的显式模型路由，以及可选的能力配置意图（缺省即完整标准工具面）。从今以后按 `memberRef` 寻址该 Member，绝不用 handle，因为同名成员在两个 Workspace 里是两个不同的 Member。
+- `project_create` 以 Team manager 的身份在一个已有 Workspace 内新建 Project，用 `description` 记录它的持续共同目标。创建时只有已在该 Workspace 内激活的 Member 可以加入——这是 Host 自己的准入门槛，严于账本——所以激活失败的 Member 会带着原因在这里被拒绝：要么不带它建，要么先修好那个 Member。空的共同目标会被拒绝，因为 Project 存在的意义是一件有人负责的持续结果。省略 `memberIds` 即先建空 Project，之后再授予 owner。
+- `member_update` 以 Team manager 的身份编辑一个已存在 Agent Member 的可变事实：它的描述、模型路由与能力配置。这是局部更新——调用没写的字段保留写入真正执行那一刻已存下的值，合并在账本的串行段落内完成，所以一次编辑不会覆盖排队期间落地的改名或描述修改，而重放的 `requestId` 只比较它自己写明的字段。handle 与 preset 在这里不可编辑。显式空白的描述会被拒绝，因为 Member 靠"它为什么存在"被寻址。省略 `capabilities` 保留已存的覆盖，`clearCapabilities: true` 则恢复完整标准工具面；两者同时给出会被拒绝，因为清除与"设成空列表"不是一回事。替换路由只在请求是新的时对照 `team_models` 列出的同一份目录校验。答案保留持久回执，并单独报告已存配置走到运行时多远——`applied`、`already-applied`、`deferred:no-live-handle`、`deferred:generation-changed`，或带 Member 自身诊断的 `failed:model-apply`／`failed:capability-apply`——所以已提交但运行时应用失败的写，绝不会被答成未提交的拒绝。失败的阶段决定 effect，比较对象是活代实际在跑的状态：重放同一请求会补做仍欠的那次效果，而后来被换掉的路由绝不会被写回。
+- `member_state` 以 Team manager 的身份改变一个 Agent Member 的生命周期。`suspend` 与 `resume` 是 Host 既有的持久操作：被暂停的 Member 保留它的 Session 与私有数据，恢复会再次激活它。`archive` 在所有面上隐藏该 Member、释放它的活跃 Claim、清空它的 Attention，并把私有记忆与会话日志留在磁盘上；这个版本没有永久删除工具，归档就是它提供的终态。`recover` 是不写账本记录的纯运行时修复：收尾被中断的换代或暂停清理、重建被 reload 弄成孤儿的 preset 组合，或重启激活失败的 Member。它要求给出 Host 会核验其参与的 Workspace，并且在重启是唯一出路时拒绝未启用的 Member。拒绝会说明原因且什么都不写；已提交的写答回它的回执与该 Member 之后的状态。
+- `member_workspace` 以 Team manager 的身份改变一个 Agent Member 的 Workspace 参与。`join` 以纯关系授予另一个 Workspace 的参与——Member 的 Session 不会被创建、复制或迁移，它仍在原来的 checkout 里工作。`leave` 退出一个非默认 Workspace：它在那里的活跃 Claim 释放、Attention 与相关 Thread 上的标记清空、Project 成员关系结束，而身份、Session 与其余参与保留。创建时的 Workspace 不能退出——请改为归档该 Member。
+- `project_owner` 以 Team manager 的身份改动一个 Agent Member 对一个 Project 的 owner 关系。`add` 授予它并记录该 Member 在那里负责什么；`update` 替换这份责任，而不先撤回再重新授予，所以 Member 在这次改动中保住自己的授予、Main stream Attention 与历史；`remove` 撤回这段关系。被授予者必须已参与该 Project 所在 Workspace，且状态为 enabled 或 suspended——archived 的 Member 会带着原因被拒绝——而这次授予本身就是该 Member 的 Project 参与。责任是一句有界的陈述，与成员的全局身份和 Project 的共享目标都不同：`add` 拒绝空值，而 `update` 接受显式空值（或 `clearResponsibility: true`）以记录 `未说明`，这是关于授予的事实而不是待补的缺口。重复授予会被拒绝，不会被悄悄保留。撤回只结束这段关系：仍在参与该 Project 的 Member 保留它负责的 Task，参与关系结束的则把它们交回 Human。
+- `project_update` 以 Team manager 的身份编辑一个 Project 或归档它。`update` 改名字、共同目标或两者，并且是局部更新：调用没写的字段保留写入真正执行那一刻已存下的值，合并在账本的串行段落内完成，所以一次改名不会把排队期间 Human 改过的共同目标写回旧值。显式空白的共同目标会像 Web 编辑器那样清空它；空名字会被拒绝。`archive` 是 Project 的终态：全部事实与整段历史仍可读，活跃 Claim 被释放，相关 Attention 清空，它拥有的每个订阅停止并丢掉私有状态。归档提交之后才失败的清理会作为警告写在回执旁边，所以已经持久化的决定绝不会被答成未提交的拒绝。
+
+每个写操作都带一个 `requestId`：这次写重要到需要重试时就自己传一个；同一个 id 配同样的参数答回原回执，不会写第二次，而同一个 id 下改了参数会被当成冲突拒绝。拒绝会说明原因，并且什么都没有写。已提交但激活失败的 Member 依然是已提交的：答回里保留它的回执、ref 与激活诊断，从那里继续，而不是把它再建一遍。
+
+`team_overview`、`team_models`、`member_create`、`project_create`、`project_owner`、`project_update`、`member_update`、`member_state` 与 `member_workspace` 服务对象是 Host 自持的 Team manager Session，不是 Member：`team-member` preset 不声明它们，九个 handler 也会拒绝任何不是当前 manager Agent 的 Session。这里用不上 `ownsSession`，它回答的是 lineage，而被替换掉的旧代同样满足 lineage。写操作校验两次——工具入口的同一道 manager gate，加上账本在幂等重放分支之后、串行段落之内的 authorize 钩子——所以在调用与提交之间被替换掉的 manager 会被拒绝，且什么都不写。
+
 mention 在 Message 正文里撰写，形如 `@Handle`（`@` 必需、大小写不敏感；规则版本 2 下 `@all` 是普通文本，不通知任何人）；不存在收件人参数。mention 只把这条 Message 送达被点名的 Member 一次，不会使其开始关注。Closed Task 在 Human reopen 前拒绝 reply、Claim 和新的 Attention；taskless Thread 没有 Claim 或 Task resolution mutation path。
 
 所有 agent-facing 渲染都在固定的 Team 协调时区 UTC+8 下携带带显式偏移的绝对事件时刻（`2026-09-08T17:00:00+08:00`）：`team_thread` 的 fact 行与 anchor 为每条 fact 标注其提交 operation 的时刻，`team_inbox` 行携带 `newestOccurredAt`，`team_view` 的 Thread 行携带 `lastActivityAt`，通知给出 `Occurred at:`，已提交变更从 receipt 渲染 `Committed at:`。同一存储时刻在任何重读路径中渲染完全一致；只渲染绝对 timestamp，绝不出现相对时间文案，且 sequence 与 revision——而非 wall-clock 时间——仍是顺序 authority。
@@ -32,3 +47,5 @@ Canonical result 以结构化字段暴露稳定 refs、可选 Task status、Thre
 ## Composition
 
 在 team-enabled Agent preset 内、`dsh-tools` 之后挂载本插件。插件只静态 inject `tools`；执行时从 live Agent context 读取 `agentTeam`，避免 Host 恢复 Member session 时形成依赖环。
+
+每个 preset 通过插件自己的 `only` 配置点名它要挂载的确切工具，因为模型可见的工具清单读自注册所在 scope 的 schemas：在这里注册、之后再藏起来的工具仍然列在模型面前，只在 handler 里拒绝也仍会先花掉一轮。`team-member` 点名十个 Member 工具；`team-manager` 点名九个 manager 工具——`team_overview`、`team_models`、`member_create`、`project_create`、`project_owner`、`project_update`、`member_update`、`member_state` 与 `member_workspace`——此外不点名任何工具。省略 `only` 会注册本包定义的全部工具；名单里出现未知名会被拒绝而不是跳过，所以写错名字不会挂上一个空工具面，最后以一个什么都不能做的 Session 的形式暴露出来。

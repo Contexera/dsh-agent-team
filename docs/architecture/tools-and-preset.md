@@ -8,7 +8,7 @@ The filesystem row states `applyPatch: false` rather than inheriting the Host de
 
 Every Member starts restricted to the tool definitions contributed by its selected preset, plus the explicitly shared `working_directory` tool. `capabilities.tools.allow` still only narrows this baseline.
 
-A separate profile-wide `extraToolGrants` list in the Team Host row can grant exact, case-sensitive registered Host tool names, including an inherited baseline name the Member allow-list omitted. The list defaults to empty, belongs to one profile, and applies to every Team Member in that profile. The ten Team tools and `working_directory` remain reserved, so a grant cannot name them. `team_worker` is one of the ten and is declared only while the Host Worker switch is on, so a grant cannot turn it on. A grant is a name, never a plugin origin, definition object, or registration instance.
+A profile-wide `extraToolGrants` list on the Team Host row grants exact, case-sensitive registered Host tool names, including a baseline name omitted by the Member allow-list. It defaults to empty and applies to every Team Member in that profile. Team-owned tools and `working_directory` are reserved; a grant cannot name them. `team_worker` is declared only while the Host Worker switch is on, so a grant cannot turn it on; the nine manager tools are never candidates. A grant is a name, never a plugin origin, definition object, or registration instance.
 
 The Host reads the grants synchronously at each Session `turn/start`, before the first tool resolution, and freezes them for that turn. A later-saved edit reaches the next turn even when consecutive turns never pass through idle, and creation, resume, and generation replacement use the same policy path. The restriction materializes the names known at that boundary.
 
@@ -32,7 +32,11 @@ This uses public Harness hooks rather than an enforced final request policy. Oth
 
 Every row `name:` is a bare specifier the Loader resolves against the profile, not against this bundle. A profile links this bundle and the host closure, so a row may name a host package or one of this bundle's own subpaths, and never a package nested inside this bundle's dependency tree. A name that resolves in a working tree can still leave the row `never started` in a real install, so a dependency's module reaches a row only through a re-export under this bundle's own name.
 
-The ten tools are defined in `packages/tool-agent-team/src/index.ts` and `packages/tool-agent-team/src/subscription.ts`; their contract is in [`tools.md`](../team-collaboration/tools.md). They mount under the isolated `team-member` preset. The Web Client is the only Human control surface and delegates every mutation through `ctx.agentTeam` typed Remote; do not restore a slash-command adapter.
+The model-facing tools are defined in `packages/tool-agent-team/src/index.ts` and `packages/tool-agent-team/src/subscription.ts`; the Member contract is in [`tools.md`](../team-collaboration/tools.md). Every preset that mounts the tools plugin declares its own exact subset through the plugin's `only` config, because the model's visible tool list is read from the registering scope's schemas: a tool registered here and hidden later is still listed to the model, and a tool refused in its handler is still spent on before it fails.
+
+`team-member` names the ten Member tools; `team-manager` names the nine manager tools and nothing else. An unknown name in the list is refused rather than skipped, so a typo cannot mount an empty surface that only surfaces as a Session that cannot act.
+
+The Web Client is the only Human control surface and delegates every mutation through `ctx.agentTeam` typed Remote; do not restore a slash-command adapter.
 
 A Member has no context tool. The preset's `compaction-basic` row mounts Team's thin `member-compaction-engine` adapter: Team owns proactive admission, while the Harness's `BasicCompactionEngine` supplies the summary template, compaction transaction, and overflow recovery. [`memory-and-context.md`](../team-collaboration/memory-and-context.md) defines the budgets. Generation swaps remain Host decisions, never model ones.
 
@@ -69,11 +73,49 @@ The wake decision itself is a pure gate ladder in `wake-recycle.ts`: disabled, n
 
 ## Team manager preset
 
-The Host mounts a separate isolated `team-manager` preset for its [Team manager](../domain-model.md#team-manager) Session. It keeps a generic coding surface — persona, time and Workspace instructions, shell, filesystem/search, web, jobs, skill loading, ask-user, and basic compaction — but deliberately omits the ten Team tools, Member context, the Member time context, Member memory and its compaction adapter, Worker and rollover policy, and the profile `extraToolGrants`. This build also registers none of the nine manager-management tools.
+The Host mounts a separate isolated `team-manager` preset for its [Team manager](../domain-model.md#team-manager) Session. It keeps a generic coding surface — persona, time and Workspace instructions, shell, filesystem/search, web, jobs, skill loading, ask-user, and basic compaction — but deliberately omits Member context, the Member time context, Member memory and its compaction adapter, Worker and rollover policy, and the profile `extraToolGrants`. This build registers the nine manager tools of the planned management set and none of the rest.
+
+That surface runs at the trusted `danger-full-access` policy, so the persona carries the data red line as a rule: under `$DSH_HOME` the manager reads and writes only its own `agent-team/manager/` directory plus a Member's private assets `team_overview` has just confirmed by ref, and never the Host's sqlite files or Session logs.
+
+It edits a Member's memory, notes or skills only within the Human's current request and under the applicable upkeep rules; it never deletes a Member's directory or copies private content into shared material. Its own memory, notes and a tool result record what was once said, so none of them authorizes an irreversible or costly action in place of the Human asking for it now.
+
+The Team surface it mounts is that exact subset: two read-only tools plus seven writes. `team_overview` reads the whole Team as a directory: every Workspace with its checkout path, every Project with its shared goal, its owners and what each answers for, its live subscription counts and board summary, and every Member with where it participates, how it runs, and what it owns.
+
+`team_models` reads the model routes a Member may run from the Session controller's own catalog, so the manager can never offer a route the Web member editor does not. Neither read carries a message body, a Thread fact, a credential, or private file content; a `memberRef` read adds that Member's private directory path and nothing beyond it.
+
+`member_create`, `project_create`, `project_owner`, `project_update`, `member_update`, `member_state` and `member_workspace` are the manager's only writes, and each rides the Host's own write path — the same serialized ledger queue, activation and receipt the Web Client uses — so the record a write answers with is the record every other surface reads.
+
+`member_update` adjusts a Member that already exists, and it is a partial update: every field the call leaves out keeps the value stored at the moment the write runs, merged inside the ledger's serialized section, so an edit cannot overwrite a rename or description change that landed while it was queued.
+
+A replayed `requestId` compares only the fields it stated. The handle and the preset are not editable there, an explicit blank standing is refused, an omitted `capabilities` keeps the stored override while `clearCapabilities` clears it, and a replacement route is checked against the catalog only while the request is new.
+
+Its answer keeps the durable receipt and reports separately how far the stored configuration reached the live runtime — `applied`, `already-applied`, `deferred:no-live-handle`, `deferred:generation-changed`, or `failed:model-apply` / `failed:capability-apply` with the Member's own diagnostic — so a committed write whose live apply failed is never answered as an uncommitted rejection that would invite a duplicate retry.
+
+The failing stage names the effect and the diagnostic class, and the comparison is against the route and the surface the live generation actually runs: replaying the same request retries the effect the stored configuration still owes, while a route a later edit replaced is never put back.
+
+`member_state` suspends, resumes, or archives through the Host's existing durable operations; archive releases the Member's active Claims and clears its Attention while its private memory and Session log stay on disk. `recover` is the one runtime-only action: it writes no ledger record, requires the Workspace whose participation the Host verifies, and finishes an interrupted swap, rebuilds an orphaned composition, or restarts a failed activation.
+
+`member_workspace` joins or leaves a non-default Workspace as a pure ledger relation — the Member's Session is not created, copied, or moved — and leaving the creation Workspace is refused in favour of archival.
+
+`project_update` edits one Project's display facts or archives it. A name or goal the call leaves out keeps the value stored at the moment the write runs, merged inside the ledger's serialized section, so a rename cannot write back a goal the Human changed while it was queued; an explicit empty goal clears it the way the Web editor does, while an empty name is refused. Archival keeps every fact and the whole history, releases the Project's active Claims, clears the related Attention, and stops and clears every subscription the Project owns.
+
+A cleanup that fails after an archival commits is named in the answer as a warning beside the receipt instead of turning the durable decision into a rejection. The archival itself cannot be redone under a new `requestId`, and replaying the same one keeps the original receipt while running that cleanup again, which is how the owed subscription state still gets cleared.
+
+`project_owner` grants one Agent Member ownership of one Project, replaces the responsibility it answers for there, or withdraws the grant. An update appends to the owner relation instead of withdrawing and re-granting, so the Member keeps its grant, its Main stream Attention and its history across the change, and the responsibility is replaced everywhere it is read — the ownership context, `team_view`, and `team_overview` — while the Member's global description is untouched.
+
+An update that records no responsibility stores `unspecified`, which is a fact about the grant rather than a gap to repair, and `add` still refuses an empty one. A withdrawal ends the relation only: a Member that still takes part in the Project keeps the Tasks it is accountable for, and one whose participation ends hands them back to the Human.
+
+The manager layer adds only what the Web Client's own forms add: a non-empty Member standing, a non-empty Project goal, a non-empty responsibility on a new grant, and a model route validated against the Session controller's catalog once the request is known to be new. Owner eligibility, admission, the reserved Member tool set, and the 2,000-character responsibility bound stay the ledger's own rules rather than a second copy inside the tool.
+
+Every write carries a `requestId`. The same id with the same parameters answers with the original receipt instead of writing twice, so a lost answer is retried rather than duplicated; a changed parameter under a reused id is refused as a collision. A refusal names its reason and wrote nothing. A committed Member whose activation failed is still committed: the answer keeps its receipt, ref and activation diagnostic, so the manager continues from there instead of creating it again.
 
 That surface runs at the trusted `danger-full-access` policy, so the persona carries the data red line as a rule: under `$DSH_HOME` the manager reads and writes only its own `agent-team/manager/` directory plus a Member's private assets `team_overview` has just confirmed, and never the Host's sqlite files or Session logs. Its own memory, notes and a tool result record what was once said, so none of them authorizes an irreversible or costly action in place of the Human asking for it now.
 
 The isolated registry's default remains `team-member`; only the manager runtime mounts `team-manager`.
+
+All nine handlers authorize the caller themselves: the tool is served only while the calling Agent is the current manager Session. `ownsSession` cannot serve there, because it answers lineage, which a replaced generation still satisfies, so a Session that reaches the tool by any other path — a Member's own scope registration, a custom preset, an ordinary Session — is refused rather than answered.
+
+A write authorizes twice: the same manager gate at the tool, and the ledger's own `authorize` hook inside the serialized section after the idempotency replay branch resolves, so a manager replaced between its call and its commit is refused with nothing written. `recover` has no ledger section to authorize in, so it re-checks the manager inside the Member's lifecycle section — the critical section it actually runs in — and a manager replaced while a recovery was queued is refused there with nothing repaired.
 
 The manager policy captures that preset's exact definitions plus the shared `working_directory`, and its execution guard admits only those definitions for the exact current manager Agent. A later or foreign definition is denied rather than inherited. `addMember` accepts only `team-member`, checked before model validation or any ledger write, so a manager composition cannot become a Member.
 

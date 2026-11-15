@@ -13,11 +13,14 @@ import { teamTools } from './render-text.ts'
  * schema, fills every slot the action does not require with its neutral value,
  * and asserts the call still succeeds.
  *
- * Every registered tool must have a row; action enums are checked against the
- * rows rather than a hand-maintained tool allowlist. Meaningful defaults (such
- * as subscription notify: [] and webhook: false, or a Worker start's engine)
- * belong in the baseline, not in the neutral fill. The filled call must produce
- * the same Host requests as the clean call, not merely avoid throwing.
+ * Every registered tool that takes an argument must have a row, and that
+ * exemption is derived from each tool's live schema rather than from a
+ * hand-maintained tool allowlist: a tool whose parameter pocket is empty has no
+ * optional slot to fill. Action enums are checked against the rows for the same
+ * reason. Meaningful defaults (such as subscription notify: [] and webhook:
+ * false, or a Worker start's engine) belong in the baseline, not in the neutral
+ * fill. The filled call must produce the same Host requests as the clean call,
+ * not merely avoid throwing.
  */
 
 const THREAD = 'thread:d78400e4-4925-4065-87b1-3f81b4a4b5fb'
@@ -37,7 +40,17 @@ const SUBSCRIPTION_STATE = { subscriptionRef: SUBSCRIPTION, name: 'watch', revis
 const WORKER_STATE = { workerRef: WORKER, projectRef: PROJECT, engine: 'codex', state: 'running', startedAt: '2026-11-10T00:00:00.000Z', cwd: '/tmp' }
 
 const THREAD_STATE = { threadRef: THREAD, revision: 20 }
+const MANAGER_OVERVIEW_STATE = {
+  workspaces: [{ workspaceId: WORKSPACE, path: '/tmp/alpha', projectCount: 0, memberCount: 0 }],
+  projects: [], members: [], switches: { worker: false }, truncated: { workspaces: false, projects: false, members: false },
+}
 const ANCHOR = { messageRef: 'message:anchor', sender: MEMBER, body: 'subject', sequence: 1, occurredAt: '2026-10-29T00:00:00.000Z' }
+const MEMBER_CREATE_STATE = { memberRef: 'member:created', workspaceIds: [WORKSPACE],
+  status: { availability: 'active', presence: 'available', capabilityState: 'applied' } }
+const PROJECT_CREATE_STATE = { projectRef: 'project:created', memberIds: [MEMBER] }
+const OWNER_GRANT_STATE = { projectRef: PROJECT, memberRef: MEMBER, responsibility: 'owns the parser' }
+const MANAGER_WRITE_STATE = { requestId: 'agent-team:tool:agent:matrix:call:1', outcome: 'committed' }
+const MEMBER_STATUS_STATE = { availability: 'active', presence: 'available', capabilityState: 'applied' }
 const TASK_STATE = { taskRef: TASK, threadRef: THREAD, projectRef: PROJECT, status: 'in_progress', resolution: 'open', accountable: MEMBER, sourceThreadRefs: [] }
 const CLAIM_STATE = { claimRef: CLAIM, direction: 'angle', state: 'active', owner: MEMBER }
 const RECEIPT = { occurredAt: '2026-10-29T00:00:00.000Z' }
@@ -94,6 +107,18 @@ function matrixHost(): Record<string, unknown> {
       activity: { from: MEMBER, to: 'human' } })),
     viewForAgent: vi.fn(() => ({ humanMemberId: 'member:human', workspaces: [{ workspaceId: WORKSPACE, default: true }], projects: [],
       directory: { projects: [], memberIds: [] }, members: [], owners: [], rulesVersion: 2, tasks: [], threads: [], taskNumbers: [], items: [], claims: [], activities: [], cursor: 0, hasMore: false })),
+    managerOverviewForAgent: vi.fn(() => MANAGER_OVERVIEW_STATE),
+    managerCreateMemberForAgent: vi.fn(async () => ({ ...MANAGER_WRITE_STATE, receipt: RECEIPT, ...MEMBER_CREATE_STATE })),
+    managerCreateProjectForAgent: vi.fn(async () => ({ ...MANAGER_WRITE_STATE, receipt: RECEIPT, ...PROJECT_CREATE_STATE })),
+    managerChangeProjectOwnerForAgent: vi.fn(async () => ({ ...MANAGER_WRITE_STATE, receipt: RECEIPT, action: 'add', ...OWNER_GRANT_STATE })),
+    managerUpdateProjectForAgent: vi.fn(async () => ({ ...MANAGER_WRITE_STATE, receipt: RECEIPT, action: 'update', projectRef: PROJECT,
+      name: 'Parser', description: 'shared goal', state: 'active' })),
+    managerUpdateMemberForAgent: vi.fn(async () => ({ ...MANAGER_WRITE_STATE, receipt: RECEIPT, memberRef: MEMBER,
+      effect: 'applied', status: MEMBER_STATUS_STATE })),
+    managerSetMemberStateForAgent: vi.fn(async () => ({ ...MANAGER_WRITE_STATE, receipt: RECEIPT, action: 'suspend',
+      memberRef: MEMBER, status: MEMBER_STATUS_STATE })),
+    managerChangeMemberWorkspaceForAgent: vi.fn(async () => ({ ...MANAGER_WRITE_STATE, receipt: RECEIPT, memberRef: MEMBER,
+      workspaceId: WORKSPACE, workspaceIds: [WORKSPACE] })),
   }
 }
 
@@ -109,6 +134,10 @@ function neutralValue(spec: ParameterSpec): unknown {
     case 'number': return 0
     case 'boolean': return false
     case 'array': return []
+    // An empty object, not a blank string: the parameter schema refuses a string
+    // where it declares an object, so the fill has to be schema-valid to reach
+    // the tool at all.
+    case 'object': return {}
     default: return ''
   }
 }
@@ -170,6 +199,51 @@ const CASES: readonly MatrixCase[] = [
   { tool: 'team_task', action: 'close', baseline: { action: 'close', taskRef: TASK, baseRevision: 20 }, hostMethod: 'changeTaskForAgent' },
   { tool: 'team_task', action: 'reopen', baseline: { action: 'reopen', taskRef: TASK, baseRevision: 20 }, hostMethod: 'changeTaskForAgent' },
   { tool: 'team_task', action: 'transfer', baseline: { action: 'transfer', taskRef: TASK, baseRevision: 20, target: 'member:human' }, hostMethod: 'transferTaskForAgent' },
+  // The manager read surface: every narrowing slot is optional presence, so a
+  // model that fills all four must reach the same Host request as a clean call.
+  // `team_models` takes no argument at all, so it has no slot to fill and no
+  // row here; the derived coverage check below exempts it for that reason.
+  { tool: 'team_overview', action: 'overview', baseline: {}, hostMethod: 'managerOverviewForAgent' },
+  // The manager write surface: every optional slot is optional presence, so a
+  // model that fills all of them must reach the same Host request as a clean
+  // call. A blank `capabilities` names no capability intent and a blank
+  // `requestId` names no retry key, so both drop exactly as `memberIds` does.
+  { tool: 'member_create', action: 'create', baseline: { workspaceId: WORKSPACE, handle: 'Iris', description: 'global standing',
+    model: { provider: 'provider:a', model: 'model:a' } }, hostMethod: 'managerCreateMemberForAgent' },
+  { tool: 'project_create', action: 'create', baseline: { workspaceId: WORKSPACE, name: 'Parser', description: 'shared goal' },
+    hostMethod: 'managerCreateProjectForAgent' },
+  // A blank responsibility names no standing and `false` names no clearing, so
+  // every ownership action drops both; `remove` has nothing to describe.
+  { tool: 'project_owner', action: 'add', baseline: { action: 'add', workspaceId: WORKSPACE, projectRef: PROJECT,
+    memberRef: MEMBER, responsibility: 'owns the parser' }, hostMethod: 'managerChangeProjectOwnerForAgent' },
+  { tool: 'project_owner', action: 'update', baseline: { action: 'update', workspaceId: WORKSPACE, projectRef: PROJECT,
+    memberRef: MEMBER, responsibility: 'owns the parser' }, hostMethod: 'managerChangeProjectOwnerForAgent' },
+  { tool: 'project_owner', action: 'remove', baseline: { action: 'remove', workspaceId: WORKSPACE, projectRef: PROJECT,
+    memberRef: MEMBER }, hostMethod: 'managerChangeProjectOwnerForAgent' },
+  // `description` is the one slot with no neutral fill on update: an explicit
+  // empty one clears the shared goal, so the row names a real goal instead.
+  { tool: 'project_update', action: 'update', baseline: { action: 'update', workspaceId: WORKSPACE, projectRef: PROJECT,
+    name: 'Parser', description: 'shared goal' }, hostMethod: 'managerUpdateProjectForAgent' },
+  { tool: 'project_update', action: 'archive', baseline: { action: 'archive', workspaceId: WORKSPACE, projectRef: PROJECT },
+    hostMethod: 'managerUpdateProjectForAgent' },
+  // The manager adjustment surface: every optional slot is optional presence, so
+  // a model that fills all of them must reach the same Host request as a clean
+  // call. A blank `description` names no standing, a blank `model` or
+  // `capabilities` names no replacement, `clearCapabilities: false` is the same
+  // as leaving it out, and a blank `workspaceId` names no participation — while
+  // `recover` alone requires one, which is why it carries a real id.
+  // `model` is the one slot with no neutral fill: its own members are required,
+  // so `{}` is not schema-valid and any schema-valid value is a real route
+  // change. The row therefore names a route in its baseline, exactly as the
+  // member_create row does.
+  { tool: 'member_update', action: 'update', baseline: { memberRef: MEMBER,
+    model: { provider: 'provider:a', model: 'model:a' } }, hostMethod: 'managerUpdateMemberForAgent' },
+  { tool: 'member_state', action: 'suspend', baseline: { action: 'suspend', memberRef: MEMBER }, hostMethod: 'managerSetMemberStateForAgent' },
+  { tool: 'member_state', action: 'resume', baseline: { action: 'resume', memberRef: MEMBER }, hostMethod: 'managerSetMemberStateForAgent' },
+  { tool: 'member_state', action: 'archive', baseline: { action: 'archive', memberRef: MEMBER }, hostMethod: 'managerSetMemberStateForAgent' },
+  { tool: 'member_state', action: 'recover', baseline: { action: 'recover', memberRef: MEMBER, workspaceId: WORKSPACE }, hostMethod: 'managerSetMemberStateForAgent' },
+  { tool: 'member_workspace', action: 'join', baseline: { action: 'join', workspaceId: WORKSPACE, memberRef: MEMBER }, hostMethod: 'managerChangeMemberWorkspaceForAgent' },
+  { tool: 'member_workspace', action: 'leave', baseline: { action: 'leave', workspaceId: WORKSPACE, memberRef: MEMBER }, hostMethod: 'managerChangeMemberWorkspaceForAgent' },
 ]
 
 function parameterProperties(tool: ToolDefinition): Record<string, ParameterSpec> {
@@ -220,8 +294,12 @@ describe('every action tolerates every optional slot filled with its neutral val
     })
   }
 
-  it('covers every registered tool, including tools without an action enum', () => {
-    expect([...new Set(CASES.map(scenario => scenario.tool))].sort()).toEqual([...teamTools().keys()].sort())
+  it('covers every registered tool that takes an argument, including tools without an action enum', () => {
+    // The exemption is derived, not a name list: a tool whose parameter pocket
+    // is empty has no optional slot to fill, so the matrix has no row to write
+    // for it. Everything else must have one.
+    const withParameters = [...teamTools()].filter(([, tool]) => Object.keys(parameterProperties(tool)).length > 0).map(([name]) => name)
+    expect([...new Set(CASES.map(scenario => scenario.tool))].sort()).toEqual(withParameters.sort())
   })
 
   for (const [toolName, tool] of teamTools()) {

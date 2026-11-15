@@ -147,7 +147,9 @@ DSH `0.2.2-rc.2` renamed them from the `dsh-experimental-agent-team` / `dsh-expe
 
 It is a competing Team implementation, not an extension point this bundle builds on. It registers its own model-facing tool family (`spawn_teammate`, `send_message`, `list_agents`, `wait_agent`, `interrupt_agent`, `team_task_create`, `team_task_get`, `team_task_list`, `team_task_update`) and carries its own members, tasks, store, and client panel.
 
-This bundle's ten tools are `team_view`, `team_inbox`, `team_thread`, `team_message`, `team_task`, `team_attention`, `team_dm`, `team_subscription`, `team_reminder`, and `team_worker`, registered only inside its `team-member` preset.
+This bundle's nineteen tools are `team_view`, `team_inbox`, `team_thread`, `team_message`, `team_task`, `team_attention`, `team_dm`, `team_subscription`, `team_reminder`, and `team_worker` — the ten Member tools, registered inside its `team-member` preset.
+
+The other nine serve the Team manager: the read-only `team_overview` and `team_models` pair, plus the `member_create`, `project_create`, `project_owner`, `project_update`, `member_update`, `member_state` and `member_workspace` writes, all registered only inside the isolated `team-manager` preset, which no ordinary session composes.
 
 Certification therefore runs in a profile where both official rows are live, and the two implementations stay apart by the preset boundary rather than by absence: this bundle's registry, preset, and tool family live inside its own isolated group, while an ordinary session keeps composing the host's `standard` preset with the official family.
 

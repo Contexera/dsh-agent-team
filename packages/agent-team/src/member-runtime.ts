@@ -22,6 +22,7 @@ import type {
 import * as memberSkills from './member-skills.ts'
 import type { MemberSkillProviderMount } from './member-skills.ts'
 import { sanitizeExtraToolGrants } from './member-tool-grants.ts'
+import { MANAGER_TOOL_NAMES } from './manager-tool-policy.ts'
 
 /** Result of waiting for a turn boundary: `waited` if a running turn had to finish first, `idle` if the Member was already between turns. */
 export type TurnBoundary = 'waited' | 'idle'
@@ -91,10 +92,10 @@ export interface MemberToolPolicySnapshot {
 /** Read the current intent synchronously: this runs from `session/event`, which cannot await. */
 export type MemberToolPolicyReader = () => MemberToolPolicySnapshot
 
-/** The names that keep their existing Member-baseline rules and are never extra grants. */
-const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([...AGENT_TEAM_TOOL_NAMES, 'working_directory'])
+/** Team-owned tools and the shared directory control are never extra grants. */
+const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([...AGENT_TEAM_TOOL_NAMES, ...MANAGER_TOOL_NAMES, 'working_directory'])
 
-/** Whether one tool name is owned by the Team baseline and cannot be reopened by a profile grant. */
+/** Whether one tool name is Team-owned or shared and cannot be reopened by a profile grant. */
 export function isReservedToolName(name: string): boolean {
   return RESERVED_TOOL_NAMES.has(name)
 }

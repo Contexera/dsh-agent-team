@@ -526,9 +526,16 @@ describe('Team manager Session Host runtime', () => {
     const agent = ctx.agents.get(opened.sessionId)!
     // Own-scope registrations stay in the declaration surface (restriction
     // only masks inherited tools), so the late row is visible and the guard is
-    // what denies it.
-    expect(toolNames(ctx, agent)).toEqual(['manager_fixture', 'working_directory', 'late_manager_tool'].sort())
+    // what denies it. The Team surface is the shipped manager subset — the two
+    // read-only tools plus the seven manager write tools, and no tool from the
+    // Member preset — because the model's visible list is read from this
+    // scope's own schemas.
+    expect(toolNames(ctx, agent)).toEqual(['manager_fixture', 'working_directory', 'late_manager_tool', 'team_overview', 'team_models',
+      'member_create', 'project_create', 'project_owner', 'project_update', 'member_update', 'member_state', 'member_workspace'].sort())
     expect(toolNames(ctx, agent)).not.toContain('foreign_global')
+    for (const writeTool of ['team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view', 'team_subscription', 'team_reminder', 'team_worker']) {
+      expect(toolNames(ctx, agent)).not.toContain(writeTool)
+    }
     expect(await execute(ctx, agent, 'working_directory', 'manager-working-directory')).toMatchObject({ isError: false })
     let nested: Awaited<ReturnType<typeof executeToolFixture>> | undefined
     const nestedHook = ctx.on('tools/pre-execute', async (execution, next) => {

@@ -20,6 +20,7 @@ import type {
   AgentTeamMainStreamReadRequest,
   AgentTeamMainStreamReadResult,
   AgentTeamMainStreamStanding,
+  AgentTeamManagerDirectory,
   AgentTeamMainThreadCard,
   AgentTeamMainTimelineEntry,
   AgentTeamMainUnreadRequired,
@@ -2794,13 +2795,21 @@ export class AgentTeamLedger {
     this.applyAndAdvanceProjectionVersion(operation)
   }
 
-  createProject(request: AgentTeamAuthorizedCreateProjectRequest): Promise<AgentTeamLedgerResult<AgentTeamCreateProjectResult>> {
+  createProject(
+    request: AgentTeamAuthorizedCreateProjectRequest,
+    options?: { readonly authorize?: () => void },
+  ): Promise<AgentTeamLedgerResult<AgentTeamCreateProjectResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameProjectCreation(existing, request, this.normalizeUnique(request.memberIds, 'initial Project members'))
         return this.resolved(this.projectResult(existing))
       }
+      // A caller-scoped authorization re-checked at the top of the serialized
+      // section: a write queued behind another one refuses once its caller
+      // lost the right to write, while an already-received replay still
+      // resolves to its original receipt.
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const name = request.name.trim()
       const description = request.description.trim()
@@ -2822,18 +2831,23 @@ export class AgentTeamLedger {
   }
 
   /** Human rename of one Project's display facts; identity refs are immutable. */
-  updateProject(request: AgentTeamAuthorizedUpdateProjectRequest): Promise<AgentTeamLedgerResult<AgentTeamUpdateProjectResult>> {
+  updateProject(request: AgentTeamAuthorizedUpdateProjectRequest, options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamUpdateProjectResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameProjectUpdate(existing, request)
         return this.resolved(this.projectUpdateResult(existing))
       }
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
-      const name = request.name.trim()
-      const description = request.description.trim()
+      const prior = this.requireActiveProject(request.workspaceId, request.projectRef)
+      // A field the request leaves absent keeps the value stored now, read
+      // inside this serialized section: an edit never writes back a snapshot
+      // the caller took before it queued behind a concurrent one.
+      const name = request.name === undefined ? prior.name : request.name.trim()
+      const description = request.description === undefined ? prior.description : request.description.trim()
       if (name === '') throw new Error('project name must not be empty')
-      const project = Object.freeze({ ...this.requireActiveProject(request.workspaceId, request.projectRef), name, description })
+      const project = Object.freeze({ ...prior, name, description })
       const operation: AgentTeamProjectUpdatedOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/project-updated',
         data: Object.freeze({ workspaceId: request.workspaceId, project }),
@@ -2844,12 +2858,18 @@ export class AgentTeamLedger {
     })
   }
 
-  addProjectOwner(request: AgentTeamAuthorizedProjectOwnerRequest): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
-    return this.changeProjectOwner(request, 'team/project-owner-added')
+  addProjectOwner(
+    request: AgentTeamAuthorizedProjectOwnerRequest,
+    options?: { readonly authorize?: () => void },
+  ): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
+    return this.changeProjectOwner(request, 'team/project-owner-added', options)
   }
 
-  removeProjectOwner(request: AgentTeamAuthorizedProjectOwnerRequest): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
-    return this.changeProjectOwner(request, 'team/project-owner-removed')
+  removeProjectOwner(
+    request: AgentTeamAuthorizedProjectOwnerRequest,
+    options?: { readonly authorize?: () => void },
+  ): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
+    return this.changeProjectOwner(request, 'team/project-owner-removed', options)
   }
 
   /**
@@ -2857,7 +2877,7 @@ export class AgentTeamLedger {
    * this appends a new record instead of removing and re-granting, so the Member
    * keeps its grant, its Main stream attention and its history across the edit.
    */
-  updateProjectOwner(request: AgentTeamAuthorizedProjectOwnerUpdateRequest): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
+  updateProjectOwner(request: AgentTeamAuthorizedProjectOwnerUpdateRequest, options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
     return this.enqueue(async () => {
       // Stored as the trimmed text, with '' meaning unspecified: the record then
       // says explicitly that the Human cleared it, and replay needs no absence.
@@ -2872,6 +2892,7 @@ export class AgentTeamLedger {
         }
         return this.resolved(this.projectOwnerResult(existing))
       }
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const base = { workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberId, responsibility }
       const problem = this.projectOwnerChangeProblem(this.state, 'team/project-owner-responsibility-updated', base)
@@ -2893,6 +2914,7 @@ export class AgentTeamLedger {
   private changeProjectOwner(
     request: AgentTeamAuthorizedProjectOwnerRequest,
     kind: 'team/project-owner-added' | 'team/project-owner-removed',
+    options?: { readonly authorize?: () => void },
   ): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
     return this.enqueue(async () => {
       // A grant names what the Member answers for; a withdrawal carries no
@@ -2908,6 +2930,10 @@ export class AgentTeamLedger {
         }
         return this.resolved(this.projectOwnerResult(existing))
       }
+      // See `createProject`: the caller-scoped authorization is re-checked at
+      // the top of the serialized section, after an already-received replay
+      // resolved.
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const base = { workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberId,
         ...(responsibility === undefined ? {} : { responsibility }) }
@@ -2979,13 +3005,20 @@ export class AgentTeamLedger {
     return undefined
   }
 
-  addMember(request: AgentTeamAuthorizedAddMemberRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
+  addMember(
+    request: AgentTeamAuthorizedAddMemberRequest,
+    options?: { readonly authorize?: () => void },
+  ): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameMemberAdd(existing, request)
         return this.resolved(this.memberResult(existing))
       }
+      // See `createProject`: the caller-scoped authorization is re-checked at
+      // the top of the serialized section, after an already-received replay
+      // resolved.
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const handle = request.handle.trim()
       const description = request.description.trim()
@@ -3018,19 +3051,23 @@ export class AgentTeamLedger {
   }
 
   /** Human edit of one Member's mutable facts; identity, preset, and lifecycle state are preserved. */
-  updateMember(request: AgentTeamAuthorizedUpdateMemberRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
+  updateMember(request: AgentTeamAuthorizedUpdateMemberRequest, options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameMemberUpdate(existing, request)
         return this.resolved(this.memberResult(existing))
       }
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const prior = this.requireMember(request.memberId)
       if (prior.state === 'inactive') throw new Error(`Agent Member '${prior.memberId}' is inactive and can no longer be edited`)
       if (prior.state === 'archived') throw new Error(`Agent Member '${prior.memberId}' is archived and can no longer be edited`)
-      const handle = request.handle.trim()
-      const description = request.description.trim()
+      // A field the request leaves absent keeps the value stored now, read
+      // inside this serialized section: an edit never writes back a snapshot
+      // the caller took before it queued behind a concurrent one.
+      const handle = request.handle === undefined ? prior.handle : request.handle.trim()
+      const description = request.description === undefined ? prior.description : request.description.trim()
       if (handle === '') throw new Error('member handle must not be empty')
       if (handle !== prior.handle) for (const workspaceId of this.workspacesOf(prior.memberId)) this.assertHandleAvailable(workspaceId, handle, prior.memberId)
       // A Member always runs an explicit route: editing may replace the model, never clear it back to the default.
@@ -3058,12 +3095,12 @@ export class AgentTeamLedger {
     })
   }
 
-  suspendMember(request: AgentTeamAuthorizedSetMemberStateRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
-    return this.setMemberState(request, 'suspended')
+  suspendMember(request: AgentTeamAuthorizedSetMemberStateRequest, options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
+    return this.setMemberState(request, 'suspended', options)
   }
 
-  resumeMember(request: AgentTeamAuthorizedSetMemberStateRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
-    return this.setMemberState(request, 'enabled')
+  resumeMember(request: AgentTeamAuthorizedSetMemberStateRequest, options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
+    return this.setMemberState(request, 'enabled', options)
   }
 
   /** Move one enabled Member from a cold generation onto a fresh Session. */
@@ -3130,13 +3167,14 @@ export class AgentTeamLedger {
    * stays rooted in its default Workspace and collaboration in the joined
    * Workspace is ledger work addressed by the workspaceId.
    */
-  joinWorkspace(request: AgentTeamAuthorizedJoinWorkspaceRequest): Promise<AgentTeamLedgerResult<AgentTeamJoinWorkspaceResult>> {
+  joinWorkspace(request: AgentTeamAuthorizedJoinWorkspaceRequest, options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamJoinWorkspaceResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameWorkspaceJoin(existing, request)
         return this.resolved(this.workspaceJoinResult(existing))
       }
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const member = this.requireMember(request.memberId)
       if (member.state === 'inactive') throw new Error(`Agent Member '${member.memberId}' is inactive and cannot join a Workspace`)
@@ -3163,13 +3201,14 @@ export class AgentTeamLedger {
    * its Project memberships there end; identity, Session, and remaining
    * participations are untouched.
    */
-  leaveWorkspace(request: AgentTeamAuthorizedLeaveWorkspaceRequest): Promise<AgentTeamLedgerResult<AgentTeamLeaveWorkspaceResult>> {
+  leaveWorkspace(request: AgentTeamAuthorizedLeaveWorkspaceRequest, options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamLeaveWorkspaceResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameWorkspaceLeave(existing, request)
         return this.resolved(this.workspaceLeaveResult(existing))
       }
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const member = this.requireMember(request.memberId)
       if (member.state === 'inactive') throw new Error(`Agent Member '${member.memberId}' is already inactive`)
@@ -3207,13 +3246,14 @@ export class AgentTeamLedger {
    * for those Threads clear — a hidden Project must not leave Tasks stuck in
    * progress behind it or phantom unread counts.
    */
-  archiveProject(request: AgentTeamAuthorizedArchiveProjectRequest): Promise<AgentTeamLedgerResult<AgentTeamArchiveProjectResult>> {
+  archiveProject(request: AgentTeamAuthorizedArchiveProjectRequest, options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamArchiveProjectResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameProjectArchival(existing, request)
         return this.resolved(this.projectArchivalResult(existing))
       }
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const project = this.requireProject(request.workspaceId, request.projectRef)
       if (project.state === 'archived') throw new Error(`Project '${project.projectRef}' is already archived`)
@@ -3774,13 +3814,14 @@ export class AgentTeamLedger {
    * Activities and the Member's Attention/markers clear — because a hidden
    * Member must not leave Tasks stuck in progress or phantom unread counts.
    */
-  archiveMember(request: AgentTeamAuthorizedArchiveMemberRequest): Promise<AgentTeamLedgerResult<AgentTeamArchiveMemberResult>> {
+  archiveMember(request: AgentTeamAuthorizedArchiveMemberRequest, options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamArchiveMemberResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameArchival(existing, request)
         return this.resolved(this.archivalResult(existing))
       }
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const member = this.requireMember(request.memberId)
       if (member.state === 'inactive') throw new Error(`Agent Member '${member.memberId}' is already inactive`)
@@ -4795,6 +4836,58 @@ export class AgentTeamLedger {
   /** Agent owners of one Project, sorted. The Human owns every Project and is not listed. */
   projectOwnerIds(projectRef: AgentTeamProjectRef): readonly AgentTeamMemberId[] {
     return Object.freeze([...this.state.owners.get(projectRef)?.keys() ?? []].sort())
+  }
+
+  /**
+   * One Workspace's directory as the Team manager reads it. `view` builds the
+   * same Projects and Members for a Member, so a manager and a Member never
+   * disagree about a Project's standing; this path exists because the manager is
+   * not a Member, so neither the participation filter nor the Member-relative
+   * `participating` flag has a meaning here. An owner whose Member record is
+   * gone is an invariant break, not a row to render with a guessed handle.
+   */
+  managerDirectory(workspaceId: WorkspaceId, projectRef?: AgentTeamProjectRef): AgentTeamManagerDirectory {
+    if (projectRef !== undefined) {
+      this.requireRefKey(this.state.projects, projectRef, 'project', 'Project')
+    }
+    const boardByProject = new Map<AgentTeamProjectRef, { open: number; inReview: number }>()
+    for (const task of this.state.tasks.values()) {
+      if (task.status === 'done' || task.status === 'closed') continue
+      const counts = boardByProject.get(task.projectRef) ?? { open: 0, inReview: 0 }
+      counts.open += 1
+      if (task.status === 'in_review') counts.inReview += 1
+      boardByProject.set(task.projectRef, counts)
+    }
+    const projects = [...this.state.projects.values()].filter(project => project.workspaceId === workspaceId
+      && this.visibleProject(project) !== undefined
+      && (projectRef === undefined || project.projectRef === projectRef))
+      .sort((left, right) => left.projectRef < right.projectRef ? -1 : left.projectRef > right.projectRef ? 1 : 0)
+      .map(project => {
+        const subscriptions = this.subscriptionsOfProject(project.projectRef)
+        const board = boardByProject.get(project.projectRef) ?? { open: 0, inReview: 0 }
+        return Object.freeze({
+          workspaceId: project.workspaceId,
+          projectRef: project.projectRef,
+          name: project.name,
+          description: project.description,
+          state: project.state,
+          owners: this.projectOwnersOf(project.projectRef).map(owner => Object.freeze({
+            memberRef: owner.memberId,
+            handle: this.requireMember(owner.memberId).handle,
+            ...(owner.responsibility === undefined ? {} : { responsibility: owner.responsibility }),
+          })),
+          subscriptions: Object.freeze({
+            active: subscriptions.filter(subscription => subscription.state === 'active').length,
+            paused: subscriptions.filter(subscription => subscription.state === 'paused').length,
+          }),
+          board: Object.freeze({ open: board.open, inReview: board.inReview }),
+        })
+      })
+    const memberIds = [...this.state.members.values()].filter(member => member.state !== 'inactive' && member.state !== 'archived'
+      && (projectRef === undefined
+        ? this.participatesIn(member.memberId, workspaceId)
+        : this.isProjectMember(projectRef, member.memberId))).map(member => member.memberId).sort()
+    return Object.freeze({ projects: Object.freeze(projects), memberIds: Object.freeze(memberIds) })
   }
 
   /**
@@ -8583,13 +8676,14 @@ export class AgentTeamLedger {
     return 'todo'
   }
 
-  private setMemberState(request: AgentTeamAuthorizedSetMemberStateRequest, state: 'enabled' | 'suspended'): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
+  private setMemberState(request: AgentTeamAuthorizedSetMemberStateRequest, state: 'enabled' | 'suspended', options?: { readonly authorize?: () => void }): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameMemberState(existing, request, state)
         return this.resolved(this.memberResult(existing))
       }
+      options?.authorize?.()
       this.assertHumanActor(request.actor)
       const member = this.requireMember(request.memberId)
       const prior = state === 'suspended' ? 'enabled' : 'suspended'
@@ -8782,7 +8876,7 @@ export class AgentTeamLedger {
     }
   }
 
-  private requireMember(memberId: AgentTeamMemberId): AgentTeamAgentMember {
+  requireMember(memberId: AgentTeamMemberId): AgentTeamAgentMember {
     const member = this.state.members.get(this.requireRefKey(this.state.members, memberId, 'member', 'Agent Member'))
     if (member === undefined) throw new Error(`unknown Agent Member '${memberId}'`)
     return member
@@ -9144,16 +9238,22 @@ export class AgentTeamLedger {
   private assertSameProjectUpdate(operation: AgentTeamOperation, request: AgentTeamAuthorizedUpdateProjectRequest): asserts operation is AgentTeamProjectUpdatedOperation {
     if (operation.kind !== 'team/project-updated' || !this.sameActor(operation.actor, request.actor)
       || operation.data.workspaceId !== request.workspaceId || operation.data.project.projectRef !== request.projectRef
-      || operation.data.project.name !== request.name.trim() || operation.data.project.description !== request.description.trim()) this.throwRequestCollision(request.requestId)
+      // Only fields the request states are comparable: an absent one keeps the
+      // stored value, and a later edit to a field this request left alone must
+      // not turn its replay into a collision.
+      || (request.name !== undefined && operation.data.project.name !== request.name.trim())
+      || (request.description !== undefined && operation.data.project.description !== request.description.trim())) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameMemberUpdate(operation: AgentTeamOperation, request: AgentTeamAuthorizedUpdateMemberRequest): asserts operation is AgentTeamMemberUpdatedOperation {
     if (operation.kind !== 'team/member-updated' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.member.memberId !== request.memberId || operation.data.member.handle !== request.handle.trim()
-      || operation.data.member.description !== request.description.trim()
+      || operation.data.member.memberId !== request.memberId
       // Only fields the request actually states are comparable: an absent one
       // means "keep the stored value", which the record cannot distinguish from
-      // a request that stated the same value.
+      // a request that stated the same value — and a later edit to a field this
+      // request left alone must not turn its replay into a collision.
+      || (request.handle !== undefined && operation.data.member.handle !== request.handle.trim())
+      || (request.description !== undefined && operation.data.member.description !== request.description.trim())
       || (request.model !== undefined && !isDeepStrictEqual(operation.data.member.model ?? undefined, request.model ?? undefined))
       || (request.capabilities !== undefined && !isDeepStrictEqual(operation.data.member.capabilities ?? undefined, request.capabilities ?? undefined))) this.throwRequestCollision(request.requestId)
   }

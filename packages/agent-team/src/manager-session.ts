@@ -167,6 +167,24 @@ export class ManagerSessionRuntime {
     return this.deps.store.ownedSessionIds().includes(sessionId)
   }
 
+  /**
+   * Whether this exact Agent is the live, currently registered manager. A tool
+   * handler asks this itself: `ownsSession` answers lineage, which a replaced
+   * generation still satisfies, so it cannot authorize a call on its own. The
+   * answer is read from the in-memory handle and re-checked against the durable
+   * pointer, and a pointer that cannot be read refuses rather than assuming.
+   */
+  isCurrentManagerAgent(agent: Agent): boolean {
+    if (this.disposed) return false
+    if (this.current?.agent !== agent) return false
+    try {
+      if (this.deps.store.read()?.sessionId !== agent.id) return false
+    } catch {
+      return false
+    }
+    return this.compositionIsManager(agent) && !this.isArchived(agent.id)
+  }
+
   /** Host teardown: stop the manager handle and release its policy before the domain closes. */
   async dispose(): Promise<void> {
     if (this.disposal !== undefined) return this.disposal

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 // Every case boots the real Host harness and waits on a real turn, so the same
 // per-test budget the sibling lifecycle specs use applies here too.
 import type { Context } from '@deepseek-ai/cordis'
@@ -8,6 +8,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage, LlmError } from '@deepseek-ai/dsh-llm'
 import { realHarness, requestId, ScriptedAdapter, textResponse } from './helpers/member-harness.ts'
 import { adoptionRequestId } from '../src/index.ts'
+import type { AgentTeamLedger } from '../src/ledger.ts'
 import type { AgentTeamMemberId, AgentTeamModelSelection } from '../src/types.ts'
 
 describe('Member model adoption from the request header', () => {
@@ -90,6 +91,72 @@ describe('Member model adoption from the request header', () => {
     // The in-flight request still carried the old route; adopting it would write the Human's edit back over itself.
     expect(recorded()).toEqual({ provider: 'mock', model: 'chosen' })
     expect(ctx.agentTeam.status().operationCount).toBe(before + 1)
+  })
+
+  it('keeps a rename that landed while the adoption was queued', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const added = await add(ctx, workspaceId, 'builder', { provider: 'mock', model: 'start' })
+    const memberId = added.status.member.memberId
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const recorded = () => ctx.agentTeam.membersForClient({ workspaceId })
+      .find(status => status.member.memberId === memberId)!.member
+
+    // The step fixes its route, then the hook holds the header: the window a
+    // settings-page edit lands in. The edit itself is held inside its ledger
+    // write, so the adoption fires while the ledger still reads the old handle
+    // and queues behind that write with the pre-rename snapshot in hand.
+    const held = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    ctx.on('agent/request', async ({ agent: subject }, next) => {
+      if (subject !== agent) return next()
+      held.resolve()
+      await release.promise
+      return next()
+    }, { prepend: true })
+    const ledger = (ctx.agentTeam as unknown as { ledger: AgentTeamLedger }).ledger
+    const table = (ledger as unknown as { table: { put(key: string, value: unknown): Promise<void> } }).table
+    const originalPut = table.put.bind(table)
+    const writing = Promise.withResolvers<void>()
+    const commit = Promise.withResolvers<void>()
+    let heldWrites = 0
+    vi.spyOn(table, 'put').mockImplementation(async (key, value) => {
+      if ((value as { requestId?: string }).requestId === requestId('rename-during-adoption')) {
+        heldWrites += 1
+        writing.resolve()
+        await commit.promise
+      }
+      return originalPut(key, value)
+    })
+    // Registered after the Team's own listener, so this resolves once the
+    // adoption has taken its snapshot and queued.
+    const adopted = Promise.withResolvers<void>()
+    agent.ctx.on('session/event', (_session, event) => {
+      if (event.type === 'request/header') adopted.resolve()
+    })
+
+    agent.model.select({ provider: 'mock', model: 'next' })
+    adapter.enqueue(textResponse('Noted.'))
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Carry on.' }], source: { kind: 'user' } }))
+    await held.promise
+    const renaming = ctx.agentTeam.updateMember({
+      requestId: requestId('rename-during-adoption'), memberId, handle: 'renamed', description: 'renamed standing',
+    })
+    await writing.promise
+    expect(heldWrites).toBe(1)
+    release.resolve()
+    await adopted.promise
+    // The rename is still uncommitted, so the adoption read the old handle.
+    expect(recorded().handle).toBe('builder')
+    commit.resolve()
+    await renaming
+    await agent.whenIdle()
+    await vi.waitFor(() => { expect(recorded().model).toEqual({ provider: 'mock', model: 'next' }) })
+
+    // The adoption states the route alone, so the rename it never named stands.
+    expect(recorded()).toMatchObject({
+      handle: 'renamed', description: 'renamed standing', model: { provider: 'mock', model: 'next' },
+    })
   })
 
   it('names the Session in an adoption request id', () => {

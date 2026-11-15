@@ -195,7 +195,9 @@ DSH `0.2.2-rc.2` 把它们从原先作为独立 experimental profile bundle 发�
 
 它注册自己的 model-facing 工具族（`spawn_teammate`、`send_message`、`list_agents`、`wait_agent`、`interrupt_agent`、`team_task_create`、`team_task_get`、`team_task_list`、`team_task_update`），自带成员、任务、store 与 client 面板。
 
-本 bundle 的十个工具是 `team_view`、`team_inbox`、`team_thread`、`team_message`、`team_task`、`team_attention`、`team_dm`、`team_subscription`、`team_reminder`、`team_worker`，只在 `team-member` preset 内注册。
+本 bundle 的十九个工具里，`team_view`、`team_inbox`、`team_thread`、`team_message`、`team_task`、`team_attention`、`team_dm`、`team_subscription`、`team_reminder` 与 `team_worker` 是十个 Member 工具，在 `team-member` preset 内注册。
+
+另外九个服务 Team manager：只读的 `team_overview` 与 `team_models`，加上 `member_create`、`project_create`、`project_owner`、`project_update`、`member_update`、`member_state` 与 `member_workspace` 七个写操作，都只在隔离的 `team-manager` preset 内注册，普通会话不会组合它。
 
 因此认证跑在两条官方 row 都在的 profile 上，两套实现靠 preset 边界而不是靠「不存在」分开：本 bundle 的 registry、preset 与工具族都在自己隔离的 group 内，普通会话继续组合宿主的 `standard` preset 与官方工具族。
 

@@ -42,7 +42,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, teamPresetScopeMismatchMessage } from '../../src/index.ts'
+import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_TOOL_NAMES, teamPresetScopeMismatchMessage } from '../../src/index.ts'
 import { AGENT_TEAM_PLUGIN_ID } from '../../src/context-source.ts'
 import { isAcceptanceNotice } from '../../src/context-projection.ts'
 import { ACCEPTANCE_COMPACT_TOKENS } from '../../src/acceptance-context.ts'
@@ -58,6 +58,19 @@ import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-test
 /** The ENOENT shape the JSONL backend raises when a walk hits a win32 staging directory mid-rename. */
 export const persistenceRaceError = (): Error =>
   Object.assign(new Error("scandir ENOENT: transient win32 staging directory raced the walk (test seam)"), { code: 'ENOENT' })
+
+/**
+ * The exact Team tool surface the shipped `team-member` preset declares. A
+ * preset names its own tools because the model's visible list is read from the
+ * registering scope's schemas, so a narrower Session is only real when the
+ * narrower set is what gets declared. Derived from the Host's own name list so
+ * this fixture cannot drift from it; the two manager read tools are absent:
+ * their handler serves only the manager Session.
+ */
+export const MEMBER_TEAM_TOOLS: readonly string[] = Object.freeze([...AGENT_TEAM_TOOL_NAMES])
+
+/** The exact Team tool surface the shipped `team-manager` preset declares: the two read tools plus the seven write tools, and nothing else. */
+export const MANAGER_TEAM_TOOLS: readonly string[] = Object.freeze(['team_overview', 'team_models', 'member_create', 'project_create', 'project_owner', 'project_update', 'member_update', 'member_state', 'member_workspace'])
 
 
 
@@ -299,13 +312,20 @@ export async function realHarness(
     const teamMemberPlugins: PresetDefinition['plugins'] = [
       { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
       { id: 'member-time-context', name: '@contexera/dsh-agent-team/member-time-context' },
-      { id: 'team-tools', name: '@contexera/dsh-agent-team/tools' },
+      // The shipped `team-member` tools row, verbatim: the exact Member surface.
+      // `team_worker` stays declared and is withdrawn by the Host Worker switch,
+      // exactly as in production.
+      { id: 'team-tools', name: '@contexera/dsh-agent-team/tools', config: { only: MEMBER_TEAM_TOOLS } },
       { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
         { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },
       ] },
     ]
     const teamManagerPlugins: PresetDefinition['plugins'] = [
       { id: 'manager-tools', name: pathToFileURL(managerToolsStub).href },
+      // The shipped `team-manager` tools row, verbatim: the real tools plugin
+      // narrowed to the manager's own eight tools. The manager's surface under
+      // test is therefore the shipped one, not a stub.
+      { id: 'team-tools', name: '@contexera/dsh-agent-team/tools', config: { only: MANAGER_TEAM_TOOLS } },
       { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
         { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },
       ] },
