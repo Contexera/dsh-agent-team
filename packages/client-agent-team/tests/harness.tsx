@@ -1,4 +1,4 @@
-import { expect, onTestFinished } from 'vitest'
+import { expect, onTestFinished, vi } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import type { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import type {
@@ -35,6 +35,8 @@ export type { MainStreamSeedEntry } from './bench/inbox-and-stream.ts'
 
 export interface ClientTestBenchOptions {
   readonly mode?: 'team'
+  readonly manager?: boolean
+  readonly managerCurrent?: boolean
   readonly mainPanelId?: string
   readonly workspaceId?: string
   readonly initialProjects?: boolean
@@ -99,13 +101,13 @@ export async function createClientBench(options?: ClientTestBenchOptions) {
     if (options?.mode !== undefined) {
       localStorage.setItem(
         'dsh.agent-team.navigation',
-        JSON.stringify({ mode: options.mode, ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }) }),
+        JSON.stringify({ mode: options.mode, ...(options.manager === true ? { manager: true } : {}), ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }) }),
       )
     }
 
     const shell = await createBenchRuntime((created) => {
       runtime = created
-    })
+    }, options?.managerCurrent === true)
 
     const { viewItems, initialMainEntries } = buildInitialSeedState(options)
     const projectsAndMembers = createProjectsAndMembersDouble({ initialProjects: options?.initialProjects })
@@ -128,6 +130,17 @@ export async function createClientBench(options?: ClientTestBenchOptions) {
       wakeAll: inboxAndStream.wakeAll,
     })
     const settingsAndSubscriptions = createSettingsAndSubscriptionsDouble(options)
+    let currentManagerSessionId = 'manager-session'
+    const managerSession = vi.fn(async () => ({ ok: true as const, value: { status: 'ready' as const, sessionId: currentManagerSessionId, workspaceId: 'w1' } }))
+    const newManagerSession = vi.fn(async ({ expectedSessionId }: { expectedSessionId: string }) => {
+      if (expectedSessionId === currentManagerSessionId) currentManagerSessionId = 'manager-session-2'
+      return { ok: true as const, value: { status: 'ready' as const, sessionId: currentManagerSessionId, workspaceId: 'w1' } }
+    })
+    const sessionOwnership = vi.fn(async ({ sessionIds }: { sessionIds: readonly string[] }) => ({
+      ok: true as const,
+      value: sessionIds.filter(id => id === currentManagerSessionId || id === 'manager-session' || id === 'manager-session-2')
+        .map(id => ({ sessionId: id, kind: 'manager' as const })),
+    }))
 
     shell.runtime.remote.provideNamespaces({
       session: { modelCatalog: projectsAndMembers.modelCatalog },
@@ -141,6 +154,9 @@ export async function createClientBench(options?: ClientTestBenchOptions) {
         leaveWorkspace: projectsAndMembers.leaveWorkspace,
         addMember: projectsAndMembers.addMember,
         toolCatalog: settingsAndSubscriptions.toolCatalog,
+        managerSession,
+        newManagerSession,
+        sessionOwnership,
         view: threadsAndTasks.viewProjects,
         inbox: inboxAndStream.inbox,
         taskBoard: threadsAndTasks.loadTaskBoard,
@@ -202,6 +218,10 @@ export async function createClientBench(options?: ClientTestBenchOptions) {
       panelInfo: shell.runtime.panelInfo,
       selectPanel: shell.selectPanel,
       openSession: shell.openSession,
+      startSession: shell.startSession,
+      managerSession,
+      newManagerSession,
+      sessionOwnership,
       disposeWorkspace: mounted.disposeWorkspace,
       disposeSettings: mounted.disposeSettings,
       ...projectsAndMembers,

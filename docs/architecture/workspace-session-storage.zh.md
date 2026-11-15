@@ -29,3 +29,17 @@ Host 的每一次逐 Session stored 读取都经过同一个 seam。`packages/ag
 成员重启是对格式拒绝的有界自愈。激活失败带 `session-refused` diagnostic 时，`recoverMember` 会重跑激活。瞬时性拒绝因此恢复。确定性拒绝则把同一失败重放进刷新后的 diagnostic，因为已不存在写侧修复。
 
 激活 diagnostic 是结构化的。`AgentTeamMemberDiagnostic` 携带三样东西：`class`、detail，以及适用时的被拒 artifact 路径。它的取值有六种：`session-refused`、`session-unreadable`、`preset-composition`、`rollover`、`runtime`、`activation`。availability/presence 仍是仅有的用户可见状态。diagnostic 是投影派生态，绝不持久化。ledger 仍是唯一 Team 权威。
+
+## Team manager Session
+
+Host 持有一个专用的 [Team manager](../domain-model.zh.md#team-manager) Session。它的持久目的地是私有 `agent_team_manager` domain 中唯一的 `pointer` 行，与 Team 同在一个 SQLite 文件里，但在 operation ledger 之外。该行存 `{sessionId, workspaceId, previousSessionIds?}`；可选 lineage 让替换后的旧 manager 仍被识别为 Team-owned history，没有该字段的旧 pointer 仍可读。
+
+`workspaceId` 只用于恢复与展示，不是第二套存在性权威。pointer store 打不开时只记日志，manager 保持 unavailable，Host 启动与 Team ledger 不受影响。
+
+首次创建先请 shipped Workspace controller 初始化默认 Workspace，再按 registry 顺序取第一个可用 Workspace；一个都不可用时返回 `no-workspace`，不创建 Session。已有 Session 只在路径与其存储 cwd 完全相同的 Workspace 中恢复。启动时的 pre-restore 会恢复可读的已注册 Session，但从不创建新 Session；pointer 缺失或对应 Session 已归档时，留给下一次 open 处理。
+
+公开 open 与替换共用一条串行链。并发首次 open 只创建一个 Session；针对同一 expected id 的并发新开也只创建一个后继；迟到调用方观察当前 Session，不再另建。对已有 pointer，只有 Session 已归档，或 stored read 明确报 `missing`，才允许替换。`refused`、`corrupt`、`io`、`unknown`、pointer read 与 pointer write 失败都返回 `unavailable` 并保留 pointer。
+
+替换先持久化 pointer，再发布后继并立即取消旧 manager 的授权；旧 handle 会被停止，Session 历史仍在所属 Workspace 的普通列表中可见并可归档。Workspace 归档与 pointer 持久化属于两套权威，竞态中两者可以短暂不同步；下一次 open 会通过替换已归档的 manager 收敛，而不是依赖跨权威原子事务。
+
+manager 私有资源位于 `$DSH_HOME/agent-team/manager`：`memory.md`、`notes/` 与 `skills/`。它们不是 ledger fact。manager 的 skill provider 只扫描这个私有 `skills/` 目录，不扫描 bundled skills。

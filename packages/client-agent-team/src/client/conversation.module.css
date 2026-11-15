@@ -630,6 +630,13 @@
   padding: 32px 0;
 }
 
+/* The message is the only flexible item beside the retry control, so a Host diagnostic wraps inside the
+   band instead of pushing the control off it. */
+.errorState span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .welcomeSurface {
   align-items: center;
   display: flex;
@@ -658,6 +665,7 @@
   line-height: 20px;
   margin: 0;
 }
+.welcome .loadingState { justify-content: center; }
 
 @keyframes pulse {
   0%, 100% { opacity: 0.35; }

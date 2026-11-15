@@ -5,7 +5,7 @@ import { UI09_SHOTS, closeScenario, openTeamPage, settleLayout } from './__exter
 afterEach(async () => { await closeScenario() })
 
 
-it('reaches Team mode, its two faces, and the shortcut reference from the keyboard', async () => {
+it('reaches Team mode, its three global faces, and the shortcut reference from the keyboard', async () => {
   // The visiting device decides which defaults are in force, so this lane states
   // the macOS device the Human runs and presses that set.
   const { page, consoleWatch } = await openTeamPage({ stayInOrdinaryMode: true, platform: 'MacIntel' })
@@ -71,6 +71,20 @@ it('reaches Team mode, its two faces, and the shortcut reference from the keyboa
   await page.locator('[data-team-conversation]').waitFor()
   await expect.poll(async () => (await snapshot()).board).toBeUndefined()
 
+  // The manager is the third global face, so it takes the third digit. Its seat is
+  // the shipped Conversation, so the assertion is the destination the rail row opens,
+  // not an element this Client draws; Back hands the seat back to the face underneath.
+  await page.keyboard.press('Meta+Alt+Digit3')
+  await expect.poll(async () => (await snapshot()).manager).toBe(true)
+  await page.locator('[data-composer-input][contenteditable="true"]').waitFor()
+  // The keyboard entry is the same destination as the rail/card click: the shipped Conversation owns the main seat,
+  // so no selected global panel may leave the shell's drawer-mode top padding on it.
+  await expect.poll(() => page.locator('[data-global-panel]').count()).toBe(0)
+  await page.screenshot({ path: join(UI09_SHOTS, 'shortcut-manager.png'), fullPage: true })
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await expect.poll(async () => (await snapshot()).manager).toBeUndefined()
+  await page.locator('[data-team-conversation]').waitFor()
+
   // The welcome surface is the top rung: Back is consumed and nothing moves.
   const welcome = await snapshot()
   await page.keyboard.press('Meta+Alt+ArrowLeft')
@@ -87,7 +101,7 @@ it('reaches Team mode, its two faces, and the shortcut reference from the keyboa
   const reference = page.getByRole('dialog', { name: '快捷键' })
   await reference.waitFor()
   const application = reference.getByRole('region', { name: '应用操作' })
-  for (const label of ['进入或退出团队模式', '收件箱', '任务看板', '聚焦输入框', '返回', '前进', '上一个项目', '下一个项目',
+  for (const label of ['进入或退出团队模式', '收件箱', '任务看板', '团队管理', '聚焦输入框', '返回', '前进', '上一个项目', '下一个项目',
     '收件箱第 1 项', '收件箱第 9 项']) {
     expect(await application.getByText(label, { exact: true }).count()).toBe(1)
   }

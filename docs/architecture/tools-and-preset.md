@@ -67,6 +67,18 @@ Whether a Member Session has durable persisted content is decided through sessio
 
 The wake decision itself is a pure gate ladder in `wake-recycle.ts`: disabled, no prior generation, unreadable activity time, a cache possibly still warm, and a context below the waterline each answer resume, and only a cold gap over a large enough context recycles. [`memory-and-context.md`](../team-collaboration/memory-and-context.md) owns the thresholds and the configuration group.
 
+## Team manager preset
+
+The Host mounts a separate isolated `team-manager` preset for its [Team manager](../domain-model.md#team-manager) Session. It keeps a generic coding surface — persona, time and Workspace instructions, shell, filesystem/search, web, jobs, skill loading, ask-user, and basic compaction — but deliberately omits the ten Team tools, Member context, the Member time context, Member memory and its compaction adapter, Worker and rollover policy, and the profile `extraToolGrants`. This build also registers none of the nine manager-management tools.
+
+That surface runs at the trusted `danger-full-access` policy, so the persona carries the data red line as a rule: under `$DSH_HOME` the manager reads and writes only its own `agent-team/manager/` directory plus a Member's private assets `team_overview` has just confirmed, and never the Host's sqlite files or Session logs. Its own memory, notes and a tool result record what was once said, so none of them authorizes an irreversible or costly action in place of the Human asking for it now.
+
+The isolated registry's default remains `team-member`; only the manager runtime mounts `team-manager`.
+
+The manager policy captures that preset's exact definitions plus the shared `working_directory`, and its execution guard admits only those definitions for the exact current manager Agent. A later or foreign definition is denied rather than inherited. `addMember` accepts only `team-member`, checked before model validation or any ledger write, so a manager composition cannot become a Member.
+
+The Client hides the shipped hero preset picker while the manager destination is active. That suppression is presentation only, not a grant or a permanent authorization lock: the Host owns the composition, and the manager guard authorizes each execution from the exact Agent and current pointer. The [Client boundary](client-and-remote.md#client-plugin-and-slot-composition) owns the entry and gate behavior.
+
 ## Persona and core skills
 
 The persona is the `prefix` of the `persona` row in `cordis.patch.yml`. It is always resident and carries behavior rules, not reference material:

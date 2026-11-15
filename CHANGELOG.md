@@ -10,7 +10,13 @@ All notable changes to this project are documented in this file. The format foll
 
 **Added**
 
+- Team mode adds a **Team manager** destination: a Host-owned, dedicated DSH Session composed from the separate `team-manager` preset and shown through the shipped Conversation and composer. It is not a Member or ledger entity; replacing it stops the previous Session while retaining its history.
+- The manager's current Session and replaced-Session lineage are a private Host pointer outside the ledger. Startup pre-restores it, creation and replacement are serialized, and only an archived or positively missing Session is replaced; refused, corrupt, I/O, unknown, and pointer failures stay retryable without losing the pointer.
+- For the manager destination, the browser persists only its token. The shipped session header carries **New conversation** for the current manager, and leaving restores the ordinary Session captured before the manager took the main seat. Its fixed preset and permission controls are hidden without changing Host authorization, and shipped controls return on other Sessions.
+- Manager history stays visible under its Workspace in the ordinary Session list and archivable through Harness. Ordinary blank creation asks the Host for exact Team ownership instead of reusing a current, replaced, or cold manager Session.
+- `addMember` now accepts only the `team-member` preset, checked before model validation or any ledger write.
 - A Project's Agent owner can carry a responsibility: one bounded text, at most 2,000 characters, saying what that owner answers for in this Project. It layers apart from the Member's global description and from the Project's own description, and the same Agent can answer for different outcomes in different Projects. It is recorded with the grant or edited afterwards from the Project dialog without withdrawing and re-granting, so the owner keeps its standing and the Main stream following that grant started; a grant that records none reads `unspecified`, which is a fact about the grant rather than a gap to repair. `team_view`, the Member's ownership context, and the Project dialog show the same text.
+- The Team manager destination is reachable from the keyboard like the Inbox and Task board: `⌥⌘1`, `⌥⌘2`, and `⌥⌘3` open the three global faces in the rail's own order, each one a rebindable command in the shell's shortcut reference rather than a private key handler.
 
 **Fixed**
 
@@ -23,6 +29,7 @@ All notable changes to this project are documented in this file. The format foll
 - Tool availability guidance names exactly the visible tools the Member guard denies, with tool names escaped as data rather than prompt markup.
 - Editing what a Project owner answers for reads as an edit everywhere: the Main stream row it appends no longer fails that Project's whole Main stream read, the wake it sends the owner and the ordinary digest other followers see name the change instead of reporting a withdrawal, and readers whose Main stream Attention covers the Project are woken for it.
 - The Project dialog's owner-responsibility edit reads as the dialog's own field instead of a second one — the same text size, radius, stroke, fill and placeholder as the Input above it, its cancel and save at the row's end in the footer's order — and opening or closing it moves focus between that field and the row's Edit control.
+- The manager gate's failure is the surface failure the rest of the Client draws — the message and its retry on one line, at that failure's own size — instead of a third arrangement of its own, and a long Host diagnostic wraps inside the band instead of pushing the retry control off it.
 
 ## [0.2.8] - 2026-11-12
 

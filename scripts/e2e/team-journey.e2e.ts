@@ -2863,7 +2863,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const inboxRail = page.locator('nav[class*="railWorkspace"]')
   await inboxRail.waitFor()
   const railLabels = await inboxRail.locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))
-  expect(railLabels).toEqual(['对话', `收件箱，${baseUnread + 3} 条未读`, '任务看板', '项目', 'Agents'])
+  expect(railLabels).toEqual(['对话', `收件箱，${baseUnread + 3} 条未读`, '任务看板', '团队管理', '项目', 'Agents'])
   await expectSidebarUnread(String(baseUnread + 3))
   // The dot replaced the number, so the rail's hover hint is where the quantity shows (the same
   // name the control carries); the assertion above reads it unhovered.

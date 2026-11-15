@@ -1,5 +1,6 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {
   AgentTeamAddMemberRequest,
   AgentTeamArchiveProjectRequest,
@@ -48,6 +49,7 @@ import type {
   AgentTeamWorkerRunListRequest,
   AgentTeamWorkerInspectRequest,
   AgentTeamWorkerStopRequest,
+  AgentTeamManagerSessionRequest,
 } from '@contexera/dsh-agent-team/types'
 import agentTeamRemote from '@contexera/dsh-agent-team/remote'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '@contexera/dsh-agent-team/human-settings'
@@ -79,6 +81,8 @@ import { TeamPanelIcon } from './TeamPanelIcon.tsx'
 import { TeamConversation } from './TeamConversation.tsx'
 import { attachSidebarOrderHost } from './sidebar-order.ts'
 import { TeamWorkspaceBrowser } from './TeamWorkspaceBrowser.tsx'
+import { registerManagerChrome } from './TeamManagerChrome.tsx'
+import { protectOrdinarySessionReuse } from './ordinary-session-reuse.ts'
 import { TeamSettingsNavIcon } from './TeamSettingsNavIcon.tsx'
 import { en, zh, type TeamKey } from './locales.ts'
 
@@ -100,11 +104,30 @@ function currentMainSessionId(ctx: ClientContext): AgentTeamClientMemberStatus['
     .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
 }
 
+/** On cold manager restoration the shell no longer holds the ordinary selection; use its newest ordinary catalog sibling. */
+async function latestOrdinarySessionId(
+  ctx: ClientContext,
+  managerWorkspaceId: WorkspaceId,
+): Promise<AgentTeamClientMemberStatus['member']['sessionId'] | undefined> {
+  const workspaces = ctx.workspaces.list.getSnapshot()
+  const workspace = workspaces.items.find(item => item.workspaceId === managerWorkspaceId)
+  if (workspace === undefined) return undefined
+  const archived = new Set(workspaces.archivedSessionIds)
+  const sessions = (ctx.sessions as unknown as ISessions).list.getSnapshot()
+  const candidates = sessions.ids.filter(id => workspace.sessionIds.includes(id)
+    && sessions.byId[id] !== undefined && !archived.has(id))
+  const response = await ctx.remote.agentTeam.sessionOwnership({ sessionIds: candidates })
+  if (!response.ok) throw new Error(response.error.message)
+  const owned = new Set(response.value.map(entry => entry.sessionId))
+  return candidates.find(id => !owned.has(id))
+}
+
 /**
  * Member session ids this client opened. The workspace service exposes no clear, so excluding them from the
  * next capture keeps a stale Member selection from becoming a false return target.
  */
 const openedMemberSessions = new WeakMap<ClientContext, Set<string>>()
+const openedManagerSessions = new WeakMap<ClientContext, Set<string>>()
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -165,7 +188,8 @@ function openMemberSessionImpl(
   const memberSessions = openedMemberSessions.get(ctx) ?? new Set<string>()
   openedMemberSessions.set(ctx, memberSessions)
   memberSessions.add(sessionId)
-  const returnTo = snapshot.memberSessionId === undefined && current !== undefined && current !== sessionId && !memberSessions.has(current) ? current : undefined
+  const returnTo = snapshot.memberSessionId === undefined && snapshot.manager !== true && current !== undefined && current !== sessionId
+    && !memberSessions.has(current) && !(openedManagerSessions.get(ctx)?.has(current) ?? false) ? current : undefined
   const open = (): void => ctx.uiWorkspace.openSession(sessionId)
   // `openSession` is a synchronous void; a Session the catalog does not carry yet would fail silently,
   // so undo the navigation and let the caller report it.
@@ -206,6 +230,59 @@ function openMemberSessionImpl(
 /** `sessions.retain` refusing an identity means this Client never listed it, which a fresh pull may repair. */
 function isUnknownToCatalog(cause: unknown): boolean {
   return cause instanceof Error && cause.message.startsWith('sessions.retain: unknown session ')
+}
+
+/** Enter the durable manager destination; its runtime id is resolved by the gate before the shipped Conversation returns. */
+function selectManagerImpl(ctx: ClientContext, navigation: TeamNavigation): void {
+  const snapshot = navigation.getSnapshot()
+  const current = currentMainSessionId(ctx)
+  const managerSessions = openedManagerSessions.get(ctx) ?? new Set<string>()
+  openedManagerSessions.set(ctx, managerSessions)
+  const returnTo = snapshot.memberSessionId === undefined && snapshot.manager !== true && current !== undefined
+    && !(openedMemberSessions.get(ctx)?.has(current) ?? false) && !managerSessions.has(current) ? current : undefined
+  navigation.actions().selectManager(returnTo)
+  ctx.layout.selectPanel(null)
+}
+
+/** Open a Host-resolved manager id and capture a restored ordinary selection before the first manager takeover. */
+async function openResolvedManagerSessionImpl(
+  ctx: ClientContext,
+  navigation: TeamNavigation,
+  sessionId: AgentTeamClientMemberStatus['member']['sessionId'],
+  workspaceId: WorkspaceId,
+): Promise<AgentTeamClientMemberStatus['member']['sessionId'] | undefined> {
+  const snapshot = navigation.getSnapshot()
+  const current = currentMainSessionId(ctx)
+  const returnTo = snapshot.returnToSessionId === undefined && current !== undefined && current !== sessionId
+    && !(openedMemberSessions.get(ctx)?.has(current) ?? false) && !(openedManagerSessions.get(ctx)?.has(current) ?? false)
+    ? current : undefined
+  const open = (): void => ctx.uiWorkspace.openSession(sessionId)
+  // Reload can leave the shell's first catalog pull failed or still in flight.
+  // Joining that pull is not a fresh observation, so allow one additional pull
+  // before surfacing an unknown Session in the manager gate.
+  let refreshes = 0
+  while (true) {
+    try {
+      open()
+      break
+    } catch (cause) {
+      if (!isUnknownToCatalog(cause) || refreshes === 2) throw cause
+      refreshes += 1
+      await (ctx.sessions as unknown as ISessions).refresh()
+      if (navigation.getSnapshot().manager !== true) return
+    }
+  }
+  const managerSessions = openedManagerSessions.get(ctx) ?? new Set<string>()
+  openedManagerSessions.set(ctx, managerSessions)
+  managerSessions.add(sessionId)
+  if (returnTo !== undefined || snapshot.returnToSessionId !== undefined) return returnTo
+  return latestOrdinarySessionId(ctx, workspaceId)
+}
+
+/** No usable Workspace is not a manager error: hand the seat to the shipped choose/create-Workspace flow. */
+function showManagerWorkspaceEmptyImpl(ctx: ClientContext, navigation: TeamNavigation): void {
+  navigation.actions().leaveTeamForConversation(() => { ctx.layout.selectPanel(null) })
+  ctx.uiWorkspace.startSession()
 }
 
 const ROSTER_SCOPE_KINDS = ['presence', 'workspace'] as const satisfies readonly WorkspaceScopeKind[]
@@ -274,6 +351,9 @@ function teamSharedRemotes(
     openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], reportFailure?: (message: string) => void) => {
       openMemberSessionImpl(ctx, navigation, sessionId, reportFailure)
     },
+    loadManagerSession: (request: AgentTeamManagerSessionRequest) => ctx.remote.agentTeam.managerSession(request),
+    openResolvedManagerSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], workspaceId: WorkspaceId) => openResolvedManagerSessionImpl(ctx, navigation, sessionId, workspaceId),
+    showManagerWorkspaceEmpty: () => { showManagerWorkspaceEmptyImpl(ctx, navigation) },
   }
 }
 
@@ -290,6 +370,7 @@ function teamSeatInject(
     ...navigation.actions(),
     // The rail row is a destination: leaving Team mode also hands the column back to the conversation.
     leaveTeam: () => { navigation.actions().leaveTeamForConversation(() => { ctx.layout.selectPanel(null) }) },
+    selectManager: () => { selectManagerImpl(ctx, navigation) },
     ...sharedRemotes,
     ...(name === 'main' ? {
       // A committed durable read consumes mention markers; the Host's changes stream never wakes on reads,
@@ -358,9 +439,9 @@ function registerModeShadow<T extends object>(
     let dispose: (() => void) | undefined
     const reconcile = (): void => {
       const snapshot = navigation.getSnapshot()
-      // The main seat yields to the shipped conversation root while a Member Session is embedded;
-      // the browser seat stays shadowed so Team chrome keeps working.
-      const active = snapshot.mode === 'team' && !(name === 'main' && snapshot.memberSessionId !== undefined)
+      // A resolved embedded Session owns the main seat; an unresolved manager keeps the thin Team gate.
+      const active = snapshot.mode === 'team' && !(name === 'main'
+        && (snapshot.memberSessionId !== undefined || snapshot.managerSessionId !== undefined))
       if (active && dispose === undefined) {
         dispose = ctx.slots.register({
           name,
@@ -386,6 +467,7 @@ function registerModeShadow<T extends object>(
 
 function applyUi(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'agent-team: dictionaries')
+  ctx.effect(() => protectOrdinarySessionReuse(ctx), 'agent-team: ordinary blank reuse')
 
   const navigation = new TeamNavigation()
   const disposeNavigation = ctx.reflect.provide('teamNavigation', navigation)
@@ -459,20 +541,26 @@ function applyUi(ctx: ClientContext): void {
     void disposeDrafts()
   }, 'agent-team: navigation service')
 
-  // Leaving an embedded Member Session view must rebind the selection, or the departed session stays retained as `mainView`.
-  // Takeover is conditional so a selection made in the meantime survives; a dead return target keeps the departed
-  // selection, as no public clear exists.
+  // Leaving an embedded Session rebinds the ordinary return target, or a departed Session would stay retained as `mainView`.
+  // Takeover is conditional so a selection made in the meantime survives. A manager without a return target uses the shipped blank flow.
   ctx.effect(() => {
     let previous = navigation.getSnapshot()
     const restore = (): void => {
       const snapshot = navigation.getSnapshot()
-      const departed = previous.memberSessionId
+      const departed = previous.memberSessionId ?? previous.managerSessionId
       const returnTo = previous.returnToSessionId
+      const managerDeparted = previous.managerSessionId !== undefined
+      const wasOverlay = previous.memberSessionId !== undefined || previous.manager === true
       previous = snapshot
-      if (departed === undefined || snapshot.memberSessionId !== undefined) return
-      if (currentMainSessionId(ctx) !== departed) return
-      if (returnTo !== undefined && (ctx.sessions as unknown as ISessions).list.getSnapshot().byId[returnTo] !== undefined) ctx.uiWorkspace.openSession(returnTo)
-      // The Member view cleared the panel to own the column; re-enter the panel the mode names.
+      if (!wasOverlay || snapshot.memberSessionId !== undefined || snapshot.manager === true) return
+      if (departed !== undefined) {
+        if (currentMainSessionId(ctx) !== departed) return
+        if (returnTo !== undefined && (ctx.sessions as unknown as ISessions).list.getSnapshot().byId[returnTo] !== undefined) ctx.uiWorkspace.openSession(returnTo)
+        // Keep the shipped default-preset and Workspace selection. The create
+        // boundary rejects a Team-owned blank, including this departed manager.
+        else if (managerDeparted) ctx.uiWorkspace.startSession()
+      }
+      // The embedded view cleared the panel to own the column; re-enter the panel the mode names.
       if (snapshot.mode === 'team' && ctx.layout.panelInfo.getSnapshot().activePanelId === null) ctx.layout.selectPanel(TEAM_PANEL_ID)
     }
     const unsubscribe = navigation.subscribe(restore)
@@ -480,7 +568,7 @@ function applyUi(ctx: ClientContext): void {
       unsubscribe()
       restore()
     }
-  }, 'agent-team: member session restore')
+  }, 'agent-team: embedded session restore')
 
   const changes = new TeamChangeStream(ctx.remote)
   ctx.effect(() => () => changes.dispose(), 'agent-team: change subscriptions')
@@ -499,6 +587,21 @@ function applyUi(ctx: ClientContext): void {
   registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
   registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'main', TeamConversation as never, 'conversation')
 
+  // Presentation-only replacements; composition and authorization stay Host-owned.
+  ctx.effect(() => registerManagerChrome(ctx, navigation, async expectedSessionId => {
+    const response = await ctx.remote.agentTeam.newManagerSession({ expectedSessionId })
+    if (!response.ok) throw new Error(response.error.message)
+    if (response.value.status === 'no-workspace') {
+      showManagerWorkspaceEmptyImpl(ctx, navigation)
+      return
+    }
+    if (response.value.status === 'unavailable') throw new Error(response.value.diagnostic.detail)
+    if (navigation.getSnapshot().manager !== true) return
+    const sessionId = response.value.sessionId
+    const returnTo = await openResolvedManagerSessionImpl(ctx, navigation, sessionId, response.value.workspaceId)
+    if (navigation.getSnapshot().manager === true) navigation.actions().resolveManagerSession(sessionId, returnTo)
+  }), 'agent-team: manager chrome')
+
   // Rail selection and Team mode are one fact: selecting the Team panel enters the mode, another panel leaves it.
   // A null selection is left alone, since a Member Session view clears the panel to own the column.
   ctx.effect(() => {
@@ -507,15 +610,16 @@ function applyUi(ctx: ClientContext): void {
       const snapshot = navigation.getSnapshot()
       if (active === TEAM_PANEL_ID) {
         if (snapshot.memberSessionId !== undefined) navigation.actions().exitMemberSession()
+        else if (snapshot.manager === true) navigation.actions().exitManagerSession()
         if (snapshot.mode !== 'team') navigation.actions().enterTeam()
         return
       }
       if (active !== null && snapshot.mode === 'team') navigation.actions().leaveTeam()
     }
     const unsubscribe = ctx.layout.panelInfo.subscribe(sync)
-    // A reload re-selects the panel the mode was left in, unless a restored Member Session view owns the column.
+    // A restored manager must resolve before the Team rail is selected; selecting that rail is itself the exit action.
     const restored = navigation.getSnapshot()
-    if (restored.mode === 'team' && restored.memberSessionId === undefined
+    if (restored.mode === 'team' && restored.memberSessionId === undefined && restored.manager !== true
       && ctx.layout.panelInfo.getSnapshot().activePanelId === null) ctx.layout.selectPanel(TEAM_PANEL_ID)
     sync()
     return unsubscribe
@@ -529,6 +633,7 @@ function applyUi(ctx: ClientContext): void {
     scoped.effect(() => registerTeamShortcuts({
       navigation,
       selectPanel: panelId => { scoped.layout.selectPanel(panelId) },
+      selectManager: () => { selectManagerImpl(scoped, navigation) },
       t,
     }, scoped.shortcuts), 'agent-team: shortcuts')
   })

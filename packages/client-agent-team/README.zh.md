@@ -8,12 +8,15 @@
 
 进入 Team mode 后默认打开 Projects。Human 导航路径是 Workspace → Project → Thread；Task 是 Thread 上可选的卡片/header overlay，不是导航层级。Project 顶层消息默认创建 taskless Thread；Human composer 提供默认关闭的「作为任务」控件，可原子创建 Task；taskless Thread 之后也可由 Human 通过 durable Host mutation promotion。promotion 成功后 Client 重读 Host projection，不乐观地自行合成 Task。taskless Thread 保留 reply、follow、mention、Inbox、read 和 history，只有存在 Task 后才展示 status、Claims 与 Task resolution 控件。Client 不显示、不进入、也不轮询 Human Inbox。打开 Thread 会调用 Host 的 `readThread`，然后展示公开 Thread 时间线、分页历史、存在时的 Claims，以及处于错误状态且仍有 active Claim 的 Agent 风险。Thread 的两个面——完整 Thread 页与右侧讨论面板——都带同一个关注控件：它的按下状态读自 Host `threadObservations` 的关注者集合，关注/取消关注通过 Human `changeAttention` Remote 写入；控件绝不做乐观翻转，因此被拒绝的写入会把原状态连同失败信息一并留在控件旁。Human 的关注/取消关注观察历史本身不作渲染。Human 消息按字面文本渲染，Agent 消息使用 Harness 共享的 Markdown 原语渲染；时间线打开时定位到最后一条消息，仅在读者停留在底部时跟随新消息，前插更早历史时保持视口稳定。读取全部自动化：有界批次的剩余未读由 Client 自动续读清零（不存在手动已读/继续阅读控件），Thread 打开期间到达的更新无论滚动位置一律持久确认——滚离底部的读者只会看到无读取语义的「↓ N 条新更新」纯跳转提示。消息正文中的已知 branded Task ref 会在原位置显示为可点击的 `Task #N`，Agent Markdown 内同样如此（整段恰好是一个 ref 的行内代码也会渲染为链接），并可解析到所属 Project 与 Thread，支持跨项目跳转；模型常见的双冒号/大写拼写会先归一化为规范 ref 再查询。代码块和混合内容的行内代码保留原文；未知 ref 不提供导航。
 
+侧栏另有 home 级的 **Team manager** 目的地。它先显示轻量的 loading 或 error gate，调用 `managerSession({})`，再打开 Host 解析出的 Session，并把主区与 composer 交给 shipped Conversation。`unavailable` 留在 gate 内可重试；`no-workspace` 交给 shipped 的选择或创建 Workspace 流程。只有当前 manager 在屏时，shipped session header 才增加 **新开对话**，它调用 `newManagerSession({expectedSessionId})`。浏览器只持久化 manager 目的地 token，不存解析出的 Session id 或普通返回目标，所以 cold restore 会重新询问 Host。离开时若捕获的普通 Session 仍存在就恢复它，否则走 shipped 空白 Session 流程。该流程在复用隐式 preset 的 blank 前查询 Host 的精确 ownership，但不会因此把 manager history 从所属 Workspace 的普通 Session list 或 Harness 归档动作中隐藏。manager history 也不显示固定 preset 与 permission 控件，切回其他 Session 即恢复 shipped 控件。
+
 侧栏行自带控件：行级 ⋯ 菜单打开对应编辑器——`updateProject` 修改项目名称/说明；`updateMember` 编辑 Agent 名称/说明，并可为该成员固定可选的 provider/model（缺省即清除覆盖、回到 Host 默认继承；对活跃成员改模型会原地更新 live model selection，保持 Agent 与 Session 身份不变，后续请求使用新选择）。模型选择经与会话无关的 `llm.models` RPC 读取 Host 目录。点击 Agent 卡片会在 Team 模式内临时显示该成员的会话，不会丢掉下层已选中的 Project 或 Thread。两种行菜单都带 danger「归档」入口：`archiveMember` 与 `archiveProject` 经破坏性确认弹窗（明确说明"暂无恢复入口"）后把实体从所有面收起（持久数据保留、活跃 Claim 释放）；归档行随 workspace 刷新消失，mention 候选与成员选择器都排除已归档成员。本轮不做侧栏归档列表与恢复入口。
 
 Team 模式的目的地也是键盘命令，注册进 shell 的快捷键服务而不是自己抓键盘，所以每条都出现在快捷键速查里并可改键：Mod+Alt+T 进出 Team 模式、Mod+Alt+1 收件箱、Mod+Alt+2 任务看板、Mod+Alt+M 聚焦输入框、Mod+Alt+← 退回上一层（Thread 页回项目、讨论面板关掉、收件箱/看板回工作区、项目回欢迎面）、Mod+Alt+→ 回到上一次「返回」离开的那一面（选了别的目的地就作废）、Mod+Alt+↑/↓ 按侧栏顺序切上一个/下一个项目。收件箱里 Mod+Alt+Shift+1~9 打开第 1~9 行，和鼠标点那一行走同一条路。Mod 在 Mac 上是 ⌘、其他系统是 Ctrl；Web 上每条都带 Alt，因为浏览器占用了裸的 Mod 组合（N、W、T），收件箱九连再带一个 Shift 是因为 macOS 把 ⌘⇧3/4/5 留给了截图；而 Linux Web 只放行三种组合，需要别的组合的命令在那里没有默认键位，也不会顶掉已有快捷键。
 
 Client 使用以下 Host 接口：
 
+- `managerSession({})` 解析 Host 持有的 manager Session；`newManagerSession({expectedSessionId})` 只替换调用方当前看到的 Session；`sessionOwnership({sessionIds})` 在 blank 复用前分类当前与保留的 Team Session。
 - `readThread`：确认一个 Thread 的未读批次。
 - `threadHistory`：读取更早事实，不改变已读状态。
 - `promoteThread`：原子地为 taskless Thread 附加真实 Task，并记录结构化 `promote` Task activity。
@@ -38,7 +41,7 @@ Worker 诊断的布局和展开报告的浏览器检查见[组件契约](../../d
 
 ## 组合边界
 
-这个 package 通过 Harness 的公开 slot API 提供 Team workspace、conversation 和 footer slots。它不修改 Harness 源码、不替换 shipped stores，也不读取 operation ledger。面向模型的 Team tools 和 guidance 仍只在 `team-member` preset 中启用。
+这个 package 通过 Harness 的公开 slot API 提供 Team workspace、conversation、footer 与 manager header action slots。它不修改 Harness 源码、不替换 shipped stores，也不读取 operation ledger。面向模型的 Team tools 和 guidance 仍只在 `team-member` preset 中启用；manager 使用独立的 `team-manager` preset，其 Host composition 与确切 Agent 的 guard 见 [Tools and preset](../../docs/architecture/tools-and-preset.zh.md#team-manager-preset)。
 
 ## 开发检查
 

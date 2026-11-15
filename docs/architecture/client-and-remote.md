@@ -13,6 +13,10 @@ Host face declaration → generate:typert → Typert Host + Remote client → ct
 
 Read requests state their purpose instead of sharing one projection shape. `view` takes `includeCatalog` only when the caller wants the Task/Thread/Claim catalog of the whole request scope — the address book the model-facing `team_view` renders; the Client's reads never ask for it and render the page they requested.
 
+`managerSession({})` resolves the Host-owned manager without a caller-selected identity. `newManagerSession({expectedSessionId})` replaces only the Session that caller currently sees; a stale id observes the current Session instead of creating another. Both return one union: `ready` with the Session and Workspace ids, `no-workspace` as an ordinary empty state, or `unavailable` with a structured Host diagnostic.
+
+`sessionOwnership({sessionIds})` classifies current and retained Team Sessions as `manager` or `member`. Its authority is the private manager lineage and Member ledger, including archived and cold Sessions; id prefixes and preset labels are not ownership evidence.
+
 ## Remote failure vocabulary
 Generated Remote methods resolve a `RemoteResult`: `{ ok: true, value }` carries the business result, `{ ok: false, error }` carries a failure whose stable `code` discriminates and whose `details` the code narrows without a cast.
 
@@ -36,6 +40,20 @@ Activation mounts `agentTeamRemote`, waits for `remote.agentTeam`, then register
 
 The panel row and Team mode are one fact: the row is the shell's own rail button, selecting it enters the mode, and another panel taking the column leaves it. A null selection is left alone — an embedded Member Session view clears the panel to own the column and the mode has to survive that — while the mode's own foot row clears the panel itself. A restored mode re-selects its panel unless a panel was already selected at mount, in which case that panel keeps the column and the mode stands down.
 
+The manager destination is a gate, not a Team conversation surface. While `manager: true` has no resolved id, the `main` conversation shadow renders a thin loading or error state. It calls `managerSession({})`; on `ready` it opens that Session through the shipped workspace controller, records the runtime id, and stands down so the shipped Conversation owns the main seat with its ordinary composer. A late resolution after the reader leaves is ignored.
+
+`unavailable` keeps the gate with the Host diagnostic and a retry; no sendable Team composer appears. `no-workspace` leaves Team and invokes the shipped choose/create-Workspace flow. The manager destination itself persists only `manager: true`; the resolved `managerSessionId` and ordinary `returnToSessionId` stay runtime-only, so a cold restore resolves through the Host again.
+
+The shipped session header replaces its preset label with a new-conversation action only while the current manager Session is displayed. It calls `newManagerSession({expectedSessionId})` with that Session id, opens the successor, and updates the runtime destination. Opening a Host-resolved id makes bounded catalog retries when reload joined an earlier pull that did not contain it.
+
+Explicit Team navigation closes the manager destination; leaving restores the captured ordinary Session when it still exists. If cold restoration found the manager already seated, the return target is the newest visible ordinary, non-Team Session in the Host-returned Workspace. With no surviving target, leaving uses the shipped new-Session flow with its default preset and Workspace choice.
+
+The create-time guard wraps the public `ISessions.create` boundary. For an implicit-preset blank candidate it reads exact Host ownership; a Team-owned id is omitted before the shipped creation continues, while ordinary blanks and explicit-preset requests pass through unchanged. A failed ownership read does not retry the unsafe candidate. Disposal during the read rejects the pending creation; it neither creates a Session nor leaves the caller waiting forever.
+
+This guard excludes only blank reuse: manager history remains visible under its Workspace in the ordinary Session list and archivable through Harness. A current or retired manager viewed there still keeps its fixed composition.
+
+While a manager is displayed, temporary slot replacements remove its hero preset picker, header preset label, and permission control. They release on every other Session so the shipped controls return. This is presentation only, not a grant or authorization lock; [Tools and preset](tools-and-preset.md#team-manager-preset) owns the Host composition and execution guard.
+
 A slot parent's `children` declaration is both render site and authority. Team's `sidebar.workspaces` shadow must not redeclare shipped `sidebar.workspaces.directoryFlow`; Harness SlotCore rejects duplicate live declarations. Do not copy private WorkspaceBrowser, ConversationRoot, Shell, or private CSS. Use public Harness services and exports, such as `ctx.workspaces.pickDirectory()`, and record limitations rather than depending silently on private implementation.
 
 ## Client data and presentation boundary
@@ -47,7 +65,7 @@ The Human Client consumes the Host's Inbox projection, never keeps a parallel In
 
 It also carries a second 「最近活跃」 slice that an Agent's Inbox never does — the Threads that reader has written a Message in, so a Thread they replied to is theirs whether or not they follow it. That slice is newest activity first, each Workspace's own slice bounded to ten while the merged page shows at most five.
 
-Team navigation mode, Workspace selection, the last Project/Thread, and the Inbox page position are browser-persisted; unread and Attention are Host-owned.
+Team navigation mode, Workspace selection, the last Project/Thread, the Inbox page position, and the manager destination token are browser-persisted. Unread and Attention are Host-owned; resolved Session ids and return targets remain runtime-only and are re-resolved through the Host.
 
 Thread reads belong to one opening of the page or discussion panel. Switching Threads discards late history, unread, and follower results from the earlier opening, including when the reader returns to the same Thread.
 

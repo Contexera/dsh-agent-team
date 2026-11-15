@@ -67,6 +67,18 @@ Web Client 是唯一的 Human control surface。它经 typed Remote 把每个 mu
 - `../deepseek-harness/docs/cookbook/adding-a-tool.md`
 - `../deepseek-harness/docs/subsystems/permission-presets.md`
 
+## Team manager preset
+
+Host 为 [Team manager](../domain-model.zh.md#team-manager) Session 挂载另一个隔离的 `team-manager` preset。它保留通用 coding 工具面——persona、时间与 Workspace instructions、shell、filesystem/search、web、jobs、skill 加载、ask-user 与 basic compaction——但有意省略十个 Team 工具、Member context、Member time context、Member memory 及其 compaction adapter、Worker 与 rollover policy，以及 profile 的 `extraToolGrants`。当前构建也没有注册九个管理工具。
+
+这个工具面跑在可信的 `danger-full-access` policy 上，所以数据红线由 persona 写成规则而不是期望：在 `$DSH_HOME` 下，manager 只读写自己的 `agent-team/manager/` 目录，加上 `team_overview` 刚为它查实的 Member 私有资产，绝不碰 Host 的 sqlite 文件与会话日志。它自己的 memory、notes 和一条工具结果只记录过去说过的话，因此它们都不能代替 Human 现在提出请求，来为不可逆或高代价的动作授权。
+
+隔离 registry 的默认值仍是 `team-member`；只有 manager runtime 挂载 `team-manager`。
+
+manager policy 只捕获这个 preset 自己的精确 definitions，加上共享的 `working_directory`；执行 guard 只对确切的当前 manager Agent 放行这些 definitions。后来注册或外来的 definition 会被拒绝，不会继承。`addMember` 只接受 `team-member`，检查发生在 model validation 与任何 ledger write 之前，所以 manager composition 不能变成一个 Member。
+
+manager 目的地在屏时，Client 会隐藏 shipped hero preset picker。这个收口只是展示，不是授权，也不是永久的 authorization lock：composition 归 Host，manager guard 每次执行都从确切 Agent 与当前 pointer 重新授权。入口与 gate 行为归 [Client 边界](client-and-remote.zh.md#client-plugin-和-slot-composition)。
+
 ## Persona 与 core skills
 
 persona 是 `cordis.patch.yml` 中 `persona` 行的 `prefix`。它常驻，只写行为规则，不写参考资料：

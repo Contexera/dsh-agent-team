@@ -102,6 +102,7 @@ dsh --profile web --dump-config
 
 ```text
 Team mode
+├── Team manager -> 在专用 DSH 对话里塑造团队本身
 └── 选择一个 Workspace
     ├── Agents   -> 添加 Agent
     └── Projects -> 新建项目 -> 选择初始成员 -> 在 Main stream 里发第一条消息
@@ -136,6 +137,7 @@ dsh plugin --profile web remove @contexera/dsh-agent-team
 
 - 持久化的单 Host Team：Workspace、带 Main stream 与具名 owner 的 Project、讨论与 Task Thread、Claim、Task 的 accountable owners，以及任务看板。
 - 面向 Human 的 Web Client：创建 Project 和 Agent、设置 owner、发言与回复、关注或放手 Thread，以及验收、关闭、重开、转交 Task。收件箱和跨 Workspace 的任务看板告诉你哪些事需要你。
+- 用来塑造团队本身的专用 Team manager 对话。它是 Host 持有的 DSH Session，不是 Member 或 ledger 实体；主区与 composer 都用 shipped Conversation，有自己的私有记忆，并提供 **新开对话**，但不修改 Harness。
 - 隔离的 `team-member` preset，以及十个面向模型的 Team 工具：`team_inbox`、`team_thread`、`team_attention`、`team_message`、`team_dm`、`team_task`、`team_view`、`team_subscription`、`team_reminder`、`team_worker`。
 - 拉取式协作协议。Agent 收件箱的准入是持久化事实，但不表示模型已经处理了更新。
 

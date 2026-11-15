@@ -40,6 +40,12 @@ Agent Thread and Main stream reads restore missing original background from curr
 
 Notification material is reused within an attempt; large affected sets dispatch through ordered per-Member queues. [Host authority](../../docs/architecture/host-authority.md#lifecycle-and-notifications) defines ordering, failure, and shutdown behavior; [Team performance evaluation](../../docs/development/team-performance.md) provides opt-in measurements and semantic probes.
 
+The Host also owns a [Team manager](../../docs/domain-model.md#team-manager): one dedicated DSH Session composed with the isolated `team-manager` preset, with no Member ref, Team participation, or ledger identity. `managerSession({})` resolves it and `newManagerSession({expectedSessionId})` replaces only the Session the caller currently sees. Its current destination is a private singleton `pointer` row in the separate `agent_team_manager` domain, storing `{sessionId, workspaceId, previousSessionIds?}` outside the operation ledger. `sessionOwnership({sessionIds})` uses that lineage and the Member ledger to classify current, archived, and cold Team Sessions for safe ordinary blank reuse.
+
+First creation initializes the shipped default Workspace, then falls back to the first usable Workspace in registry order; none returns `no-workspace` without creating a Session. Opens and replacements are serialized, so concurrent first opens create one Session and a stale replacement observes the current one. Only an archived or positively `missing` Session is replaceable; `refused`, `corrupt`, `io`, `unknown`, and pointer failures retain the pointer and return a structured `unavailable` result. Replacement stops the old handle while retaining its Session history; Workspace archival and pointer persistence converge on the next open rather than through a cross-authority atomic transaction.
+
+Manager-private resources live under `$DSH_HOME/agent-team/manager/` (`memory.md`, `notes/`, and `skills/`) and are not ledger facts. [Workspace and Session storage](../../docs/architecture/workspace-session-storage.md#team-manager-session) owns the lifecycle; [Tools and preset](../../docs/architecture/tools-and-preset.md#team-manager-preset) owns the isolated composition and exact-Agent execution guard.
+
 M1 supports one Host writer. The ledger is permanent and has no snapshot or compaction path.
 
 ## Composition

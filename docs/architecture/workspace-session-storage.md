@@ -23,3 +23,17 @@ The shipped JSONL backend throws its corruption family as plain `Error`s, so cor
 Member restart is the bounded self-heal for refusals: when activation failed with a `session-refused` diagnostic, `recoverMember` re-runs the activation — a transient refusal heals, and a deterministic one replays the same refusal into the refreshed diagnostic, since no write-side repair pass exists.
 
 Activation diagnostics are structured — `AgentTeamMemberDiagnostic` carries a `class` (`session-refused`, `session-unreadable`, `preset-composition`, `rollover`, `runtime`, or `activation`), a detail, and where applicable the refused artifact location. Availability/presence remain the only user-facing states; diagnostics are projection-derived, never persisted, and the ledger stays the sole Team authority.
+
+## Team manager Session
+
+The Host owns one dedicated [Team manager](../domain-model.md#team-manager) Session. Its durable destination is a singleton `pointer` row in the private `agent_team_manager` domain, in the same SQLite file as Team but outside the operation ledger. The row stores `{sessionId, workspaceId, previousSessionIds?}`; the optional lineage keeps replaced managers recognizable as Team-owned history, and old pointers without it remain readable.
+
+`workspaceId` is restoration and display metadata, not a second existence authority. A pointer-store open failure is logged and leaves the manager unavailable without failing Host boot or the Team ledger.
+
+First creation asks the shipped Workspace controller to initialize its default Workspace, then takes the first usable Workspace in registry order; when none is usable it returns `no-workspace` and creates no Session. An existing Session resumes only in the Workspace whose path exactly matches its stored cwd. Startup pre-restore resumes a readable registered Session but never creates one; an absent pointer or an archived registered Session is left for the next open.
+
+Public opens and replacements share one serialized chain. Concurrent first opens create one Session, and concurrent new-conversation requests under one expected id create one successor; a stale caller observes the current Session instead of creating another. For an existing pointer, only an archived Session or a stored read that positively reports `missing` is replacement-eligible. `refused`, `corrupt`, `io`, `unknown`, pointer-read, and pointer-write failures return `unavailable` and retain the pointer.
+
+Replacement persists the pointer, then publishes the successor and immediately denies the old manager; the old handle is stopped while its Session history remains visible and archivable under its Workspace in the ordinary list. Workspace archival and pointer persistence are separate authorities, so a race can leave them briefly out of step; the next open converges by replacing an archived manager rather than by a cross-authority atomic transaction.
+
+Manager-private resources live under `$DSH_HOME/agent-team/manager`: `memory.md`, `notes/`, and `skills/`. They are not ledger facts. The manager's skill provider scans that private `skills/` directory and no bundled skills.

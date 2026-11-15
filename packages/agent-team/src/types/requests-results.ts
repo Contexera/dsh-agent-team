@@ -1,3 +1,4 @@
+import type { SessionId } from "@deepseek-ai/dsh-session"
 import type { WorkspaceId } from "@deepseek-ai/dsh-workspace"
 import type {
   AgentTeamActivity,
@@ -61,6 +62,62 @@ export interface AgentTeamOperationReceipt {
   /** Wall-clock instant of the committing operation; the one source results carry for optimistic fact instants. */
   readonly occurredAt: string
 }
+
+/** Classify listed Sessions from the Host's durable manager lineage and Member ledger before blank reuse. */
+export interface AgentTeamSessionOwnershipRequest {
+  readonly sessionIds: readonly SessionId[]
+}
+
+/** A listed Session retained in this Team Host's ownership history, not an ordinary reusable blank. */
+export interface AgentTeamSessionOwnership {
+  readonly sessionId: SessionId
+  readonly kind: 'member' | 'manager'
+}
+
+/** Open or resolve the Host-managed Team manager Session. The request carries no caller-selected identity. */
+export interface AgentTeamManagerSessionRequest {}
+
+/** Replace the manager Session the caller currently sees, only if it is still current. */
+export interface AgentTeamNewManagerSessionRequest {
+  readonly expectedSessionId: SessionId
+}
+
+/**
+ * Which action helps when the manager Session is unavailable. Refused and
+ * unreadable stored Sessions stay distinct so a damaged log is never replaced
+ * as though it had been deleted.
+ */
+export type AgentTeamManagerDiagnosticClass =
+  | 'session-refused'
+  | 'session-unreadable'
+  | 'preset-composition'
+  | 'workspace-unavailable'
+  | 'session-create'
+  | 'session-resume'
+  | 'session-attach'
+  | 'pointer-read'
+  | 'pointer-persist'
+  | 'runtime'
+
+/** One structured manager failure; rendered by the Client, never persisted. */
+export interface AgentTeamManagerDiagnostic {
+  readonly class: AgentTeamManagerDiagnosticClass
+  readonly detail: string
+  /** The refused artifact's location, when a format refusal reported one. */
+  readonly location?: { readonly kind: string; readonly path: string }
+  /** The manager Session the failure is about, when it is about one. */
+  readonly sessionId?: SessionId
+  /** The bounded source that observed the failure, when one is available. */
+  readonly source?: string
+  /** When the Host observed the failure, as an ISO timestamp. */
+  readonly occurredAt?: string
+}
+
+/** The resolved manager destination. `no-workspace` is an ordinary empty state, not a failure. */
+export type AgentTeamManagerSessionResult =
+  | { readonly status: 'ready'; readonly sessionId: SessionId; readonly workspaceId: WorkspaceId }
+  | { readonly status: 'no-workspace' }
+  | { readonly status: 'unavailable'; readonly diagnostic: AgentTeamManagerDiagnostic }
 
 /** Human intent to create a Workspace Project with its initial Members. */
 export interface AgentTeamCreateProjectRequest {

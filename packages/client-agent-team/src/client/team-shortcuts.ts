@@ -9,6 +9,8 @@ export interface TeamShortcutHost {
   readonly navigation: TeamNavigation
   /** The shipped layout's panel selection; the rail row and these commands share it. */
   selectPanel(panelId: typeof TEAM_PANEL_ID | null): void
+  /** The pointer entry's complete manager navigation, including its panel handoff and ordinary return target. */
+  selectManager(): void
   readonly t: (key: TeamKey, params?: Record<string, string>) => string
 }
 
@@ -126,6 +128,16 @@ export function registerTeamShortcuts(host: TeamShortcutHost, shortcuts: Shortcu
       regions: ['page', 'editable'],
       modals: [],
       resolve: () => ({ status: 'handled', run: () => { open(() => { host.navigation.actions().selectBoard() }) } }),
+    },
+    {
+      // The third global face, so it takes the third digit: the rail's order is the chord's order.
+      id: 'team.manager' as ShortcutCommandId,
+      label: () => host.t('teamManager'),
+      aliases: ['team manager', 'manager', 'management'],
+      defaults: altPrimary('Digit3'),
+      regions: ['page', 'editable'],
+      modals: [],
+      resolve: () => ({ status: 'handled', run: () => { open(host.selectManager) } }),
     },
     {
       id: 'team.composer.focus' as ShortcutCommandId,

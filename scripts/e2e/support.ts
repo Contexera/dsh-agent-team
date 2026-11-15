@@ -71,8 +71,8 @@ export async function openTeamPage(options: {
   readonly webhookOrigin?: string
   /** Device pixels per CSS pixel; a scenario reading a glyph needs more than one. */
   readonly deviceScaleFactor?: number
-  /** A scripted model conversation mounted by the real scaffold before any Member can wake. */
-  readonly replay?: { readonly fixture: string; readonly override: string }
+  /** Scripted model conversations mounted by the real scaffold before any Member can wake. */
+  readonly replay?: { readonly fixture: string; readonly override: string; readonly childFixtures?: readonly string[] }
   /** The visiting device the page reports; a shortcut scenario presses one device's defaults. */
   readonly platform?: string
 } = {}): Promise<{
@@ -86,7 +86,11 @@ export async function openTeamPage(options: {
     const overlay = options.webhookOrigin === undefined ? undefined : await webhookOriginOverlay(options.webhookOrigin)
     scaffold = await launchWebScaffold({ harnessHome: home, profile: { packages: [{ dir: stagedBundle, enabled: true }] },
       ...(overlay === undefined ? {} : { extraOverlayPath: overlay }),
-      ...(options.replay === undefined ? {} : { replayFixture: options.replay.fixture, replayOverride: options.replay.override }) })
+      ...(options.replay === undefined ? {} : {
+        replayFixture: options.replay.fixture,
+        replayOverride: options.replay.override,
+        ...options.replay.childFixtures === undefined ? {} : { replayChildFixtures: [...options.replay.childFixtures] },
+      }) })
     browser = await chromium.launch({ headless: true, executablePath: CHROME })
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN',
       ...(options.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: options.deviceScaleFactor }) })
@@ -228,6 +232,7 @@ export const SUBSCRIPTION_SHOTS = join(BROWSER_ARTIFACTS, 'subscriptions')
 export const WORKER_SHOTS = join(BROWSER_ARTIFACTS, 'worker-thread')
 export const WORKER_STOP_SHOTS = join(BROWSER_ARTIFACTS, 'worker-stop')
 export const WORKER_INSPECT_SHOTS = join(BROWSER_ARTIFACTS, 'worker-inspect')
+export const MANAGER_SHOTS = join(BROWSER_ARTIFACTS, 'team-manager')
 /**
  * Wait until no finite animation is running: a screenshot taken mid-collapse
  * captures the expanded column clipped to the rail. Infinite animations
@@ -614,7 +619,7 @@ export async function installLocalBundle(): Promise<{ readonly home: string; rea
   activeHome = home
   await Promise.all([
     UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, UI09_SHOTS,
-    SETTINGS_SHOTS, SUBSCRIPTION_SHOTS, WORKER_SHOTS, WORKER_STOP_SHOTS, WORKER_INSPECT_SHOTS,
+    SETTINGS_SHOTS, SUBSCRIPTION_SHOTS, WORKER_SHOTS, WORKER_STOP_SHOTS, WORKER_INSPECT_SHOTS, MANAGER_SHOTS,
   ].map(dir => mkdir(dir, { recursive: true })))
   return { home, stagedBundle }
 }

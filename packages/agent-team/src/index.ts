@@ -16,6 +16,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { installModelSelection, type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-api-workspace-controller'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
@@ -66,6 +67,8 @@ import { readWorkerHistory } from './worker-inspection.ts'
 import { coldInboxOf } from './cold-inbox.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
+import { ManagerSessionStore, managerSessionDomainSpec } from './manager-session-store.ts'
+import { ManagerSessionRuntime } from './manager-session.ts'
 import { INITIAL_CHECKPOINT, SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
 import { baselineIdsOf, failureCategory, failureTail, missingCredentials, probeShellFamily, runSubscriptionScript, type ShellFamilyProbe, type SubscriptionCredentials, type SubscriptionRunCategory, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
 import { deliveryEntryOf, deliveryKey, deliveryKeysOf, deliveryRecordOf, evictedDeliveries, evictedRunKeys, failedDeliveries, replayKey, replayKeysOf, runRecordOf, runSummaryOf, subscriptionRunKey, subscriptionRunKeysOf, SUBSCRIPTION_DELIVERY_LIMIT, SUBSCRIPTION_RUN_HISTORY_LIMIT, type SubscriptionDeliveryInput, type SubscriptionDeliveryRecord, type SubscriptionReplayRecord, type SubscriptionRunRecord, type SubscriptionRunTrigger } from './subscription-runs.ts'
@@ -146,6 +149,8 @@ import type {
   AgentTeamMemberId,
   AgentTeamMemberResult,
   AgentTeamMembersRequest,
+  AgentTeamSessionOwnership,
+  AgentTeamSessionOwnershipRequest,
   AgentTeamMessageRef,
   AgentTeamResolveMessageRefsRequest,
   AgentTeamResolveMessageRefsResult,
@@ -251,6 +256,9 @@ import type {
   AgentTeamMemberReminderCreateResult,
   AgentTeamMemberReminderCancelRequest,
   AgentTeamMemberReminderCancelResult,
+  AgentTeamManagerSessionRequest,
+  AgentTeamManagerSessionResult,
+  AgentTeamNewManagerSessionRequest,
   AgentTeamUnreadMemberReminder,
   AgentTeamWebhookIntakeRequest,
   AgentTeamWebhookIntakeResult,
@@ -498,6 +506,8 @@ export default class AgentTeam extends TypertRemoteService {
   private backend?: SqliteStorageBackend
   private domain?: Domain<typeof agentTeamDomainSpec>
   private ledger?: AgentTeamLedger
+  /** The manager pointer lives beside, never inside, the Team ledger. */
+  private managerRuntime?: ManagerSessionRuntime
   /** The scheduler's private state: deleting it changes no domain fact, so it is not part of the ledger. */
   private subscriptionDomain?: Domain<typeof subscriptionDomainSpec>
   private subscriptionTable?: KvTable<AgentTeamSubscriptionRef, SubscriptionCheckpoint>
@@ -1200,6 +1210,16 @@ export default class AgentTeam extends TypertRemoteService {
     const storageDomain = this.openTeamStorage()
     const domain = await storageDomain.open(agentTeamDomainSpec)
     const subscriptionDomain = await storageDomain.open(subscriptionDomainSpec)
+    // A damaged manager pointer must not fail Host boot. Keep the failure as
+    // the store's read diagnostic; the Team ledger and Members still start.
+    let managerDomain: Domain<typeof managerSessionDomainSpec> | undefined
+    let managerStoreFailure: unknown
+    try {
+      managerDomain = await storageDomain.open(managerSessionDomainSpec)
+    } catch (error) {
+      managerStoreFailure = error
+      this.ctx.logger.warn(`agent-team: manager pointer store could not open: ${error instanceof Error ? error.message : String(error)}`)
+    }
     this.ctx.effect(() => async () => {
       this.accepting = false
       // Stop admitting runs before anything they write stops being served, and
@@ -1236,6 +1256,20 @@ export default class AgentTeam extends TypertRemoteService {
       this.handles.clear()
       this.memberRuntime.disposeAll()
       this.runningAgents.clear()
+      // Stop the manager Agent before its pointer domain and the shared SQLite
+      // backend close; a late open must never write into a closed store.
+      try {
+        await this.managerRuntime?.dispose()
+      } catch (error) {
+        this.ctx.logger.warn(`agent-team: manager runtime disposal failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      try {
+        await managerDomain?.close()
+      } catch (error) {
+        this.ctx.logger.warn(
+          `agent-team: manager pointer domain close failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
       await domain.close()
       await subscriptionDomain.close()
       await this.backend?.close()
@@ -1251,6 +1285,30 @@ export default class AgentTeam extends TypertRemoteService {
       },
     })
     this.ledger = ledger
+    const managerStore = managerDomain === undefined
+      ? {
+          read: (): never => { throw managerStoreFailure ?? new Error('Team manager pointer store is unavailable') },
+          ownedSessionIds: (): readonly SessionId[] => {
+            throw managerStoreFailure ?? new Error('Team manager pointer store is unavailable')
+          },
+          writeIfExpected: async (): Promise<never> => {
+            throw managerStoreFailure ?? new Error('Team manager pointer store is unavailable')
+          },
+        }
+      : new ManagerSessionStore(managerDomain.table('pointer'))
+    this.managerRuntime = new ManagerSessionRuntime({
+      ctx: this.ctx,
+      store: managerStore,
+      reader: this.sessionReader,
+      managerPrivateRoot: dshHomePath('agent-team', 'manager'),
+      defaultAgentOptions: () => ({ ...this.ctx.agentDefaultModel.currentSelection() }),
+      initializeDefaultWorkspace: async signal => {
+        const value = await this.ctx.get('workspaceController')?.initializeDefault(signal)
+        return value === undefined
+          ? undefined
+          : { workspaceId: value.workspace.workspaceId, path: value.workspace.path }
+      },
+    })
     // A live Config edit in the constructor's window may have arrived before
     // the ledger existed; sync once here so @ matching starts from the stored
     // name.
@@ -1295,6 +1353,16 @@ export default class AgentTeam extends TypertRemoteService {
     }
     // Timers start last: every Member is settled, so a run that finishes
     // immediately can already reach the owners it must notify.
+    // Restore the registered manager Session once dependencies and the ledger
+    // are ready. A manager failure is reported, never fatal to Host boot.
+    try {
+      const restored = await this.managerRuntime.preRestore()
+      if (restored?.status === 'unavailable') {
+        this.ctx.logger.warn(`agent-team: manager Session pre-restore failed: ${restored.diagnostic.class}: ${restored.diagnostic.detail}`)
+      }
+    } catch (error) {
+      this.ctx.logger.warn(`agent-team: manager Session pre-restore failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
     await this.startSubscriptionRuntime(subscriptionDomain)
   }
 
@@ -1337,6 +1405,26 @@ export default class AgentTeam extends TypertRemoteService {
     return this.requireLedger().listMembers().map(member => this.memberStatus(member))
   }
 
+  /**
+   * Resolve the Host-managed Team manager Session. The caller supplies no
+   * identity: the Host decides whether to create, resume, or replace.
+   */
+  @Remote('managerSession')
+  async openManagerSession(_request: AgentTeamManagerSessionRequest): Promise<AgentTeamManagerSessionResult> {
+    this.requireAccepting()
+    return this.requireManagerRuntime().open()
+  }
+
+  /**
+   * Replace the manager Session this caller currently sees. A stale expected
+   * id observes the current Session instead of creating another.
+   */
+  @Remote('newManagerSession')
+  async newManagerSession(request: AgentTeamNewManagerSessionRequest): Promise<AgentTeamManagerSessionResult> {
+    this.requireAccepting()
+    return this.requireManagerRuntime().newConversation(request.expectedSessionId)
+  }
+
   /** Read-only navigation lookup for branded Task refs found in message bodies. */
   @Remote('resolveTaskRefs')
   resolveTaskRefs(request: AgentTeamResolveTaskRefsRequest): AgentTeamResolveTaskRefsResult {
@@ -1374,6 +1462,24 @@ export default class AgentTeam extends TypertRemoteService {
       return true
     })
     return Object.freeze({ resolved: Object.freeze(this.requireLedger().resolveMessageRefs(request.workspaceId, messageRefs)) })
+  }
+
+  /**
+   * Classify a blank before ordinary creation reuses it. The private manager
+   * lineage and Member ledger still identify cold Sessions after handles stop;
+   * ids and preset labels are not ownership evidence.
+   */
+  @Remote('sessionOwnership')
+  sessionOwnership(request: AgentTeamSessionOwnershipRequest): readonly AgentTeamSessionOwnership[] {
+    this.requireAccepting()
+    const members = new Set(this.ledger?.listMembers().flatMap(member => {
+      const previous = this.ledger?.previousSessionForMember(member.memberId)
+      return previous === undefined ? [member.sessionId] : [member.sessionId, previous]
+    }))
+    return request.sessionIds.flatMap((sessionId): AgentTeamSessionOwnership[] => {
+      if (this.managerRuntime?.ownsSession(sessionId) === true) return [{ sessionId, kind: 'manager' }]
+      return members.has(sessionId) ? [{ sessionId, kind: 'member' }] : []
+    })
   }
 
   @Remote('members')
@@ -1504,6 +1610,12 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('addMember')
   async addMember(request: AgentTeamAddMemberRequest): Promise<AgentTeamAddMemberResult> {
     return this.enqueueAddition(request.requestId, async () => {
+      // The manager composition is Host-owned and never an ordinary Member.
+      // Reject here, before model validation or any ledger write, so a row the
+      // Host could never activate is not recorded.
+      if (request.presetId !== 'team-member') {
+        throw new Error("only the 'team-member' preset can create an Agent Team Member")
+      }
       const workspace = this.requireWorkspace(request.workspaceId)
       await this.assertModelRoute(request.model)
       const memberId = `member:${randomUUID()}` as AgentTeamMemberId
@@ -3411,6 +3523,11 @@ export default class AgentTeam extends TypertRemoteService {
     const workspace = this.ctx.workspaceRegistry.get(workspaceId)
     if (workspace === undefined) throw new Error(`unknown Workspace '${workspaceId}'`)
     return workspace
+  }
+
+  private requireManagerRuntime(): ManagerSessionRuntime {
+    if (this.managerRuntime === undefined) throw new Error('Team manager runtime is not ready')
+    return this.managerRuntime
   }
 
   /** Coalesce event-driven checks; reminders themselves never recursively schedule another pass. */

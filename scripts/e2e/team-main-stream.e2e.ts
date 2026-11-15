@@ -266,15 +266,16 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   const globalCard = boardPage.getByRole('button', { name: /Task #1/ })
   await globalCard.waitFor()
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'task-board-page.png'), fullPage: true })
-  // The two cross-Workspace cards and the Workspace selector stand as one
-  // stack: every gap between them is some control's 2px top step, so the
-  // two top-to-top distances must measure equal in this one render.
+  // The three cross-Workspace controls and the Workspace selector stand as one
+  // stack: every gap between them is some control's 2px top step, so all
+  // top-to-top distances must measure equal in this one render.
   const stackSteps = await page.evaluate(() => {
-    const tops = ['button[aria-label="收件箱"]', 'button[aria-label="任务看板"]', '[data-team-workspace-trigger]']
+    const tops = ['button[aria-label="收件箱"]', 'button[aria-label="任务看板"]', 'button[aria-label="团队管理"]', '[data-team-workspace-trigger]']
       .map(selector => document.querySelector(selector)?.getBoundingClientRect().top)
-    return [tops[1]! - tops[0]!, tops[2]! - tops[1]!]
+    return [tops[1]! - tops[0]!, tops[2]! - tops[1]!, tops[3]! - tops[2]!]
   })
-  expect(stackSteps[0]).toBe(stackSteps[1])
+  expect(stackSteps[0]).toBeGreaterThan(0)
+  expect(stackSteps).toEqual([stackSteps[0], stackSteps[0], stackSteps[0]])
   // A card opens the Task's own Thread level, and the sidebar marker follows
   // it off the board row: the board is a face, not a standing selection.
   await globalCard.click()

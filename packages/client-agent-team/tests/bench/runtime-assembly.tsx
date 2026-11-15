@@ -30,6 +30,7 @@ function BaselineSettings() { return <div data-baseline-settings>设置</div> }
 
 export async function createBenchRuntime(
   onCreated: (runtime: SlotTestRuntime) => void,
+  managerCurrent = false,
 ) {
   const runtime = await SlotTestRuntime.create()
   onCreated(runtime)
@@ -79,7 +80,8 @@ export async function createBenchRuntime(
     mainReference?.release()
     mainReference = runtime.sessions.retain(sessionId as never, { source: 'mainView' })
   })
-  runtime.ctx.provide('uiWorkspace', { startSession: vi.fn(), connectWorkspace: vi.fn(async () => 'ordinary-session'), openSession })
+  const startSession = vi.fn()
+  runtime.ctx.provide('uiWorkspace', { startSession, connectWorkspace: vi.fn(async () => 'ordinary-session'), openSession })
 
   // The shipped conversation reads the developer-tools switch and per-domain
   // config scopes through the config-form registry. The Team settings page also
@@ -137,6 +139,7 @@ export async function createBenchRuntime(
     runtime,
     selectPanel,
     openSession,
+    startSession,
     mountShell: async <T,>(
       connection: ConstructorParameters<typeof RemoteStream>[0],
       mainPanelId: string | undefined,
@@ -148,13 +151,18 @@ export async function createBenchRuntime(
       })
       runtime.ctx.provide('connection', { isLoopback: true, generation: { getSnapshot: () => ({}) }, state: { getSnapshot: () => ({}) }, rpc: {}, reconnect: vi.fn(), registerGenerationSource: vi.fn(), start: vi.fn(), stop: vi.fn() })
       await runtime.sessions.add({ id: 'ordinary-session', summary: { title: 'Ordinary', cwd: '/work/alpha' } })
+      await runtime.sessions.add({ id: 'manager-session', summary: { title: '团队管理', cwd: '/work/alpha' } })
+      await runtime.sessions.add({ id: 'manager-session-2', summary: { title: '团队管理', cwd: '/work/alpha' } })
       // The workspace service restores the Human's saved selection at boot; the
       // bench seeds the same `mainView` retention so return-target captures see
       // a live selection.
-      mainReference = runtime.sessions.retain('ordinary-session' as never, { source: 'mainView' })
+      mainReference = runtime.sessions.retain((managerCurrent ? 'manager-session' : 'ordinary-session') as never, { source: 'mainView' })
       await runtime.workspaces.update((draft) => {
         draft.items = [
-          { workspaceId: 'w1' as WorkspaceId, title: 'Alpha', path: '/work/alpha', sessionIds: [], createdAt: '', updatedAt: '' },
+          // A cold manager can be retained before the Workspace projection echoes its attach.
+          { workspaceId: 'w1' as WorkspaceId, title: 'Alpha', path: '/work/alpha', sessionIds: managerCurrent
+            ? ['ordinary-session', 'manager-session-2']
+            : ['ordinary-session', 'manager-session', 'manager-session-2'], createdAt: '', updatedAt: '' },
           { workspaceId: 'w2' as WorkspaceId, title: 'Beta', path: '/work/beta', sessionIds: [], createdAt: '', updatedAt: '' },
         ] as never
       })
@@ -169,6 +177,11 @@ export async function createBenchRuntime(
       await runtime.mount({ inject: [...injectSidebar], apply: applySidebar })
       runtime.slots.provideRoot({ props: { useContextMenu: contextMenuHook() } })
       await runtime.mount({ inject: [...injectConversation], apply: applyConversation })
+      // The manager fixture mounts the Conversation but not the optional preset
+      // plugins. Keep their public seats present so shadow release is observable.
+      runtime.slots.inject('conversation.hero.agentPreset', () => runtime.slots.register({ name: 'conversation.hero.agentPreset' }, (() => null) as never))
+      runtime.slots.inject('conversation.input.permission', () => runtime.slots.register({ name: 'conversation.input.permission' }, (() => null) as never))
+      runtime.slots.inject('conversation.session.header.actions', () => runtime.slots.register({ name: 'conversation.session.header.actions', id: 'agent-preset', order: -10 }, (() => null) as never))
       const disposeWorkspace = runtime.slots.register({ name: 'sidebar.workspaces', priority: 0 }, BaselineWorkspace as never)
       const disposeSettings = runtime.slots.register({ name: 'sidebar.settings', priority: 0 }, BaselineSettings as never)
       const team = await mountTeam()

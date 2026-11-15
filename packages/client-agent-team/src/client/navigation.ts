@@ -31,9 +31,13 @@ export interface TeamNavigationSnapshot {
   /** A navigation fact, not an unread fact: selecting Inbox clears the Project/Thread faces, and a reload reopens the page. */
   inbox?: boolean
   board?: boolean
+  /** Home-level Team manager destination; persisted without the Host-resolved Session id. */
+  manager?: boolean
+  /** Runtime-only manager Session resolved by the Host for this opening; never persisted. */
+  managerSessionId?: SessionId
   /** Runtime-only Member Session embedded in the conversation seat; never persisted. */
   memberSessionId?: SessionId
-  /** Runtime-only session to restore when the Member view closes; never persisted. */
+  /** Runtime-only ordinary Session to restore when an embedded Member or manager view closes; never persisted. */
   returnToSessionId?: SessionId
 }
 
@@ -54,6 +58,7 @@ function readSnapshot(): TeamNavigationSnapshot {
       ...(typeof projectRef === 'string' ? { projectRef: projectRef as AgentTeamProjectRef } : {}),
       ...(parsed.inbox === true ? { inbox: true } : {}),
       ...(parsed.board === true ? { board: true } : {}),
+      ...(parsed.mode === 'team' && parsed.manager === true ? { manager: true } : {}),
       ...(hasDiscussion ? {
         discussionRef: parsed.discussionRef as AgentTeamThreadRef,
         ...(parsed.discussionAnchor === 'unread' ? { discussionAnchor: 'unread' as const } : {}),
@@ -71,13 +76,14 @@ function readSnapshot(): TeamNavigationSnapshot {
 
 function persistSnapshot(snapshot: TeamNavigationSnapshot): void {
   if (typeof localStorage === 'undefined') return
-  const { mode, workspaceId, projectRef, taskRef, threadRef, taskNumber, discussionRef, discussionAnchor, inbox, board } = snapshot
+  const { mode, workspaceId, projectRef, taskRef, threadRef, taskNumber, discussionRef, discussionAnchor, inbox, board, manager } = snapshot
   persistLocallyBestEffort({
     mode,
     ...(workspaceId === undefined ? {} : { workspaceId }),
     ...(projectRef === undefined ? {} : { projectRef }),
     ...(inbox === true ? { inbox: true } : {}),
     ...(board === true ? { board: true } : {}),
+    ...(manager === true ? { manager: true } : {}),
     ...(taskRef === undefined ? {} : { taskRef }),
     ...(threadRef === undefined ? {} : { threadRef }),
     ...(taskNumber === undefined ? {} : { taskNumber }),
@@ -96,7 +102,7 @@ function persistLocallyBestEffort(payload: TeamNavigationSnapshot): void {
 
 export interface TeamNavigationActions {
   enterTeam: () => void
-  /** Flip the mode only; a caller that also owns the column releases it through {@link leaveTeamForConversation}. */
+  /** Leave the mode and any embedded Session; a caller that also owns the column releases it through {@link leaveTeamForConversation}. */
   leaveTeam: () => void
   /**
    * Leave Team mode and hand the column back in one move. The panel release runs before the mode flips, or a
@@ -115,6 +121,11 @@ export interface TeamNavigationActions {
   closeDiscussion: () => void
   selectInbox: () => void
   selectBoard: () => void
+  /** Open the manager destination; the Host resolves its current Session asynchronously. */
+  selectManager: (returnToSessionId?: SessionId) => void
+  /** Publish only the Host-resolved runtime id for the active manager destination. */
+  resolveManagerSession: (sessionId: SessionId, returnToSessionId?: SessionId) => void
+  exitManagerSession: () => void
   backToWorkspace: () => void
   /**
    * Close the Project face and land on the workspace's welcome surface. The sidebar keeps listing Projects, so this is
@@ -122,14 +133,14 @@ export interface TeamNavigationActions {
    */
   leaveProject: () => void
   /**
-   * One step up the face ladder: the Member view, a Thread page, the discussion panel beside a Project, the Inbox or
+   * One step up the face ladder: an embedded Session, a Thread page, the discussion panel beside a Project, the Inbox or
    * Board, then the Project itself. Each rung is the action its own visible control uses, so the keyboard never takes a
    * path the pointer cannot, and the face it left is kept for {@link forward}.
    */
   back: () => void
   /**
-   * Re-enter the face the last Back left. A Member view is a session swap rather than a face, so Forward restores the
-   * face alone; any other destination discards what Back left behind.
+   * Re-enter the face the last Back left. Embedded Sessions are swaps rather than durable faces, so Forward restores
+   * the destination alone and the manager resolves a fresh runtime id; any other destination discards what Back left behind.
    */
   forward: () => void
   /** Swap the conversation seat to a Member Session. `returnToSessionId` is captured once, so switching Member Sessions keeps the original target. */
@@ -171,22 +182,22 @@ export class TeamNavigation {
 
   actions(): TeamNavigationActions {
     return {
-      enterTeam: () => { this.clearMemberSession(); this.setMode('team') },
-      leaveTeam: () => { this.setMode('conversation') },
+      enterTeam: () => { this.clearSessionOverlay(); this.setMode('team') },
+      leaveTeam: () => { this.clearSessionOverlay(); this.setMode('conversation') },
       leaveTeamForConversation: releasePanel => {
-        this.clearMemberSession()
+        this.clearSessionOverlay()
         releasePanel()
         this.setMode('conversation')
       },
-      selectWorkspace: workspaceId => { this.clearMemberSession(); this.setWorkspace(workspaceId) },
-      selectProject: projectRef => { this.clearMemberSession(); this.setProject(projectRef) },
-      selectThread: (threadRef, projectRef, taskRef, taskNumber, options) => { this.clearMemberSession(); this.setThread(threadRef, projectRef, taskRef, taskNumber, options) },
-      selectDiscussion: (threadRef, projectRef, options) => { this.clearMemberSession(); this.setDiscussion(threadRef, projectRef, options) },
-      closeDiscussion: () => { this.clearMemberSession(); this.setDiscussion(undefined) },
-      selectInbox: () => { this.clearMemberSession(); this.setInbox() },
-      selectBoard: () => { this.clearMemberSession(); this.setBoard() },
-      backToWorkspace: () => { this.clearMemberSession(); this.setThread(undefined) },
-      leaveProject: () => { this.clearMemberSession(); this.clearProject() },
+      selectWorkspace: workspaceId => { this.clearSessionOverlay(); this.setWorkspace(workspaceId) },
+      selectProject: projectRef => { this.clearSessionOverlay(); this.setProject(projectRef) },
+      selectThread: (threadRef, projectRef, taskRef, taskNumber, options) => { this.clearSessionOverlay(); this.setThread(threadRef, projectRef, taskRef, taskNumber, options) },
+      selectDiscussion: (threadRef, projectRef, options) => { this.clearSessionOverlay(); this.setDiscussion(threadRef, projectRef, options) },
+      closeDiscussion: () => { this.clearSessionOverlay(); this.setDiscussion(undefined) },
+      selectInbox: () => { this.clearSessionOverlay(); this.setInbox() },
+      selectBoard: () => { this.clearSessionOverlay(); this.setBoard() },
+      backToWorkspace: () => { this.clearSessionOverlay(); this.setThread(undefined) },
+      leaveProject: () => { this.clearSessionOverlay(); this.clearProject() },
       back: () => {
         const before = this.snapshot
         this.keepsForward = true
@@ -196,7 +207,10 @@ export class TeamNavigation {
       forward: () => {
         const target = this.forwardFaces.pop()
         if (target === undefined) return
-        const { memberSessionId: _memberSessionId, returnToSessionId: _returnToSessionId, ...face } = target
+        const {
+          memberSessionId: _memberSessionId, managerSessionId: _managerSessionId,
+          returnToSessionId: _returnToSessionId, ...face
+        } = target
         this.keepsForward = true
         try {
           this.snapshot = face
@@ -204,7 +218,10 @@ export class TeamNavigation {
         } finally { this.keepsForward = false }
       },
       enterMemberSession: (sessionId, returnToSessionId) => { this.setMemberSession(sessionId, returnToSessionId) },
-      exitMemberSession: () => { this.clearMemberSession() },
+      exitMemberSession: () => { this.clearSessionOverlay() },
+      selectManager: returnToSessionId => { this.setManager(returnToSessionId) },
+      resolveManagerSession: (sessionId, returnToSessionId) => { this.resolveManagerSession(sessionId, returnToSessionId) },
+      exitManagerSession: () => { this.clearSessionOverlay() },
     }
   }
 
@@ -219,8 +236,11 @@ export class TeamNavigation {
   }
 
   private setMemberSession(sessionId: SessionId, returnToSessionId?: SessionId): void {
-    if (isReselectingActiveMember(this.snapshot, sessionId)) return
-    const { memberSessionId: _memberSessionId, ...base } = this.snapshot
+    if (this.snapshot.manager !== true && isReselectingActiveMember(this.snapshot, sessionId)) return
+    const {
+      memberSessionId: _memberSessionId, manager: _manager, managerSessionId: _managerSessionId,
+      ...base
+    } = this.snapshot
     this.snapshot = {
       ...base,
       mode: 'team',
@@ -230,10 +250,40 @@ export class TeamNavigation {
     this.commit()
   }
 
-  /** Any explicit Team navigation or the footer leave closes a Member view. */
-  private clearMemberSession(): void {
-    if (this.snapshot.memberSessionId === undefined && this.snapshot.returnToSessionId === undefined) return
-    const { memberSessionId: _memberSessionId, returnToSessionId: _returnToSessionId, ...base } = this.snapshot
+  private setManager(returnToSessionId?: SessionId): void {
+    if (this.snapshot.manager === true) return
+    const {
+      memberSessionId: _memberSessionId, managerSessionId: _managerSessionId,
+      ...base
+    } = this.snapshot
+    this.snapshot = {
+      ...base,
+      mode: 'team',
+      manager: true,
+      ...(returnToSessionId === undefined ? {} : { returnToSessionId }),
+    }
+    this.commit()
+  }
+
+  private resolveManagerSession(sessionId: SessionId, returnToSessionId?: SessionId): void {
+    if (this.snapshot.manager !== true) return
+    if (this.snapshot.managerSessionId === sessionId && (returnToSessionId === undefined || this.snapshot.returnToSessionId === returnToSessionId)) return
+    this.snapshot = {
+      ...this.snapshot,
+      managerSessionId: sessionId,
+      ...(returnToSessionId === undefined ? {} : { returnToSessionId }),
+    }
+    this.commit()
+  }
+
+  /** Any explicit Team navigation or the footer leave closes an embedded Session view. */
+  private clearSessionOverlay(): void {
+    if (this.snapshot.memberSessionId === undefined && this.snapshot.manager !== true
+      && this.snapshot.managerSessionId === undefined && this.snapshot.returnToSessionId === undefined) return
+    const {
+      memberSessionId: _memberSessionId, manager: _manager, managerSessionId: _managerSessionId,
+      returnToSessionId: _returnToSessionId, ...base
+    } = this.snapshot
     this.snapshot = base
     this.commit()
   }
@@ -348,7 +398,10 @@ export class TeamNavigation {
    */
   private runBackLadder(): void {
     const state = this.snapshot
-    if (state.memberSessionId !== undefined || state.returnToSessionId !== undefined) { this.clearMemberSession(); return }
+    if (state.memberSessionId !== undefined || state.manager === true || state.managerSessionId !== undefined || state.returnToSessionId !== undefined) {
+      this.clearSessionOverlay()
+      return
+    }
     if (state.threadRef !== undefined) { this.setThread(undefined); return }
     if (state.discussionRef !== undefined) { this.setDiscussion(undefined); return }
     if (state.inbox === true || state.board === true) {

@@ -40,6 +40,12 @@ Agent 的 Thread 与 Main stream read 根据当前 Session 可见性恢复缺失
 
 通知材料在一次投递内复用；较大的受影响集合通过按 Member 保序的队列派发。[Host authority](../../docs/architecture/host-authority.zh.md#lifecycle-与通知) 定义顺序、失败和关闭行为；[Team 性能评测](../../docs/development/team-performance.zh.md) 提供显式开启的测量与语义探针。
 
+Host 还持有一个 [Team manager](../../docs/domain-model.zh.md#team-manager)：一条专用 DSH Session，使用隔离的 `team-manager` preset，没有 Member ref、Team 参与关系或 ledger 身份。`managerSession({})` 解析它，`newManagerSession({expectedSessionId})` 只替换调用方当前看到的 Session。当前目的地是独立 `agent_team_manager` domain 中唯一的私有 `pointer` 行，存 `{sessionId, workspaceId, previousSessionIds?}`，位于 operation ledger 之外。`sessionOwnership({sessionIds})` 结合这份 lineage 与 Member ledger，分类当前、archived 与 cold Team Session，供普通 blank 安全复用判断。
+
+首次创建先初始化 shipped 默认 Workspace，再回落到 registry 顺序中第一个可用 Workspace；没有可用项就返回 `no-workspace`，不创建 Session。open 与替换串行执行，所以并发首次 open 只建一条 Session，迟到替换只观察当前项。只有已归档或明确 `missing` 的 Session 可被替换；`refused`、`corrupt`、`io`、`unknown` 与 pointer 失败都保留 pointer，并返回结构化 `unavailable`。替换会停止旧 handle，但保留 Session 历史；Workspace 归档与 pointer 持久化在下一次 open 收敛，不依赖跨权威原子事务。
+
+manager 私有资源位于 `$DSH_HOME/agent-team/manager/`（`memory.md`、`notes/` 与 `skills/`），不是 ledger fact。生命周期归 [Workspace 与 Session storage](../../docs/architecture/workspace-session-storage.zh.md#team-manager-session)；隔离 composition 与确切 Agent 的执行 guard 归 [Tools and preset](../../docs/architecture/tools-and-preset.zh.md#team-manager-preset)。
+
 M1 支持单个 Host writer。Ledger 永久保留，不提供 snapshot 或 compaction。
 
 ## Composition

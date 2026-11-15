@@ -22,10 +22,12 @@ async function bench(persisted: string | null = null) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   ctx.provide('locale', new LocaleRuntime(ctx))
-  ctx.provide('remote', { $mount: async () => async () => {} } as never)
-  ctx.provide('remote.agentTeam', {
+  const agentTeam = {
     toolCatalog: vi.fn(async () => ({ ok: true, value: { names: [] } })),
-  })
+    sessionOwnership: vi.fn(async () => ({ ok: true, value: [] })),
+  }
+  ctx.provide('remote', { $mount: async () => async () => {}, agentTeam } as never)
+  ctx.provide('remote.agentTeam', agentTeam)
   ctx.provide('remote.settings', {
     describe: vi.fn(async () => ({
       ok: true,
@@ -61,6 +63,7 @@ async function bench(persisted: string | null = null) {
   ctx.provide('remote.session', { modelCatalog: vi.fn(async () => ({ ok: true, value: { groups: [], failures: [] } })) })
   ctx.provide('conversation', { input: { for: () => ({ submit: vi.fn() }) } } as never)
   ctx.provide('sessions', {
+    create: vi.fn(async () => { throw new Error('this slot bench does not create Sessions') }),
     list: { getSnapshot: () => ({ byId: {} }), subscribe: () => () => {} },
     search: vi.fn(async () => ({ items: [], hasMore: false })),
     searchResultLimit: 20,
@@ -256,7 +259,7 @@ describe('Team Client slot takeover', () => {
     expect(slots.entries('conversation.composer.bar')).toHaveLength(0)
     expect(slots.entries('conversation.input.dock')).toHaveLength(0)
     // Direct Member-to-Member navigation keeps the zero-surface invariant.
-    sessions.list.getSnapshot = () => ({ byId: { 'session:reviewer': { id: 'session:reviewer', retainedBy: { mainView: 1 } }, 'session:human-origin': {} } })
+    sessions.list.getSnapshot = () => ({ byId: { 'session:reviewer': { id: 'session:reviewer', retainedBy: { mainView: 1 } }, 'session:human-origin': { id: 'session:human-origin', retainedBy: {} } } })
     ctx.teamNavigation.actions().enterMemberSession('session:reviewer' as never)
     expect(slots.entries('conversation.input.dock')).toHaveLength(0)
     expect(slots.entries('sidebar.workspaces')).toHaveLength(2)

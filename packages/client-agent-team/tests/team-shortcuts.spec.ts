@@ -28,17 +28,28 @@ function run(command: ShortcutCommand | undefined): void {
   resolution.run()
 }
 
+/** One command by id: a test names the destination it means, so adding a command moves no other test. */
+function byId(commands: readonly ShortcutCommand[], id: string): ShortcutCommand {
+  const command = commands.find(candidate => candidate.id === id)
+  if (command === undefined) throw new Error(`command ${id} missing`)
+  return command
+}
+
 /** The sidebar's project rows, in the order they are rendered. */
 function projectRows(...refs: string[]): void {
   document.body.innerHTML = refs.map(ref => `<article data-team-project-row="${ref}"></article>`).join('')
 }
 
-function register(): { navigation: TeamNavigation; commands: ShortcutCommand[]; selectPanel: ReturnType<typeof vi.fn> } {
+function register(): { navigation: TeamNavigation; commands: ShortcutCommand[]; selectPanel: ReturnType<typeof vi.fn>; selectManager: ReturnType<typeof vi.fn> } {
   const navigation = new TeamNavigation()
   const selectPanel = vi.fn()
+  const selectManager = vi.fn(() => {
+    navigation.actions().selectManager()
+    selectPanel(null)
+  })
   const { shortcuts, commands } = fakeShortcuts()
-  registerTeamShortcuts({ navigation, selectPanel, t: (key, params) => zh[key].replace('{index}', params?.index ?? '') }, shortcuts)
-  return { navigation, commands, selectPanel }
+  registerTeamShortcuts({ navigation, selectPanel, selectManager, t: (key, params) => zh[key].replace('{index}', params?.index ?? '') }, shortcuts)
+  return { navigation, commands, selectPanel, selectManager }
 }
 
 describe('Team mode shortcuts', () => {
@@ -48,11 +59,11 @@ describe('Team mode shortcuts', () => {
     const { commands } = register()
 
     expect(commands.map(command => command.id)).toEqual([
-      'team.mode.toggle', 'team.inbox', 'team.board', 'team.composer.focus', 'team.back', 'team.forward', 'team.project.previous', 'team.project.next',
+      'team.mode.toggle', 'team.inbox', 'team.board', 'team.manager', 'team.composer.focus', 'team.back', 'team.forward', 'team.project.previous', 'team.project.next',
       ...Array.from({ length: 9 }, (_, offset) => `team.inbox.item.${offset + 1}`),
     ])
     expect(commands.map(command => command.label())).toEqual([
-      '进入或退出团队模式', '收件箱', '任务看板', '聚焦输入框', '返回', '前进', '上一个项目', '下一个项目',
+      '进入或退出团队模式', '收件箱', '任务看板', '团队管理', '聚焦输入框', '返回', '前进', '上一个项目', '下一个项目',
       ...Array.from({ length: 9 }, (_, offset) => `收件箱第 ${offset + 1} 项`),
     ])
     // Web keeps Alt in the chord: the browser owns the bare Command combinations.
@@ -60,6 +71,7 @@ describe('Team mode shortcuts', () => {
       { code: 'KeyT', modifiers: ['primary', 'alt'] },
       { code: 'Digit1', modifiers: ['primary', 'alt'] },
       { code: 'Digit2', modifiers: ['primary', 'alt'] },
+      { code: 'Digit3', modifiers: ['primary', 'alt'] },
       { code: 'KeyM', modifiers: ['primary', 'alt'] },
       { code: 'ArrowLeft', modifiers: ['primary', 'alt'] },
       { code: 'ArrowRight', modifiers: ['primary', 'alt'] },
@@ -76,6 +88,7 @@ describe('Team mode shortcuts', () => {
       { code: 'KeyT', modifiers: ['primary', 'alt'] },
       { code: 'Digit1', modifiers: ['primary', 'alt'] },
       { code: 'Digit2', modifiers: ['primary', 'alt'] },
+      { code: 'Digit3', modifiers: ['primary', 'alt'] },
       { code: 'KeyM', modifiers: ['primary', 'alt'] },
       undefined,
       undefined,
@@ -101,7 +114,7 @@ describe('Team mode shortcuts', () => {
 
   it('toggles the mode through the rail selection the shipped layout owns', () => {
     const { navigation, commands, selectPanel } = register()
-    const toggle = commands[0]
+    const toggle = byId(commands, 'team.mode.toggle')
 
     run(toggle)
     expect(selectPanel).toHaveBeenLastCalledWith(TEAM_PANEL_ID)
@@ -117,19 +130,33 @@ describe('Team mode shortcuts', () => {
   it('opens a face in Team mode even from the conversation', () => {
     const { navigation, commands, selectPanel } = register()
 
-    run(commands[1])
+    run(byId(commands, 'team.inbox'))
     expect(navigation.getSnapshot()).toMatchObject({ mode: 'team', inbox: true })
     expect(selectPanel).toHaveBeenLastCalledWith(TEAM_PANEL_ID)
 
-    run(commands[2])
+    run(byId(commands, 'team.board'))
     expect(navigation.getSnapshot()).toMatchObject({ mode: 'team', board: true })
     expect(navigation.getSnapshot().inbox).toBeUndefined()
     expect(selectPanel).toHaveBeenLastCalledWith(TEAM_PANEL_ID)
   })
 
+  it('opens the manager through the pointer entry and its panel handoff', () => {
+    const { navigation, commands, selectPanel, selectManager } = register()
+
+    run(byId(commands, 'team.manager'))
+    expect(selectManager).toHaveBeenCalledTimes(1)
+    expect(navigation.getSnapshot()).toMatchObject({ mode: 'team', manager: true })
+    expect(selectPanel).toHaveBeenLastCalledWith(null)
+
+    // The manager is a global face like the other two: asking for one closes the other.
+    run(byId(commands, 'team.board'))
+    expect(navigation.getSnapshot().manager).toBeUndefined()
+    expect(navigation.getSnapshot().board).toBe(true)
+  })
+
   it('focuses the composer the open face carries, and does nothing without one', () => {
     const { commands } = register()
-    const focus = commands[3]
+    const focus = byId(commands, 'team.composer.focus')
 
     run(focus)
     expect(document.activeElement).toBe(document.body)
@@ -141,7 +168,7 @@ describe('Team mode shortcuts', () => {
 
   it('climbs one face at a time and stops at the workspace', () => {
     const { navigation, commands } = register()
-    const back = commands[4]
+    const back = byId(commands, 'team.back')
     const state = (): ReturnType<TeamNavigation['getSnapshot']> => navigation.getSnapshot()
 
     // Nothing open: the chord is consumed and nothing moves.
@@ -187,8 +214,8 @@ describe('Team mode shortcuts', () => {
 
   it('re-enters the face the last Back left, and forgets it after another destination', () => {
     const { navigation, commands } = register()
-    const back = commands[4]
-    const forward = commands[5]
+    const back = byId(commands, 'team.back')
+    const forward = byId(commands, 'team.forward')
     const state = (): ReturnType<TeamNavigation['getSnapshot']> => navigation.getSnapshot()
 
     // Nothing to replay: Forward is consumed and nothing moves.
@@ -223,8 +250,8 @@ describe('Team mode shortcuts', () => {
 
   it('steps through the project list in the order the sidebar shows it', () => {
     const { navigation, commands, selectPanel } = register()
-    const previous = commands[6]
-    const next = commands[7]
+    const previous = byId(commands, 'team.project.previous')
+    const next = byId(commands, 'team.project.next')
 
     // No list on screen: the chord is consumed and nothing moves.
     run(next)
@@ -255,11 +282,11 @@ describe('Team mode shortcuts', () => {
     }
 
     // The third digit opens the third row, exactly as a click on it does.
-    run(commands[8 + 2])
+    run(byId(commands, 'team.inbox.item.3'))
     expect(opened).toEqual(['c'])
 
     // A digit past the list opens nothing rather than reaching outside it.
-    run(commands[8 + 8])
+    run(byId(commands, 'team.inbox.item.9'))
     expect(opened).toEqual(['c'])
   })
 })

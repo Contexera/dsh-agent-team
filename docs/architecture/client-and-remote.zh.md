@@ -21,6 +21,10 @@ Client remote service
 
 读取请求各自声明用途，不共用一种投影形状。只有当调用方要整个请求 scope 的 Task/Thread/Claim catalog（模型侧 `team_view` 渲染的 address book）时才传 `includeCatalog`。Client 的读取从不传它，只渲染自己请求的那一页。
 
+`managerSession({})` 由 Host 解析 manager，不接受调用方指定的身份。`newManagerSession({expectedSessionId})` 只在调用方看到的 Session 仍是当前值时替换它；迟到的 id 会观察当前 Session，不再另建。两者返回同一种 union：`ready` 带 Session 与 Workspace id，`no-workspace` 是普通空态，`unavailable` 带结构化 Host diagnostic。
+
+`sessionOwnership({sessionIds})` 把当前与保留的 Team Session 分类为 `manager` 或 `member`。权威来自私有 manager lineage 与 Member ledger，包含 archived 和 cold Session；id 前缀与 preset 标签不是 ownership 证据。
+
 ## Remote failure vocabulary
 生成的 Remote methods resolve 为 `RemoteResult`。`{ ok: true, value }` 携带业务结果，`{ ok: false, error }` 携带失败：稳定的 `code` 是判别字段，`details` 随 `code` 收窄，无需 cast。
 
@@ -53,6 +57,20 @@ Client plugin apply
 
 panel row 与 Team mode 是同一件事：这一行是 shell 自己的 rail button，选中它即进入 mode，另一个 panel 拿走中栏即离开 mode。selection 为 null 时 Team 不介入：嵌入的 Member Session 视图会清空 panel 来独占中栏，mode 必须活过这一段。离开 mode 则由 mode 自己的 foot row 清空 panel。恢复的 mode 会重新选中自己的 panel，除非挂载时已有 panel 被选中：那时那个 panel 保留中栏，mode 主动让位。
 
+manager 目的地是一道 gate，不是 Team conversation surface。`manager: true` 还没有解析出的 id 时，`main` conversation shadow 只渲染轻量的 loading 或 error 状态。它调用 `managerSession({})`；得到 `ready` 后经 shipped workspace controller 打开该 Session，记下运行时 id 并让位，主区与普通 composer 都交给 shipped Conversation。读者离开后迟到的解析结果会被丢弃。
+
+`unavailable` 把 Host diagnostic 与重试留在 gate 内，不出现可发送的 Team composer。`no-workspace` 会离开 Team，进入 shipped 的选择或创建 Workspace 流程。manager 目的地本身只把 `manager: true` 持久化到浏览器；解析出的 `managerSessionId` 与普通 `returnToSessionId` 都只活在运行时，所以 cold restore 会重新问 Host。
+
+只有当前 manager Session 在屏时，shipped session header 才用「新开对话」action 替换 preset 标签。它用该 Session id 调用 `newManagerSession({expectedSessionId})`，打开后继并更新运行时目的地。若 reload 并入的较早 catalog pull 还没有 Host 解析出的 id，打开时会进行有界的 catalog 重试。
+
+任何显式 Team 导航都会关闭 manager 目的地；离开时若捕获的普通 Session 仍存在就恢复它。cold restore 若发现 manager 已占据主区，就从 Host 返回的 Workspace 里选最新可见的普通非 Team Session 作为返回目标。没有仍存在的目标时，离开仍走 shipped 新建 Session 流程，保留其默认 preset 与 Workspace 选择。
+
+create 时的 guard 包装公开的 `ISessions.create` 边界。隐式 preset 的 blank candidate 先经 Host 查询精确 ownership；Team-owned id 会在继续 shipped 创建前省略，普通 blank 与显式 preset 请求原样通过。ownership 读取失败时不会重试不安全的 candidate。读取期间若插件销毁，待决创建会被拒绝，既不创建 Session，也不让调用方一直等待。
+
+guard 只排除 blank 复用：manager history 仍在所属 Workspace 的普通 Session list 中可见，并可经 Harness 归档。从该列表打开当前或已替换的 manager 时，固定 composition 保持不变。
+
+manager 在屏时，临时 slot replacement 隐藏 hero preset picker、header preset label 与 permission control；切到其他 Session 就释放并恢复 shipped controls。这只是展示收口，不是授权或 authorization lock；Host composition 与执行 guard 归 [Tools and preset](tools-and-preset.zh.md#team-manager-preset)。
+
 Slot parent 的 `children` declaration 同时是 render site 和 render authority。两个存活的 parent entries 不能声明同一个 child slot。特别是 Team 的 `sidebar.workspaces` shadow 不得重新声明 shipped `sidebar.workspaces.directoryFlow`。即使 Team entry priority 更高，Harness SlotCore 也会拒绝这个 duplicate。不要复制 private WorkspaceBrowser、ConversationRoot、Shell 或 private CSS 来规避它。
 
 Team feature 需要现有 Harness capability 时，使用 public service 或 package export。对于 directory selection，先检查 `ctx.workspaces.pickDirectory()` 和 `host.pickDirectory` path，再考虑 Team-specific picker。如果 public contract 无法表达目标 composition，就记录这个 limitation。选择 Team-owned plugin 或新设计。不要静默依赖 private implementation details。
@@ -66,7 +84,7 @@ UI work 的边界如下：
 
   Human Client 消费 Host 的 Inbox 投影，但绝不维护并行 Inbox authority。投影有两片。第一片是「收件箱 / Inbox」队列：合并各 Workspace 的徽标与页，覆盖读者的整片未读。mention 只在其中计数，绝不是准入条件。第二片是该读者写过 Message 的「最近活跃」段。回复过的 Thread 无论是否 follow 都算他的。按最新活跃降序，Host 侧每个 Workspace 上限 10，合并到页面上最多 5 条。第二片永不进入 agent 的 Inbox。打开页不确认任何内容。
 
-  Thread reads 使用 Host projections（`readThread`、`threadHistory`）和 Host mutations（replies、promotion、Task actions）。 当前 Thread UI 不提供 Attention controls 或 observations。这些 controls 的 Host Remote methods 留给后续自有 UI。 Browser 会持久化四样东西。Team navigation mode、Workspace selection、最近选中的 Project 或 Thread，还有 Inbox 页位置。回到 Team 时恢复位置。unread 或 Attention 不持久化。
+  Thread reads 使用 Host projections（`readThread`、`threadHistory`）和 Host mutations（replies、promotion、Task actions）。 当前 Thread UI 不提供 Attention controls 或 observations。这些 controls 的 Host Remote methods 留给后续自有 UI。 Browser 会持久化 Team navigation mode、Workspace selection、最近选中的 Project 或 Thread、Inbox 页位置，以及 manager 目的地 token。unread 与 Attention 归 Host；解析出的 Session id 与返回目标只活在运行时，并重新经 Host 解析。回到 Team 时恢复位置。
 
   Thread 页面或讨论侧栏每次打开都有独立的读取范围。切换时丢弃上一次打开尚未返回的历史、未读和关注者结果，即使之后回到同一个 Thread 也一样。
 

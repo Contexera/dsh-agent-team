@@ -5,14 +5,18 @@ import { TeamProjectPage } from './TeamProjectPage.tsx'
 import { TeamInboxPage } from './TeamInboxPage.tsx'
 import { TeamTaskBoardPage } from './TeamTaskBoardPage.tsx'
 import { TeamThreadPage } from './TeamThreadPage.tsx'
+import { TeamManagerGate } from './TeamManagerGate.tsx'
 import css from './conversation.module.css'
 
-export function TeamConversation({ t, useWorkspaces, navigation, drafts, humanIdentity, putAttachment, getAttachment, loadProjects, loadTaskBoard, readThread, loadThreadHistory, threadObservations, subscribeChanges, loadMembers, loadInbox, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeAttention, transferTask, changeTask, promoteThread, selectThread, selectDiscussion, closeDiscussion, selectProject, selectWorkspace, backToWorkspace, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, loadSubscriptions, loadSubscriptionLogs, pauseSubscription, resumeSubscription, deleteSubscription }: TeamConversationProps) {
+export function TeamConversation({ t, useWorkspaces, navigation, drafts, humanIdentity, putAttachment, getAttachment, loadProjects, loadTaskBoard, readThread, loadThreadHistory, threadObservations, subscribeChanges, loadMembers, loadInbox, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeAttention, transferTask, changeTask, promoteThread, selectThread, selectDiscussion, closeDiscussion, selectProject, selectWorkspace, backToWorkspace, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, loadManagerSession, openResolvedManagerSession, showManagerWorkspaceEmpty, resolveManagerSession, loadSubscriptions, loadSubscriptionLogs, pauseSubscription, resumeSubscription, deleteSubscription }: TeamConversationProps) {
   const navigationState = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot)
   const identity = useHumanIdentity(humanIdentity)
   const humanName = identity.name ?? t('human')
   const workspaces = useWorkspaces(state => state.items)
   const current = workspaces.find(workspace => workspace.workspaceId === navigationState.workspaceId)
+  if (navigationState.manager === true) {
+    return <TeamManagerGate navigation={navigation} loadManagerSession={loadManagerSession} openResolvedManagerSession={openResolvedManagerSession} resolveManagerSession={resolveManagerSession} showManagerWorkspaceEmpty={showManagerWorkspaceEmpty} t={t} />
+  }
   if (navigationState.inbox === true) {
     // The Inbox page is global; selecting it clears the Project/Thread faces, so this face owns the seat while the flag stands.
     return <TeamInboxPage key="inbox" useWorkspaces={useWorkspaces} loadInbox={loadInbox} subscribeChanges={subscribeChanges} selectWorkspace={selectWorkspace} selectThread={selectThread} selectDiscussion={selectDiscussion} selectProject={selectProject} humanName={humanName} {...(identity.avatarUrl === undefined ? {} : { humanAvatarUrl: identity.avatarUrl })} t={t} />

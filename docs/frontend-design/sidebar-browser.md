@@ -14,13 +14,17 @@ That menu is the only way to switch Workspaces, so it takes focus on open. A por
 
 The trigger takes `aria-current="page"` while the Workspace overview is the page on screen, exactly as the old selected row did, and takes the shared hover fill for it. The field's own layer is its resting background, so the fill is what marks the page.
 
+The Team manager is a global destination like the Inbox and Task board, not a Workspace-scoped row. The expanded sidebar and narrow drawer place its card after the Task board and before the Workspace selector; the collapsed desktop rail uses a 16px sliders glyph in the same position. The rail's order is top-down 对话 → 收件箱 → 任务看板 → 团队管理 → 项目 → Agents.
+
+The three global faces take the digits in that order — `⌥⌘1` Inbox, `⌥⌘2` Task board, `⌥⌘3` Team manager — registered through the shell's own shortcut service, so each is one rebindable command in its reference rather than a private key handler.
+
 Persistent Projects/Agents sections use native button headers with `aria-expanded`, default expanded. Collapse state is a per-browser preference, not a Team fact: both panels are keyed per workspace, and `sidebar-sections.ts` persists them to one localStorage key (`dsh.agent-team.sidebar-sections`) with a read-through cache and an in-memory fallback when storage is unavailable. The Workspace selector is a field rather than a section, so it keeps no preference of its own. Rows remain quiet: Projects keep `#`; Agent rows use avatars and presence.
 
 Dragging updates the browser's order immediately. The Host stores one order per Workspace and list (Projects or Agents). The first read migrates an older local order only if no new drag has replaced it. Newcomers append and removed rows drop out.
 
-Only the active leaf row has `aria-current="page"`, and exactly one row carries it at a time: the open Project, the Workspace overview while it stands, or the one global face (Inbox, Task board) the reader is on. A global face never leaves the marker on the Workspace selector, because no Workspace overview stands underneath it.
+Only the active leaf row has `aria-current="page"`, and exactly one row carries it at a time: the open Project, the Workspace overview while it stands, or the one global face (Inbox, Task board, Team manager) the reader is on. A global face never leaves the marker on the Workspace selector, because no Workspace overview stands underneath it. The manager row keeps the marker while its gate is resolving and after the shipped Conversation takes the main seat.
 
-The embedded Member Session is the one overlay that can stand over a Team face the reader is still on — an Inbox or Task board page, or a Project or Thread they opened the Agent from — and it takes the marker for its own Agent card. The face underneath keeps its place without the marker, and takes it back when the overlay closes (the Inbox and Task board entries included, either of which is otherwise the marked row while its page stands).
+An embedded Member Session or the manager destination can stand over a Team face the reader is still on — an Inbox or Task board page, or a Project or Thread. The Member view takes the marker for its Agent card; the manager takes it for its own row. The face underneath keeps its place without the marker, and takes it back when the overlay closes (the Inbox and Task board entries included, either of which is otherwise the marked row while its page stands).
 
 Row ellipsis menus use public `Menu`, are visible on hover/focus/menu-open, and pin the row background while open.
 
@@ -38,7 +42,9 @@ Above the addable list, one optional field states the responsibility the next gr
 
 A question mark beside the sidebar's Projects label, and another beside this section's Owners label, each shows its explanation on hover, to the right of the mark. Covering the row beside it is accepted. A Project is a standing scope, mentioning someone outside it adds them, and who receives a message depends on following and on being mentioned. Each mark is its own button, so reading it does not fold the section or submit the editor.
 
-When a Member's generation is swapped, the Agents panel observes the old→new Session binding and follows exactly once — only when the embedded page equals the observed old live Session id — and never redirects an archive view. No surface offers to reset a Member's context. The narrow rail's four icon buttons read top-down Inbox (`IconQueueOutlineRegular`) → Task board (`IconChecklistOutlineRegular`) → Projects (`IconListPenOutlineRegular`) → Agents (`IconAgentPresetOutlineRegular`), all at 16px; the member icon stays unused by the rail.
+When a Member's generation is swapped, the Agents panel observes the old→new Session binding and follows exactly once — only when the embedded page equals the observed old live Session id — and never redirects an archive view. No surface offers to reset a Member's context.
+
+The narrow rail's content icons read top-down Inbox (`IconQueueOutlineRegular`) → Task board (`IconChecklistOutlineRegular`) → Team manager (`IconSlidersTwoOutlineRegular`) → Projects (`IconListPenOutlineRegular`) → Agents (`IconAgentPresetOutlineRegular`), all at 16px; the member icon stays unused by the rail.
 
 The Inbox and Task board icons are destinations: clicking one opens its page and expands the sidebar; the Projects/Agents icons expand the sidebar and focus their section header. Agent creation carries no Project page and the Agent editor carries no membership section.
 
@@ -108,7 +114,7 @@ The number lives in the control's accessible name on both rails (`收件箱，6 
 
 While the Inbox page stands, the card/icon carries `aria-current="page"` — and the rail icon wears the card's own current-page fill, because the icon-only rail has no label and the fill is the only thing that can say where the reader is.
 
-`TeamConversation` renders a fifth face: Thread | Project | Inbox | Task board | welcome. Selecting Inbox or the Task board clears the Project/Thread faces and each other; selecting a Workspace, Project, or Thread clears both. From an Inbox row, Back lands on that row's Project — the Inbox is never pushed onto the back path; re-enter it through the card or the rail icon.
+`TeamConversation` also renders the manager gate before its Thread | Project | Inbox | Task board | welcome faces. The manager destination takes the main seat without clearing the Team face underneath; selecting Inbox or the Task board closes it and replaces that face. Selecting Inbox or the Task board also clears the Project/Thread faces and each other. From an Inbox row, Back lands on that row's Project — the Inbox is never pushed onto the back path; re-enter it through the card or the rail icon.
 
 ## Task board (任务看板)
 

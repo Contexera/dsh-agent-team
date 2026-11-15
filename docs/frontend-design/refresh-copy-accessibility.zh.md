@@ -19,6 +19,7 @@
 - 长消息的「展开全文/收起」是原生 button 并携带 `aria-expanded`，键盘 Enter/Space 原生可达。
 - 行内 ⋯ 菜单按钮带 `aria-label`（`{name} 的操作`）与 `aria-expanded/haspopup`；菜单项由公共 `Menu` 提供完整键盘与外点关闭路径。
 - Agent 和 Project 编辑弹窗打开时聚焦名称，关闭时把焦点还给原列表行。负责人责任的编辑态打开时聚焦它的 textarea，取消或保存成功后焦点回到该行的「编辑」控件。
+- manager gate 重试成功后，若读者没有离开，就在 Session 解析完成时聚焦 shipped composer。gate 自己的失败态就是这个 Client 一直在画的那种整面失败——一行，消息在前、重试在行尾——重试重跑同一次解析。「新开对话」失败会恢复可点击的按钮，并通过自动消失的 Toast 报错，不留下常驻 inline alert。
 - listbox/option 完整键盘闭环（见 composer 一节）；Project composer 的「作为任务」使用原生 button 的 `aria-pressed`，Space/Enter 均可切换。
 - Project 页的 `项目 | 看板` 页签行是复合控件：整组只有一个 tab stop（未选中的那个 `tabIndex` 为 -1），Left/Right/Home/End 同时移动选中与焦点，每个页签用 `aria-controls`/`aria-labelledby` 指明自己控制的 panel。
 - 图标按钮均有 aria-label；装饰元素 `aria-hidden`。

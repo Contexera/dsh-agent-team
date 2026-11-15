@@ -211,6 +211,11 @@ export async function realHarness(
   readonly root: string
   readonly checkout: string
   readonly workspaces: Map<WorkspaceId, { id: WorkspaceId; path: string; attachSession: () => Promise<void> }>
+  /** Per-Workspace usability override for the D26 default/fallback tests. */
+  readonly workspaceStatus: Map<WorkspaceId, 'ok' | 'missing-dir'>
+  readonly workspaceController: {
+    initializeDefault(signal: AbortSignal): Promise<{ workspace: { workspaceId: WorkspaceId; path: string } } | undefined>
+  }
   readonly teamFiber: Awaited<ReturnType<Context['plugin']>>
   readonly archived: readonly SessionId[]
   /** One-shot failures for the workspace archive side effect. */
@@ -271,6 +276,23 @@ export async function realHarness(
       "export function apply(scope) { scope.provide('compaction', { compactNow: async () => null, compactIfNeeded: async () => null }) }",
       '',
     ].join('\n'))
+    // A minimal manager-owned tool keeps the manager preset a real mounted
+    // composition without pulling the Member/Team surface into this harness.
+    const managerToolsStub = join(root, 'manager-tools-stub.mjs')
+    await writeFile(managerToolsStub, [
+      "export const name = 'test-manager-tools'",
+      "export const inject = ['tools']",
+      'export function apply(scope) {',
+      '  scope.tools.register({',
+      "    name: 'manager_fixture',",
+      "    description: 'Team manager fixture',",
+      "    parameters: { type: 'object', properties: {}, additionalProperties: false },",
+      "    output: { schema: { type: 'object' }, render: () => [{ type: 'text', text: 'manager fixture' }] },",
+      "    execute: async () => ({ ok: true }),",
+      '  })',
+      '}',
+      '',
+    ].join('\n'))
     // The team-member definition as one declarative row, the same shape the
     // shipped cordis.patch.yml declares; bare internal loader names resolve
     // through the self-linked node_modules.
@@ -278,6 +300,12 @@ export async function realHarness(
       { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
       { id: 'member-time-context', name: '@contexera/dsh-agent-team/member-time-context' },
       { id: 'team-tools', name: '@contexera/dsh-agent-team/tools' },
+      { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
+        { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },
+      ] },
+    ]
+    const teamManagerPlugins: PresetDefinition['plugins'] = [
+      { id: 'manager-tools', name: pathToFileURL(managerToolsStub).href },
       { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
         { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },
       ] },
@@ -320,6 +348,7 @@ export async function realHarness(
     await ctx.plugin(SessionTitle, { fallbackMaxWords: 5, fallbackMaxBytes: 40, maxTitleBytes: 80 })
     await ctx.plugin(TestablePresets, { default: 'team-member' })
     await ctx.plugin(AgentPresetPlugin, { id: 'team-member', plugins: teamMemberPlugins })
+    await ctx.plugin(AgentPresetPlugin, { id: 'team-manager', plugins: teamManagerPlugins })
     await ctx.plugin(Storage)
     backend = ledgerBackend === 'sqlite'
       ? new SqliteStorageBackend({ path: join(root, 'agent-team.sqlite'), journalMode: 'delete' })
@@ -332,9 +361,17 @@ export async function realHarness(
     const archived: SessionId[] = []
     const archiveFailures = { remaining: 0 }
     const workspaces = new Map([[workspaceId, { id: workspaceId, path: checkout, attachSession: async () => {} }]])
+    const workspaceStatus = new Map<WorkspaceId, 'ok' | 'missing-dir'>()
+    const exposeWorkspace = (workspace: { id: WorkspaceId; path: string; attachSession: () => Promise<void> }) => ({
+      ...workspace,
+      status: async () => workspaceStatus.get(workspace.id) ?? 'ok',
+    })
     ctx.provide('workspaceRegistry', {
-      get: (id: WorkspaceId) => workspaces.get(id),
-      list: () => [],
+      get: (id: WorkspaceId) => {
+        const workspace = workspaces.get(id)
+        return workspace === undefined ? undefined : exposeWorkspace(workspace)
+      },
+      list: () => [...workspaces.values()].map(exposeWorkspace),
       get archivedSessionIds(): readonly SessionId[] { return archived },
       archiveSession: async (sessionId: SessionId) => {
         if (archived.includes(sessionId)) return
@@ -345,10 +382,16 @@ export async function realHarness(
         archived.push(sessionId)
       },
     })
+    const workspaceController = {
+      initializeDefault: async (_signal: AbortSignal) => ({
+        workspace: { workspaceId, path: checkout },
+      }),
+    }
+    ctx.provide('workspaceController', workspaceController)
     // A spec that replays a ledger an older build wrote seeds the domain here, before Team boots over it.
     if (seed !== undefined) await seed(ctx, workspaceId)
     teamFiber = await ctx.plugin(AgentTeam)
-    return { ctx, workspaceId, root, checkout, workspaces, teamFiber, archived, archiveFailures, presets: ctx.agentPresets as TestablePresets, pressureState, jobsState, human: new TestHuman(ctx, workspaceId), close }
+    return { ctx, workspaceId, root, checkout, workspaces, workspaceStatus, workspaceController, teamFiber, archived, archiveFailures, presets: ctx.agentPresets as TestablePresets, pressureState, jobsState, human: new TestHuman(ctx, workspaceId), close }
   } catch (initError) {
     try {
       await close()

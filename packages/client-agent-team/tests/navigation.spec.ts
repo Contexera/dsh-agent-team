@@ -302,6 +302,64 @@ describe('TeamNavigation', () => {
     }
   })
 
+  it('persists only the manager destination, never its Session or ordinary return target', () => {
+    const navigation = new TeamNavigation()
+    navigation.actions().enterTeam()
+    navigation.actions().selectManager('session:return' as never)
+    navigation.actions().resolveManagerSession('session:manager' as never)
+
+    expect(navigation.getSnapshot()).toEqual({
+      mode: 'team', manager: true, managerSessionId: 'session:manager', returnToSessionId: 'session:return',
+    })
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({ mode: 'team', manager: true })
+    expect(new TeamNavigation().getSnapshot()).toEqual({ mode: 'team', manager: true })
+
+    navigation.actions().leaveTeam()
+    expect(navigation.getSnapshot()).toEqual({ mode: 'conversation' })
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({ mode: 'conversation' })
+  })
+
+  it('makes Member and manager views exclusive without losing the original return Session', () => {
+    const navigation = new TeamNavigation()
+    navigation.actions().enterTeam()
+    navigation.actions().enterMemberSession('session:builder' as never, 'session:return' as never)
+    navigation.actions().selectManager()
+    navigation.actions().resolveManagerSession('session:manager' as never)
+
+    expect(navigation.getSnapshot()).toEqual({
+      mode: 'team', manager: true, managerSessionId: 'session:manager', returnToSessionId: 'session:return',
+    })
+
+    navigation.actions().enterMemberSession('session:reviewer' as never)
+    expect(navigation.getSnapshot()).toEqual({
+      mode: 'team', memberSessionId: 'session:reviewer', returnToSessionId: 'session:return',
+    })
+  })
+
+  it('closes the manager view on explicit Team navigation and ignores a late Host resolution', () => {
+    const navigation = new TeamNavigation()
+    navigation.actions().enterTeam()
+    navigation.actions().selectManager('session:return' as never)
+    navigation.actions().selectInbox()
+    navigation.actions().resolveManagerSession('session:late' as never)
+
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', inbox: true })
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({ mode: 'team', inbox: true })
+  })
+
+  it('re-resolves the runtime manager Session after Back and Forward', () => {
+    const navigation = new TeamNavigation()
+    navigation.actions().enterTeam()
+    navigation.actions().selectManager('session:return' as never)
+    navigation.actions().resolveManagerSession('session:manager' as never)
+
+    navigation.actions().back()
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team' })
+    navigation.actions().forward()
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', manager: true })
+    expect(new TeamNavigation().getSnapshot()).toEqual({ mode: 'team', manager: true })
+  })
+
   it('opens the Inbox page as a durable location that Project and Thread faces replace', () => {
     const navigation = new TeamNavigation()
     navigation.actions().selectWorkspace('workspace:one' as never)

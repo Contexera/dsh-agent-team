@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { IconAgentPresetOutlineRegular, IconChecklistOutlineRegular, IconChevronLeftOutlineMedium, IconChevronLeftOutlineRegular, IconListPenOutlineRegular, IconQueueOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconAgentPresetOutlineRegular, IconChecklistOutlineRegular, IconChevronLeftOutlineMedium, IconChevronLeftOutlineRegular, IconListPenOutlineRegular, IconQueueOutlineRegular, IconSlidersTwoOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentTeamAddMemberRequest, AgentTeamInbox } from '@contexera/dsh-agent-team/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { TeamSidebarProps } from './slots.ts'
@@ -33,7 +33,7 @@ function InboxMark({ unread }: { readonly unread: number }) {
   </span>
 }
 
-export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectProject, selectInbox, selectBoard, leaveTeam, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateProjectOwner, humanIdentity, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, loadMemberReminders, cancelMemberReminder, loadWorkerRuns, stopWorker, inspectWorker, openMemberSession }: TeamSidebarProps) {
+export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectProject, selectInbox, selectBoard, selectManager, leaveTeam, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateProjectOwner, humanIdentity, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, loadMemberReminders, cancelMemberReminder, loadWorkerRuns, stopWorker, inspectWorker, openMemberSession }: TeamSidebarProps) {
   const navigationState = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot)
   const workspaces = useWorkspaces(state => state.items)
   const selected = navigationState.workspaceId
@@ -42,9 +42,10 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   // Exactly one sidebar row carries aria-current='page': the open Project, else the selected Agent card while a Member Session
   // view is open, else the Workspace overview. The Inbox and Task board cards take the marker while their global page stands,
   // but not while an embedded Member Session covers it (the face stays the remembered one underneath).
-  const overviewIsCurrent = navigationState.projectRef === undefined && navigationState.memberSessionId === undefined && navigationState.inbox !== true && navigationState.board !== true
-  const inboxIsCurrent = navigationState.inbox === true && navigationState.memberSessionId === undefined
-  const boardIsCurrent = navigationState.board === true && navigationState.memberSessionId === undefined
+  const managerIsCurrent = navigationState.manager === true
+  const overviewIsCurrent = navigationState.projectRef === undefined && navigationState.memberSessionId === undefined && !managerIsCurrent && navigationState.inbox !== true && navigationState.board !== true
+  const inboxIsCurrent = navigationState.inbox === true && navigationState.memberSessionId === undefined && !managerIsCurrent
+  const boardIsCurrent = navigationState.board === true && navigationState.memberSessionId === undefined && !managerIsCurrent
   const [creatingAgents, setCreatingAgents] = useState<readonly AgentTeamAddMemberRequest[]>([])
   // Rail icons request expansion and name the section to reveal once wide.
   const [pendingSection, setPendingSection] = useState<SidebarSection>()
@@ -90,11 +91,11 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   useEffect(() => {
     // The Inbox and Task board pages are global and need no selected Workspace, so the
     // auto-select must not yank the seat back to a Workspace overview.
-    if (navigationState.inbox === true || navigationState.board === true) return
+    if (navigationState.inbox === true || navigationState.board === true || navigationState.manager === true) return
     if (navigationState.mode === 'team' && selectedId !== undefined && selectedId !== selected) {
       selectWorkspace(selectedId)
     }
-  }, [navigationState.inbox, navigationState.board, navigationState.mode, selected, selectedId, selectWorkspace])
+  }, [navigationState.inbox, navigationState.board, navigationState.manager, navigationState.mode, selected, selectedId, selectWorkspace])
 
   useEffect(() => {
     if (!wide || pendingSection === undefined) return
@@ -118,6 +119,11 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
       <Tooltip label={t('taskBoard')} side="right">
         <button type="button" className={css.railButton} aria-label={t('taskBoard')} aria-current={boardIsCurrent ? 'page' : undefined} onClick={() => { selectBoard(); expandSidebar() }}>
           <IconChecklistOutlineRegular size={16} />
+        </button>
+      </Tooltip>
+      <Tooltip label={t('teamManager')} side="right">
+        <button type="button" className={css.railButton} aria-label={t('teamManager')} aria-current={managerIsCurrent ? 'page' : undefined} data-team-action="manager" onClick={() => { selectManager() }}>
+          <IconSlidersTwoOutlineRegular size={16} />
         </button>
       </Tooltip>
       <Tooltip label={t('projects')} side="right">
@@ -148,10 +154,11 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
     </button>
     {/* The Task board crosses Workspaces like the Inbox, so it stands beside it above the selector rather than inside its scope. */}
     <button type="button" className={css.taskBoardCard} aria-label={t('taskBoard')} aria-current={boardIsCurrent ? 'page' : undefined} onClick={selectBoard}><span className={css.taskBoardGlyph}><IconChecklistOutlineRegular size={16} /></span><span className={css.inboxCardLabel}>{t('taskBoard')}</span></button>
+    <button type="button" className={css.taskBoardCard} aria-label={t('teamManager')} aria-current={managerIsCurrent ? 'page' : undefined} data-team-action="manager" onClick={() => { selectManager() }}><span className={css.taskBoardGlyph}><IconSlidersTwoOutlineRegular size={16} /></span><span className={css.inboxCardLabel}>{t('teamManager')}</span></button>
     <TeamWorkspaceSelector workspaces={workspaces} selectedId={selectedId} current={overviewIsCurrent} onSelect={selectWorkspace} t={t} />
     {selectedId !== undefined && <div className={css.workspaceSection}>
       <div ref={projectsRef}>
-        <TeamProjectsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} loadProjects={loadProjects} subscribeChanges={subscribeChanges} createProject={createProject} updateProject={updateProject} archiveProject={archiveProject} addProjectOwner={addProjectOwner} removeProjectOwner={removeProjectOwner} updateProjectOwner={updateProjectOwner} humanIdentity={humanIdentity} creatingAgents={creatingAgents.filter(request => request.workspaceId === selectedId)} {...(navigationState.memberSessionId !== undefined || navigationState.projectRef === undefined ? {} : { selectedProjectRef: navigationState.projectRef })} selectProject={selectProject} t={t} />
+        <TeamProjectsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} loadProjects={loadProjects} subscribeChanges={subscribeChanges} createProject={createProject} updateProject={updateProject} archiveProject={archiveProject} addProjectOwner={addProjectOwner} removeProjectOwner={removeProjectOwner} updateProjectOwner={updateProjectOwner} humanIdentity={humanIdentity} creatingAgents={creatingAgents.filter(request => request.workspaceId === selectedId)} {...(navigationState.memberSessionId !== undefined || managerIsCurrent || navigationState.projectRef === undefined ? {} : { selectedProjectRef: navigationState.projectRef })} selectProject={selectProject} t={t} />
       </div>
       <div ref={agentsRef}>
         <TeamAgentsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} subscribeChanges={subscribeChanges} addMember={addMember} updateMember={updateMember} recoverMember={recoverMember} archiveMember={archiveMember} joinWorkspace={joinWorkspace} leaveWorkspace={leaveWorkspace} loadModels={loadModels} loadMemberReminders={loadMemberReminders} cancelMemberReminder={cancelMemberReminder} loadWorkerRuns={loadWorkerRuns} stopWorker={stopWorker} inspectWorker={inspectWorker} {...(navigationState.memberSessionId === undefined ? {} : { memberSessionId: navigationState.memberSessionId })} openMemberSession={openMemberSession} onCreatingChange={(request, creating) => { setCreatingAgents(current => creating ? [...current.filter(item => item.requestId !== request.requestId), request] : current.filter(item => item.requestId !== request.requestId)) }} t={t} />

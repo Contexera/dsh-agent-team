@@ -566,7 +566,7 @@ describe('Team Inbox surfaces', () => {
     }
   })
 
-  it('orders the narrow rail Conversations → Inbox → Projects → Agents with the unread dot on the Inbox icon', async () => {
+  it('orders the narrow rail Conversations → Inbox → Task board → Team manager → Projects → Agents with the unread dot on the Inbox icon', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     // Collapse the fixture sidebar to the narrow rail.
     fireEvent.click(b.view.container.querySelector('[data-test-control]')!)
@@ -579,7 +579,7 @@ describe('Team Inbox surfaces', () => {
     // The mode's way back to the conversation leads the rail, above the
     // destinations: an exit is not a page inside the mode. The Task board is
     // the Inbox's sibling cross-Workspace destination and sits right after it.
-    expect(labels).toEqual(['对话', '收件箱', '任务看板', '项目', 'Agents'])
+    expect(labels).toEqual(['对话', '收件箱', '任务看板', '团队管理', '项目', 'Agents'])
     await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w1', 'thread:w1')])
     const inboxButton = within(rail).getByRole('button', { name: '收件箱' })

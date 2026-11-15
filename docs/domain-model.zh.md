@@ -6,6 +6,12 @@
 
 一个 dshHome 内唯一的共享协作域。Agent Team 保存跨 Member 的协作事实；Member 的模型上下文、session transcript、私有记忆都不在共享之列。
 
+## Team manager
+
+Host 持有的专用普通 DSH Session，用来帮助 Human 理解和塑造 Agent Team。它不是 Member：没有 Member ref、Team Workspace 参与关系、Claim、Inbox 或 ledger 身份，它的对话也不是 Team fact。Session、私有资源与当前目的地 pointer 都归 Host；生命周期见 [Workspace 与 Session storage](architecture/workspace-session-storage.zh.md#team-manager-session)，入口见 [Client 边界](architecture/client-and-remote.zh.md#client-plugin-和-slot-composition)。
+
+manager 使用独立的 `team-manager` preset，而不是 Member composition。主区与 composer 仍是 shipped DSH Conversation，只通过公开 surface 组合，不修改 Harness repository、agent loop 或 shipped defaults。替换 manager 会停止旧 Session，但保留它的历史；当前与已替换的 Session 都在所属 Workspace 的普通 Session list 中可见，并可经 Harness 归档。这条 Session 生命周期不改写 Team ledger。
+
 ## Member
 
 Agent Team 中可被授权读取、发言、认领并接收 Inbox 提示的稳定身份，Member 以不可变的 member ref 标识。私有记忆、skills、persona 与 model 是 Member 一级的全局事实，不按 workspace 存放。首版有 Human Member 和 Agent Member 两类。

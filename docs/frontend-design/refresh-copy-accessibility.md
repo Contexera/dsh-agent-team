@@ -21,6 +21,8 @@ Every icon button has an accessible label; decoration is hidden. A Thread entry'
 
 The Agent and Project edit dialogs focus the name on entry and return focus to the originating row on close. Opening an owner responsibility edit focuses its textarea, and closing it — cancel or a committed save — returns focus to that row's Edit control.
 
+A successful manager-gate retry focuses the shipped composer after its Session resolves, unless the reader has already left. The gate's own failure is the surface failure the rest of this Client draws — one line, the message first and its retry at the row's end — and its retry re-runs the same resolution. A failed **New conversation** restores the enabled action and reports through an auto-dismissing Toast rather than a persistent inline alert.
+
 Unread and run dividers have `role="separator"`; visible UI changes require desktop 1440×960, 390×844, and keyboard browser checks.
 
 ## Verification and evolution

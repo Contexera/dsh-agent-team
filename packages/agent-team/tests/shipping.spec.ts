@@ -70,6 +70,18 @@ function teamMemberPresetText(patch: string): string {
   // pattern absorb a platform-specific '\r'.
   const text = patch.replaceAll('\r\n', '\n')
   const start = rowStartByName(text, '@deepseek-ai/dsh-agent-preset')
+  const firstName = text.indexOf("name: '@deepseek-ai/dsh-agent-preset'", start)
+  const nextName = firstName < 0 ? -1 : text.indexOf("name: '@deepseek-ai/dsh-agent-preset'", firstName + 1)
+  const nextPreset = nextName < 0 ? -1 : text.lastIndexOf('- id: ', nextName)
+  const host = rowStartByName(text, '@contexera/dsh-agent-team/host')
+  const end = nextPreset >= 0 ? nextPreset : host
+  return start >= 0 && end > start ? text.slice(start, end) : ''
+}
+
+function teamManagerPresetText(patch: string): string {
+  const text = patch.replaceAll('\r\n', '\n')
+  const id = text.indexOf('id: team-manager')
+  const start = id < 0 ? -1 : text.lastIndexOf('- id: ', id)
   const end = rowStartByName(text, '@contexera/dsh-agent-team/host')
   return start >= 0 && end > start ? text.slice(start, end) : ''
 }
@@ -422,6 +434,53 @@ describe('Agent Team shipping contract', () => {
     }
   })
 
+  it('ships a separate isolated team-manager preset with the ordinary coding surface', async () => {
+    const patch = await readFile(resolve(root, 'cordis.patch.yml'), 'utf8')
+    const preset = teamManagerPresetText(patch)
+    // The manager preset is an explicit sibling; the isolated registry default
+    // still names team-member, so an unnamed Session can never become manager.
+    expect(preset).toContain("name: '@deepseek-ai/dsh-agent-preset'")
+    expect(preset).toContain('id: team-manager')
+    expect(patch).toContain('default: team-member')
+    for (const row of [
+      '@deepseek-ai/dsh-persona',
+      '@deepseek-ai/dsh-agent-instructions',
+      '@deepseek-ai/dsh-time-context',
+      '@deepseek-ai/dsh-tool-bash',
+      '@deepseek-ai/dsh-tool-pwsh',
+      '@deepseek-ai/dsh-tool-fs',
+      '@deepseek-ai/dsh-tool-fs-search',
+      '@deepseek-ai/dsh-tool-jobs',
+      '@deepseek-ai/dsh-tool-skill',
+      '@deepseek-ai/dsh-tool-web',
+      '@deepseek-ai/dsh-tool-ask-user',
+      '@deepseek-ai/dsh-compaction-basic',
+      '@deepseek-ai/dsh-command-compact',
+      '@deepseek-ai/dsh-compaction-tool-result-pruner',
+    ]) expect(preset).toContain(`name: '${row}'`)
+    expect(preset).toMatch(/- id: tool-fs\n\s+name: '@deepseek-ai\/dsh-tool-fs'\n\s+config:\n\s+applyPatch: false\n/)
+    expect(preset).toContain('mode: native')
+    // No Member identity, Team tool family, Member context/time, Member memory
+    // or compaction engine, todo tool, rollover/Worker policy, grants, or
+    // Project-owner authority enters this composition.
+    for (const absent of [
+      '@contexera/dsh-agent-team/tools',
+      '@contexera/dsh-agent-team/member-context',
+      '@contexera/dsh-agent-team/member-time-context',
+      '@contexera/dsh-agent-team/member-compaction-engine',
+      '@deepseek-ai/dsh-tool-todo',
+      '@deepseek-ai/dsh-skill-filesystem',
+    ]) expect(preset).not.toContain(absent)
+    expect(preset).not.toContain('extraToolGrants')
+    expect(preset).not.toContain('projectOwner')
+    // The manager agent has the ordinary shared directory tool only through
+    // the inherited global surface, not a preset declaration.
+    expect(preset).not.toContain('working_directory')
+    const persona = personaInstructionText(preset)
+    expect(persona).toContain('You are the Team manager')
+    expect(persona.length).toBeLessThanOrEqual(4000)
+  })
+
   it('reads the tool-fs applyPatch declaration through a CRLF checkout', async () => {
     // Windows checks out cordis.patch.yml with CRLF endings. The row that turns
     // applyPatch off is a logical YAML line, so the byte that ends it must never
@@ -454,6 +513,8 @@ describe('Boot-critical host closure surface', () => {
     '@deepseek-ai/dsh-persona',
     '@deepseek-ai/dsh-agent-instructions',
     '@deepseek-ai/dsh-compaction-tool-result-pruner',
+    '@deepseek-ai/dsh-time-context',
+    '@deepseek-ai/dsh-tool-ask-user',
   ]
 
   // Value imports survive the build into the shipped bundle; `import type`

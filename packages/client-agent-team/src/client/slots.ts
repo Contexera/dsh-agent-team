@@ -89,8 +89,11 @@ import type {
   AgentTeamSubscriptionReplayResult,
   AgentTeamView,
   AgentTeamViewRequest,
+  AgentTeamManagerSessionRequest,
+  AgentTeamManagerSessionResult,
 } from '@contexera/dsh-agent-team/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { TeamNavigationActions, TeamNavigationSnapshot } from './navigation.ts'
 import type { TeamChangeListener, TeamChangeScope } from './team-changes.ts'
 import type { TeamDraftStore } from './drafts.ts'
@@ -225,4 +228,8 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   threadObservations: (request: AgentTeamThreadObservationsRequest) => Promise<RemoteResult<AgentTeamThreadObservations>>
   /** Agent-card session jump, shared by every slot; message member chips reuse it. */
   openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], reportFailure?: (message: string) => void) => void
+  /** Resolve and open the Host-owned manager before the main seat yields. */
+  loadManagerSession: (request: AgentTeamManagerSessionRequest) => Promise<RemoteResult<AgentTeamManagerSessionResult>>
+  openResolvedManagerSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], workspaceId: WorkspaceId) => Promise<AgentTeamClientMemberStatus['member']['sessionId'] | undefined>
+  showManagerWorkspaceEmpty: () => void
 }
