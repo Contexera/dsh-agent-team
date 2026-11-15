@@ -9,7 +9,8 @@
 
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   installModelSelection,
@@ -49,12 +50,21 @@ export interface ManagerWorkspaceValue {
   readonly path: string
 }
 
+/**
+ * The read-only skills shipped with the bundle for the manager, resolved beside
+ * the built module. It is a sibling of the Member core skills, never the same
+ * directory: a manager skill must not enter a Member catalog and vice versa.
+ */
+export const MANAGER_BUNDLED_SKILLS_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), '../manager-skills')
+
 /** Everything the manager runtime consumes from the Host composition. */
 export interface ManagerSessionRuntimeDeps {
   readonly ctx: Context
   readonly store: ManagerSessionStoreLike
   readonly reader: Pick<StoredSessionReader, 'read'>
   readonly managerPrivateRoot: string
+  /** Scanned before the writable private directory, so a same-name private skill never shadows a shipped one. */
+  readonly managerBundledSkillsRoot: string
   readonly defaultAgentOptions: () => AgentOptions
   readonly initializeDefaultWorkspace: (signal: AbortSignal) => Promise<ManagerWorkspaceValue | undefined>
 }
@@ -475,7 +485,7 @@ export class ManagerSessionRuntime {
     try {
       const skills = mountMemberSkillProvider(handle.agent.ctx, {
         skillsDirectory: join(this.deps.managerPrivateRoot, 'skills'),
-        bundledSkillsDirectory: undefined,
+        bundledSkillsDirectory: this.deps.managerBundledSkillsRoot,
         initialSelection: undefined,
       })
       return { handle, policy: installedPolicy, skills }

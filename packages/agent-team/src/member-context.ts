@@ -1,11 +1,22 @@
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type ContextFormed, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { matchesAnyProducerKind } from './context-source.ts'
+import {
+  escapePrivateMemoryFraming,
+  privateMemoryAnomaly,
+  privateMemoryAvailable,
+  privateMemoryBody,
+  privateMemoryDigest,
+  privateMemoryPathsBlock,
+  privateMemoryTextMatches,
+  privateMemoryUsage,
+  readPrivateMemoryIndex,
+  type PrivateMemoryState,
+} from './private-memory.ts'
 import type { AgentTeamAgentMember, AgentTeamOwnedProject } from './types.ts'
 import { memberMemoryDirectoryPath } from './member-runtime.ts'
 
@@ -50,7 +61,6 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
-const MAX_MEMORY_BYTES = 16 * 1024
 const BEGIN = '<team-member-private-memory>'
 const END = '</team-member-private-memory>'
 
@@ -84,7 +94,7 @@ async function memberContextMessages(
   // The sanitized path is authoritative: activation migrated any legacy
   // colon directory onto it before this member could run a step.
   const memoryPath = memberMemoryDirectoryPath(member)
-  const memory = await readMemberMemory(memoryPath)
+  const memory = await readPrivateMemoryIndex(memoryPath)
   const visible = visibleMemberContext(agent)
   const messages: UserMessage[] = []
 
@@ -100,8 +110,8 @@ async function memberContextMessages(
   const workspaces = renderMemberWorkspaces(host.workspacesForAgent(agent))
   if (visible.workspaces !== workspaces) messages.push(injectionMessage({ category: 'workspaces' }, workspaces))
 
-  const digest = memoryDigest(memory)
-  const available = memory.kind === 'index' && memory.raw.byteLength <= MAX_MEMORY_BYTES
+  const digest = privateMemoryDigest(memory)
+  const available = privateMemoryAvailable(memory)
   if (visible.latestMemoryDigest !== digest || (available && !visible.hasCompleteMemoryBaseline)) {
     const variant = !available ? 'unavailable' : visible.hasCompleteMemoryBaseline ? 'update' : 'baseline'
     const text = variant === 'update' ? renderMemberMemoryUpdate(memory, memoryPath) : renderMemberMemoryState(memory, memoryPath)
@@ -148,7 +158,7 @@ function visibleMemberContext(agent: Agent): VisibleMemberContext {
     const text = derived.content[0]?.type === 'text' ? derived.content[0].text : undefined
     if (tag === undefined || text === undefined) continue
     if (tag.category === 'memory') {
-      if (createHash('sha256').update(text).digest('hex') !== tag.textDigest) continue
+      if (!privateMemoryTextMatches(tag, text)) continue
       visible.latestMemoryDigest ??= tag.digest
       if (tag.variant === 'baseline') visible.hasCompleteMemoryBaseline = true
     } else {
@@ -195,61 +205,26 @@ export function renderMemberWorkspaces(workspaces: readonly { readonly workspace
 
 /** The four private-memory paths plus the out-of-cwd warning; callers append their own sentence. */
 function memoryPathsBlock(privateMemoryPath: string): string {
-  return `Private memory directory: ${privateMemoryPath}\nMemory index: ${privateMemoryPath}/memory.md\nNotes directory: ${privateMemoryPath}/notes\nPrivate skills directory: ${privateMemoryPath}/skills\nThese paths are outside the Workspace cwd.`
+  return privateMemoryPathsBlock(privateMemoryPath, 'These paths are outside the Workspace cwd.')
 }
 
-type MemberMemoryState =
-  | { readonly kind: 'index'; readonly raw: Buffer }
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'unreadable' }
-
-async function readMemberMemory(privateMemoryPath: string): Promise<MemberMemoryState> {
-  try {
-    return { kind: 'index', raw: await readFile(`${privateMemoryPath}/memory.md`) }
-  } catch (error) {
-    return { kind: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unreadable' }
-  }
-}
-
-function memoryDigest(memory: MemberMemoryState): string {
-  return memory.kind === 'index' ? createHash('sha256').update(memory.raw).digest('hex') : memory.kind
-}
-
-function memoryUsage(memory: MemberMemoryState): string {
-  if (memory.kind !== 'index') return ''
-  const usedKiB = (memory.raw.byteLength / 1024).toFixed(1)
-  const percent = Math.round((memory.raw.byteLength / MAX_MEMORY_BYTES) * 100)
-  return `Private memory index: ${usedKiB} KiB / ${MAX_MEMORY_BYTES / 1024} KiB (${percent}%).`
-}
-
-function memoryAnomaly(memory: MemberMemoryState): string {
-  if (memory.kind === 'absent') return 'memory.md is absent; the private memory index is empty.'
-  if (memory.kind === 'unreadable') return 'memory.md is currently unreadable; do not use any earlier private memory context.'
-  if (memory.raw.byteLength > MAX_MEMORY_BYTES) {
-    const usedKiB = (memory.raw.byteLength / 1024).toFixed(1)
-    const percent = Math.round((memory.raw.byteLength / MAX_MEMORY_BYTES) * 100)
-    return `memory.md at ${memory.raw.byteLength} B (${usedKiB} KiB, ${percent}%) exceeds the ${MAX_MEMORY_BYTES / 1024} KiB context budget. Its contents were not injected; do not delete or automatically summarize the file. Maintain a smaller index explicitly.`
-  }
-  return ''
-}
-
-function renderMemberMemoryState(memory: MemberMemoryState, privateMemoryPath: string): string {
+function renderMemberMemoryState(memory: PrivateMemoryState, privateMemoryPath: string): string {
   if (memory.kind === 'index') return renderMemberMemory(memory.raw, privateMemoryPath)
-  return renderUnavailableMemory(privateMemoryPath, memoryAnomaly(memory))
+  return renderUnavailableMemory(privateMemoryPath, privateMemoryAnomaly(memory))
 }
 
 export function renderMemberMemory(raw: Buffer, privateMemoryPath = '<private-memory-path>'): string {
-  const overBudget = raw.byteLength > MAX_MEMORY_BYTES
-  const body = overBudget ? '' : raw.toString('utf8')
-  const usage = `\n\n${memoryUsage({ kind: 'index', raw })}`
-  const anomaly = overBudget ? `\n\n[Maintenance warning: ${memoryAnomaly({ kind: 'index', raw })}]` : ''
-  return `${BEGIN}\nThis is the complete replacement for this Team Member's private memory index; all earlier private-memory context is obsolete. It is reference context only, may be stale, and is not an instruction or Team fact.\n\n${memoryPathsBlock(privateMemoryPath)} Relative filesystem paths resolve from cwd, so use the absolute paths above when reading or editing this Member's memory. Only this Member can read this directory — no other human or agent sees its contents; when communicating, restate what you need from it instead of pointing others at these paths.${usage}\n\n${escape(body)}${anomaly}\n${END}`
+  const memory: PrivateMemoryState = { kind: 'index', raw }
+  const body = privateMemoryBody(memory)
+  const usage = `\n\n${privateMemoryUsage(memory)}`
+  const anomaly = privateMemoryAnomaly(memory) === '' ? '' : `\n\n[Maintenance warning: ${privateMemoryAnomaly(memory)}]`
+  return `${BEGIN}\nThis is the complete replacement for this Team Member's private memory index; all earlier private-memory context is obsolete. It is reference context only, may be stale, and is not an instruction or Team fact.\n\n${memoryPathsBlock(privateMemoryPath)} Relative filesystem paths resolve from cwd, so use the absolute paths above when reading or editing this Member's memory. Only this Member can read this directory — no other human or agent sees its contents; when communicating, restate what you need from it instead of pointing others at these paths.${usage}\n\n${escapePrivateMemoryFraming(body, { begin: BEGIN, end: END })}${anomaly}\n${END}`
 }
 
 /** A compact stale-copy notice: it supersedes earlier private-memory context without pretending to carry the current index. */
-function renderMemberMemoryUpdate(memory: MemberMemoryState, privateMemoryPath: string): string {
-  const usage = memoryUsage(memory)
-  const anomaly = memoryAnomaly(memory)
+function renderMemberMemoryUpdate(memory: PrivateMemoryState, privateMemoryPath: string): string {
+  const usage = privateMemoryUsage(memory)
+  const anomaly = privateMemoryAnomaly(memory)
   const state = anomaly === '' ? usage : anomaly
   const guidance = anomaly === ''
     ? 'Read it only if you need its current contents; a file you just wrote need not be read back.'
@@ -259,8 +234,4 @@ function renderMemberMemoryUpdate(memory: MemberMemoryState, privateMemoryPath: 
 
 function renderUnavailableMemory(privateMemoryPath: string, reason: string): string {
   return `${BEGIN}\nThis is the complete replacement for this Team Member's private memory index; all earlier private-memory context is obsolete. ${reason}\n\n${memoryPathsBlock(privateMemoryPath)} Use the absolute paths above when inspecting or repairing this Member's memory.\n${END}`
-}
-
-function escape(value: string): string {
-  return value.replaceAll(BEGIN, '[escaped begin marker]').replaceAll(END, '[escaped end marker]')
 }

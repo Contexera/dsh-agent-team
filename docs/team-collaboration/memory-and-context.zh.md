@@ -12,6 +12,15 @@ ownership 和参与始终给出完整列表，包括 ownership 撤销为空，�
 
 私有记忆有两种形态。完整索引是基线。`memory.md` 变化后，Member 只收到一条简短提示：先前副本已过时、文件位置和当前预算占用。判断以最新的 memory 事件对照文件当前状态，旧的匹配提示不能掩盖后来的变化。提示不是索引：压缩后只剩提示时，仍会补发最新的完整基线。索引缺失、不可读或超出预算时，说明当前状况及其路径，不再注入内容。
 
+## 管理会话的记忆与 skills
+团队管理会话在 `$DSH_HOME/agent-team/manager/` 下有自己的私有空间——`memory.md`、`notes/` 与 `skills/`——它不属于任何 Member。这个目录比任何一个管理会话都活得久：重启、归档后重开、「新开对话」读的都是同一批文件，所以 Human 教给 manager 的东西不会随教它的那次对话消失。
+
+它的记忆块是 Member 记忆块的同一套契约、换一套措辞：完整索引作为基线，文件变化后只给一条「旧副本已过期」的提示，同样 16 KiB 硬顶、同样的框架转义、同样的超限警告——超限时保留文件、不注入正文，绝不自动裁剪。只有 `memory.md` 进入上下文；`notes/` 按块里给出的路径按需读取。唯一的差别是位置那句话：manager 在某个 Workspace 里运行，所以块内按实际 cwd 说明私有 root 的位置，而不是断言它在所有 Workspace 之外。
+
+这个目录的维护手艺不是另写一套教程，而是同一套 `member-memory-manager` 与 `member-skill-manager` 手艺，用在 manager 的路径上；manager 自己的引导 skills 放在 `packages/agent-team/manager-skills/`。
+
+skills 用文件配置、按轮次发现：manager 的 provider 先扫随包发布的 manager root，再扫可写的 `manager/skills/`，所以同名的私有 skill 不会盖住内置的。在这里增删文件，下一轮就能看到，不必换会话、也不必改 preset。这两处 root 都不会挂给 Member 或普通 Session。
+
 ## 上下文生命周期归属
 Member 的上下文只有两个机制，且都不由模型发起。
 

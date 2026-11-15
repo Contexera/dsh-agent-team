@@ -50,6 +50,7 @@ function runtimeFor(
   options: {
     readonly store: MemoryPointerStore
     readonly root: string
+    readonly bundledSkillsRoot?: string | undefined
     readonly workspace: ManagerWorkspaceValue
     readonly reader?: Pick<StoredSessionReader, 'read'> | undefined
     readonly initializeDefaultWorkspace?: ((signal: AbortSignal) => Promise<ManagerWorkspaceValue | undefined>) | undefined
@@ -60,6 +61,7 @@ function runtimeFor(
     store: options.store,
     reader: options.reader ?? { read: async sessionId => readResultOf({ kind: 'missing', sessionId, detail: 'not stored' }) },
     managerPrivateRoot: join(options.root, 'manager-private'),
+    managerBundledSkillsRoot: options.bundledSkillsRoot ?? join(options.root, 'manager-bundled-skills'),
     defaultAgentOptions: () => ({ provider: 'mock', model: 'mock' }),
     initializeDefaultWorkspace: options.initializeDefaultWorkspace ?? (async () => options.workspace),
   }

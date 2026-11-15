@@ -42,4 +42,6 @@ Host 持有一个专用的 [Team manager](../domain-model.zh.md#team-manager) Se
 
 替换先持久化 pointer，再发布后继并立即取消旧 manager 的授权；旧 handle 会被停止，Session 历史仍在所属 Workspace 的普通列表中可见并可归档。Workspace 归档与 pointer 持久化属于两套权威，竞态中两者可以短暂不同步；下一次 open 会通过替换已归档的 manager 收敛，而不是依赖跨权威原子事务。
 
-manager 私有资源位于 `$DSH_HOME/agent-team/manager`：`memory.md`、`notes/` 与 `skills/`。它们不是 ledger fact。manager 的 skill provider 只扫描这个私有 `skills/` 目录，不扫描 bundled skills。
+manager 私有资源位于 `$DSH_HOME/agent-team/manager`：`memory.md`、`notes/` 与 `skills/`。它们不是 ledger fact。manager 的 skill provider 扫描两处：随 bundle 发布的只读 manager skills（`packages/agent-team/manager-skills/`，排前）与这个私有 `skills/` 目录。Member 的 core skills 是另一个 root，不会进入 manager；manager 的这两处也不会进入 Member 或普通 Session。
+
+manager 的记忆通过自己的 preset row 进入上下文，不经过 Member context 插件：该 row 先问 Host「这个 Agent 是不是当前 manager」，再从私有 root 读 `memory.md`，注入与 Member 同构的有界索引块——先一份完整 baseline，文件变化后只给一条「旧副本已过期」的提示。块内按本次 Session 的实际 cwd 说明私有 root 的位置，因为 manager 是在某个 Workspace 里运行，而不是在所有 Workspace 之外。

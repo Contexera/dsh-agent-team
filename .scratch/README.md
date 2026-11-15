@@ -25,6 +25,7 @@
 
 | 月 | 工作项 | 一句话结论 | 链接 |
 | --- | --- | --- | --- |
+| 2026-11 | team-management-agent | 团队管理专用 Session、owner 责任、九个管理工具、独立私有记忆与两份内置引导 skills 的 01–08 全部验收并合入本地 master；真实模型下的自然语言使用仍待 Human。 | [README](archive/2026-11/team-management-agent/README.md) |
 | 2026-11 | test-system-overhaul | 测试底座自托管与五层 Vitest 分层落地；16 项故障注入检出 16/16，26 个 E2E 与 195 张截图通过，复核问题已修复。 | [README](archive/2026-11/test-system-overhaul/README.md) |
 | 2026-11 | implicit-state-machines | Webhook 耗尽可恢复、订阅存储升到 v5、Task 写入与重放共享状态推导；编辑、发送、头像、附件与时间线的故障恢复通过 Web 验收。 | [README](archive/2026-11/implicit-state-machines/README.md) |
 | 2026-11 | implicit-state-machines-deep | 14 张票全部验收：Host 终态与恢复、通知覆盖、草稿发送归属和侧栏保存顺序；收口证据及重开条件已记录。 | [README](archive/2026-11/implicit-state-machines-deep/README.md) |

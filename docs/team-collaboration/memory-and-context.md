@@ -14,6 +14,17 @@ Ownership and participation are always stated in full, including an empty owners
 
 Private memory has two shapes. The complete index is the baseline. After `memory.md` changes, the Member gets one compact notice that the earlier copy is stale, where the file is, and its current budget use. The newest memory event is compared with the file's current state, so an older matching notice cannot hide a later change. A notice is not an index: a compaction that leaves only the notice still triggers the latest complete baseline. A missing, unreadable, or over-budget index states that condition and its path instead of injecting content.
 
+## Team manager memory and skills
+The Team manager Session keeps its own private space under `$DSH_HOME/agent-team/manager/` — `memory.md`, `notes/`, and `skills/` — and it is not a Member's. The directory outlives every manager Session: a restart, a reopen after archival, and "new conversation" all read the same files, so what the Human taught the manager survives the conversation that taught it.
+
+Its memory block is the Member block's contract with its own wording: one complete index as the baseline, one stale-copy notice after the file changes, the same 16 KiB ceiling, the same framing escape, and the same over-budget warning that withholds the body instead of trimming the file. Only `memory.md` enters context; `notes/` is read on demand from the paths the block names.
+
+The one difference is the location sentence. The manager runs inside a Workspace, so the block states where the private root actually sits relative to that cwd instead of asserting it is outside every Workspace.
+
+Upkeep craft for that directory is not a separate tutorial. It is the same `member-memory-manager` and `member-skill-manager` craft, applied to the manager's paths; the manager's own guide skills live in `packages/agent-team/manager-skills/`.
+
+Skills are file-configured and discovered per turn: the manager's provider scans the bundled manager root first and its writable `manager/skills/` second, so a same-name private skill never shadows a shipped one. Adding or removing a file there is visible on the next turn without a new conversation and without touching the preset. Neither root is mounted for a Member or an ordinary Session.
+
 ## Context lifecycle ownership
 A Member's context has exactly two mechanisms, and neither is the model's to invoke.
 

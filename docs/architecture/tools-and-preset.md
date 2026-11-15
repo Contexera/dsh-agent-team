@@ -109,8 +109,6 @@ The manager layer adds only what the Web Client's own forms add: a non-empty Mem
 
 Every write carries a `requestId`. The same id with the same parameters answers with the original receipt instead of writing twice, so a lost answer is retried rather than duplicated; a changed parameter under a reused id is refused as a collision. A refusal names its reason and wrote nothing. A committed Member whose activation failed is still committed: the answer keeps its receipt, ref and activation diagnostic, so the manager continues from there instead of creating it again.
 
-That surface runs at the trusted `danger-full-access` policy, so the persona carries the data red line as a rule: under `$DSH_HOME` the manager reads and writes only its own `agent-team/manager/` directory plus a Member's private assets `team_overview` has just confirmed, and never the Host's sqlite files or Session logs. Its own memory, notes and a tool result record what was once said, so none of them authorizes an irreversible or costly action in place of the Human asking for it now.
-
 The isolated registry's default remains `team-member`; only the manager runtime mounts `team-manager`.
 
 All nine handlers authorize the caller themselves: the tool is served only while the calling Agent is the current manager Session. `ownsSession` cannot serve there, because it answers lineage, which a replaced generation still satisfies, so a Session that reaches the tool by any other path — a Member's own scope registration, a custom preset, an ordinary Session — is refused rather than answered.
@@ -150,4 +148,6 @@ The section carries standing owner duties — what only an owner may start, acco
 
 While the Worker switch is on it adds a short paragraph on local Workers. It never restates tool parameters or per-Project facts, which the tool descriptions and the ledger own, and because it is a prompt section rather than a message, compaction does not remove it.
 
-`npm run check:core-skills` validates each skill's front matter, description, size budget, and links.
+The Team manager Session loads its own read-only skills from `packages/agent-team/manager-skills/`, ahead of its writable `$DSH_HOME/agent-team/manager/skills/`. That root is deliberately separate from the Member core skills: a management guide must not appear in a Member catalog, and a Member skill must not appear in the manager's.
+
+`npm run check:core-skills` validates each skill's front matter, description, size budget, and links in both shipped roots (`core-skills/` and `manager-skills/`). The Member root may never be empty; the manager root ships `team-management-guide` and `team-operations`, and the gate still tolerates an empty one because content is not a build dependency.

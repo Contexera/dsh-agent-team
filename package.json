@@ -19,6 +19,7 @@
     "assets/icon.svg",
     "packages/agent-team/lib/**/*",
     "packages/agent-team/core-skills/**/*",
+    "packages/agent-team/manager-skills/**/*",
     "packages/tool-agent-team/lib/**/*",
     "packages/client-agent-team/lib/**/*",
     "README.md",
@@ -143,6 +144,10 @@
     "./member-context": {
       "types": "./packages/agent-team/lib/types/member-context.d.ts",
       "default": "./packages/agent-team/lib/member-context.js"
+    },
+    "./manager-context": {
+      "types": "./packages/agent-team/lib/types/manager-context.d.ts",
+      "default": "./packages/agent-team/lib/manager-context.js"
     },
     "./member-time-context": {
       "types": "./packages/agent-team/lib/types/member-time-context.d.ts",

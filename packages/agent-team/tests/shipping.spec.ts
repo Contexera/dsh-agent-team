@@ -495,14 +495,17 @@ describe('Agent Team shipping contract', () => {
       '@deepseek-ai/dsh-compaction-basic',
       '@deepseek-ai/dsh-command-compact',
       '@deepseek-ai/dsh-compaction-tool-result-pruner',
+      // The manager's own private memory index: the Member context plugin is
+      // excluded above, so this row is the only memory entry point it has.
+      '@contexera/dsh-agent-team/manager-context',
     ]) expect(preset).toContain(`name: '${row}'`)
     expect(preset).toMatch(/- id: tool-fs\n\s+name: '@deepseek-ai\/dsh-tool-fs'\n\s+config:\n\s+applyPatch: false\n/)
     expect(preset).toContain('mode: native')
     // No Member identity, Member context/time, Member memory or compaction
     // engine, todo tool, rollover/Worker policy, grants, or Project-owner
-    // authority enters this composition. The Team tool family enters only as
-    // the subset the manager needs: the two read tools plus the three write
-    // tools 04 delivered, and nothing else.
+    // authority enters this composition; the manager's memory arrives through
+    // its own row above. The Team tool family enters only as the subset the
+    // manager needs: two read tools plus seven write tools, and nothing else.
     expect(preset).toContain("name: '@contexera/dsh-agent-team/tools'")
     expect(preset).toMatch(/- id: team-tools\n\s+name: '@contexera\/dsh-agent-team\/tools'\n\s+config:\n\s+only:\n\s+- team_overview\n\s+- team_models\n\s+- member_create\n\s+- project_create\n\s+- project_owner\n/)
     // The two shipped presets partition the plugin's default surface exactly:
@@ -526,6 +529,8 @@ describe('Agent Team shipping contract', () => {
     expect(preset).not.toContain('working_directory')
     const persona = personaInstructionText(preset)
     expect(persona).toContain('You are the Team manager')
+    expect(persona).toContain("Edit a Member's memory, notes, or skills only within the Human's current request")
+    expect(persona).not.toMatch(/never edit a Member's memory/i)
     expect(persona.length).toBeLessThanOrEqual(4000)
   })
 

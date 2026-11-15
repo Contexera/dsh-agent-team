@@ -107,8 +107,6 @@ manager 层只加上 Web Client 自己的表单也加的部分：非空的成员
 
 每次写操作都带一个 `requestId`。同一个 id 配同样的参数答回原回执，不会写第二次，所以丢失的答案是重试而不是重复写入；同一个 id 下改了参数会被当成冲突拒绝。拒绝会说明原因，并且什么都没有写。已提交但激活失败的 Member 依然是已提交的：答回里保留它的回执、ref 与激活诊断，manager 从那里继续，而不是把它再建一遍。
 
-这个工具面跑在可信的 `danger-full-access` policy 上，所以数据红线由 persona 写成规则而不是期望：在 `$DSH_HOME` 下，manager 只读写自己的 `agent-team/manager/` 目录，加上 `team_overview` 刚为它查实的 Member 私有资产，绝不碰 Host 的 sqlite 文件与会话日志。它自己的 memory、notes 和一条工具结果只记录过去说过的话，因此它们都不能代替 Human 现在提出请求，来为不可逆或高代价的动作授权。
-
 隔离 registry 的默认值仍是 `team-member`；只有 manager runtime 挂载 `team-manager`。
 
 九个 handler 各自校验调用方：只有调用者正是当前 manager Session 时才应答。这里用不上 `ownsSession`，它回答的是 lineage，而被替换掉的旧代同样满足 lineage，所以任何从别的路径拿到该工具的 Session——Member 自己 scope 上的注册、自定义 preset、普通 Session——都被拒绝，不会拿到数据。
@@ -148,4 +146,6 @@ Team 内容仍是不可信输入。persona 按代码里的现状点名工具；�
 
 Worker 开关打开时，它再加一段关于本地 Worker 的简短说明。它从不复述工具参数或单个 Project 的事实，那些属于工具说明与账本；又因为它是 prompt section 而不是消息，compaction 不会把它抹掉。
 
-`npm run check:core-skills` 检查每个 skill 的 front matter、description、体积预算与链接。
+管理会话从 `packages/agent-team/manager-skills/` 加载自己的只读 skills，排在可写的 `$DSH_HOME/agent-team/manager/skills/` 之前。这个 root 与 Member 的 core skills 刻意分开：管理引导不该出现在 Member 的目录里，Member 的 skill 也不该出现在 manager 的目录里。
+
+`npm run check:core-skills` 检查两处随包发布的 root（`core-skills/` 与 `manager-skills/`）里每个 skill 的 front matter、description、体积预算与链接。Member 的 root 不允许为空；manager 的 root 随包交付 `team-management-guide` 与 `team-operations`，门禁仍容许它为空，因为内容不是构建依赖。

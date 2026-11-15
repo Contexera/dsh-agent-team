@@ -141,6 +141,8 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - 名册每行的 `capabilityState`（`applied` | `pending`）比较该 Member 存储的 `capabilities` 与运行时已应用的配置；没有运行时的 Member 报 `pending`。它与 `availability`、`presence` 分开，也不表示某个回合的 profile `extraToolGrants` 是否生效。
 - Skills 是 Member 私有的。preset 不带共享 skill-filesystem row。Host 在每个 Member 的 agent exact scope layer 上注册一个 filesystem provider。它是 traceable-service 接缝，与 tool restriction 同构。这个 provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<memberId>/skills/`。
 
+  管理会话由自己的 runtime 提供同构的两处 root：只读的 `packages/agent-team/manager-skills/`（排前，并由同一个 `check:core-skills` 检查）与可写的 `$DSH_HOME/agent-team/manager/skills/`。Member 的 root 与 manager 的 root 互不进入，普通 Session 根本没有 provider。
+
   Member catalog 从内置集起始，内置集里有 `member-skill-manager` meta skill。全部 skill 写作/安装/credentials 引导都在这个 meta skill 里面。persona 只陈述私有空间物理事实。安装就是往 Member 自己的目录写。目录形态为 `skills/<name>/SKILL.md` 加可选 references/scripts，或平铺 `.md`。有意不提供上传 Remote，发现由 filesystem watcher 驱动。
 
   `skills.allow` 通过已挂载 provider 上的 live selection swap 过滤 `list()` 输出。编辑与 tool 编辑在同一 turn 边界换过滤并失效 catalog。过滤是可见性语义，不是安全边界：两个 root 始终被扫描和 watch。Member remove 连同私有目录一起删除。suspend/resume 与 Host restart 恢复相同 catalog。

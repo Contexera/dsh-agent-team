@@ -29,6 +29,7 @@ const own = {
   '@contexera/dsh-agent-team/sqlite-backend': ['./packages/agent-team/src/vendor/storage-sqlite/index.ts'],
   '@contexera/dsh-agent-team/member-compaction-engine': ['./packages/agent-team/src/member-compaction-engine.ts'],
   '@contexera/dsh-agent-team/member-context': ['./packages/agent-team/src/member-context.ts'],
+  '@contexera/dsh-agent-team/manager-context': ['./packages/agent-team/src/manager-context.ts'],
   '@contexera/dsh-agent-team/member-time-context': ['./packages/agent-team/src/member-time-context.ts'],
   '@contexera/dsh-agent-team/time-format': ['./packages/agent-team/src/time-format.ts'],
   '@contexera/dsh-agent-team/mentions': ['./packages/agent-team/src/mentions.ts'],

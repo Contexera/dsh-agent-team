@@ -34,6 +34,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { SessionFormatUnsupportedError } from '@deepseek-ai/dsh-session-persistence'
 import SessionTitle from '@deepseek-ai/dsh-session-title'
+import SkillRegistry from '@deepseek-ai/dsh-skill'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -321,6 +322,9 @@ export async function realHarness(
       ] },
     ]
     const teamManagerPlugins: PresetDefinition['plugins'] = [
+      // The shipped `team-manager` context row, verbatim: the manager's own
+      // private memory index, mounted independently of the Member context plugin.
+      { id: 'manager-context', name: '@contexera/dsh-agent-team/manager-context' },
       { id: 'manager-tools', name: pathToFileURL(managerToolsStub).href },
       // The shipped `team-manager` tools row, verbatim: the real tools plugin
       // narrowed to the manager's own eight tools. The manager's surface under
@@ -346,6 +350,10 @@ export async function realHarness(
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    // The skill registry the per-session provider registers on. It is a service,
+    // not a tool row: the model-facing `skill` tool stays a preset decision, while
+    // a manager or Member catalog can be read and asserted here.
+    await ctx.plugin(SkillRegistry)
     // 0.2.2 moved tool execution behind a selected executor plugin, so a composition that runs tools must name one.
     await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(AgentRegistry)

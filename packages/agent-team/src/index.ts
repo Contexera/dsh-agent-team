@@ -68,7 +68,8 @@ import { coldInboxOf } from './cold-inbox.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
 import { ManagerSessionStore, managerSessionDomainSpec } from './manager-session-store.ts'
-import { ManagerSessionRuntime } from './manager-session.ts'
+import { MANAGER_BUNDLED_SKILLS_DIRECTORY, ManagerSessionRuntime } from './manager-session.ts'
+import type { ManagerPrivateMemory } from './manager-context.ts'
 import { MANAGER_SESSION_PRESET_ID, MEMBER_SESSION_PRESET_ID } from './manager-tool-policy.ts'
 import { INITIAL_CHECKPOINT, SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
 import { baselineIdsOf, failureCategory, failureTail, missingCredentials, probeShellFamily, runSubscriptionScript, type ShellFamilyProbe, type SubscriptionCredentials, type SubscriptionRunCategory, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
@@ -1353,6 +1354,7 @@ export default class AgentTeam extends TypertRemoteService {
       store: managerStore,
       reader: this.sessionReader,
       managerPrivateRoot: dshHomePath('agent-team', 'manager'),
+      managerBundledSkillsRoot: MANAGER_BUNDLED_SKILLS_DIRECTORY,
       defaultAgentOptions: () => ({ ...this.ctx.agentDefaultModel.currentSelection() }),
       initializeDefaultWorkspace: async signal => {
         const value = await this.ctx.get('workspaceController')?.initializeDefault(signal)
@@ -1451,6 +1453,17 @@ export default class AgentTeam extends TypertRemoteService {
       if (handle.agent === agent) return this.requireLedger().getMember(memberId)
     }
     return undefined
+  }
+
+  /**
+   * The manager Session's private memory facts, or `undefined` for any other
+   * Agent. The manager context plugin asks this instead of `memberForAgent`: the
+   * manager holds no Member identity, and a replaced generation must not keep
+   * reading the directory.
+   */
+  managerMemoryForAgent(agent: Agent): ManagerPrivateMemory | undefined {
+    if (this.managerRuntime === undefined || !this.managerRuntime.isCurrentManagerAgent(agent)) return undefined
+    return Object.freeze({ root: dshHomePath('agent-team', 'manager'), cwd: agent.session.header.cwd })
   }
 
   members(): readonly AgentTeamAgentMemberStatus[] {
