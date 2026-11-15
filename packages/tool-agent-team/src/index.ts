@@ -2799,7 +2799,7 @@ const teamWorker = defineTool({
  */
 export interface Config {
   /**
-   * Restrict registration to these tool names, matched exactly. Omitted registers every Team tool, which is what the Member preset mounts. An unknown name is refused rather than skipped: a typo would otherwise mount an empty surface and surface only as a Session that cannot act.
+   * Restrict registration to these tool names, matched exactly. Omitted registers all 19 Team tools; the `team-member` and `team-manager` presets each provide their own explicit whitelist. An unknown name is refused rather than skipped: a typo would otherwise mount an empty surface and surface only as a Session that cannot act.
    */
   only?: readonly string[]
 }

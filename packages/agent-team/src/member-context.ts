@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
@@ -13,6 +12,7 @@ import {
   privateMemoryDigest,
   privateMemoryPathsBlock,
   privateMemoryTextMatches,
+  privateMemoryTextDigest,
   privateMemoryUsage,
   readPrivateMemoryIndex,
   type PrivateMemoryState,
@@ -115,7 +115,7 @@ async function memberContextMessages(
   if (visible.latestMemoryDigest !== digest || (available && !visible.hasCompleteMemoryBaseline)) {
     const variant = !available ? 'unavailable' : visible.hasCompleteMemoryBaseline ? 'update' : 'baseline'
     const text = variant === 'update' ? renderMemberMemoryUpdate(memory, memoryPath) : renderMemberMemoryState(memory, memoryPath)
-    messages.push(injectionMessage({ category: 'memory', variant, digest, textDigest: createHash('sha256').update(text).digest('hex') }, text))
+    messages.push(injectionMessage({ category: 'memory', variant, digest, textDigest: privateMemoryTextDigest(text) }, text))
   }
   return messages
 }

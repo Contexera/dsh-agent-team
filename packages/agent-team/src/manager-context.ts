@@ -21,6 +21,7 @@ import {
   privateMemoryDigest,
   privateMemoryPathsBlock,
   privateMemoryTextMatches,
+  privateMemoryTextDigest,
   privateMemoryUsage,
   readPrivateMemoryIndex,
   type PrivateMemoryState,
@@ -114,7 +115,7 @@ function visibleManagerMemory(agent: Agent): VisibleManagerMemory {
 }
 
 function digestOfText(text: string): string {
-  return privateMemoryDigest({ kind: 'index', raw: Buffer.from(text) })
+  return privateMemoryTextDigest(text)
 }
 
 /**

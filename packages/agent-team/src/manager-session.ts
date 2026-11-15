@@ -125,19 +125,11 @@ export class ManagerSessionRuntime {
               pointer.sessionId,
             )
         }
-        if (this.liveOutsideManager(pointer.sessionId)) {
-          return this.unavailable(
-            'session-unreadable',
-            'the registered manager Session is already live outside the manager runtime',
-            pointer.sessionId,
-          )
-        }
-        const stored = await this.deps.reader.read(pointer.sessionId)
-        if (!stored.ok) {
-          if (stored.failure.kind === 'missing') return undefined
-          return this.readFailure(stored.failure)
-        }
-        return this.resumeLocked(pointer, stored.inspection)
+        return this.resolveStoredPointer(pointer, {
+          archived: () => undefined,
+          missing: () => undefined,
+          outsideMessage: 'the registered manager Session is already live outside the manager runtime',
+        })
       } catch (error) {
         return this.unavailable('runtime', messageOf(error))
       }
@@ -242,20 +234,11 @@ export class ManagerSessionRuntime {
         pointer.sessionId,
       )
     }
-    if (this.isArchived(pointer.sessionId)) return this.replaceLocked(pointer)
-    if (this.liveOutsideManager(pointer.sessionId)) {
-      return this.unavailable(
-        'session-unreadable',
-        'the registered manager Session is already live outside the manager runtime',
-        pointer.sessionId,
-      )
-    }
-    const stored = await this.deps.reader.read(pointer.sessionId)
-    if (!stored.ok) {
-      if (stored.failure.kind === 'missing') return this.replaceLocked(pointer)
-      return this.readFailure(stored.failure)
-    }
-    return this.resumeLocked(pointer, stored.inspection)
+    return (await this.resolveStoredPointer(pointer, {
+      archived: () => this.replaceLocked(pointer),
+      missing: () => this.replaceLocked(pointer),
+      outsideMessage: 'the registered manager Session is already live outside the manager runtime',
+    }))!
   }
 
   /**
@@ -276,34 +259,41 @@ export class ManagerSessionRuntime {
           pointer.sessionId,
         )
     }
-    if (this.isArchived(pointer.sessionId)) {
-      return this.unavailable('runtime', 'the current manager Session was archived', pointer.sessionId)
-    }
-    if (this.liveOutsideManager(pointer.sessionId)) {
-      return this.unavailable(
+    return (await this.resolveStoredPointer(pointer, {
+      archived: () => this.unavailable('runtime', 'the current manager Session was archived', pointer.sessionId),
+      missing: () => this.unavailable(
         'session-unreadable',
-        'the current manager Session is live outside the manager runtime',
+        'the current manager Session is missing; reopen the destination to replace it',
         pointer.sessionId,
-      )
-    }
-    const stored = await this.deps.reader.read(pointer.sessionId)
-    if (!stored.ok) {
-      if (stored.failure.kind === 'missing') {
-        return this.unavailable(
-          'session-unreadable',
-          'the current manager Session is missing; reopen the destination to replace it',
-          pointer.sessionId,
-        )
-      }
-      return this.readFailure(stored.failure)
-    }
-    return this.resumeLocked(pointer, stored.inspection)
+      ),
+      outsideMessage: 'the current manager Session is live outside the manager runtime',
+    }))!
   }
 
   /**
    * Resume the registered Session. Every failure here retains the pointer:
    * only an archived or positively missing Session is replacement-eligible.
    */
+  private async resolveStoredPointer(
+    pointer: ManagerSessionPointer,
+    options: {
+      readonly archived: () => AgentTeamManagerSessionResult | undefined | Promise<AgentTeamManagerSessionResult | undefined>
+      readonly missing: () => AgentTeamManagerSessionResult | undefined | Promise<AgentTeamManagerSessionResult | undefined>
+      readonly outsideMessage: string
+    },
+  ): Promise<AgentTeamManagerSessionResult | undefined> {
+    if (this.isArchived(pointer.sessionId)) return await options.archived()
+    if (this.liveOutsideManager(pointer.sessionId)) {
+      return this.unavailable('session-unreadable', options.outsideMessage, pointer.sessionId)
+    }
+    const stored = await this.deps.reader.read(pointer.sessionId)
+    if (!stored.ok) {
+      if (stored.failure.kind === 'missing') return await options.missing()
+      return this.readFailure(stored.failure)
+    }
+    return this.resumeLocked(pointer, stored.inspection)
+  }
+
   private async resumeLocked(
     pointer: ManagerSessionPointer,
     inspection: StoredSessionInspection,

@@ -4886,7 +4886,7 @@ export class AgentTeamLedger {
     const memberIds = [...this.state.members.values()].filter(member => member.state !== 'inactive' && member.state !== 'archived'
       && (projectRef === undefined
         ? this.participatesIn(member.memberId, workspaceId)
-        : this.isProjectMember(projectRef, member.memberId))).map(member => member.memberId).sort()
+        : this.participatesIn(member.memberId, workspaceId) && this.isProjectMember(projectRef, member.memberId))).map(member => member.memberId).sort()
     return Object.freeze({ projects: Object.freeze(projects), memberIds: Object.freeze(memberIds) })
   }
 
