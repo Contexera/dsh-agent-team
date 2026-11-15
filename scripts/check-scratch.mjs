@@ -37,12 +37,12 @@ function workItemOf(path) {
   return existsSync(candidate) && statSync(candidate).isDirectory() ? candidate : undefined
 }
 
-function markdownFiles(directory) {
+function allFiles(directory) {
   const found = []
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name)
-    if (entry.isDirectory()) found.push(...markdownFiles(path))
-    else if (entry.isFile() && entry.name.endsWith('.md')) found.push(path)
+    if (entry.isDirectory()) found.push(...allFiles(path))
+    else if (entry.isFile()) found.push(path)
   }
   return found
 }
@@ -176,7 +176,7 @@ for (const month of months) {
   }
 }
 
-for (const file of markdownFiles(archive)) {
+for (const file of allFiles(archive)) {
   if (basename(file) === 'README.md') checkLinks(file)
   if (TRANSIENT.test(file)) report(file, 1, 'transient file committed in the archive')
 }
