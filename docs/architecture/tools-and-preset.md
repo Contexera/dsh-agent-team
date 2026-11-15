@@ -2,7 +2,11 @@
 
 English | [中文](tools-and-preset.zh.md)
 
-The explicit `team-member` preset is the only Team Member composition. It adds coding capability rows (shell, filesystem/search, web search and fetch, background jobs, the skill loader tool, compaction), collaboration guidance/tools, Harness Workspace instruction discovery, and bounded private-memory context. Skill discovery itself is not a preset row: each Member's provider is Host-registered on its agent scope (see Host authority). Ordinary Sessions remain outside this roster and receive no Team prompt sections, tools, or Member memory.
+The explicit `team-member` preset is the only Team Member composition. It adds coding capability rows (shell, filesystem/search, web search and fetch, background jobs, the skill loader tool, compaction), collaboration guidance/tools, Harness Workspace instruction discovery, and bounded private-memory context. Ordinary Sessions remain outside this roster and receive no Team prompt sections, tools, or Member memory.
+
+A nested preset group isolates the skills registry, Team's per-Agent router, and the skill loader together; [Host authority](host-authority.md#member-capabilities-and-skills) owns the exact roots and selection lifecycle.
+
+Tool declarations and prompt guidance are separate model-input layers. Tool names, descriptions, and parameters become schemas in the request's dedicated `tools` field; some tool plugins also register system-prompt guidance sections. Skill summaries instead arrive as durable user-role `<system-reminder>` / `<available_skills>` messages, and a full skill body enters only after the `skill` tool loads it or the user explicitly invokes it. The isolated Team skills registry is shared by all three skill surfaces.
 
 The filesystem row states `applyPatch: false` rather than inheriting the Host default: `edit` is the one file-modification tool a Member is granted, and a preset that left the flag unstated would widen every Member's surface the day a Host default flips. The shipped preset test asserts the value, so the decision is checked rather than assumed.
 

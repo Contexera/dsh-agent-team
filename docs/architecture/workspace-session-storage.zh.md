@@ -40,7 +40,9 @@ Host 持有一个专用的 [Team manager](../domain-model.zh.md#team-manager) Se
 
 公开 open 与替换共用一条串行链。并发首次 open 只创建一个 Session；针对同一 expected id 的并发新开也只创建一个后继；迟到调用方观察当前 Session，不再另建。对已有 pointer，只有 Session 已归档，或 stored read 明确报 `missing`，才允许替换。`refused`、`corrupt`、`io`、`unknown`、pointer read 与 pointer write 失败都返回 `unavailable` 并保留 pointer。
 
-替换先持久化 pointer，再发布后继并立即取消旧 manager 的授权；旧 handle 会被停止，Session 历史仍在所属 Workspace 的普通列表中可见并可归档。Workspace 归档与 pointer 持久化属于两套权威，竞态中两者可以短暂不同步；下一次 open 会通过替换已归档的 manager 收敛，而不是依赖跨权威原子事务。
+替换先持久化 pointer，再发布后继并立即取消旧 manager 的授权。旧 handle 停止后，Host 归档被替换的 Session 而不删除日志，因此后继留在活跃列表，前代移入所属 Workspace 的归档视图。
+
+发布后的归档是 best-effort：失败会记录警告，不回滚后继，也不删除历史。Workspace 归档与 pointer 持久化属于两套权威，竞态中两者可以短暂不同步；下一次 open 会通过替换已归档的 manager 收敛，而不是依赖跨权威原子事务。
 
 manager 私有资源位于 `$DSH_HOME/agent-team/manager`：`memory.md`、`notes/` 与 `skills/`。它们不是 ledger fact。manager 的 skill provider 扫描两处：随 bundle 发布的只读 manager skills（`packages/agent-team/manager-skills/`，排前）与这个私有 `skills/` 目录。Member 的 core skills 是另一个 root，不会进入 manager；manager 的这两处也不会进入 Member 或普通 Session。
 

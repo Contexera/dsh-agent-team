@@ -7,6 +7,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { MANAGER_BUNDLED_SKILLS_DIRECTORY, ManagerSessionRuntime } from '../src/manager-session.ts'
 import type { ManagerSessionPointer, ManagerSessionStoreLike } from '../src/manager-session-store.ts'
 import { realHarness, requestId } from './helpers/member-harness.ts'
+import { skillRegistryFor } from './helpers/team-host-fixture.ts'
 
 
 class MemoryPointerStore implements ManagerSessionStoreLike {
@@ -60,7 +61,7 @@ async function managerFixture(options: { bundledRoot?: string } = {}): Promise<M
 }
 
 async function catalogNames(ctx: Context, agent: Agent): Promise<readonly string[]> {
-  const skills = await ctx.skills.list({ scope: agent as never })
+  const skills = await skillRegistryFor(ctx, agent).list({ scope: agent as never })
   return skills.map(skill => skill.name).sort()
 }
 
@@ -99,7 +100,7 @@ describe('Team manager skill discovery', () => {
     await vi.waitFor(async () => {
       expect(await catalogNames(fixture.ctx, fixture.agent)).toEqual(['shared-name', 'weekly-review'])
     })
-    const loaded = await fixture.ctx.skills.get('weekly-review', { scope: fixture.agent as never })
+    const loaded = await skillRegistryFor(fixture.ctx, fixture.agent).get('weekly-review', { scope: fixture.agent as never })
     expect(loaded?.content).toContain('Ask for the board first.')
 
     // Removing it is equally file-driven.
@@ -116,13 +117,17 @@ describe('Team manager skill discovery', () => {
     await vi.waitFor(async () => {
       expect((await catalogNames(fixture.ctx, fixture.agent)).filter(name => name === 'shared-name')).toHaveLength(1)
     })
-    const loaded = await fixture.ctx.skills.get('shared-name', { scope: fixture.agent as never })
+    const loaded = await skillRegistryFor(fixture.ctx, fixture.agent).get('shared-name', { scope: fixture.agent as never })
     expect(loaded?.content).toContain('Bundled body.')
     expect(loaded?.content).not.toContain('Private body.')
   })
 
-  it('keeps the manager catalog away from Members and ordinary Sessions', async () => {
+  it('keeps manager and Member catalogs private while ordinary Sessions retain Host-global skills', async () => {
     const fixture = await managerFixture()
+    const dispose = fixture.ctx.skills.register({
+      name: 'office', description: 'Host-global Office skills', source: 'runtime', content: 'Ordinary manager bystanders may load this body.',
+    })
+    onTestFinished(async () => { dispose() })
     await writeFile(join(fixture.privateRoot, 'skills', 'manager-only.md'),
       SKILL_MD('manager-only', 'A skill only the management Session may load', 'Manager only.'))
     await vi.waitFor(async () => {
@@ -131,7 +136,11 @@ describe('Team manager skill discovery', () => {
 
     const ordinary = await fixture.ctx.agents.create({ sessionId: SessionId('ordinary-manager-skills') })
     onTestFinished(async () => { await ordinary.dispose() })
-    expect(await catalogNames(fixture.ctx, ordinary.agent)).toEqual([])
+    expect(await catalogNames(fixture.ctx, fixture.agent)).not.toContain('office')
+    expect(await skillRegistryFor(fixture.ctx, fixture.agent).get('office', { scope: fixture.agent as never })).toBeUndefined()
+    expect(await catalogNames(fixture.ctx, ordinary.agent)).toEqual(['office'])
+    expect((await skillRegistryFor(fixture.ctx, ordinary.agent).get('office', { scope: ordinary.agent as never }))?.content)
+      .toBe('Ordinary manager bystanders may load this body.')
 
     const member = await fixture.ctx.agentTeam.addMember({ requestId: requestId('manager-skills-member'),
       workspaceId: (await fixture.ctx.workspaceRegistry.list())[0]!.id, handle: 'skills-bystander',

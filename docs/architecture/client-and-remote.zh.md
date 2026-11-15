@@ -67,7 +67,7 @@ manager 目的地是一道 gate，不是 Team conversation surface。`manager: t
 
 create 时的 guard 包装公开的 `ISessions.create` 边界。隐式 preset 的 blank candidate 先经 Host 查询精确 ownership；Team-owned id 会在继续 shipped 创建前省略，普通 blank 与显式 preset 请求原样通过。ownership 读取失败时不会重试不安全的 candidate。读取期间若插件销毁，待决创建会被拒绝，既不创建 Session，也不让调用方一直等待。
 
-guard 只排除 blank 复用：manager history 仍在所属 Workspace 的普通 Session list 中可见，并可经 Harness 归档。从该列表打开当前或已替换的 manager 时，固定 composition 保持不变。
+guard 只排除 blank 复用。成功替换会自动归档旧 manager，因此保留的历史出现在所属 Workspace 的归档视图，而不是活跃 Session list；归档失败不会回滚后继。从普通列表打开当前 manager 时，固定 composition 保持不变。
 
 manager 在屏时，临时 slot replacement 隐藏 hero preset picker、header preset label 与 permission control；切到其他 Session 就释放并恢复 shipped controls。这只是展示收口，不是授权或 authorization lock；Host composition 与执行 guard 归 [Tools and preset](tools-and-preset.zh.md#team-manager-preset)。
 

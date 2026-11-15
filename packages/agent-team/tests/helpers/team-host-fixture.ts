@@ -7,10 +7,10 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Group from '@deepseek-ai/cordis-plugin-group'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentPreset from '@deepseek-ai/dsh-agent-preset'
-import AgentPresetRegistry from '@deepseek-ai/dsh-agent-preset-registry'
+import AgentPresetRegistry, { type PresetDefinition } from '@deepseek-ai/dsh-agent-preset-registry'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import SessionStore from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -101,6 +101,20 @@ export function registerAutoCleanup(
   })
 }
 
+/** The shipped Team skills realm: bundled/private discovery only, plus its matching loader. */
+export const TEAM_SKILLS_PRESET_ROW: PresetDefinition['plugins'][number] = {
+  id: 'skills', name: 'cordis:group', group: true, isolate: { skills: true }, config: [
+    { id: 'skill-registry', name: '@deepseek-ai/dsh-skill' },
+    { id: 'member-skills', name: '@contexera/dsh-agent-team/member-skills' },
+    { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+  ],
+}
+
+/** Resolve the same registry that the shipped Session skill catalog and loader use. */
+export function skillRegistryFor(ctx: Context, agent: Agent): SkillRegistry {
+  return ctx.agentPresets.serviceFor(agent, 'skills') ?? ctx.skills
+}
+
 export interface TeamMemberHost {
   readonly ctx: Context
   readonly root: string
@@ -125,7 +139,7 @@ export interface TeamMemberHostOptions {
    * or `file:` URLs to fixtures beside its spec; this helper owns everything
    * else the preset needs to mount.
    */
-  readonly presetPlugins: ReadonlyArray<{ readonly id: string; readonly name: string }>
+  readonly presetPlugins: PresetDefinition['plugins']
   /** Optional module-level disposers a `beforeAll` spec drains in its `afterAll`; omit for automatic `onTestFinished` cleanup. */
   readonly cleanups?: Array<() => Promise<void>> | undefined
   /** Optional explicit cleanup registrar for `beforeAll` / `afterAll` callers. */

@@ -88,7 +88,7 @@ async function execute(ctx: Context, agent: Agent, name: string, callId: string)
 
 describe('Team manager Session Host runtime', () => {
   it('opens and replaces the manager Session through the Host Remote', async () => {
-    const { ctx, workspaceId } = await realHarness()
+    const { ctx, workspaceId, archived } = await realHarness()
     const first = await ctx.agentTeam.openManagerSession({})
     expect(first).toMatchObject({ status: 'ready', workspaceId })
     if (first.status !== 'ready') throw new Error('expected a ready manager Session')
@@ -101,6 +101,8 @@ describe('Team manager Session Host runtime', () => {
     // A stale caller observes the current id instead of creating another.
     expect(await ctx.agentTeam.newManagerSession({ expectedSessionId: first.sessionId })).toEqual(replaced)
     expect(managerAgents(ctx).map(agent => agent.id)).toEqual([replaced.sessionId])
+    expect(archived).toContain(first.sessionId)
+    expect(archived).not.toContain(replaced.sessionId)
   })
 
   it('identifies current and retired manager Sessions from their durable lineage', async () => {
@@ -253,6 +255,26 @@ describe('Team manager Session Host runtime', () => {
     firstHandle.dispose = originalDispose
     await originalDispose()
     expect(ctx.agents.get(first.sessionId)).toBeUndefined()
+    await runtime.dispose()
+  })
+
+  it('keeps the published successor and retired history when automatic archival fails', async () => {
+    const { ctx, workspaceId, checkout, root, archived, archiveFailures } = await realHarness()
+    const runtime = runtimeFor(ctx, { store: new MemoryPointerStore(), root, workspace: { workspaceId, path: checkout } })
+    const first = await runtime.open()
+    if (first.status !== 'ready') throw new Error('expected the first manager Session')
+    const retired = ctx.agents.get(first.sessionId)!
+    const retiredEvents = retired.session.ownEvents().map(event => event.seq)
+    archiveFailures.remaining = 1
+
+    const replacement = await runtime.newConversation(first.sessionId)
+    expect(replacement).toMatchObject({ status: 'ready' })
+    if (replacement.status !== 'ready') throw new Error('expected a ready replacement')
+    expect(await runtime.open()).toEqual(replacement)
+    expect(managerAgents(ctx).map(agent => agent.id)).toEqual([replacement.sessionId])
+    expect(archived).not.toContain(first.sessionId)
+    expect(archived).not.toContain(replacement.sessionId)
+    expect(retired.session.ownEvents().map(event => event.seq)).toEqual(retiredEvents)
     await runtime.dispose()
   })
 
@@ -532,7 +554,7 @@ describe('Team manager Session Host runtime', () => {
     // read-only tools plus the seven manager write tools, and no tool from the
     // Member preset — because the model's visible list is read from this
     // scope's own schemas.
-    expect(toolNames(ctx, agent)).toEqual(['manager_fixture', 'working_directory', 'late_manager_tool', 'team_overview', 'team_models',
+    expect(toolNames(ctx, agent)).toEqual(['manager_fixture', 'working_directory', 'late_manager_tool', 'skill', 'team_overview', 'team_models',
       'member_create', 'project_create', 'project_owner', 'project_update', 'member_update', 'member_state', 'member_workspace'].sort())
     expect(toolNames(ctx, agent)).not.toContain('foreign_global')
     for (const writeTool of ['team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view', 'team_subscription', 'team_reminder', 'team_worker']) {

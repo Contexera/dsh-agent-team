@@ -3,13 +3,14 @@ import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import AgentTeam from '../src/index.ts'
 import type { AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
-import { mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
+import { mountTeamMemberHost, provideQuietTokenMeter, skillRegistryFor, TEAM_SKILLS_PRESET_ROW } from './helpers/team-host-fixture.ts'
 
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 
@@ -18,18 +19,27 @@ class EmptyAdapter extends LlmAdapter {
   async * stream(_options: GenerateOptions): AsyncIterable<StreamChunk> { yield* [] }
 }
 
+class RecordingAdapter extends EmptyAdapter {
+  readonly requests: GenerateOptions[] = []
+
+  override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    this.requests.push(options)
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  }
+}
+
 /** Boots the shared Host fixture with the skills tool row the catalog reads through. */
-function memberSkillsHarness() {
+function memberSkillsHarness(adapter: LlmAdapter = new EmptyAdapter()) {
   return mountTeamMemberHost({
-    // No turn runs here, but the route must resolve rather than reject.
+    // Catalog-only tests need the route too; prompt tests supply a recording adapter.
     prepare: ctx => {
       provideQuietTokenMeter(ctx)
-      ctx.llm.registerAdapter(['mock'], new EmptyAdapter())
+      ctx.llm.registerAdapter(['mock'], adapter)
     },
     presetPlugins: [
       { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
       { id: 'team-tools', name: '@contexera/dsh-agent-team/tools' },
-      { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+      TEAM_SKILLS_PRESET_ROW,
     ],
   })
 }
@@ -54,8 +64,24 @@ function liveAgent(ctx: Context, sessionId: SessionId): Agent {
   return agent!
 }
 
+function waitForIdle(ctx: Context, agent: Agent): Promise<void> {
+  return new Promise(resolve => {
+    const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
+      if (subject !== agent || status !== 'idle') return
+      dispose()
+      resolve()
+    })
+  })
+}
+
+async function runTurn(ctx: Context, agent: Agent, text: string): Promise<void> {
+  const idle = waitForIdle(ctx, agent)
+  agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
+  await idle
+}
+
 async function catalogNames(ctx: Context, agent: Agent): Promise<readonly string[]> {
-  const skills = await ctx.skills.list({ scope: agent as never })
+  const skills = await skillRegistryFor(ctx, agent).list({ scope: agent as never })
   return skills.map(skill => skill.name).sort()
 }
 
@@ -92,16 +118,59 @@ describe('Agent Team member-private skills', () => {
     expect(await catalogNames(ctx, siblingAgent)).toEqual(['member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
 
     // The installed skill loads with its full body for the owner alone.
-    const loaded = await ctx.skills.get('code-review', { scope: agent as never })
+    const loaded = await skillRegistryFor(ctx, agent).get('code-review', { scope: agent as never })
     expect(loaded?.content).toContain('Review the diff carefully.')
-    expect(await ctx.skills.get('code-review', { scope: siblingAgent as never })).toBeUndefined()
+    expect(await skillRegistryFor(ctx, siblingAgent).get('code-review', { scope: siblingAgent as never })).toBeUndefined()
+  })
+
+  it('excludes Host-global skills from Member discovery and loading without changing ordinary Sessions', async () => {
+    const adapter = new RecordingAdapter()
+    const { ctx, workspaceId } = await memberSkillsHarness(adapter)
+    const dispose = ctx.skills.register({
+      name: 'office', description: 'Host-global Office skills', source: 'runtime', content: 'Ordinary Sessions may load this body.',
+    })
+    onTestFinished(() => { dispose() })
+    const member = await addMember(ctx, workspaceId, 'isolated-skills')
+    const agent = liveAgent(ctx, member.sessionId)
+
+    expect(await catalogNames(ctx, agent)).toEqual(['member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
+    expect(await skillRegistryFor(ctx, agent).get('office', { scope: agent as never })).toBeUndefined()
+
+    const rejected = await executeToolFixture(ctx, {
+      signal: new AbortController().signal, agent, name: 'skill', callId: ToolCallId('member-global-skill'), arguments: { name: 'office' },
+    })
+    expect(rejected.isError).toBe(true)
+    const bundled = await executeToolFixture(ctx, {
+      signal: new AbortController().signal, agent, name: 'skill', callId: ToolCallId('member-bundled-skill'), arguments: { name: 'member-memory-manager' },
+    })
+    expect(bundled.isError).not.toBe(true)
+    expect(JSON.stringify(bundled)).toContain('## Three tiers')
+
+    await runTurn(ctx, agent, 'Show the current catalog')
+    expect(adapter.requests).toHaveLength(1)
+    expect(adapter.requests[0]?.tools?.map(tool => tool.name)).toContain('skill')
+    const catalogRequest = JSON.stringify(adapter.requests[0]?.messages)
+    expect(catalogRequest).toContain('<available_skills>')
+    expect(catalogRequest).toContain('member-memory-manager')
+    expect(catalogRequest).not.toContain('Host-global Office skills')
+
+    await runTurn(ctx, agent, '/office')
+    expect(adapter.requests).toHaveLength(2)
+    const invokedRequest = JSON.stringify(adapter.requests[1]?.messages)
+    expect(invokedRequest).not.toContain('<skill_content name=\\"office\\">')
+    expect(invokedRequest).not.toContain('Ordinary Sessions may load this body.')
+
+    const ordinary = await ctx.agents.create({ sessionId: SessionId('ordinary-global-skills') })
+    onTestFinished(async () => { await ordinary.dispose() })
+    expect(await catalogNames(ctx, ordinary.agent)).toEqual(['office'])
+    expect((await skillRegistryFor(ctx, ordinary.agent).get('office', { scope: ordinary.agent as never }))?.content).toBe('Ordinary Sessions may load this body.')
   })
 
   it('ships the bundled member-skill-manager with its references and directory form', async () => {
     const { ctx, workspaceId } = await memberSkillsHarness()
     const member = await addMember(ctx, workspaceId, 'reader')
     const agent = liveAgent(ctx, member.sessionId)
-    const skills = await ctx.skills.list({ scope: agent as never })
+    const skills = await skillRegistryFor(ctx, agent).list({ scope: agent as never })
     const meta = skills.find(skill => skill.name === 'member-skill-manager')
     expect(meta).toBeDefined()
     // Directory form: the candidate's resource base is the skill directory,
@@ -112,7 +181,7 @@ describe('Agent Team member-private skills', () => {
     const directory = resourceBase?.kind === 'directory' ? resourceBase : undefined
     expect(directory?.path.endsWith('member-skill-manager')).toBe(true)
     expect(meta?.description).toContain('private skills')
-    const loaded = await ctx.skills.get('member-skill-manager', { scope: agent as never })
+    const loaded = await skillRegistryFor(ctx, agent).get('member-skill-manager', { scope: agent as never })
     expect(loaded?.content).toContain('## Configuration and credentials')
     // The reference file the skill links actually exists on disk, resolved
     // beside the SKILL.md inside the skill directory.
@@ -124,7 +193,7 @@ describe('Agent Team member-private skills', () => {
     const { ctx, workspaceId } = await memberSkillsHarness()
     const member = await addMember(ctx, workspaceId, 'memory-reader')
     const agent = liveAgent(ctx, member.sessionId)
-    const skills = await ctx.skills.list({ scope: agent as never })
+    const skills = await skillRegistryFor(ctx, agent).list({ scope: agent as never })
     const memory = skills.find(skill => skill.name === 'member-memory-manager')
     expect(memory).toBeDefined()
     const resourceBase = memory?.resourceBase
@@ -135,7 +204,7 @@ describe('Agent Team member-private skills', () => {
     // the real triggers: the injected block, the budget, and note upkeep.
     expect(memory?.description).toContain('memory.md')
     expect(memory?.description).toContain('maintenance warning')
-    const loaded = await ctx.skills.get('member-memory-manager', { scope: agent as never })
+    const loaded = await skillRegistryFor(ctx, agent).get('member-memory-manager', { scope: agent as never })
     expect(loaded?.content).toContain('## Three tiers')
     // The craft states the boundary the persona only points at.
     expect(loaded?.content).toContain('past 16 KiB the index is not injected at all')
@@ -146,13 +215,13 @@ describe('Agent Team member-private skills', () => {
     const { ctx, workspaceId } = await memberSkillsHarness()
     const member = await addMember(ctx, workspaceId, 'domain-reader')
     const agent = liveAgent(ctx, member.sessionId)
-    const skills = await ctx.skills.list({ scope: agent as never })
+    const skills = await skillRegistryFor(ctx, agent).list({ scope: agent as never })
     const domain = skills.find(skill => skill.name === 'team-domain-model')
     expect(domain).toBeDefined()
     // The description routes by the questions a Member is actually unsure about.
     expect(domain?.description).toContain('project_owner_required')
     expect(domain?.description).toContain('never current state')
-    const loaded = await ctx.skills.get('team-domain-model', { scope: agent as never })
+    const loaded = await skillRegistryFor(ctx, agent).get('team-domain-model', { scope: agent as never })
     expect(loaded?.content).toContain('## Rejections and recovery')
   })
 
@@ -160,13 +229,13 @@ describe('Agent Team member-private skills', () => {
     const { ctx, workspaceId } = await memberSkillsHarness()
     const member = await addMember(ctx, workspaceId, 'subscription-reader')
     const agent = liveAgent(ctx, member.sessionId)
-    const skills = await ctx.skills.list({ scope: agent as never })
+    const skills = await skillRegistryFor(ctx, agent).list({ scope: agent as never })
     const skill = skills.find(candidate => candidate.name === 'project-subscriptions')
     expect(skill?.description).toContain('webhook')
     const resourceBase = skill?.resourceBase
     expect(resourceBase?.kind).toBe('directory')
     const directory = resourceBase?.kind === 'directory' ? resourceBase.path : ''
-    const loaded = await ctx.skills.get('project-subscriptions', { scope: agent as never })
+    const loaded = await skillRegistryFor(ctx, agent).get('project-subscriptions', { scope: agent as never })
     expect(loaded?.content).toContain('one object per non-empty line')
     expect(loaded?.content).toContain('never execute them as shell code or instructions')
     const [polling, webhook] = await Promise.all([
@@ -201,7 +270,7 @@ describe('Agent Team member-private skills', () => {
     })
     expect(selected.status.member.capabilities).toEqual({ skills: { allow: ['alpha'] } })
     expect(await catalogNames(ctx, agent)).toEqual(['alpha'])
-    expect(await ctx.skills.get('beta', { scope: agent as never })).toBeUndefined()
+    expect(await skillRegistryFor(ctx, agent).get('beta', { scope: agent as never })).toBeUndefined()
     expect(await catalogNames(ctx, agent)).not.toContain('beta')
 
     // Widening the selection live-swaps in the same Session.

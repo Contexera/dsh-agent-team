@@ -191,7 +191,7 @@ it('drives the manager through shipped Conversation, replacement, reload, and or
   await secondManagerComposer.fill('准备第二代管理历史')
   await secondManagerComposer.press('Enter')
   await page.getByText('第二代管理会话已就绪。', { exact: true }).waitFor({ timeout: 30_000 })
-  expect(scaffold!.ctx.workspaceRegistry.archivedSessionIds).not.toContain(firstManagerId)
+  expect(scaffold!.ctx.workspaceRegistry.archivedSessionIds).toContain(firstManagerId)
   expect(await scaffold!.ctx.agentTeam.openManagerSession({})).toMatchObject({ status: 'ready', sessionId: secondManagerId })
 
   const warningStart = consoleWatch.warnings.length
@@ -224,29 +224,25 @@ it('drives the manager through shipped Conversation, replacement, reload, and or
   await expect.poll(() => page.locator('[role="alert"]').count()).toBe(0)
   await page.locator(`[data-row-key="session:${ordinaryId}"]`).click()
   await waitForSession(page, ordinaryId!)
-  // Manager history remains an ordinary, archivable Workspace Session.
+  // Replacement moves the old manager out of the active list without deleting
+  // its history; the current manager remains an ordinary Workspace Session.
   expect(await page.locator('[role="treeitem"]').filter({ hasText: '团队管理' }).count()).toBeGreaterThan(0)
-  await page.locator('button[class*="newSession"][aria-label="新建会话"]').click()
-  await expect.poll(async () => {
-    const id = await currentSessionId(page)
-    return id !== undefined && id !== ordinaryId && !id.startsWith('agent-team-manager-')
-  }, { timeout: 10_000 }).toBe(true)
-  await expect.poll(() => page.locator('[role="alert"]').count()).toBe(0)
   const retiredHistoryRow = page.locator(`[data-row-key="session:${firstManagerId}"]`)
-  await retiredHistoryRow.click()
-  await waitForSession(page, firstManagerId)
-  await expect.poll(() => presetLabel.count()).toBe(0)
-  await expect.poll(() => permissionControl.count()).toBe(0)
-  await expect.poll(() => page.getByRole('button', { name: '新开对话', exact: true }).count()).toBe(0)
+  const currentHistoryRow = page.locator(`[data-row-key="session:${secondManagerId}"]`)
+  await expect.poll(() => retiredHistoryRow.count()).toBe(0)
+  await expect.poll(() => currentHistoryRow.count()).toBe(1)
+  await page.getByRole('button', { name: '视图选项', exact: true }).click()
+  await page.getByRole('menuitem', { name: '仅显示已归档', exact: true }).click()
+  await retiredHistoryRow.waitFor()
+  await expect.poll(() => currentHistoryRow.count()).toBe(0)
   await retiredHistoryRow.hover()
   await page.screenshot({ path: join(MANAGER_SHOTS, 'manager-history-desktop.png'), fullPage: true, animations: 'disabled' })
-  await retiredHistoryRow.getByRole('button', { name: /^会话“.*”的操作$/ }).click()
-  await page.getByRole('menuitem', { name: '归档会话', exact: true }).click()
-  await expect.poll(() => scaffold!.ctx.workspaceRegistry.archivedSessionIds.includes(firstManagerId as SessionId)).toBe(true)
+  await page.getByRole('button', { name: '视图选项', exact: true }).click()
+  await page.getByRole('menuitem', { name: '隐藏已归档', exact: true }).click()
   await expect.poll(() => retiredHistoryRow.count()).toBe(0)
+  await expect.poll(() => currentHistoryRow.count()).toBe(1)
 
   // Archiving the current manager through the same ordinary-list action is replacement-eligible.
-  const currentHistoryRow = page.locator(`[data-row-key="session:${secondManagerId}"]`)
   await currentHistoryRow.click()
   await waitForSession(page, secondManagerId)
   await currentHistoryRow.hover()

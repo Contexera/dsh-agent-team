@@ -288,14 +288,15 @@ describe('Agent Team shipping contract', () => {
     for (const capability of [
       '@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh', '@deepseek-ai/dsh-tool-fs',
       '@deepseek-ai/dsh-tool-fs-search', '@deepseek-ai/dsh-tool-jobs', '@deepseek-ai/dsh-tool-skill',
-      '@deepseek-ai/dsh-tool-web',
+      '@deepseek-ai/dsh-skill', '@contexera/dsh-agent-team/member-skills', '@deepseek-ai/dsh-tool-web',
     ]) expect(preset).toContain(`name: '${capability}'`)
     // The file-editing surface is stated, not inherited: `apply_patch` is off in the
     // Host default today, and a preset that left it unstated would silently widen
     // every Member's tools the day that default flips.
     expect(preset).toMatch(/- id: tool-fs\n\s+name: '@deepseek-ai\/dsh-tool-fs'\n\s+config:\n\s+applyPatch: false\n/)
-    // Skills are per-Member (Host-mounted private-directory provider), so the
-    // shared filesystem row is deliberately absent from the preset.
+    // The registry, per-Agent router and loader share one isolated realm; no
+    // shared filesystem or Host-global provider can leak into Team skills.
+    expect(preset).toContain('skills: true')
     expect(preset).not.toContain('@deepseek-ai/dsh-skill-filesystem')
     // Members plan through the ledger, so the session-local todo tool is
     // deliberately absent. The web bundle disables that row on the host plane,
@@ -489,7 +490,7 @@ describe('Agent Team shipping contract', () => {
       '@deepseek-ai/dsh-tool-fs',
       '@deepseek-ai/dsh-tool-fs-search',
       '@deepseek-ai/dsh-tool-jobs',
-      '@deepseek-ai/dsh-tool-skill',
+      '@deepseek-ai/dsh-tool-skill', '@deepseek-ai/dsh-skill', '@contexera/dsh-agent-team/member-skills',
       '@deepseek-ai/dsh-tool-web',
       '@deepseek-ai/dsh-tool-ask-user',
       '@deepseek-ai/dsh-compaction-basic',
@@ -501,6 +502,7 @@ describe('Agent Team shipping contract', () => {
     ]) expect(preset).toContain(`name: '${row}'`)
     expect(preset).toMatch(/- id: tool-fs\n\s+name: '@deepseek-ai\/dsh-tool-fs'\n\s+config:\n\s+applyPatch: false\n/)
     expect(preset).toContain('mode: native')
+    expect(preset).toContain('skills: true')
     // No Member identity, Member context/time, Member memory or compaction
     // engine, todo tool, rollover/Worker policy, grants, or Project-owner
     // authority enters this composition; the manager's memory arrives through

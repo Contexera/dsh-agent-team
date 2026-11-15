@@ -10,7 +10,7 @@
 
 Host 持有的专用普通 DSH Session，用来帮助 Human 理解和塑造 Agent Team。它不是 Member：没有 Member ref、Team Workspace 参与关系、Claim、Inbox 或 ledger 身份，它的对话也不是 Team fact。Session、私有资源与当前目的地 pointer 都归 Host；生命周期见 [Workspace 与 Session storage](architecture/workspace-session-storage.zh.md#team-manager-session)，入口见 [Client 边界](architecture/client-and-remote.zh.md#client-plugin-和-slot-composition)。
 
-manager 使用独立的 `team-manager` preset，而不是 Member composition。主区与 composer 仍是 shipped DSH Conversation，只通过公开 surface 组合，不修改 Harness repository、agent loop 或 shipped defaults。替换 manager 会停止旧 Session，但保留它的历史；当前与已替换的 Session 都在所属 Workspace 的普通 Session list 中可见，并可经 Harness 归档。这条 Session 生命周期不改写 Team ledger。
+manager 使用独立的 `team-manager` preset，而不是 Member composition。主区与 composer 仍是 shipped DSH Conversation，只通过公开 surface 组合，不修改 Harness repository、agent loop 或 shipped defaults。替换 manager 会停止并自动归档旧 Session，同时保留它的历史；当前 Session 仍在所属 Workspace 的普通 Session list 中可见，已替换的 Session 则留在归档视图中。这条 Session 生命周期不改写 Team ledger。
 
 ## Member
 

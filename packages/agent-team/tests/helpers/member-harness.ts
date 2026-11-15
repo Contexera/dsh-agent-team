@@ -52,7 +52,7 @@ import { RECOVERY_DELAY_MS } from '../../src/recovery.ts'
 import type { AgentTeamProjectRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../../src/types.ts'
 import { TestHuman } from './domain-handles.ts'
 import { MemoryStorageBackend } from './memory-backend.ts'
-import { pushDshHome, registerAutoCleanup, runCleanupSteps } from './team-host-fixture.ts'
+import { pushDshHome, registerAutoCleanup, runCleanupSteps, TEAM_SKILLS_PRESET_ROW } from './team-host-fixture.ts'
 import { SqliteStorageBackend } from '../../src/vendor/storage-sqlite/index.ts'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 
@@ -317,6 +317,7 @@ export async function realHarness(
       // `team_worker` stays declared and is withdrawn by the Host Worker switch,
       // exactly as in production.
       { id: 'team-tools', name: '@contexera/dsh-agent-team/tools', config: { only: MEMBER_TEAM_TOOLS } },
+      TEAM_SKILLS_PRESET_ROW,
       { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
         { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },
       ] },
@@ -327,9 +328,10 @@ export async function realHarness(
       { id: 'manager-context', name: '@contexera/dsh-agent-team/manager-context' },
       { id: 'manager-tools', name: pathToFileURL(managerToolsStub).href },
       // The shipped `team-manager` tools row, verbatim: the real tools plugin
-      // narrowed to the manager's own eight tools. The manager's surface under
-      // test is therefore the shipped one, not a stub.
+      // narrowed to the manager's own tools. The manager's surface under test is
+      // therefore the shipped one, not a stub.
       { id: 'team-tools', name: '@contexera/dsh-agent-team/tools', config: { only: MANAGER_TEAM_TOOLS } },
+      TEAM_SKILLS_PRESET_ROW,
       { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
         { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },
       ] },

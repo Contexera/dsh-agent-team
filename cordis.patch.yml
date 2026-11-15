@@ -172,12 +172,21 @@
             - id: tool-jobs
               name: '@deepseek-ai/dsh-tool-jobs'
 
-            # Skills are per-Member: the Host mounts a private-directory provider on each
-            # Member's agent context at activation (member-skills). The shared filesystem
-            # row stays out, so no Member inherits project/user/bundled skills and every
-            # Member catalog starts empty until the Member installs a skill itself.
-            - id: tool-skill
-              name: '@deepseek-ai/dsh-tool-skill'
+            # Team skills use a preset-private registry. The router selects only the
+            # exact Agent's bundled and private roots; Host-global providers never enter
+            # discovery, loading, explicit invocation, or the model catalog.
+            - id: skills
+              name: cordis:group
+              group: true
+              isolate:
+                skills: true
+              config:
+                - id: skill-registry
+                  name: '@deepseek-ai/dsh-skill'
+                - id: member-skills
+                  name: '@contexera/dsh-agent-team/member-skills'
+                - id: tool-skill
+                  name: '@deepseek-ai/dsh-tool-skill'
 
             # No `tool-todo` row: Team Members plan through the ledger (Tasks,
             # Claims, Thread updates) rather than a session-local todo list, so
@@ -321,8 +330,18 @@
             - id: tool-jobs
               name: '@deepseek-ai/dsh-tool-jobs'
 
-            - id: tool-skill
-              name: '@deepseek-ai/dsh-tool-skill'
+            - id: skills
+              name: cordis:group
+              group: true
+              isolate:
+                skills: true
+              config:
+                - id: skill-registry
+                  name: '@deepseek-ai/dsh-skill'
+                - id: member-skills
+                  name: '@contexera/dsh-agent-team/member-skills'
+                - id: tool-skill
+                  name: '@deepseek-ai/dsh-tool-skill'
 
             - id: tool-web
               name: '@deepseek-ai/dsh-tool-web'

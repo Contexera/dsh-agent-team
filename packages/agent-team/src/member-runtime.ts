@@ -487,7 +487,7 @@ export class MemberRuntime {
     for (const settle of Array.from(this.turnWaitResolvers)) settle()
   }
 
-  /** Registers the Member-private skill provider on the created agent's exact scope layer (the traceable-service seam, like the tool restriction): bundled core skills plus the Member's private directory. Without a skill registry nothing is registered. The sanitized directory is authoritative; activateMember migrates any legacy colon directory onto it first. */
+  /** Mounts bundled core skills plus the Member's private directory behind the exact Agent entry in its preset's isolated skills router. Without that Team registry nothing is registered. The sanitized directory is authoritative; activateMember migrates any legacy colon directory onto it first. */
   mountMemberSkillProvider(
     member: AgentTeamAgentMember,
     agentCtx: Context,

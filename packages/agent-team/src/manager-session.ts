@@ -421,6 +421,7 @@ export class ManagerSessionRuntime {
       return this.unavailable('runtime', 'the successor manager Session was archived after pointer persistence', sessionId)
     }
     await this.disposeRetired(previous)
+    await this.archiveRetired(previous)
     return this.ready(nextPointer)
   }
 
@@ -611,6 +612,18 @@ export class ManagerSessionRuntime {
       // The successor is current, while the retained guard denies the old
       // Agent until its handle has actually stopped.
       this.warn(`retired manager Session disposal failed after the successor was current: ${messageOf(error)}`)
+    }
+  }
+
+  /** Archive the replaced Session without deleting its log or rolling back the published successor. */
+  private async archiveRetired(previous: RetiredManager | undefined): Promise<void> {
+    if (previous === undefined) return
+    const sessionId = previous.handle.agent.id
+    if (this.isArchived(sessionId)) return
+    try {
+      await this.deps.ctx.workspaceRegistry.archiveSession(sessionId, { stopActivity: true })
+    } catch (error) {
+      this.warn(`retired manager Session archival failed after the successor was current: ${messageOf(error)}`)
     }
   }
 

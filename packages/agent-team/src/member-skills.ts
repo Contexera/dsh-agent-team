@@ -1,13 +1,38 @@
 /**
- * Per-Member private skill provider: wraps the Harness filesystem provider so one Member discovers only the plugin's bundled read-only core skills plus its private `skills/` directory (default roots excluded), filtered by that Member's selection.
+ * Team-owned skill discovery. An isolated preset registry admits only this router;
+ * the router selects the exact Agent's bundled-plus-private filesystem provider.
  * @module @contexera/dsh-agent-team/member-skills
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { SkillCandidate, SkillProvider, SkillProviderControl, SkillProviderObservation, SkillRegistry } from '@deepseek-ai/dsh-skill'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import type { SkillCandidate, SkillProvider, SkillProviderControl, SkillProviderObservation, SkillRegistry, SkillViewOptions } from '@deepseek-ai/dsh-skill'
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 
-/** Handle to one mounted Member skill provider: the selection swap and the disposer. */
+export const name = 'contexera-agent-team-member-skills'
+export const inject = ['skills']
+
+/** The registry is shared even when the preset and Host activate separate module graphs. */
+const skillRouterKey = Symbol.for('@contexera/dsh-agent-team/skill-router')
+type RoutedSkillRegistry = SkillRegistry & { [skillRouterKey]?: TeamSkillRouter }
+
+/** Mount the router into the preset's isolated registry, never the Host-global one. */
+export function apply(ctx: Context): void {
+  const registry = ctx.skills as RoutedSkillRegistry
+  if (registry[skillRouterKey] !== undefined) throw new Error('Team skill routing is already mounted in this registry')
+  let router!: TeamSkillRouter
+  registry.registerProvider(control => {
+    router = new TeamSkillRouter(control)
+    return router
+  })
+  Object.defineProperty(registry, skillRouterKey, { configurable: true, value: router })
+  ctx.effect(() => () => {
+    if (registry[skillRouterKey] === router) Reflect.deleteProperty(registry, skillRouterKey)
+    router.dispose()
+  }, 'agent-team.skill-router')
+}
+
+/** Handle to one mounted Agent skill provider: the selection swap and the disposer. */
 export interface MemberSkillProviderMount {
   /** Swaps the live selection filter and drops cached catalogs; `undefined` loads every discovered skill. */
   readonly swap: (allow: readonly string[] | undefined) => void
@@ -15,37 +40,97 @@ export interface MemberSkillProviderMount {
   readonly dispose: () => void
 }
 
-/** Per-Member provider configuration; the private directory is provisioned before mounting. */
+/** Per-Agent provider configuration; the private directory is provisioned before mounting. */
 export interface MemberSkillsConfig {
-  /** The Member's private skills directory; the writable self-install root. */
+  /** The Agent's private skills directory; the writable self-install root. */
   readonly skillsDirectory: string
-  /** Read-only bundled skills shipped with the plugin (e.g. the meta skill). */
+  /** Read-only bundled skills shipped with the plugin for this Team role. */
   readonly bundledSkillsDirectory: string | undefined
-  /** The selection this Member's provider starts with; `undefined` loads every discovered skill. */
+  /** The selection this Agent's provider starts with; `undefined` loads every discovered skill. */
   readonly initialSelection: readonly string[] | undefined
 }
 
 /**
- * Registers the Member-private skill provider on one Member's agent scope and returns its disposer; no sibling Member or ordinary session sees the catalog.
- *
- * Registration goes through the traceable service resolved from the agent context (like `tools.restrict()`), never a plugin mount: a mount from Host activation lands on the Host's trace fiber instead of the agent scope, and a plugin `inject` would hold Member activation open. Without a skill registry the Member has no private catalog.
+ * Mount one Agent's private roots behind its preset router. No Team preset router
+ * means no private catalog; in particular, do not fall back to the Host registry.
  */
 export function mountMemberSkillProvider(agentCtx: Context, config: MemberSkillsConfig): MemberSkillProviderMount | undefined {
-  const skills = agentCtx.get('skills') as SkillRegistry | undefined
-  // No registry: return no handle, since a no-op handle would pretend a filter exists.
-  if (skills === undefined) return undefined
-  let mounted: MemberPrivateSkillProvider | undefined
-  const dispose = skills.registerProvider(control => {
-    mounted = new MemberPrivateSkillProvider(agentCtx, control, config)
-    return mounted
-  })
-  return {
-    swap: (allow: readonly string[] | undefined) => mounted?.select(allow),
-    dispose,
+  const registry = agentCtx.get('agentPresets')?.serviceFor({ ctx: agentCtx }, 'skills') as RoutedSkillRegistry | undefined
+  return registry?.[skillRouterKey]?.mount(agentCtx, config)
+}
+
+interface MountedPrivateSkills {
+  readonly provider: MemberPrivateSkillProvider
+  readonly lifecycle: AbortController
+}
+
+interface RoutedSkillLocator {
+  readonly candidate: SkillCandidate
+}
+
+/** One isolated registry provider that forwards to the exact viewing Agent. */
+class TeamSkillRouter implements SkillProvider {
+  readonly name = 'agent-team-private'
+  private readonly mounted = new Map<Context, MountedPrivateSkills>()
+
+  constructor(private readonly control: SkillProviderControl) {}
+
+  mount(agentCtx: Context, config: MemberSkillsConfig): MemberSkillProviderMount {
+    this.unmount(agentCtx)
+    const lifecycle = new AbortController()
+    const provider = new MemberPrivateSkillProvider(agentCtx, {
+      signal: lifecycle.signal,
+      invalidate: this.control.invalidate,
+    }, config)
+    const mounted = { provider, lifecycle }
+    this.mounted.set(agentCtx, mounted)
+    this.control.invalidate()
+    return {
+      swap: allow => {
+        if (this.mounted.get(agentCtx) === mounted) provider.select(allow)
+      },
+      dispose: () => this.unmount(agentCtx, mounted),
+    }
+  }
+
+  async list(options: Parameters<SkillProvider['list']>[0]): Promise<readonly SkillCandidate[] | SkillProviderObservation> {
+    const provider = this.providerFor(options)
+    if (provider === undefined) return []
+    const output = await provider.list(options)
+    if (!('candidates' in output)) return output.map(candidate => this.route(candidate))
+    return { candidates: output.candidates.map(candidate => this.route(candidate)), complete: output.complete }
+  }
+
+  async get(candidate: SkillCandidate, options: Parameters<SkillProvider['get']>[1]): Promise<Awaited<ReturnType<SkillProvider['get']>>> {
+    const provider = this.providerFor(options)
+    const original = (candidate.locator as RoutedSkillLocator).candidate
+    if (provider === undefined || original.provider !== provider.name) return undefined
+    return provider.get(original, options)
+  }
+
+  private route(candidate: SkillCandidate): SkillCandidate {
+    return { ...candidate, provider: this.name, locator: { candidate } satisfies RoutedSkillLocator }
+  }
+
+  dispose(): void {
+    for (const agentCtx of this.mounted.keys()) this.unmount(agentCtx)
+  }
+
+  private providerFor(options: Parameters<SkillProvider['list']>[0]): MemberPrivateSkillProvider | undefined {
+    const scope = (options as SkillViewOptions).scope as { readonly ctx?: Context } | undefined
+    return scope?.ctx === undefined ? undefined : this.mounted.get(scope.ctx)?.provider
+  }
+
+  private unmount(agentCtx: Context, expected?: MountedPrivateSkills): void {
+    const mounted = this.mounted.get(agentCtx)
+    if (mounted === undefined || expected !== undefined && mounted !== expected) return
+    this.mounted.delete(agentCtx)
+    mounted.lifecycle.abort(new Error(`Team skill provider "${mounted.provider.name}" disposed`))
+    this.control.invalidate()
   }
 }
 
-/** One Member's bundled-plus-private skill roots wrapped as a filtered registry provider. */
+/** One Agent's bundled-plus-private skill roots wrapped as a filtered provider. */
 class MemberPrivateSkillProvider implements SkillProvider {
   readonly name: string
   private readonly wrapped: FileSystemSkillProvider
@@ -61,7 +146,7 @@ class MemberPrivateSkillProvider implements SkillProvider {
     this.control = control
     this.allow = config.initialSelection
     this.name = `member-private:${config.skillsDirectory}`
-    // Bundled read-only core skills first, then the Member's private directory; both share the custom rank and discovery keeps the first root's same-name candidate, so bundled skills stay stable across upgrades.
+    // Bundled read-only core skills first, then the Agent's private directory; both share the custom rank and discovery keeps the first root's same-name candidate, so bundled skills stay stable across upgrades.
     const customSkillDirs = config.bundledSkillsDirectory === undefined
       ? [config.skillsDirectory]
       : [config.bundledSkillsDirectory, config.skillsDirectory]
@@ -78,7 +163,7 @@ class MemberPrivateSkillProvider implements SkillProvider {
     this.control.invalidate()
   }
 
-  /** Filters the wrapped discovery to the Member's selection. `list()` output only: the directory is still scanned and watched, so this is not a security boundary. */
+  /** Filters the wrapped discovery to the Agent's selection. `list()` output only: the directory is still scanned and watched, so this is not a security boundary. */
   async list(options: Parameters<SkillProvider['list']>[0]): Promise<readonly SkillCandidate[] | SkillProviderObservation> {
     const output = await this.wrapped.list(options)
     const allow = this.allow

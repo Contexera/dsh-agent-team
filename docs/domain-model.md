@@ -10,7 +10,7 @@ The single shared collaboration domain in one DSH home. It stores cross-member c
 
 The Host-owned, dedicated ordinary DSH Session that helps the Human understand and shape the Agent Team. It is not a Member: it has no Member ref, Team Workspace participation, Claims, Inbox, or ledger identity, and its conversation is not a Team fact. Its Session, private resources, and current-destination pointer are Host-owned; [Workspace and Session storage](architecture/workspace-session-storage.md#team-manager-session) owns their lifecycle, and [the Client boundary](architecture/client-and-remote.md#client-plugin-and-slot-composition) owns its entry.
 
-The manager uses the isolated `team-manager` preset rather than a Member composition. Its main area and composer remain the shipped DSH Conversation, composed through public surfaces without changing the Harness repository, agent loop, or shipped defaults. Replacing the manager stops the previous Session but retains its history; current and replaced Sessions stay visible in their Workspace's ordinary Session list and archivable through Harness. That Session lifecycle does not rewrite the Team ledger.
+The manager uses the isolated `team-manager` preset rather than a Member composition. Its main area and composer remain the shipped DSH Conversation, composed through public surfaces without changing the Harness repository, agent loop, or shipped defaults. Replacing the manager stops and automatically archives the previous Session while retaining its history; the current Session stays visible in its Workspace's ordinary Session list, and replaced Sessions remain available in the archive view. That Session lifecycle does not rewrite the Team ledger.
 
 ## Member
 

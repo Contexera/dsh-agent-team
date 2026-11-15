@@ -50,7 +50,7 @@ Explicit Team navigation closes the manager destination; leaving restores the ca
 
 The create-time guard wraps the public `ISessions.create` boundary. For an implicit-preset blank candidate it reads exact Host ownership; a Team-owned id is omitted before the shipped creation continues, while ordinary blanks and explicit-preset requests pass through unchanged. A failed ownership read does not retry the unsafe candidate. Disposal during the read rejects the pending creation; it neither creates a Session nor leaves the caller waiting forever.
 
-This guard excludes only blank reuse: manager history remains visible under its Workspace in the ordinary Session list and archivable through Harness. A current or retired manager viewed there still keeps its fixed composition.
+This guard excludes only blank reuse. A successful replacement automatically archives the retired manager, so its retained history appears in the Workspace's archive view rather than its active Session list; an archival failure does not roll back the successor. A current manager viewed in the ordinary list still keeps its fixed composition.
 
 While a manager is displayed, temporary slot replacements remove its hero preset picker, header preset label, and permission control. They release on every other Session so the shipped controls return. This is presentation only, not a grant or authorization lock; [Tools and preset](tools-and-preset.md#team-manager-preset) owns the Host composition and execution guard.
 

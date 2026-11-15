@@ -2,7 +2,11 @@
 
 [English](tools-and-preset.md) | 中文
 
-显式的 `team-member` preset 是唯一的 Team Member composition。它含一整套 coding capability rows：shell、filesystem/search、web search 与 fetch。还有 background jobs、skill 加载工具、compaction。skill 发现本身不是 preset row。每个 Member 的 provider 由 Host 注册在自己的 agent scope 上（见 Host authority）。另有 Team collaboration guidance/tools、Harness Workspace instruction discovery，和有界的 private-memory reference context。普通 Sessions 留在这个 isolated roster 之外。它们拿不到 Team prompt sections、tools 或 Member memory。
+显式的 `team-member` preset 是唯一的 Team Member composition。它含一整套 coding capability rows：shell、filesystem/search、web search 与 fetch。还有 background jobs、skill 加载工具、compaction。另有 Team collaboration guidance/tools、Harness Workspace instruction discovery，和有界的 private-memory reference context。普通 Sessions 留在这个 isolated roster 之外，拿不到 Team prompt sections、tools 或 Member memory。
+
+嵌套的 preset group 把 skills registry、Team 的逐 Agent router 与 skill loader 放在同一个隔离域；确切 roots 与选择生命周期归 [Host authority](host-authority.zh.md#member-capabilities-与-skills)。
+
+工具声明与提示指导是模型输入的不同层。工具名、描述与参数会成为请求专用 `tools` 字段里的 schemas；部分工具插件还会注册 system-prompt guidance sections。技能摘要目录则是持久的 user-role `<system-reminder>` / `<available_skills>` 消息，完整技能正文只在 `skill` 工具加载或用户显式调用后进入。隔离的 Team skills registry 同时服务这三种技能表面。
 
 filesystem row 显式写 `applyPatch: false`，而不是沿用 Host 默认值：Member 只被授予 `edit` 这一种文件修改工具，preset 若留空，将来 Host 默认值一翻就会悄悄扩大每个 Member 的工具面。发布包的 preset 测试断言这个值，所以这是一项被检查的决定，不是一个假设。
 

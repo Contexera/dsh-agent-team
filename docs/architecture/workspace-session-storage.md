@@ -34,7 +34,9 @@ First creation asks the shipped Workspace controller to initialize its default W
 
 Public opens and replacements share one serialized chain. Concurrent first opens create one Session, and concurrent new-conversation requests under one expected id create one successor; a stale caller observes the current Session instead of creating another. For an existing pointer, only an archived Session or a stored read that positively reports `missing` is replacement-eligible. `refused`, `corrupt`, `io`, `unknown`, pointer-read, and pointer-write failures return `unavailable` and retain the pointer.
 
-Replacement persists the pointer, then publishes the successor and immediately denies the old manager; the old handle is stopped while its Session history remains visible and archivable under its Workspace in the ordinary list. Workspace archival and pointer persistence are separate authorities, so a race can leave them briefly out of step; the next open converges by replacing an archived manager rather than by a cross-authority atomic transaction.
+Replacement persists the pointer, then publishes the successor and immediately denies the old manager. After the old handle stops, the Host archives the retired Session without deleting its log, so the successor stays in the active list and the predecessor moves to the Workspace's archive view.
+
+Archival is best-effort after publication: a failure is warned about without rolling back the successor or deleting history. Workspace archival and pointer persistence are separate authorities, so a race can leave them briefly out of step; the next open converges by replacing an archived manager rather than by a cross-authority atomic transaction.
 
 Manager-private resources live under `$DSH_HOME/agent-team/manager`: `memory.md`, `notes/`, and `skills/`. They are not ledger facts. The manager's skill provider scans two roots: the read-only manager skills shipped with the bundle (`packages/agent-team/manager-skills/`, first) and that private `skills/` directory. The Member core skills are a different root and never reach the manager, and neither manager root reaches a Member or an ordinary Session.
 

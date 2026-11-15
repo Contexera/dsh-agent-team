@@ -139,9 +139,11 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - composer 是另一个入口，且不靠选择事件落账。真正证明切换越过了 Host 的压缩检查、进入一次真实请求的是 Member Session 的 `request/header`，所以 Host 以 `header.config` 的路由写一条 Human 的 `team/member-updated`。只写路由：推理档位是 Session 日志里的事实，activation 对同一条路由重新读取。
 - 有三种请求什么都不写。一种是请求的路由与 Member 当前正在跑的路由一致，包括 Team 自己在 activation 时写回的那条，于是写回不会经账本自循环。另一种是被 Host 拒绝的切换：它根本不会记下 header，因此也从不写入。第三种是 Member 已经走过的 header：该 step 固定路由之后发生的选择更新，写回这条 header 的路由会把被替换掉的那条按回去。
 - 名册每行的 `capabilityState`（`applied` | `pending`）比较该 Member 存储的 `capabilities` 与运行时已应用的配置；没有运行时的 Member 报 `pending`。它与 `availability`、`presence` 分开，也不表示某个回合的 profile `extraToolGrants` 是否生效。
-- Skills 是 Member 私有的。preset 不带共享 skill-filesystem row。Host 在每个 Member 的 agent exact scope layer 上注册一个 filesystem provider。它是 traceable-service 接缝，与 tool restriction 同构。这个 provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<memberId>/skills/`。
+- Team skills 使用各 Team preset 内部隔离的 registry。它唯一注册的 provider 是 Team router，由 router 选择确切 Agent 的 filesystem provider；Host 全局 provider 与 runtime skills 不会进入 Team 的发现、加载、显式 `/skill` 调用或模型目录。shipped Session skill catalog 与 `skill` 工具读取同一个 registry。普通 Session 继续使用 Host registry，以及其中配置的全部全局 skills。
 
-  管理会话由自己的 runtime 提供同构的两处 root：只读的 `packages/agent-team/manager-skills/`（排前，并由同一个 `check:core-skills` 检查）与可写的 `$DSH_HOME/agent-team/manager/skills/`。Member 的 root 与 manager 的 root 互不进入，普通 Session 根本没有 provider。
+  每个 Member provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<memberId>/skills/`。
+
+  管理会话由自己的 runtime 提供同构的隔离结构与两处 root：只读的 `packages/agent-team/manager-skills/`（排前，并由同一个 `check:core-skills` 检查）与可写的 `$DSH_HOME/agent-team/manager/skills/`。Member 的 root 与 manager 的 root 互不进入。
 
   Member catalog 从内置集起始，内置集里有 `member-skill-manager` meta skill。全部 skill 写作/安装/credentials 引导都在这个 meta skill 里面。persona 只陈述私有空间物理事实。安装就是往 Member 自己的目录写。目录形态为 `skills/<name>/SKILL.md` 加可选 references/scripts，或平铺 `.md`。有意不提供上传 Remote，发现由 filesystem watcher 驱动。
 
