@@ -29,6 +29,7 @@ Run through `npm run check:*`; several are also part of `npm test` (see `start-a
 | `generate-typert.mjs` | Analyze the Host face under `packages/agent-team/src/` and emit the Typert Host/Remote artifacts into `packages/agent-team/lib/`. | `npm run generate:typert` |
 | `clean-build-outputs.mjs` | Remove the package `lib/` output directories. | `npm run clean:build-outputs` (first step of `build`) |
 | `build-client.mjs` | Build the Client bundle with Harness `tsdown`. | last step of `npm run build` |
+| `ci-harness-cache.mjs` | Pack and restore the sibling Harness checkout's gitignored build outputs (`lib/`, native host addons, `.dsh-build`) into one CI cache archive. | `.github/workflows/ci.yml` |
 
 ## Browser acceptance, previews, and dev tools
 

@@ -1,51 +1,31 @@
-# CI gate: typecheck + full tests on clean Linux and Windows runners.
+# CI gate: fast static checks first, then cached Linux and Windows runners on code changes.
 #
-# The environment contract lives in
-# docs/development/environments-and-install.md § "Sandbox and CI environments" — the same contract as
-# scripts/hoplite-setup.sh. When the certified harness tag advances, update the
-# DSH_HARNESS_TAG env below together with the DSH peer ranges and
-# docs/development/environments-and-install.md; `npm run check:versions` gates the
-# match. The Hoplite setup derives its tag from the peer lower bound.
+# Architecture (3 jobs):
+# - `checks` runs on every PR, `master` push, and manual dispatch without cloning or building
+#   deepseek-harness: repo docs, core-skills, package boundaries, versions, comment hygiene,
+#   scratch hygiene, and oxlint. It also classifies whether code/package files changed.
+# - `linux` and `windows` run in parallel only when code/package/CI files change (or on
+#   manual dispatch), caching the pnpm store and compiled Harness outputs keyed by runner OS
+#   and `DSH_HARNESS_TAG`.
 #
-# Scope guard: this workflow keeps two code jobs (linux + windows) and the
-# scratch-only workflow reads the archived work area. No coverage matrix,
-# no release automation, no test:browser (that stays a local acceptance step).
-# The windows lane is the regression fence for filesystem-identifier bugs
+# Scope guard: no coverage matrix, no release automation, no test:browser (that stays a local
+# acceptance step). The windows lane is the regression fence for filesystem-identifier bugs
 # (issues #7/#8): string-level sanitizing must hold on a real Windows FS.
 name: ci
 
 on:
   pull_request:
-    # A PR touching only `.scratch/` skips this gate: no CI check here reads work
-    # history — check:docs page sets, the check:comments citation ban, the
-    # check:versions exclusion, and the vitest includes all stop short of it.
-    # `.scratch/` is checked by the scratch-only workflow instead.
-    # `**.md` is deliberately absent here: check:docs is a real content gate
-    # for docs/ and the READMEs, so those PRs keep running both lanes.
-    # `.agents/` joins `.scratch/` for the same reason: it holds the one-way
-    # downstream skill copies, and no gate reads them — check:core-skills
-    # covers packages/agent-team/core-skills, check:docs stops at docs/ and the
-    # READMEs, and no vitest include reaches it.
-    paths-ignore:
-      - '.scratch/**'
-      - '.agents/**'
   push:
     branches: [master]
-    # Docs-only pushes skip the gate: README/docs/assets never reach code.
-    # The [skip ci] marker achieves the same per-commit when hand-editing
-    # generated path facades on master. `.scratch/` and `.agents/` join them for
-    # the same reason: no gate reads either.
-    paths-ignore:
-      - '**.md'
-      - 'assets/**'
-      - 'docs/**'
-      - '.scratch/**'
-      - '.agents/**'
   workflow_dispatch:
 
-# Least privilege; the harness clone and pnpm store live in the workspace.
+# Least privilege; the harness clone and pnpm store live in workspace/runner temp.
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Single adjustable variable: the certified harness release tag. Advance it
@@ -53,62 +33,160 @@ env:
   DSH_HARNESS_TAG: dsh-v0.2.2-rc.2
 
 jobs:
-  linux:
+  checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
     steps:
       - name: Check out this repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: ${{ github.event_name == 'push' && 0 || 1 }}
+          persist-credentials: false
+
+      - name: Classify change scope
+        id: scope
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          predicate-quantifier: some-with-excludes
+          filters: |
+            code:
+              - '**'
+              - '!*.md'
+              - '!docs/**'
+              - '!.scratch/**'
+              - '!.agents/**'
+              - '!assets/readme/**'
+              - '!packages/*/README.md'
+              - '!packages/*/README.zh.md'
+              - '!scripts/README.md'
+              - '!.github/ISSUE_TEMPLATE/**'
+              - '!.github/PULL_REQUEST_TEMPLATE.md'
+              - '!.github/dependabot.yml'
+              - '!LICENSE'
+
+      - name: Enable the corepack shims
+        run: |
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Configure pnpm store path
+        id: pnpm-store
+        run: |
+          store_root=$(node -e "console.log(require('node:path').join(process.env.RUNNER_TEMP, 'pnpm-store'))")
+          echo "PNPM_CONFIG_STORE_DIR=$store_root" >> "$GITHUB_ENV"
+          echo "path=$(PNPM_CONFIG_STORE_DIR="$store_root" pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-repo-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-repo-
+
+      - name: Install this repository
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Run static and hygiene gates
+        run: |
+          npm run check:docs
+          npm run check:core-skills
+          npm run check:boundaries
+          npm run check:versions
+          npm run check:comments
+          npm run check:scratch
+
+      - name: Lint
+        run: npm run lint
+
+  linux:
+    needs: checks
+    if: github.event_name == 'workflow_dispatch' || needs.checks.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Enable the corepack shims
         # The certified Harness calls a bare `pnpm` from inside its own scripts
         # (build:lib, build:web). `corepack pnpm` resolves only within its own
         # process, so without a shim on PATH those steps fail on `pnpm: not found`.
-        # Echo the resolved version so a missing shim fails here, at its cause.
         run: |
           corepack enable pnpm
           pnpm --version
 
+      - name: Configure pnpm store path
+        id: pnpm-store
+        run: |
+          store_root=$(node -e "console.log(require('node:path').join(process.env.RUNNER_TEMP, 'pnpm-store'))")
+          echo "PNPM_CONFIG_STORE_DIR=$store_root" >> "$GITHUB_ENV"
+          echo "path=$(PNPM_CONFIG_STORE_DIR="$store_root" pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-full-${{ env.DSH_HARNESS_TAG }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-full-${{ env.DSH_HARNESS_TAG }}-
+            ${{ runner.os }}-pnpm-full-
+
+      - name: Cache built Harness artifacts
+        id: harness-build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/harness-build.tar
+          key: harness-build-v1-${{ runner.os }}-${{ env.DSH_HARNESS_TAG }}
+
       - name: Check out the pinned Harness release as the default sibling
         # Contract: the sibling must be named deepseek-harness (the default
-        # every script falls back to); checkout the certified tag. actions/
-        # checkout refuses paths outside the workspace, so clone inside and
-        # move it up one level to the real sibling position.
+        # every script falls back to); checkout the certified tag.
         run: |
           git clone --depth 1 --branch "$DSH_HARNESS_TAG" \
             https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
 
-      - name: Install and build the Harness workspace
+      - name: Install and prepare the Harness workspace
         # corepack pnpm only — never npm install (breaks workspace symlinks).
-        # The host addon is a separate, gitignored build (`build:native-system`);
-        # only the Harness's own `test` script performs it, and this repository
-        # runs Vitest directly against that checkout. Without it Member
-        # activation fails (`Agent is not an active Team Member`) and 85
-        # agent-team tests error or hang. The script exits without building off
-        # Linux/macOS, so both lanes run the same step.
+        # Built outputs (`build:lib` + `build:native-system`) are restored from
+        # cache when available, or compiled once and packed for future runs.
+        env:
+          HARNESS_CACHE_ARCHIVE: ${{ runner.temp }}/harness-build.tar
         run: |
-          cd ../deepseek-harness
-          corepack pnpm install
-          corepack pnpm build:lib
-          corepack pnpm build:native-system
+          (cd ../deepseek-harness && corepack pnpm install --frozen-lockfile)
+          if [ "${{ steps.harness-build.outputs.cache-hit }}" = "true" ]; then
+            node scripts/ci-harness-cache.mjs unpack ../deepseek-harness
+          else
+            (
+              cd ../deepseek-harness
+              corepack pnpm build:lib
+              corepack pnpm build:native-system
+            )
+            node scripts/ci-harness-cache.mjs pack ../deepseek-harness
+          fi
 
       - name: Install this repository
-        run: corepack pnpm install
+        run: corepack pnpm install --frozen-lockfile
 
       - name: Link harness packages and build the bundle
         run: |
           node scripts/link-harness-packages.mjs
           npm run build
 
-      - name: Check built artifact
-        run: npm run check:artifact
+      - name: Check built artifact and stripped desktop boot
+        run: |
+          npm run check:artifact
+          node scripts/verify-desktop-strip-boot.mjs
 
       - name: Regenerate TypeScript path facades
         # sync-paths is not part of any npm script; skipping it leaves the
         # committed facades pointing at their generation-time paths.
         run: node scripts/sync-paths.mjs
-
-      - name: Lint
-        run: npm run lint
 
       - name: UI parity audit
         run: node scripts/audit-ui-parity.mjs
@@ -120,59 +198,85 @@ jobs:
         run: npm test
 
   windows:
+    needs: checks
+    if: github.event_name == 'workflow_dispatch' || needs.checks.outputs.code == 'true'
     runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        # Git bash keeps ../ and $VAR expansion identical to Linux; default pwsh
+        # breaks backslash line continuations.
+        shell: bash
     steps:
       - name: Check out this repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Enable the corepack shims
-        # The certified Harness calls a bare `pnpm` from inside its own scripts
-        # (build:lib, build:web). `corepack pnpm` resolves only within its own
-        # process, so without a shim on PATH those steps fail on `pnpm: not found`.
-        # Echo the resolved version so a missing shim fails here, at its cause.
         run: |
           corepack enable pnpm
           pnpm --version
 
+      - name: Configure pnpm store path
+        id: pnpm-store
+        run: |
+          store_root=$(node -e "console.log(require('node:path').join(process.env.RUNNER_TEMP, 'pnpm-store'))")
+          echo "PNPM_CONFIG_STORE_DIR=$store_root" >> "$GITHUB_ENV"
+          echo "path=$(PNPM_CONFIG_STORE_DIR="$store_root" pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-full-${{ env.DSH_HARNESS_TAG }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-full-${{ env.DSH_HARNESS_TAG }}-
+            ${{ runner.os }}-pnpm-full-
+
+      - name: Cache built Harness artifacts
+        id: harness-build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/harness-build.tar
+          key: harness-build-v1-${{ runner.os }}-${{ env.DSH_HARNESS_TAG }}
+
       - name: Check out the pinned Harness release as the default sibling
-        # Same sibling contract; run in git bash so ../ and $VAR expand exactly
-        # like the linux lane (the default windows shell is pwsh, which breaks
-        # backslash line continuations).
-        shell: bash
         run: |
           git clone --depth 1 --branch "$DSH_HARNESS_TAG" \
             https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
 
-      - name: Install and build the Harness workspace
-        shell: bash
-        # Same native host addon as the linux lane; the script exits without
-        # building off Linux/macOS, so this step stays identical in both lanes.
+      - name: Install and prepare the Harness workspace
+        env:
+          HARNESS_CACHE_ARCHIVE: ${{ runner.temp }}/harness-build.tar
         run: |
-          cd ../deepseek-harness
-          corepack pnpm install
-          corepack pnpm build:lib
-          corepack pnpm build:native-system
+          (cd ../deepseek-harness && corepack pnpm install --frozen-lockfile)
+          if [ "${{ steps.harness-build.outputs.cache-hit }}" = "true" ]; then
+            node scripts/ci-harness-cache.mjs unpack ../deepseek-harness
+          else
+            (
+              cd ../deepseek-harness
+              corepack pnpm build:lib
+              corepack pnpm build:native-system
+            )
+            node scripts/ci-harness-cache.mjs pack ../deepseek-harness
+          fi
 
       - name: Install this repository
-        shell: bash
-        run: corepack pnpm install
+        run: corepack pnpm install --frozen-lockfile
 
       - name: Link harness packages and build the bundle
         # link-harness-packages uses directory junctions on win32, so no
         # symlink privilege is needed.
-        shell: bash
         run: |
           node scripts/link-harness-packages.mjs
           npm run build
 
       - name: Regenerate TypeScript path facades
-        shell: bash
         run: node scripts/sync-paths.mjs
 
       - name: Typecheck
-        shell: bash
         run: npm run typecheck
 
       - name: Test
-        shell: bash
         run: npm test
