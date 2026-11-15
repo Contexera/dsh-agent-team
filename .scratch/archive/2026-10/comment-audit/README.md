@@ -78,7 +78,7 @@
 
 ## 材料
 
-过程材料（24 份 `comment-sicko` 原始报告、分片清单、机械校验与删除计划的中间 JSON）已按 [`../AGENTS.md`](../AGENTS.md) 的生命周期规则删除：它们是可重新生成的中间产物，结论已全部固化进 [`refactoring-candidates.md`](refactoring-candidates.md) 与 `issues/`。
+过程材料（24 份 `comment-sicko` 原始报告、分片清单、机械校验与删除计划的中间 JSON）已按 [`../../../AGENTS.md`](../../../AGENTS.md) 的生命周期规则删除：它们是可重新生成的中间产物，结论已全部固化进 [`refactoring-candidates.md`](refactoring-candidates.md) 与 `issues/`。
 
 **报告是输入不是结论**：当年的 `verified.json` 只证明"这条建议指向的行当前确实是注释"，不证明"这条注释该删"。
 

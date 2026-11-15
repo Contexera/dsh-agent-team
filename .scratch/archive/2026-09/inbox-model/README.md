@@ -4,7 +4,7 @@
 
 **已完成并归档（2026-09-15）。** 三步全部落地：① 模型收敛（本目录 `spec.md`）→ ② Iris 侧 Thread 入口采用（c57e0b0，验收于 thread:8939bf7e）→ ③ 改造「提到我」为收件箱（Host 准入 + 删 `directOnly` + Client 页面，随本目录的归档提交一起落地）。
 
-决策正本是 [`spec.md`](spec.md) 的九条；durable conclusions 已搬进 `docs/architecture.md`、`docs/frontend-design.md`、`docs/team-collaboration.md`（均含 `.zh.md` 镜像）与 `CHANGELOG.md` `[Unreleased]`。本目录只保留决策与过程材料。
+决策正本是 [`spec.md`](spec.md) 的九条；durable conclusions 已搬进 `docs/architecture/README.md`、`docs/frontend-design/README.md`、`docs/team-collaboration/README.md`（均含 `.zh.md` 镜像）与 `CHANGELOG.md` `[Unreleased]`。本目录只保留决策与过程材料。
 
 last-checked: 2026-09-15（当日门禁实跑：`npm test`、`typecheck`、`lint`、`npm run test:browser`）。
 

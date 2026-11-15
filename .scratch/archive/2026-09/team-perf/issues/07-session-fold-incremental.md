@@ -1,5 +1,7 @@
 # 07 — Session fold 增量与 pressure notice 状态
 
+> 已归档：本票未实施，续作见 [session-fold-incremental](../../session-fold-incremental/README.md)。
+
 **What to build:** `context-management` 与 clock context 用 Session event cursor 取代每次事件的全量 `ownEvents()` fold；pressure notice「是否已送达」改成增量 Session 状态；progress-nudge reconcile 按受影响 Member 合并批次。
 **Blocked by:** None — can start immediately
 **Status:** ready

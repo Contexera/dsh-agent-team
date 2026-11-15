@@ -1,8 +1,8 @@
 # Quality improvement
 
-**Status:** ready-for-implementation
+**Status:** complete — archived 2026-10-01. All seven implementation tickets shipped the same day (`a4872a6a`, `eecd367f`, `509a8e83`, `62180a75`, `96ad30f7`, `4b61756e`).
 **Last checked:** 2026-10-01
-**Current frontier:** Research has converged into the decision snapshot in `spec.md` and seven dependency-ordered implementation tickets under `issues/`. The strongest path is Member context renewal reconciliation, followed by lifecycle boot convergence; attachment idempotency can proceed in parallel. This work item defines behavior and acceptance boundaries; dedicated implementation agents may now execute the tickets.
+**Delivered:** Member context renewal reconciliation, lifecycle boot convergence, attachment idempotency, post-commit delivery semantics, the Remote error contract, operation-protocol coverage, and structured recovery classification. Durable conclusions are in the owning documents under `docs/`; each ticket records its own evidence.
 **Completion conditions:**
 
 - [x] First-pass Team modules, package seams, durable authorities, and Harness extension contracts are inventoried from source and tests.

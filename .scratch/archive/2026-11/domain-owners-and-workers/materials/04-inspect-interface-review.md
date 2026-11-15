@@ -1,5 +1,7 @@
 # 04 — 退出后只读诊断的接口核对
 
+> 文中链接的探针脚本位于 Git 忽略的 `artifacts/` 目录，未随仓库分发；这里保留路径作为来源记录。
+
 **核对时间：** 2026-11-09。**范围：** Codex CLI 0.167.0、OAR 0.95.1、Harness 0.2.2-rc.1。本文记录实施中的实证与约束，不代表 04 已验收；当前事实仍以源码、测试和 Task #140 为准。
 
 ## 已核实的原生关联
@@ -12,7 +14,7 @@ Reeve 在独立临时目录、清空凭证的进程环境和本机 HTTP 假端�
 - 测试记录的构造阶段会请求本机假端点；退出后的查询没有新增模型端点请求。不能把“没有凭证，预计返回 401”当成不调用真实服务的防护。
 - 结论只覆盖上述 Codex/OAR 组合，不外推到 Claude 或任意 runtime。OAR 的 Codex 投影直接以原生 `turnId`／`turn.id` 构造 `spanId`，但仍需把锚点绑定到本次输入，不能遇到多个候选时猜最后一条。
 
-可复跑的[原生对照探针](../../../../artifacts/review-worker-native-read.mjs)位于忽略区；从仓库根运行，并保留可执行文件搜索路径：
+可复跑的原生对照探针（`artifacts/review-worker-native-read.mjs`）位于忽略区；从仓库根运行，并保留可执行文件搜索路径：
 
 ```sh
 NODE="$(command -v node)"
@@ -21,7 +23,7 @@ env -i PATH="${PATH:?}" HOME=/tmp "${NODE:?}" --import tsx artifacts/review-work
 
 ## 草稿中的三个确定反例
 
-[读取边界探针](../../../../artifacts/review-worker-inspection-boundaries.mjs)对同一读取入口有一个正对照和三个反例，核对时为 1 绿／3 红：
+读取边界探针（`artifacts/review-worker-inspection-boundaries.mjs`）对同一读取入口有一个正对照和三个反例，核对时为 1 绿／3 红：
 
 1. 文件属于正确 Session，但目标 turn 不存在，仍返回无说明的 `read`；只有 Session 元数据不能代表查到了该次执行。
 2. `password=`、`x-api-key:` 后的测试值进入返回片段。OAR 的 `REDACTION_RULES` 只覆盖若干 Grok／CodeBuddy 帧，不是 Codex 文本清洗器；窄 token 外形匹配也不覆盖带敏感键名的自定义值。
@@ -37,7 +39,7 @@ Reeve 已读完该提交全部 33 个文件的差量；它尚未通过核验。�
 
 - 原来三项读取反例已转绿。读取器改用 `FileHandle.read` 后，字节探针也改为观测这个入口，并要求实际观测字节大于零；只保留旧 `createReadStream` 钩子会得到无意义的零字节通过。
 - 扩充后的读取探针为 4 绿／3 红：带引号的敏感 JSON 键漏过 withholding；open 取得另一个真实 inode 而路径前后仍指回原文件时被接受；128 KiB 非法路径被完整回显到拒绝原因。完整报告的界限还须涵盖 native 字段与说明，不能只约束片段。
-- 新增[锚点生命周期探针](../../../../artifacts/review-worker-anchor-lifetime.mjs)，直接运行 Team provider、只模拟 OAR、不启动进程或模型，连续两次为 1 绿／3 红。正常失败可携带私有锚点；取消与清理失败的调用顺序却是 `abort → dispose → records`，模拟器关闭 dispose 后的记录流时锚点丢失。这个结果证明捕获顺序不符合清理前捕获的要求，不代表已经实测发布版 OAR 在 dispose 后必然清空记录。
+- 新增锚点生命周期探针（`artifacts/review-worker-anchor-lifetime.mjs`），直接运行 Team provider、只模拟 OAR、不启动进程或模型，连续两次为 1 绿／3 红。正常失败可携带私有锚点；取消与清理失败的调用顺序却是 `abort → dispose → records`，模拟器关闭 dispose 后的记录流时锚点丢失。这个结果证明捕获顺序不符合清理前捕获的要求，不代表已经实测发布版 OAR 在 dispose 后必然清空记录。
 - 同一探针再加入另一个根 turn，当前收集循环直接选择最后一个，不能保证属于该次输入。无法唯一关联时应明确缺失，而不是猜测。
 - Client 首轮只有列表行的入口，没有 Human 按编号读取窗口外记录的入口；该能力是已定交付条件，不能用删改窗口文案替代。Tars 继续收口实现，Iris 复核 Client 并在控件定稿后补组件说明。
 
@@ -49,7 +51,7 @@ node --experimental-test-module-mocks --import tsx artifacts/review-worker-ancho
 
 04 已接受，Task #140：task:d6312f96-9391-407a-8c3b-1e5059185e7c。上面的反例是修复过程，不再代表当前缺陷。Reeve 已全文核对实现与各次收口差量，独立读取探针 7/7、生命周期探针（含新增的 await 抛错路径）5/5 通过；取消前与所有结算路径均会尝试捕获，由本次执行携带快照。
 
-另加[真实 Team provider 对照探针](../../../../artifacts/review-worker-provider-native.mjs)：不手工组装锚点，而是调用生产 `startWorkerRun`，取其结果上的私有锚点，再关闭进程并由新的 CLI 回读。发布版 Codex 0.167.0 的 session／turn／路径逐值一致，失败片段可读；构造失败走本机假端点，查询前后端点请求数均为 6。
+另加真实 Team provider 对照探针（`artifacts/review-worker-provider-native.mjs`）：不手工组装锚点，而是调用生产 `startWorkerRun`，取其结果上的私有锚点，再关闭进程并由新的 CLI 回读。发布版 Codex 0.167.0 的 session／turn／路径逐值一致，失败片段可读；构造失败走本机假端点，查询前后端点请求数均为 6。
 
 Vera 的独立整版门禁、新浏览器回归提交 `d46644f` 及最终 `032e10f` 上的窄跑已交付；Reeve 查看了桌面、动作组与 390×844 的三张新截图。完整命令与结果在 Task 的交付记录中。当前认证 GUI 未重启／更新，本验收不把临时测试 profile 冒充运行中的 Host。
 

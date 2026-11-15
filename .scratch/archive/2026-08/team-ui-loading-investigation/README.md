@@ -10,7 +10,7 @@
 - Client 以 `TeamChangeStream` 共享按 scope 的可取消 long-poll；Thread 首开改为一轮并行读取。
 - 冷启动复用一次 `sessionPersistence.list()` 的结果。
 
-稳定边界已进入 [`docs/architecture.md`](../../../../docs/architecture.md)、[`packages/agent-team/README.md`](../../../../packages/agent-team/README.md) 和 [`packages/client-agent-team/README.md`](../../../../packages/client-agent-team/README.md)。详细历史分析见 [`report.md`](report.md)。
+稳定边界已进入 [`docs/architecture/README.md`](../../../../docs/architecture/README.md)、[`packages/agent-team/README.md`](../../../../packages/agent-team/README.md) 和 [`packages/client-agent-team/README.md`](../../../../packages/client-agent-team/README.md)。详细历史分析见 [`report.md`](report.md)。
 
 ## 验收记录
 

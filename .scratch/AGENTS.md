@@ -102,6 +102,9 @@ The work-item README names the default acceptance owner. A ticket adds any indep
 - When adding or removing a `.scratch/local/` entry, update `.scratch/local/README.md` with its source work item and reason for retention.
 - Project skills under `.agents/skills/` are downstream copies of the skills source repository. Change the source, then synchronize one way and run that checkout's read-only copy comparison; do not maintain parallel edits here.
 - The scratch README does not list active local work items. Each active item's own README owns its status and frontier; only closed items enter the archive index.
+- `npm run check:scratch` mechanically checks the archive index, each archived work item's entry README, links in archived README files, and ticket status lines. A ticket may keep an unclosed status only when its first lines carry a `> 已归档` note explaining that the status is historical and was not backfilled.
+- A month directory may carry a `README.md` overview; 2026-08 has one as a historical artifact, and other months do not need one. A `validation/` directory directly under a month is shared evidence for several work items: it needs its own `README.md` and is indexed as shared evidence, not treated as a work item.
+- Acceptance evidence may name the machine it ran on — absolute paths, engine versions, temporary profiles. Treat those as provenance, not as portable commands.
 
 ## Directory index
 

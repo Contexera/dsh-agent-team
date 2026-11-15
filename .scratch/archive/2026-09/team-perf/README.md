@@ -46,6 +46,6 @@ last-checked: 2026-09-14。
 | 后续可能有帮助的（B 及更远） | [`materials/next.md`](materials/next.md) |
 | 别再踩的约束 | [`materials/constraints.md`](materials/constraints.md) |
 | Vera 的可复跑尺子 | [`materials/vera-replay-ruler.md`](materials/vera-replay-ruler.md) |
-| 2026-08 那轮 UI loading（无规模数据，勿当待办） | [`.scratch/archive/2026-08/team-ui-loading-investigation/`](../../archive/2026-08/team-ui-loading-investigation/) |
+| 2026-08 那轮 UI loading（无规模数据，勿当待办） | [`.scratch/archive/2026-08/team-ui-loading-investigation/`](../../2026-08/team-ui-loading-investigation/) |
 
 源头线程：thread:0de17583 / task:0bcb60b7 #9。Roadmap 第一刀：thread:e3f3d7f7 / task:6415d88a #38，issue #21 / PR #22。

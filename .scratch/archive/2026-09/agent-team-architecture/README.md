@@ -41,8 +41,8 @@ Make future Agent Team extensions easier to place and review, without inventing 
 
 All exits are satisfied:
 
-- Package ownership and dependency direction → `docs/architecture.md` / `architecture.zh.md`. **Done.**
-- The operation-extension workflow, the seam rules, and the new `check:boundaries` gate → `docs/development.md` / `development.zh.md`. **Done.**
+- Package ownership and dependency direction → `docs/architecture/package-ownership.md`. **Done.**
+- The operation-extension workflow, the seam rules, and the new `check:boundaries` gate → `docs/development/start-and-checks.md`. **Done.**
 - The activation-owner rule → stated in `architecture.md` and in frontier item 3 here. **Done as a rule; the refactor itself is deliberately not scheduled.**
 - The Client settings forwarder → removed rather than documented. **Done.**
 - The Remote entrypoint correction → recorded in ticket 01 rather than in maintained prose, because it is an implementation constraint with no user-visible contract.

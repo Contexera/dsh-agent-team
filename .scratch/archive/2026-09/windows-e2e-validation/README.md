@@ -11,4 +11,4 @@
 
 **结束条件：** 已满足——报告交付；issue 草稿内嵌报告（F2/F3/F6/F7/F8/F10 为可立 issue 项，#8 复现证据可直接回帖；F11 为新候选 issue，根因与修哪一层建议已备齐）。
 
-**正式文档出口：** 不回写 docs/（只测不修）；`docs/development.md` 的候选修订点（F1 环境卫生项、F2 packageManager 事实修正）已列入报告建议段，待团队决策。
+**正式文档出口：** 不回写 docs/（只测不修）；`docs/development/README.md` 的候选修订点（F1 环境卫生项、F2 packageManager 事实修正）已列入报告建议段，待团队决策。

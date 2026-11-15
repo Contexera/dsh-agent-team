@@ -1,6 +1,6 @@
 # Team tools render information architecture
 
-**Status:** Both implementation tickets complete (2026-09-08); cumulative delivery `440624f` reviewed by Reeve with verdict 不通过 — six blockers. Tars's focused follow-up commit closes them; awaiting Reeve's delta re-review, then Cole's final simplification pass.
+**Status:** Both implementation tickets complete (2026-09-08); cumulative delivery `440624f` reviewed by Reeve with verdict 不通过 — six blockers. Tars's focused follow-up commit `d9611e56` addressed them and landed; archived without a recorded final delta re-review or Cole's simplification pass.
 **Last checked:** 2026-09-08.
 
 ## Current frontier

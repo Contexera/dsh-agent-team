@@ -1,6 +1,6 @@
 # 01 — Session fold 增量与 pressure notice 状态
 
-> 自归档 [`team-perf` 的 07](../../../archive/2026-09/team-perf/issues/07-session-fold-incremental.md) 取来（归档不复活），**归档那份保持历史原样**。四条验收判据的**含义未改**，只勾选并在末节补落地结果；另有一处口径修正：第 1 条的「133,596 事件」按 Vera 的 §3i 校正为真实读路径的 18,983（理由见末节）。
+> 自归档 [`team-perf` 的 07](../../team-perf/issues/07-session-fold-incremental.md) 取来（归档不复活），**归档那份保持历史原样**。四条验收判据的**含义未改**，只勾选并在末节补落地结果；另有一处口径修正：第 1 条的「133,596 事件」按 Vera 的 §3i 校正为真实读路径的 18,983（理由见末节）。
 
 **What to build:** `context-management` 与 clock context 用 Session event cursor 取代每次事件的全量 `ownEvents()` fold；pressure notice「是否已送达」改成增量 Session 状态；progress-nudge reconcile 按受影响 Member 合并批次。
 **Blocked by:** None — can start immediately

@@ -1,5 +1,7 @@
 # 03 — 长间隔相关性门控
 
+> 已归档：本票面状态与勾选是实现前的历史清单，未回填；见[工作项 README](../README.md)。
+
 **What to build:** 用量 ≥ 128K，且本次 turn 距上一 turn ≥ 30min 时，宿主问 jev 一次："本次输入与最近几轮 user_input 有关吗？"无关就扣住本次输入、投一条**换代**指令（模型写 handoff 并调 `context_rollover`），扣住的输入随新代交回。策略本身进 continuity 的通用压力策略，所有宿主一起继承。
 
 **Blocked by:** 无——**2026-10-04 human 把 remedy 从"压缩"改成"换代"，本条不再依赖 01**（换代不需要压缩引擎）。

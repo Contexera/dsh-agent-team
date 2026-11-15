@@ -44,8 +44,8 @@ Human 2026-09-17 指示：把文件改到与现状一致后归档。以下各项
 
 以下正式文档已更新本次实现的行为：
 
-- `docs/architecture.md` 及中文对应文档：通知传输、scope 语义、恢复与取消责任。
-- `docs/development.md` 及中文对应文档：多页面浏览器回归入口与验证条件。
+- `docs/architecture/README.md` 及中文对应文档：通知传输、scope 语义、恢复与取消责任。
+- `docs/development/README.md` 及中文对应文档：多页面浏览器回归入口与验证条件。
 - Host / Client package README 双语文档：可观察的订阅契约、适用版本与多页面限制。
 - 若改变草稿、导航或已读行为，更新其现有契约所属文档；不复制一份新的行为权威。
 

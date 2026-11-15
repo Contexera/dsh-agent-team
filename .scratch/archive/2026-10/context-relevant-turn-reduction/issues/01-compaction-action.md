@@ -1,5 +1,7 @@
 # 01 — 压缩动作（模型可调用的同 Session 压缩）
 
+> 已归档：本票面状态与勾选是实现前的历史清单，未回填；见[工作项 README](../README.md)。
+
 **What to build:** 模型在同一个 Agent Session 内多了一个自己调用的压缩动作。它把身后一段安全连续前缀换成摘要，然后继续干活。压了哪段、省了多少、或"没有可压区间"，都如实回报。跨 Session 的 handoff 仍归 `context_rollover`。工具契约与机制都在 continuity；本仓只负责挂工具与依赖。
 
 **Blocked by:** None — can start immediately。本项是 03 的前置。

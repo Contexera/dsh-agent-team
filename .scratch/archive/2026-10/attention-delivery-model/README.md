@@ -14,7 +14,7 @@
 - [`reviews/01-attention-delivery-model.md`](reviews/01-attention-delivery-model.md)：归档前的只读评审与修复记录。
 - [`reviews/02-final-completeness-review.md`](reviews/02-final-completeness-review.md)：重新打开本工作项的最终完成度复核，含复现步骤、根因和修复建议。
 - [`materials/2026-10-27-findings.md`](materials/2026-10-27-findings.md)：改动前的实测证据与代码调查。
-- 上位工作项 [`../../archive/2026-10/project-ownership-model/spec.md`](../../archive/2026-10/project-ownership-model/spec.md)（2026-10-28 归档）：其 §1 与 §7 的 Attention 矛盾由本工作项消解，其余权限与责任结论保持。
+- 上位工作项 [`../project-ownership-model/spec.md`](../project-ownership-model/spec.md)（2026-10-28 归档）：其 §1 与 §7 的 Attention 矛盾由本工作项消解，其余权限与责任结论保持。
 
 ## 当前前沿
 
@@ -45,4 +45,4 @@
 ## 与其它工作项的关系
 
 - 继承 `project-ownership-model` 的权限与责任模型，明确不恢复其已撤回的 Thread participant 层。
-- [`../agent-tools-context-rendering/`](../agent-tools-context-rendering/) 负责统一审视 tool result、错误、通知和 prompt/context 的呈现机制；本工作项提供 Attention 这个首个完整用例及必须表达的语义，两个工作项不互相扩张范围。
+- [`../../2026-11/agent-tools-context-rendering/`](../../2026-11/agent-tools-context-rendering/) 负责统一审视 tool result、错误、通知和 prompt/context 的呈现机制；本工作项提供 Attention 这个首个完整用例及必须表达的语义，两个工作项不互相扩张范围。

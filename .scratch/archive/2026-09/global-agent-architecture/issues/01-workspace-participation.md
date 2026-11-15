@@ -4,7 +4,7 @@
 
 **Blocked by:** None — spec 经 Human 验收后即可开始。
 
-**Status:** ready
+**Status:** complete（PR #26）
 
 背景与边界（自包含）：
 

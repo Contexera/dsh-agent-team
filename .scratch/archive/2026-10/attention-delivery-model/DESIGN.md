@@ -162,7 +162,7 @@ Thread / Main stream 读取结果和必要的通知中，用一行说明 `follow
 
 ## 呈现职责与相邻工作项
 
-本工作项规定必须表达的 Attention 语义和验收场景。统一的「状态 → 语义 → tool result / notification / error / prompt 渲染」机制由 [`../agent-tools-context-rendering/`](../agent-tools-context-rendering/) 审视与设计。
+本工作项规定必须表达的 Attention 语义和验收场景。统一的「状态 → 语义 → tool result / notification / error / prompt 渲染」机制由 [`../../2026-11/agent-tools-context-rendering/`](../../2026-11/agent-tools-context-rendering/) 审视与设计。
 
 Attention 是该呈现机制的第一个完整用例，但投递模型不应等待一次全工具重写才开始落地。结构化字段保持机器消费的权威；自然语言提示是辅助，不能成为另一份状态来源或要求 Client 解析。
 
