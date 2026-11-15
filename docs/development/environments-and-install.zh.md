@@ -39,9 +39,13 @@
 
 **本 bundle 自己的 dependencies 就是全部外部面。** 按名字解析的包只剩 host 闭包与本仓库自身：根 manifest 只声明 `yaml` 与 `zod`，两者都由 `generate-typert.mjs` 从本仓库自己的安装链接进 Typert 分析包。profile 安装因此不再多带任何包，CI 也不需要额外的准备步骤。
 
-**CI lanes。 ** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) 在干净的 `ubuntu-latest` 与 `windows-latest` runner 上运行 typecheck 加完整测试套件。pull request、push 到 `master`、手动 `workflow_dispatch` 都会触发。 两条 lane 执行上面相同的六步环境契约。Windows lane 的每一步经 git bash（`shell: bash`）运行，因为默认 pwsh 会破坏反斜杠续行。harness 包经目录 junction 链接，无需 symlink 权限。 范围护栏：无 coverage matrix、无发布自动化、无 `test:browser`——浏览器验收始终是本地步骤。 Windows lane 是文件系统标识符类 bug（issue #7/#8）的回归防线。 唯一可调变量是 `DSH_HARNESS_TAG`。认证推进该 tag 时，workflow 的 env、本文档与 DSH peer 区间一起更新，`npm run check:versions` 拒绝不一致。
+**CI lanes。** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) 在 pull request、push 到 `master` 和手动 `workflow_dispatch` 时运行。快速 `checks` job 在不检出 Harness 的情况下于 `ubuntu-latest` 运行静态与卫生检查（`check:docs`、`check:core-skills`、`check:boundaries`、`check:versions`、`check:comments`、`check:scratch`、`lint`），并判定是否改动了代码或包文件。
 
-两条 lane 都只报告、不设门：`master` 没有 required status checks，没有 rulesets，`enforce_admins` 也是关的。因此一次绿的 run 不会挡住合并，也没有任何服务端会拒绝一次红的。绿色 workflow 是证据，不是许可——某个改动是否等 CI，仍然取决于纪律。
+仅当代码、包文件或 CI 本身改动（或手动 `workflow_dispatch`）时，`linux`（`ubuntu-latest`）与 `windows`（`windows-latest`）才并行运行。两条 lane 按 runner OS 与 `DSH_HARNESS_TAG` 缓存 pnpm store 及 Harness 构建产物，完成链接构建、`sync-paths`、typecheck 与 `npm test`。`linux` 额外运行 `check:artifact`、`verify-desktop-strip-boot.mjs` 与 `audit-ui-parity.mjs`，`windows` 经 git bash（`shell: bash`）以目录 junction 运行。
+
+范围护栏：无 coverage matrix、无发布自动化、无 `test:browser`——浏览器验收始终是本地步骤。Windows lane 是文件系统标识符类 bug（issue #7/#8）的回归防线。唯一可调变量是 `DSH_HARNESS_TAG`；认证推进该 tag 时，workflow 的 env、本文档与 DSH peer 区间一起更新，`npm run check:versions` 拒绝不一致。
+
+三个 job 都只报告、不设门：`master` 没有 required status checks，没有 rulesets，`enforce_admins` 也是关的。因此一次绿的 run 不会挡住合并，也没有任何服务端会拒绝一次红的。绿色 workflow 是证据，不是许可——某个改动是否等 CI，仍然取决于纪律。
 
 **Hoplite 沙箱。** [`.hoplite/settings.json`](../../.hoplite/settings.json) 在每个新 thread 里运行 [`scripts/hoplite-setup.sh`](../../scripts/hoplite-setup.sh) 完成第 1–5 步，第 6 步作为 `check` 脚本提供，不在 setup 期间运行。脚本 checkout DSH peer 区间下限对应的 `dsh-v<下限>`，peer 移动时无需另改。Hoplite 项目级 setup 覆盖优先于仓库文件，应保持未设置。
 
