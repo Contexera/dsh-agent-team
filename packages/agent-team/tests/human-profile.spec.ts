@@ -2,23 +2,14 @@ import { mkdir, mkdtemp, rm, readFile, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import AgentTeam from '../src/index.ts'
 import { AgentTeamLedger, AGENT_TEAM_HUMAN_HANDLE, agentTeamHumanActor } from '../src/ledger.ts'
-import { agentTeamDomainSpec } from '../src/spec.ts'
-import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import { assertValidHumanName, HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_VERSION, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile } from '../src/human-profile.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA, planHostRowWrite } from '../src/host-row-settings.ts'
 import { DEFAULT_WAKE_RECYCLE } from '../src/wake-recycle.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
 import { assertHumanAvatarRef, humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from '../src/human-avatar.ts'
-import type { AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
+import type { AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 
 const alpha = WorkspaceId('workspace:alpha')
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
@@ -31,16 +22,11 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
 })
 
+import { openTestLedger } from './helpers/ledger-harness.ts'
+import { harness as bootHostHarness } from './helpers/host-harness.ts'
+
 async function openLedger(): Promise<AgentTeamLedger> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
-  return new AgentTeamLedger(domain.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
+  return (await openTestLedger()).ledger
 }
 
 describe('human display name validation', () => {
@@ -339,31 +325,19 @@ describe('host row migration on boot', () => {
     profile?: { readonly patchPath: string; readonly user?: Record<string, unknown> },
   ): Promise<readonly Mutation[]> {
     const mutations: Mutation[] = []
-    const ctx = new Context()
-    await ctx.plugin(Storage)
-    ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-    const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-    ctx.storage.mount('domain', facility)
-    ctx.provide('storageDomain', facility)
-    cleanups.push(async () => { await facility.closeAll() })
-    ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [], archiveSession: async () => {} })
-    ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-    ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-    ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-    ctx.provide('tools', { schemas: () => [] })
-    ctx.provide('sessionPersistence', { list: async () => [] })
-    provideQuietTokenMeter(ctx)
-    ctx.provide('settings', {
-      configure: () => () => {},
-      mutate: async (namespace: string, ops: unknown) => { mutations.push({ namespace, ops }) },
-      describe: () => profile === undefined
-        ? []
-        : [{ ns: HUMAN_PROFILE_SETTINGS_NAMESPACE, user: profile.user ?? {} }],
-    } as never)
-    if (profile !== undefined) ctx.provide('profileContext', { home, dir: home, patchPath: profile.patchPath })
-    await ctx.plugin(SessionProjectionRegistry)
-    const fiber = await ctx.plugin(AgentTeam)
-    cleanups.push(async () => { await fiber.dispose() })
+    await bootHostHarness({
+      workspaceIds: [],
+      prepare: ctx => {
+        ctx.provide('settings', {
+          configure: () => () => {},
+          mutate: async (namespace: string, ops: unknown) => { mutations.push({ namespace, ops }) },
+          describe: () => profile === undefined
+            ? []
+            : [{ ns: HUMAN_PROFILE_SETTINGS_NAMESPACE, user: profile.user ?? {} }],
+        } as never)
+        if (profile !== undefined) ctx.provide('profileContext', { home, dir: home, patchPath: profile.patchPath })
+      },
+    })
     expect(home).toBe(process.env.DSH_HOME)
     return mutations
   }

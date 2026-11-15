@@ -1,40 +1,28 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
+import { describe, expect, it } from 'vitest'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { openTestLedger, openTestTable } from './helpers/ledger-harness.ts'
 import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
-import { agentTeamDomainSpec } from '../src/spec.ts'
 import type { AgentTeamInboxDelta, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
 const alpha = WorkspaceId('workspace:alpha')
 const human = agentTeamHumanActor()
-const cleanups: Array<() => Promise<void>> = []
 let counter = 0
 const requestId = (label: string) => `test:legacy-main-attention:${label}:${++counter}` as AgentTeamRequestId
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
 
 async function openTable(): Promise<Table> {
-  const pool = new MemoryMediaPool()
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  return await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as Table
+  return (await openTestTable()).table
 }
 
-async function seed() {
-  const table = await openTable()
-  const ledger = new AgentTeamLedger(table, { rulesVersion: 2 })
-  await ledger.initialize()
+async function seed(options?: { readonly validateLedger?: boolean }) {
+  const { table, ledger } = await openTestLedger({
+    ledgerOptions: { rulesVersion: 2 },
+    initialize: true,
+    ...(options?.validateLedger !== undefined ? { validateLedger: options.validateLedger } : {}),
+  })
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'delivery', description: '', memberIds: [] })).value.project.projectRef
   const memberId = `member:owner` as AgentTeamMemberId
   const member = { memberId, sessionId: SessionId('session:owner'), workspaceId: alpha, handle: 'owner', description: '', presetId: 'team-member', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: '/tmp/owner', state: 'enabled' as const }
@@ -126,7 +114,7 @@ describe('pre-Main-stream-Attention records', () => {
   })
 
   it('leaves a receipt that differs from the era shape to fail validation', async () => {
-    const team = await seed()
+    const team = await seed({ validateLedger: false })
     await team.ledger.postMainMessage({ requestId: requestId('post'), actor: team.actor, workspaceId: alpha, projectRef: team.projectRef, body: 'an update' })
     await team.ledger.readMainStream({ requestId: requestId('read'), actor: team.actor, workspaceId: alpha, projectRef: team.projectRef })
     // A forged watermark: not the era's shape, so the repair must not launder it. The row carries the

@@ -1,13 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, waitFor } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import type { AgentTeamWorkerStateView } from '@contexera/dsh-agent-team/types'
 import { runtimeWithTeam } from './harness.tsx'
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 /**
  * The same two facts a Thread page reads, met through the discussion panel: a
@@ -43,6 +41,5 @@ describe('Worker runs in a discussion panel', () => {
     expect(rows.filter(row => row.includes('运行中'))).toHaveLength(1)
     expect(rows.filter(row => row.includes('结果未确认'))).toHaveLength(1)
     expect(rows.join('\n')).not.toContain('worker:')
-    await bench.runtime.dispose()
   })
 })

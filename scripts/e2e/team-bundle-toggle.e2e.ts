@@ -1,20 +1,27 @@
 import { afterEach, it, expect } from 'vitest'
 import type { Browser } from 'playwright'
-import { HOME, STAGED_BUNDLE, installLocalBundle, launchWebScaffold } from './__external-agent-team-support.ts'
+import { closeScenario, installLocalBundle, launchWebScaffold } from './__external-agent-team-support.ts'
 import type { WebScaffold } from './__external-agent-team-support.ts'
 
 let scaffold: WebScaffold | undefined
 let browser: Browser | undefined
 
 afterEach(async () => {
-  await browser?.close(); browser = undefined
-  await scaffold?.close(); scaffold = undefined
+  try {
+    await browser?.close(); browser = undefined
+  } finally {
+    try {
+      await scaffold?.close(); scaffold = undefined
+    } finally {
+      await closeScenario()
+    }
+  }
 })
 
 
 it('toggles the complete bundle without restarting the session controller', async () => {
-  await installLocalBundle()
-  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: false }] } })
+  const { home, stagedBundle } = await installLocalBundle()
+  scaffold = await launchWebScaffold({ harnessHome: home, profile: { packages: [{ dir: stagedBundle, enabled: false }] } })
   const sessionController = [...scaffold.ctx.loader.entries()].find(entry => entry.id === 'session-controller')?.fiber
 
   const enabled = await scaffold.ctx.pluginManager.setBundleEnabled('@contexera/dsh-agent-team', true)

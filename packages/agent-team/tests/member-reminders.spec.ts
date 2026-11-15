@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  MAX_ACTIVE_REMINDERS_PER_MEMBER,
   MAX_REMINDER_NOTE_CHARACTERS,
   MEMBER_REMINDER_REF_PATTERN,
   MIN_RECURRING_MINUTES,
@@ -281,13 +280,6 @@ describe('planMemberReminders decides what is due now', () => {
       reminder({ reminderRef: 'b', schedule: { kind: 'every' as const, minutes: 30 } }),
     ]
     expect(plan(due)).toEqual(['reminder:a@2026-11-03T01:30:00.000Z', 'reminder:b@2026-11-03T01:30:00.000Z'])
-  })
-})
-
-describe('the per-Member active-reminder ceiling', () => {
-  it('is a whole number the create path can compare against', () => {
-    expect(MAX_ACTIVE_REMINDERS_PER_MEMBER).toBe(50)
-    expect(Number.isInteger(MAX_ACTIVE_REMINDERS_PER_MEMBER)).toBe(true)
   })
 })
 

@@ -1,12 +1,9 @@
 import { afterEach, it, expect } from 'vitest'
-import { chmod, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { WORKER_INSPECT_SHOTS, chooseMemberModel, closeScenario, memberAgent, openSettings,
-  openSidebar, openTeamPage, scaffold, scenarioTempDir, settleLayout, waitForMemberAgent, type Locator } from './__external-agent-team-support.ts'
+import { WORKER_INSPECT_SHOTS, chooseMemberModel, closeScenario, installFakeCodex, memberAgent,
+  openSidebar, openTeamPage, scaffold, settleLayout, waitForMemberAgent, type Locator } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
-
-const MASTER = '允许从成员会话派出 Worker'
 
 /**
  * A stand-in for the Codex CLI that speaks the app-server handshake and answers
@@ -133,29 +130,7 @@ it('reads a Worker diagnostic from its row and keeps the list to five rows', asy
   const threadRef = discussion.thread.threadRef
 
   // The fake engine is installed where an operator would point the setting.
-  const directory = await scenarioTempDir('dsh-team-fake-codex-')
-  const fakeCodex = join(directory, 'codex')
-  await writeFile(fakeCodex, FAKE_CODEX, 'utf8')
-  await chmod(fakeCodex, 0o755)
-
-  await openSettings(page)
-  const panel = page.getByRole('dialog')
-  await panel.getByRole('button', { name: '团队', exact: true }).click()
-  const group = panel.locator('[data-worker-settings]')
-  await group.waitFor()
-  await group.getByRole('button', { name: /Worker 委派/ }).click()
-  await group.getByRole('switch', { name: MASTER }).click()
-  const codex = group.locator('[data-worker-engine="codex"]')
-  const codexSwitch = codex.getByRole('switch')
-  await expect.poll(async () => await codexSwitch.isDisabled()).toBe(false)
-  await codexSwitch.click()
-  await expect.poll(async () => await codexSwitch.getAttribute('aria-checked')).toBe('true')
-  await codex.getByLabel('Codex 的可执行路径').fill(fakeCodex)
-  const save = group.getByRole('button', { name: '保存' })
-  await save.click()
-  await expect.poll(async () => await save.isDisabled(), { timeout: 20_000 }).toBe(true)
-  await panel.getByRole('button', { name: '关闭', exact: true }).click()
-  expect(team.config.worker.get().engines.codex).toMatchObject({ enabled: true, executable: fakeCodex })
+  await installFakeCodex(page, team, FAKE_CODEX)
 
   await waitForMemberAgent(scaffold!, workspaceId, runner.memberId)
   await waitForMemberAgent(scaffold!, workspaceId, other.memberId)

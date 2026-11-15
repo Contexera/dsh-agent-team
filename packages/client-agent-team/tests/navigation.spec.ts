@@ -1,17 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { STORAGE_KEY, TeamNavigation } from '../src/client/navigation.ts'
+import { memoryStorage } from './bench/client-fixtures.tsx'
 
-function storage(): Storage {
-  const values = new Map<string, string>()
-  return {
-    get length() { return values.size },
-    clear: () => { values.clear() },
-    getItem: key => values.get(key) ?? null,
-    key: index => [...values.keys()][index] ?? null,
-    removeItem: key => { values.delete(key) },
-    setItem: (key, value) => { values.set(key, value) },
-  }
-}
+const storage = memoryStorage
 
 describe('TeamNavigation', () => {
   beforeEach(() => {

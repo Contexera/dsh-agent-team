@@ -4,9 +4,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 // The vendored-vs-upstream byte diff writes and re-reads a real SQLite file, and
-// the windows lane has stretched it to 2.2s against vitest's 5s default (worst
-// of 11 CI runs, 2026-09-17..21), so the file keeps headroom.
-vi.setConfig({ testTimeout: 30_000 })
+// the windows lane has stretched it to 2.2s against the unit project's 5s budget
+// (worst of 11 CI runs, 2026-09-17..21), so it runs in the integration project.
 // Byte-compatibility anchor for the vendored fork (GitHub issue #28): the
 // upstream package stays a devDependency as the declared reference, while the
 // import itself resolves through the tsconfig path alias to the adjacent

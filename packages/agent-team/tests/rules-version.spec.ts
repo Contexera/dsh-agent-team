@@ -1,38 +1,23 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import { describe, expect, it } from 'vitest'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { openTestTable } from './helpers/ledger-harness.ts'
+import { drainCleanups } from './helpers/team-host-fixture.ts'
 import { AgentTeamLedger, agentTeamHumanActor, AGENT_TEAM_RULES_VERSION } from '../src/ledger.ts'
-import { agentTeamDomainSpec } from '../src/spec.ts'
 import type { AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
 const alpha = WorkspaceId('workspace:alpha')
 const cleanups: Array<() => Promise<void>> = []
 
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
-
-type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
-
-async function openTable(pool: MemoryMediaPool): Promise<Table> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
-  return domain.table('operations') as unknown as Table
+async function openTable(pool: MemoryMediaPool) {
+  const opened = await openTestTable({ pool })
+  cleanups.push(opened.close)
+  return opened.table
 }
 
 /** Close every open domain over this pool so the next open replays what the pool now holds. */
 async function closeAll(): Promise<void> {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
+  await drainCleanups(cleanups)
 }
 
 function storedRecords(pool: MemoryMediaPool): AgentTeamOperation[] {

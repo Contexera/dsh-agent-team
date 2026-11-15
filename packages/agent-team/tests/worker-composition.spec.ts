@@ -7,16 +7,12 @@
  * native engines are acceptance targets, not unit-test doubles.
  */
 
-import { afterEach, expect, it } from 'vitest'
-import { realHarness, cleanups, waitFor } from './helpers/member-harness.ts'
+import { expect, it, onTestFinished } from 'vitest'
+import { realHarness, waitFor } from './helpers/member-harness.ts'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentProvider, SubagentRuntime as SubagentRuntimeService } from '@deepseek-ai/dsh-subagent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-
-afterEach(async () => {
-  while (cleanups.length > 0) await cleanups.pop()!()
-}, 30_000)
 
 const stubProvider = (name: string, answer: string): SubagentProvider => ({
   name,
@@ -53,7 +49,7 @@ it('reaches a Host-mounted subagent service from a Member context and delivers a
   expect(agent!.ctx.get('subagents')).toBeDefined()
 
   const release = subagents.registerProvider(stubProvider('probe', 'the probe answer'))
-  cleanups.push(async () => { release() })
+  onTestFinished(() => { release() })
 
   const activation = await subagents.startActivation({
     provider: 'probe',
@@ -69,4 +65,4 @@ it('reaches a Host-mounted subagent service from a Member context and delivers a
     return text.includes('the probe answer') ? text : undefined
   }, 20_000)
   expect(seen).toContain('the probe answer')
-}, 60_000)
+})

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
@@ -10,8 +10,6 @@ function mainViewSessionId(b: Awaited<ReturnType<typeof runtimeWithTeam>>): stri
 }
 
 usePinnedBrowserLanguages('zh-CN')
-afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
 
 describe('Team agent surfaces', () => {
   it('imports a global Member without copying it, retries the same join, and withdraws only here', async () => {
@@ -48,7 +46,6 @@ describe('Team agent surfaces', () => {
     expect(b.leaveWorkspace).toHaveBeenCalledWith(expect.objectContaining({ memberId: 'member:worker', workspaceId: 'w2' }))
     expect(b.archiveMember).not.toHaveBeenCalled()
     expect((await b.members({ workspaceId: 'w1' })).value.some(row => row.member.memberId === 'member:worker')).toBe(true)
-    await b.runtime.dispose()
   })
 
   it('shows import loading, read failure with retry, and a truthful empty state', async () => {
@@ -77,7 +74,6 @@ describe('Team agent surfaces', () => {
     expect(await within(dialog).findByText('没有可引入的 Agent。')).toBeTruthy()
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(b.view.queryByRole('dialog')).toBeNull())
-    await b.runtime.dispose()
   })
 
   it('warns about other participations before global archive and preserves the dialog on failure', async () => {
@@ -95,7 +91,6 @@ describe('Team agent surfaces', () => {
     await waitFor(() => expect(b.view.queryByText('worker')).toBeNull())
     expect(b.archiveMember.mock.calls[0]![0]).toEqual(b.archiveMember.mock.calls[1]![0])
     expect(b.leaveWorkspace).not.toHaveBeenCalled()
-    await b.runtime.dispose()
   })
 
   it('renders agent rows draggable with the saved personal order folded in', async () => {
@@ -103,7 +98,6 @@ describe('Team agent surfaces', () => {
     await waitFor(() => expect(b.view.container.querySelectorAll('[draggable="true"]').length).toBeGreaterThanOrEqual(4))
     const rows = b.view.container.querySelectorAll('[draggable="true"]')
     for (const row of rows) expect(row.querySelector('[class*="agentSelect"]')).not.toBeNull()
-    await b.runtime.dispose()
   })
 
   it('enters Team with existing Workspaces and restores the shipped seats', async () => {
@@ -134,7 +128,6 @@ describe('Team agent surfaces', () => {
     expect(b.view.container.querySelector('[data-composer-seat]')).toBeTruthy()
     expect(await b.view.findByText('设置')).toBeTruthy()
     expect(mainViewSessionId(b)).toBe('ordinary-session')
-    await b.runtime.dispose()
   })
 
   it('loads Workspace Agents and creates a durable Member without optimistic rows', async () => {
@@ -184,7 +177,6 @@ describe('Team agent surfaces', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(b.view.queryByRole('dialog', { name: '添加 Agent' })).toBeNull()
     await waitFor(() => expect(document.activeElement).toBe(addAgentTrigger))
-    await b.runtime.dispose()
   })
 
   it('creates an Agent with empty description, no Projects, and an optional model', async () => {
@@ -208,7 +200,6 @@ describe('Team agent surfaces', () => {
       workspaceId: 'w1', handle: 'bare', description: '', presetId: 'team-member', projectRefs: [],
       model: { provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: 'high' },
     }))
-    await b.runtime.dispose()
   })
 
   it('creates a Project atomically with selected available Members and manages committed membership', async () => {
@@ -236,7 +227,6 @@ describe('Team agent surfaces', () => {
     // no membership controls to drive.
     fireEvent.click(b.view.getByRole('button', { name: '# backend' }))
     expect(b.view.queryByRole('button', { name: '管理成员' })).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('renames Project display facts from the editor and refreshes the row', async () => {
@@ -259,7 +249,6 @@ describe('Team agent surfaces', () => {
     expect(await b.view.findByText('# platform')).toBeTruthy()
     expect(b.view.queryByText('# engineering')).toBeNull()
     fireEvent.keyDown(document, { key: 'Escape' })
-    await b.runtime.dispose()
   })
 
   async function openProjectEditor(b: Awaited<ReturnType<typeof runtimeWithTeam>>): Promise<HTMLElement> {
@@ -302,7 +291,6 @@ describe('Team agent surfaces', () => {
     expect(await within(owners).findByRole('button', { name: '添加负责人 @builder' })).toBeTruthy()
     expect(b.addProjectOwner.mock.calls[0]![0].requestId).not.toBe(b.removeProjectOwner.mock.calls[0]![0].requestId)
     fireEvent.keyDown(document, { key: 'Escape' })
-    await b.runtime.dispose()
   })
 
   it('keeps a Host owner error visible and leaves the owners unchanged', async () => {
@@ -315,7 +303,6 @@ describe('Team agent surfaces', () => {
     expect(within(owners).queryByRole('button', { name: '移除负责人 @builder' })).toBeNull()
     expect((within(owners).getByRole('button', { name: '添加负责人 @builder' }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.keyDown(document, { key: 'Escape' })
-    await b.runtime.dispose()
   })
 
   it('offers 恢复 and 重启 in the row menu only where they apply and routes both through the Host remote', async () => {
@@ -349,7 +336,6 @@ describe('Team agent surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: 'offline 的操作' }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: '重启' }))
     await waitFor(() => { expect(b.view.getByRole('alert').textContent).toContain('重启执行失败：connection lost') })
-    await b.runtime.dispose()
   })
 
   it('retires the manual clear-context action and follows a Member rollover exactly once', async () => {
@@ -404,7 +390,6 @@ describe('Team agent surfaces', () => {
     await waitFor(() => {
       expect(b.openSession.mock.calls.filter(([id]) => String(id).includes('builder-next-2')).length).toBe(1)
     })
-    await b.runtime.dispose()
   })
 
   it('edits Agent identity and pins a Member model through the editor', async () => {
@@ -434,7 +419,6 @@ describe('Team agent surfaces', () => {
     // The renamed handle reaches the roster through the refreshed projection.
     expect(await b.view.findByText('architect')).toBeTruthy()
     fireEvent.keyDown(document, { key: 'Escape' })
-    await b.runtime.dispose()
   })
 
   it('opens the Member Session inside Team mode from the Agent card', async () => {
@@ -469,7 +453,6 @@ describe('Team agent surfaces', () => {
     await waitFor(() => { expect(b.view.container.querySelector('[data-team-project]')).toBeTruthy() })
     expect(b.view.container.querySelector('[data-phase]')).toBeNull()
     expect(card.getAttribute('aria-current')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('lends the Agent card the marker while the Inbox page stands under it', async () => {
@@ -499,7 +482,6 @@ describe('Team agent surfaces', () => {
     await waitFor(() => { expect(b.view.container.querySelector('[data-team-inbox]')).toBeTruthy() })
     expect(entry.getAttribute('aria-current')).toBe('page')
     expect(card.getAttribute('aria-current')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('rebinds the underlying session when leaving an embedded Member view, so an off-seat rollover never blanks the seat', async () => {
@@ -528,7 +510,6 @@ describe('Team agent surfaces', () => {
     expect(mainViewSessionId(b)).toBe('ordinary-session')
     expect(b.view.container.querySelector('[data-team-project]')).toBe(seat)
     expect(b.view.getByRole('heading', { name: '# engineering' })).toBeTruthy()
-    await b.runtime.dispose()
   })
 
   it('keeps the departed Member retention when the return target is gone, without reopening the dead id', async () => {
@@ -550,7 +531,6 @@ describe('Team agent surfaces', () => {
     expect(mainViewSessionId(b)).toBe('session:member:builder')
     // The dead target is never opened: unknown ids fail loud in the service.
     expect(b.openSession).not.toHaveBeenCalledWith('ordinary-session')
-    await b.runtime.dispose()
   })
 
   it('edits Agent facts without a Project membership section', async () => {
@@ -573,7 +553,6 @@ describe('Team agent surfaces', () => {
       memberId: 'member:builder', handle: 'builder', description: 'Edited description',
     })) })
     await waitFor(() => expect(b.view.queryByRole('dialog', { name: '编辑 Agent' })).toBeNull())
-    await b.runtime.dispose()
   })
 
 })
@@ -606,7 +585,6 @@ describe('Team archival surfaces', () => {
     })
     await b.publishProjectUpdate()
     await waitFor(() => expect(b.view.queryByRole('button', { name: 'builder 的操作' })).toBeNull())
-    await b.runtime.dispose()
   })
 
   it('replaces the rail empty claims with one error line when the connection drops', async () => {
@@ -636,7 +614,6 @@ describe('Team archival surfaces', () => {
     b.recoverChanges()
     await b.view.findByRole('button', { name: '# recovery' })
     expect(b.view.queryByText('transport down')).toBeNull()
-    await b.runtime.dispose()
   })
 
   it('archives a Project from the row menu behind a destructive confirm', async () => {
@@ -659,7 +636,6 @@ describe('Team archival surfaces', () => {
     })
     await b.publishProjectUpdate()
     await waitFor(() => expect(b.view.queryByRole('button', { name: 'engineering 的操作' })).toBeNull())
-    await b.runtime.dispose()
   })
 })
 

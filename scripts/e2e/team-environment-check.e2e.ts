@@ -1,7 +1,7 @@
 import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
 import type { Browser, Page } from 'playwright'
-import { CHROME, HOME, STAGED_BUNDLE, UI09_SHOTS, closeScenario, connectFreshWorkspaceZh, getDshRuntimeVersion, installLocalBundle, launchWebScaffold, openSettings, openTeamPage, settleLayout, watchConsole } from './__external-agent-team-support.ts'
+import { CHROME, UI09_SHOTS, closeScenario, connectFreshWorkspaceZh, getDshRuntimeVersion, launchWebScaffold, openSettings, openTeamPage, settleLayout, watchConsole } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 

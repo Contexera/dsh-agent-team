@@ -1,20 +1,15 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
-vi.setConfig({ testTimeout: 60_000 })
 import type { AgentTeamMemberId } from '../src/types.ts'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { SessionId } from '@deepseek-ai/dsh-session'
 
-import { cleanups, realHarness, ScriptedAdapter, textResponse, waitFor, waitForArchive, requestId } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-
+import { realHarness, ScriptedAdapter, textResponse, waitForArchive, requestId } from './helpers/member-harness.ts'
 
 describe('Agent Team wake-slot generation swap (ticket 05)', () => {
   /**
@@ -30,16 +25,15 @@ describe('Agent Team wake-slot generation swap (ticket 05)', () => {
     readonly pressureState: { usageTokens: number; bySession: Map<string, number>; failFor: Set<string> }
   }> {
     const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-    const project = await ctx.agentTeam.createProject({ requestId: requestId(`wake-project-${idleMs}`), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId(`wake-builder-${idleMs}`), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const h = await realHarness(adapter)
+    const project = await h.human.createProject('engineering')
+    const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
     adapter.enqueue(textResponse('First look done.'))
-    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
-    await agent.whenIdle()
-    pressureState.bySession.set(added.status.member.sessionId, contextTokens)
+    builder.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+    await builder.waitForIdle()
+    h.pressureState.bySession.set(builder.sessionId, contextTokens)
     await vi.advanceTimersByTimeAsync(idleMs)
-    return { ctx, adapter, memberId: added.status.member.memberId, sessionId: added.status.member.sessionId, pressureState }
+    return { ctx: h.ctx, adapter, memberId: builder.memberId, sessionId: builder.sessionId, pressureState: h.pressureState }
   }
 
   it('swaps a generation that idled past the cache TTL with a large context, and the waking message opens the new one', async () => {

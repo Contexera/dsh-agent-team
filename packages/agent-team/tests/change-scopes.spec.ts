@@ -1,49 +1,25 @@
 import { changeBaseline, nextChange } from './helpers/change-stream.ts'
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import { describe, expect, it } from 'vitest'
+import type { Context } from '@deepseek-ai/cordis'
+import type { DomainFacility, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, agentTeamDomainSpec } from '../src/index.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { harness as bootHostHarness } from './helpers/host-harness.ts'
+import { openTestLedger } from './helpers/ledger-harness.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/index.ts'
 import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
 import type { AgentTeamChangeScope, AgentTeamProjectRef, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
 
-const cleanups: Array<() => Promise<void>> = []
 const alpha = WorkspaceId('workspace:alpha')
 const beta = WorkspaceId('workspace:beta')
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
-
 async function harness(): Promise<{ readonly ctx: Context; readonly facility: DomainFacility }> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === alpha ? { id, path: process.cwd(), attachSession: async () => {}, archiveSession: async () => {} } : undefined,
-    list: () => [{ id: alpha, path: process.cwd() }],
+  const { ctx, facility } = await bootHostHarness({
+    prepare: async c => { await c.plugin(agentTeamInvariant) },
   })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  await ctx.plugin(agentTeamInvariant)
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
-  cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, facility }
 }
 
@@ -70,26 +46,10 @@ async function commitMemberRecordDirectlyOnLedger(ledger: AgentTeamLedger, proje
  * service and boot a second one over the same durable records.
  */
 async function restartHarness(pool: MemoryMediaPool): Promise<{ readonly ctx: Context; readonly facility: DomainFacility; readonly fiber: { dispose: () => Promise<void> } }> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === alpha ? { id, path: process.cwd(), attachSession: async () => {}, archiveSession: async () => {} } : undefined,
-    list: () => [{ id: alpha, path: process.cwd() }],
+  const { ctx, facility, fiber } = await bootHostHarness({
+    pool,
+    prepare: async c => { await c.plugin(agentTeamInvariant) },
   })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  await ctx.plugin(agentTeamInvariant)
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
-  cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, facility, fiber }
 }
 
@@ -346,16 +306,7 @@ describe('ledger change scope and affected member derivation', () => {
   })
 
   it('derives follower membership from Attention state on an isolated ledger', async () => {
-    const ctx = new Context()
-    await ctx.plugin(Storage)
-    ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-    const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-    ctx.storage.mount('domain', facility)
-    ctx.provide('storageDomain', facility)
-    cleanups.push(async () => { await facility.closeAll() })
-    const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
-    const ledger = new AgentTeamLedger(domain.table('operations'))
-    await ledger.initialize()
+    const { ledger } = await openTestLedger({ initialize: true })
 
     const created = (await ledger.createProject({
       requestId: requestId('iso-project'), workspaceId: alpha, name: 'isolated', description: 'Isolated work',

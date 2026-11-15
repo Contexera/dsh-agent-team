@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { AgentTeamProjectRef } from '@contexera/dsh-agent-team/types'
-import { cleanups, realHarness, requestId } from '../../agent-team/tests/helpers/member-harness.ts'
+import { realHarness, requestId } from '../../agent-team/tests/helpers/member-harness.ts'
 import { teamTools } from './render-text.ts'
 
 /**
@@ -9,10 +9,6 @@ import { teamTools } from './render-text.ts'
  * Sessions. The Host is seeded through its public API; the tool definitions
  * are the source under test. No Host result or refusal is mocked.
  */
-
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
 
 type Harness = Awaited<ReturnType<typeof realHarness>>
 type Member = { readonly agent: NonNullable<ReturnType<Harness['ctx']['agents']['get']>> }

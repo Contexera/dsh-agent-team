@@ -1,22 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
-vi.setConfig({ testTimeout: 60_000 })
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { writeFile } from 'node:fs/promises'
 import type { AgentTeamMemberId } from '../src/types.ts'
 
-import { access, mkdtemp, mkdir, readFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { access, mkdir, readFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
 
-import { cleanups, realHarness, requestId } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-
+import { realHarness } from './helpers/member-harness.ts'
 
 describe('Agent Team Member private memory directory sanitization (issue #7)', () => {
   it('derives a Windows-safe directory segment without touching the member ref', async () => {
@@ -52,10 +46,10 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
   })
 
   it('provisions new Members under a colon-free private memory path', async () => {
-    const { ctx, workspaceId } = await realHarness()
-    await ctx.agentTeam.createProject({ requestId: requestId('san-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('san-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
-    const member = added.status.member
+    const h = await realHarness()
+    await h.human.createProject('engineering', { description: 'Engineering work' })
+    const builder = await h.human.addMember('builder', { description: 'Builds the implementation' })
+    const member = builder.raw
     expect(member.memberId).toContain(':')
     // The colon-free guarantee is about the directory segment: a Windows
     // absolute prefix still carries its drive-letter colon (F7b).
@@ -65,7 +59,7 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
     await expect(access(join(member.privateMemoryPath, 'notes'))).resolves.toBeUndefined()
     await expect(access(join(member.privateMemoryPath, 'skills'))).resolves.toBeUndefined()
     await expect(access(join(member.privateMemoryPath, 'memory.md'))).resolves.toBeUndefined()
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+    expect(() => h.ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
   it('migrates a legacy colon directory onto the sanitized path on activation, preserving memory', async () => {

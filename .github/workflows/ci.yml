@@ -93,10 +93,19 @@ jobs:
           node scripts/link-harness-packages.mjs
           npm run build
 
+      - name: Check built artifact
+        run: npm run check:artifact
+
       - name: Regenerate TypeScript path facades
         # sync-paths is not part of any npm script; skipping it leaves the
         # committed facades pointing at their generation-time paths.
         run: node scripts/sync-paths.mjs
+
+      - name: Lint
+        run: npm run lint
+
+      - name: UI parity audit
+        run: node scripts/audit-ui-parity.mjs
 
       - name: Typecheck
         run: npm run typecheck

@@ -10,26 +10,19 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Context, resolveConfig, type Fiber } from '@deepseek-ai/cordis'
+import { resolveConfig, type Fiber } from '@deepseek-ai/cordis'
 import { updateVolatile, volatileEntries, type Volatile } from '@deepseek-ai/cosmokit'
-import Storage from '@deepseek-ai/dsh-storage'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import AgentTeam from '../src/index.ts'
+import { harness } from './helpers/host-harness.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
 import { humanAvatarsRoot, writeHumanAvatar } from '../src/human-avatar.ts'
 import { DEFAULT_MEMBER_COMPACTION } from '../src/member-compaction.ts'
 import { DEFAULT_WAKE_RECYCLE } from '../src/wake-recycle.ts'
 
-const cleanups: Array<() => Promise<void>> = []
 const tempRoots: string[] = []
 const previousHome = process.env.DSH_HOME
 
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
   if (previousHome === undefined) delete process.env.DSH_HOME
   else process.env.DSH_HOME = previousHome
 })
@@ -67,71 +60,52 @@ async function bootHost(options: BootOptions = {}) {
   const mutations: Mutation[] = []
   const stored: Record<string, unknown> = {}
   let fiber: Fiber | undefined
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [], archiveSession: async () => {} })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  ctx.provide('settings', {
-    configure: () => () => {},
-    describe: () => options.patchPath === undefined
-      ? []
-      : [{ ns: HUMAN_PROFILE_SETTINGS_NAMESPACE, user: options.user ?? {} }],
-    mutate: async (namespace: string, ops: unknown) => {
-      mutations.push({ namespace, ops })
-      for (const op of ops as readonly SettingsOp[]) {
-        if (op.op !== 'set') continue
-        let target = stored
-        for (const key of op.path.slice(0, -1)) {
-          const next = target[key]
-          target = (next !== undefined && typeof next === 'object' ? next : target[key] = {}) as Record<string, unknown>
-        }
-        const field = op.path.at(-1)
-        if (field === undefined) continue
-        target[field] = op.value
-      }
-      if (options.apply !== true || fiber === undefined) return
-      const candidate = resolveConfig(fiber.runtime!, structuredClone(stored))
-      const changed: string[][] = []
-      // The running references hang off the plugin instance's resolved config.
-      // 0.2.2 keeps the raw config on `fiber.config` and the validated one on
-      // the service, so the fiber's own config no longer carries them; the
-      // loader commits into the same effective config.
-      for (const { path, ref } of volatileEntries(ctx.agentTeam.config)) {
-        const source = path.reduce<unknown>((value, key) => Reflect.get(value as object, key), candidate)
-        if (source === undefined) continue
-        updateVolatile(ref, source as Volatile<unknown>)
-        changed.push(path)
-      }
-      if (changed.length === 0) return
-      try {
-        fiber.ctx.emit('loader/volatile-update', changed)
-      } catch {
-        // A listener failure must not fail the write; every value is committed.
+  const { ctx, fiber: bootedFiber } = await harness({
+    workspaceIds: [],
+    config: options.user === undefined ? undefined : options.user as never,
+    prepare: c => {
+      c.provide('settings', {
+        configure: () => () => {},
+        describe: () => options.patchPath === undefined
+          ? []
+          : [{ ns: HUMAN_PROFILE_SETTINGS_NAMESPACE, user: options.user ?? {} }],
+        mutate: async (namespace: string, ops: unknown) => {
+          mutations.push({ namespace, ops })
+          for (const op of ops as readonly SettingsOp[]) {
+            if (op.op !== 'set') continue
+            let target = stored
+            for (const key of op.path.slice(0, -1)) {
+              const next = target[key]
+              target = (next !== undefined && typeof next === 'object' ? next : target[key] = {}) as Record<string, unknown>
+            }
+            const field = op.path.at(-1)
+            if (field === undefined) continue
+            target[field] = op.value
+          }
+          if (options.apply !== true || fiber === undefined) return
+          const candidate = resolveConfig(fiber.runtime!, structuredClone(stored))
+          const changed: string[][] = []
+          for (const { path, ref } of volatileEntries(c.agentTeam.config)) {
+            const source = path.reduce<unknown>((value, key) => Reflect.get(value as object, key), candidate)
+            if (source === undefined) continue
+            updateVolatile(ref, source as Volatile<unknown>)
+            changed.push(path)
+          }
+          if (changed.length === 0) return
+          try {
+            fiber.ctx.emit('loader/volatile-update', changed)
+          } catch {
+            // A listener failure must not fail the write; every value is committed.
+          }
+        },
+      } as never)
+      if (options.patchPath !== undefined) {
+        c.provide('profileContext', { home: process.env.DSH_HOME, dir: process.env.DSH_HOME, patchPath: options.patchPath })
       }
     },
-  } as never)
-  if (options.patchPath !== undefined) {
-    ctx.provide('profileContext', { home: process.env.DSH_HOME, dir: process.env.DSH_HOME, patchPath: options.patchPath })
-  }
-  await ctx.plugin(SessionProjectionRegistry)
-  // The row's config is composed from its user layer at boot, so the seed
-  // carries it: a precedence rule that still reads the resolved config must
-  // see what the Human stored there, not the schema defaults.
-  fiber = options.user === undefined
-    ? await ctx.plugin(AgentTeam)
-    : await ctx.plugin(AgentTeam, options.user as never)
+  })
+  fiber = bootedFiber
   const dispose = async () => { await fiber!.dispose() }
-  cleanups.push(dispose)
   return { mutations, host: ctx.agentTeam, dispose }
 }
 

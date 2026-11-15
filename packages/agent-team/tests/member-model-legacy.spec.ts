@@ -1,20 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 // A boot replay followed by a full Member activation over the real Host, so this file keeps the per-test budget the
 // sibling lifecycle specs use.
-vi.setConfig({ testTimeout: 60_000 })
-
 import { join } from 'node:path'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { cleanups, realHarness, requestId, ScriptedAdapter, textResponse, waitFor } from './helpers/member-harness.ts'
+import { realHarness, requestId, ScriptedAdapter, textResponse, waitFor } from './helpers/member-harness.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, agentTeamHumanActor } from '../src/ledger.ts'
 import type { AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId } from '../src/types.ts'
-
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
 
 describe('A Member recorded before the explicit route contract (issue #131)', () => {
   it('wakes on the Host default instead of being refused or pinned', async () => {

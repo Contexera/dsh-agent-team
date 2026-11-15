@@ -1,9 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/index.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { cleanups, realHarness, ScriptedAdapter, textResponse, toolCallResponse, requestId, waitFor, waitForIdle } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
+import { realHarness, ScriptedAdapter, textResponse, toolCallResponse, requestId, waitFor, waitForIdle } from './helpers/member-harness.ts'
 
 describe('complete Activity notices supply context without acknowledging it', () => {
   it('states both sides of a Task transfer and permits a reply while leaving it unread', async () => {

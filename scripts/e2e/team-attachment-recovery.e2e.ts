@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import type { AgentTeamRequestId } from '@contexera/dsh-agent-team/types'
-import { BROWSER_ARTIFACTS, HOME, ONE_PIXEL_PNG, closeScenario, openTeamPage, scaffold, settleLayout } from './__external-agent-team-support.ts'
+import { BROWSER_ARTIFACTS, ONE_PIXEL_PNG, closeScenario, openTeamPage, scaffold, scenarioHome, settleLayout } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
@@ -25,7 +25,7 @@ it('distinguishes an expired attachment from a broken image and rereads it by ke
     attachments: [broken.attachmentId, expired.attachmentId, longBroken.attachmentId],
   })
   expect(sent.kind).toBe('committed')
-  const cache = join(HOME, 'agent-team', 'attachments', 'v1')
+  const cache = join(scenarioHome(), 'agent-team', 'attachments', 'v1')
   await rm(join(cache, expired.attachmentId), { recursive: true })
 
   await page.getByRole('button', { name: '# attachment-recovery', exact: true }).click()

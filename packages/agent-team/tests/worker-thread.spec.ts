@@ -8,17 +8,15 @@
  * derived state a Thread read reports.
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
+import { describe, expect, it } from 'vitest'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { renderInboxNotice } from '../src/inbox-notice.ts'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { openTestLedger, openTestTable } from './helpers/ledger-harness.ts'
+import { drainCleanups } from './helpers/team-host-fixture.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_RULES_VERSION, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
-import { agentTeamDomainSpec } from '../src/spec.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation,
   AgentTeamOperationId, AgentTeamProjectRef, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef,
   AgentTeamWorkerRef } from '../src/types.ts'
@@ -28,23 +26,12 @@ const human = agentTeamHumanActor()
 const cleanups: Array<() => Promise<void>> = []
 let counter = 0
 const requestId = (label: string) => `test:worker-thread:${label}:${++counter}` as AgentTeamRequestId
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
 
 type Table = KvTable<AgentTeamOperationId, AgentTeamOperation>
 
 /** A ledger with one Project, one owner Member who delegates, and one taskless Thread. */
 async function seed(rulesVersion = AGENT_TEAM_RULES_VERSION) {
-  const pool = new MemoryMediaPool()
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  const table = await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as Table
-  const ledger = new AgentTeamLedger(table, { rulesVersion })
-  await ledger.initialize()
+  const { pool, table, ledger } = await openTestLedger({ ledgerOptions: { rulesVersion }, initialize: true })
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha,
     name: 'delivery', description: '', memberIds: [] })).value.project.projectRef
   const memberId = 'member:owner' as AgentTeamMemberId
@@ -66,18 +53,13 @@ type Seeded = Awaited<ReturnType<typeof seed>>
 
 /** A table over the same medium, for a build that reads it at its own rules version. */
 async function openTableOver(pool: MemoryMediaPool): Promise<Table> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  cleanups.push(async () => { await facility.closeAll() })
-  return await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as Table
+  const opened = await openTestTable({ pool })
+  cleanups.push(opened.close)
+  return opened.table
 }
 
 async function closeAll(): Promise<void> {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
+  await drainCleanups(cleanups)
 }
 
 /** Every operation the ledger holds, for the cases that assert on a record's own payload. */

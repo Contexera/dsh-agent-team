@@ -9,157 +9,22 @@
  * across a Host that is replaced while one is still running.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SubagentActivation, SubagentResult, SubagentRuntime } from '@deepseek-ai/dsh-subagent'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import AgentTeam from '../src/index.ts'
-import { agentTeamHumanActor } from '../src/ledger.ts'
-import * as agentTeamInvariant from '../src/invariant.ts'
-import { carryWorkerAnchors } from '../src/worker-runtime.ts'
-import type { AgentTeamMemberActor, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamRequestId,
-  AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
-
-const alpha = WorkspaceId('workspace:alpha')
-const cleanups: Array<() => Promise<void>> = []
-const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
-
-/** A Host row with delegation allowed on Codex, which is what a Human has to switch on first. */
-const workerRow = () => ({ worker: { enabled: true, defaultEngine: 'codex' as const, timeoutMs: 0,
-  engines: { codex: { enabled: true, executable: '', sandbox: 'workspace-write' },
-    claude: { enabled: false, executable: '', sandbox: '' } } } })
-
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
-})
-
-/** One fake engine process per open, so several runs can be in flight at once. */
-interface FakeEngines {
-  readonly runtime: SubagentRuntime
-  readonly starts: Array<Parameters<SubagentRuntime['startActivation']>[0]>
-  readonly pending: Map<string, { resolve: (result: SubagentResult) => void }>
-}
-
-function fakeEngines(): FakeEngines {
-  const starts: FakeEngines['starts'] = []
-  const pending = new Map<string, { resolve: (result: SubagentResult) => void }>()
-  let opened = 0
-  const runtime = {
-    registerProvider: () => () => {},
-    startActivation: async (spec: Parameters<SubagentRuntime['startActivation']>[0]): Promise<SubagentActivation> => {
-      starts.push(spec)
-      const childId = `session:worker-${++opened}`
-      const result = Promise.withResolvers<SubagentResult>()
-      pending.set(childId, { resolve: result.resolve })
-      // Closing the activation ends the engine, exactly as the real service's disposal does.
-      const dispose = async (): Promise<void> => {
-        const open = pending.get(childId)
-        pending.delete(childId)
-        open?.resolve({ output: [], stopReason: 'aborted' })
-      }
-      return { childId, result: result.promise.then(outcome => carryWorkerAnchors(outcome, { nativeSessionId: `native:${childId}` })),
-        dispose } as unknown as SubagentActivation
-    },
-  } as unknown as SubagentRuntime
-  return { runtime, starts, pending }
-}
-
-interface BootedHost {
-  readonly ctx: Context
-  readonly host: AgentTeam
-  readonly engines: FakeEngines
-  /** What the initiating Member's session received. */
-  readonly wakes: UserMessage[]
-  /** Shut this Host down, as losing the process would. */
-  readonly stop: () => Promise<void>
-}
-
-/** Boot the Team plugin over the given storage pool; booting twice is how a restart reads the same ledger. */
-async function boot(pool: MemoryMediaPool, engines: FakeEngines = fakeEngines()): Promise<BootedHost> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('subagents', engines.runtime)
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === alpha ? { id, path: process.cwd(), attachSession: async () => {}, archiveSession: async () => {} } : undefined,
-    list: () => [{ id: alpha, path: process.cwd() }],
-    archiveSession: async () => {},
-  })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  await ctx.plugin(agentTeamInvariant)
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam, workerRow())
-  let stopped = false
-  const stop = async (): Promise<void> => {
-    if (stopped) return
-    stopped = true
-    await fiber.dispose()
-    await facility.closeAll()
-  }
-  cleanups.push(stop)
-  return { ctx, host: ctx.agentTeam, engines, wakes: [] as UserMessage[], stop }
-}
-
-/** One durable Member of the Project, plus the live Agent surface its wake touches. */
-async function addMember(host: BootedHost, projectRef: AgentTeamProjectRef, options: {
-  readonly owner: boolean
-  readonly handle: string
-}): Promise<{ readonly actor: AgentTeamMemberActor; readonly agent: Agent; readonly wakes: UserMessage[] }> {
-  const memberId = `member:${options.handle}` as AgentTeamMemberId
-  const member = { memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle: options.handle,
-    description: 'Delegates work', presetId: 'team-member', model: { provider: 'mock', model: 'mock' },
-    privateMemoryPath: `/tmp/${options.handle}`, state: 'enabled' as const }
-  await host.host['ledger']!.addMember({ requestId: requestId(`member-${options.handle}`), actor: agentTeamHumanActor(),
-    member, handle: options.handle, description: 'Delegates work', presetId: 'team-member', workspaceId: alpha,
-    projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' } })
-  if (options.owner) {
-    await host.host['ledger']!.addProjectOwner({ requestId: requestId(`owner-${options.handle}`), actor: agentTeamHumanActor(),
-      workspaceId: alpha, projectRef, memberId })
-  }
-  const wakes: UserMessage[] = []
-  const wake = (message: UserMessage): void => { wakes.push(message) }
-  const agent = {
-    id: SessionId(`session:${memberId}`),
-    ctx: host.ctx,
-    session: Session.create(SessionId(`session:${memberId}`)),
-    status: 'idle',
-    inbox: { nextTurn: [], nextStep: [], remove: () => {} },
-    steer: wake,
-    followup: wake,
-  } as unknown as Agent
-  host.host['handles'].set(memberId, { agent, dispose: async () => {} })
-  return { actor: { kind: 'member', memberId, handle: options.handle }, agent, wakes }
-}
-
-async function createProject(host: BootedHost): Promise<AgentTeamProjectRef> {
-  const project = await host.host.createProject({ requestId: requestId('project'), workspaceId: alpha,
-    name: 'delivery', description: 'Delivery' })
-  return project.project.projectRef
-}
-
-async function startThread(host: BootedHost, projectRef: AgentTeamProjectRef, kind: 'discussion' | 'task'):
-  Promise<{ readonly threadRef: AgentTeamThreadRef; readonly taskRef?: AgentTeamTaskRef }> {
-  const result = await host.host.startThread({ requestId: requestId(`thread-${kind}`), workspaceId: alpha, projectRef,
-    kind, body: kind === 'task' ? 'Fix the nightly run' : 'Where does the nightly run fail?' })
-  if (result.kind !== 'committed') throw new Error('Thread did not commit')
-  return { threadRef: result.thread.threadRef, ...(result.task === undefined ? {} : { taskRef: result.task.taskRef }) }
-}
+import type AgentTeam from '../src/index.ts'
+import type { AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { alpha, requestId } from './helpers/host-harness.ts'
+import {
+  addWorkerMember as addMember,
+  bootWorkerHost as boot,
+  createWorkerProject as createProject,
+  startWorkerThread as startThread,
+  type BootedWorkerHost as BootedHost,
+} from './helpers/worker-engines-fixture.ts'
 
 const settle = (host: BootedHost, childId: string, result: SubagentResult): void => {
   const pending = host.engines.pending.get(childId)

@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
-vi.setConfig({ testTimeout: 60_000 })
 import type { AgentTeamMemberId, AgentTeamProjectRef } from '../src/types.ts'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { Context } from '@deepseek-ai/cordis'
@@ -11,11 +10,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { SessionId } from '@deepseek-ai/dsh-session'
 
-import { cleanups, realHarness, ScriptedAdapter, textResponse, waitFor, waitForArchive, requestId, TestablePresets } from './helpers/member-harness.ts'
-
-afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
-
-
+import { realHarness, ScriptedAdapter, textResponse, waitForArchive, requestId, TestablePresets } from './helpers/member-harness.ts'
 
 describe('Agent Team wake-slot swap input across the commit (ticket 05)', () => {
   /**
@@ -46,7 +41,7 @@ describe('Agent Team wake-slot swap input across the commit (ticket 05)', () => 
    * One idle Member with a real persisted log, priced past both swap gates and
    * woken after the cache TTL: the next Team wake retires this generation.
    */
-  async function recyclableMember(tag: string): Promise<{
+  async function recyclableMember(_tag: string): Promise<{
     readonly adapter: ScriptedAdapter
     readonly ctx: Context
     readonly workspaceId: WorkspaceId
@@ -58,17 +53,16 @@ describe('Agent Team wake-slot swap input across the commit (ticket 05)', () => 
     readonly presets: TestablePresets
   }> {
     const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState, presets, archived } = await realHarness(adapter)
-    const project = await ctx.agentTeam.createProject({ requestId: requestId(`${tag}-project`), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId(`${tag}-add`), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
-    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const h = await realHarness(adapter)
+    const project = await h.human.createProject('engineering')
+    const builder = await h.human.addMember('builder', { description: 'Builds changes', projects: [project] })
     adapter.enqueue(textResponse('First look done.'))
-    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
-    await agent.whenIdle()
-    pressureState.bySession.set(added.status.member.sessionId, 130_000)
+    builder.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+    await builder.waitForIdle()
+    h.pressureState.bySession.set(builder.sessionId, 130_000)
     await vi.advanceTimersByTimeAsync(61 * 60_000)
-    return { adapter, ctx, workspaceId, projectRef: project.project.projectRef, memberId: added.status.member.memberId,
-      sessionId: added.status.member.sessionId, agent, archived, presets }
+    return { adapter, ctx: h.ctx, workspaceId: h.workspaceId, projectRef: project.projectRef, memberId: builder.memberId,
+      sessionId: builder.sessionId, agent: builder.agent, archived: h.archived, presets: h.presets }
   }
 
   it('carries ordinary input that arrives while the recycled binding is being written into the successor', async () => {
