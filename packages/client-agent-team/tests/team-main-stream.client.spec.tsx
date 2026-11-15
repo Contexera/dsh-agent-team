@@ -50,6 +50,20 @@ describe('Team Main stream', () => {
     expect(b.view.queryByText(/删除了订阅 main CI/)).toBeNull()
   })
 
+  it('names a responsibility edit as an edit, not a withdrawal', async () => {
+    const edit: MainStreamSeedEntry = { kind: 'activity', sequence: 5, occurredAt: '2026-10-20T08:30:00.000Z', activity: {
+      activityRef: 'activity:responsibility', projectRef: 'project:engineering', kind: 'owner-responsibility-updated',
+      memberId: 'member:builder', actor: 'member:human', sequence: 5, occurredAt: '2026-10-20T08:30:00.000Z' } }
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true,
+      mainStreamEntries: [...seedEntries, edit] })
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    await b.view.findByRole('tab', { name: '主对话' })
+    expect(await b.view.findByText('human 更新了 @builder 在这个项目里的责任')).toBeTruthy()
+    // The grant is untouched, so the row must not read as a withdrawal.
+    expect(b.view.queryByText(/撤销了 @builder 的项目负责人身份/)).toBeNull()
+    await b.runtime.dispose()
+  })
+
   it('renders messages, owner activity and both card kinds from the Host history, and opens the cards', async () => {
     const b = await openProject()
     expect(await b.view.findByText('配色要不要跟设置页统一？')).toBeTruthy()

@@ -265,6 +265,27 @@ export interface AgentTeamProjectMembership {
   readonly memberId: AgentTeamMemberId
 }
 
+/**
+ * One Project an Agent Member owns, with the responsibility it answers for
+ * there. The Member context renders this list, so the responsibility travels
+ * with the ownership instead of being looked up separately.
+ */
+export interface AgentTeamOwnedProject {
+  readonly project: AgentTeamProject
+  readonly responsibility?: string
+}
+
+/**
+ * One Agent Member's ownership of one Project. The responsibility is what that
+ * Member answers for here, layered apart from the Member's global description
+ * and the Project's shared goal; an absent one is unspecified, not a fault.
+ */
+export interface AgentTeamProjectOwner {
+  readonly projectRef: AgentTeamProjectRef
+  readonly memberId: AgentTeamMemberId
+  readonly responsibility?: string
+}
+
 /** One immutable top-level or reply Message. */
 export interface AgentTeamMessageAttachment {
   readonly attachmentId: AgentTeamAttachmentId
@@ -796,7 +817,7 @@ export interface AgentTeamSubscriptionEventPublished {
 export interface AgentTeamOwnerActivity {
   readonly activityRef: AgentTeamActivityRef
   readonly projectRef: AgentTeamProjectRef
-  readonly kind: 'owner-added' | 'owner-removed'
+  readonly kind: 'owner-added' | 'owner-removed' | 'owner-responsibility-updated'
   /** The Agent Member whose ownership changed. */
   readonly memberId: AgentTeamMemberId
   readonly actor: AgentTeamMemberId

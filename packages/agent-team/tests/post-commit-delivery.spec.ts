@@ -499,6 +499,15 @@ describe('post-commit delivery', () => {
     const owner = state.calls.at(-1)?.content[0]
     expect(owner).toMatchObject({ type: 'text', text: expect.stringContaining('made you an owner of Project engineering') })
 
+    // An edit of what the owner answers for reaches the same marker path. It is
+    // neither a grant nor a withdrawal, so the wake must say which one it is.
+    await ctx.agentTeam.updateProjectOwner({ requestId: requestId('main-owner-responsibility'), workspaceId: alpha,
+      projectRef: project.project.projectRef, memberId: member.memberId, responsibility: 'owns the release checklist' })
+    const updated = state.calls.at(-1)?.content[0]
+    expect(updated).toMatchObject({ type: 'text', text: expect.stringContaining('updated what you answer for in Project engineering') })
+    expect(updated).toMatchObject({ text: expect.stringContaining('Your ownership is unchanged') })
+    expect(updated).not.toMatchObject({ text: expect.stringContaining('removed you as an owner') })
+
     const posted = await ctx.agentTeam.postMainMessage({ requestId: requestId('main-post'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: `@${member.handle} over to you` })
     expect(posted.kind).toBe('committed')

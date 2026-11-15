@@ -24,6 +24,19 @@ describe('team_view renders one address book', () => {
     expect(text).toContain('project:aaaa1111-0000-4000-8000-000000000003 · releases · owners @human, @Ferry · you: directory only · subscriptions 1 active, 1 paused')
   })
 
+  it('states what each Agent owner answers for, and leaves the row alone when nobody recorded one', () => {
+    const base = { workspaces: WORKSPACES, members: [], threads: [], tasks: [], cursor: 1, hasMore: false }
+    const text = renderText(teamTools().get('team_view')!, {}, { ...base, projects: [
+      { projectRef: PROJECT, name: 'general', owners: ['human', 'Tars'], role: 'owner',
+        ownerResponsibilities: [{ handle: 'Tars', responsibility: 'owns the release checklist' }, { handle: 'Ferry', responsibility: 'unspecified' }] },
+      { projectRef: 'project:aaaa1111-0000-4000-8000-000000000002', name: 'ops', owners: ['human', 'Tars'], role: 'member' },
+    ] })
+    expect(text).toContain(`${PROJECT} · general · owners @human, @Tars · you: owner · responsibility @Tars: owns the release checklist; @Ferry: unspecified`)
+    // A Project with no recorded text renders exactly as it did before the field existed.
+    expect(text).toContain('project:aaaa1111-0000-4000-8000-000000000002 · ops · owners @human, @Tars · you: member')
+    expect(text).not.toContain('project:aaaa1111-0000-4000-8000-000000000002 · ops · owners @human, @Tars · you: member · responsibility')
+  })
+
   it('distinguishes a directory-only Project from a Project with no Threads', () => {
     const text = renderText(teamTools().get('team_view')!, {}, {
       workspaces: WORKSPACES,

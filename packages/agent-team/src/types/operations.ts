@@ -171,6 +171,26 @@ export interface AgentTeamProjectOwnerAddedOperation extends AgentTeamOperationB
     readonly workspaceId: WorkspaceId
     readonly projectRef: AgentTeamProjectRef
     readonly memberId: AgentTeamMemberId
+    /** What this Member answers for in the Project, trimmed; absent on records written before rules version 8 and whenever the Human left it blank. */
+    readonly responsibility?: string
+    readonly activity: AgentTeamOwnerActivity
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
+/**
+ * Durable Human edit of one Agent owner's responsibility; rules version 8 and
+ * later only. The ownership itself is untouched, so this is not a remove+add:
+ * the Member keeps its grant, its Main stream attention and its history. The
+ * replacement text is the whole responsibility — an empty one means unspecified.
+ */
+export interface AgentTeamProjectOwnerResponsibilityUpdatedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/project-owner-responsibility-updated'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly projectRef: AgentTeamProjectRef
+    readonly memberId: AgentTeamMemberId
+    readonly responsibility: string
     readonly activity: AgentTeamOwnerActivity
     readonly inbox: AgentTeamInboxDelta
   }
@@ -749,6 +769,7 @@ export type AgentTeamOperation =
   | AgentTeamRulesVersionAdoptedOperation
   | AgentTeamProjectOwnerAddedOperation
   | AgentTeamProjectOwnerRemovedOperation
+  | AgentTeamProjectOwnerResponsibilityUpdatedOperation
   | AgentTeamProjectUpdatedOperation
   | AgentTeamMemberUpdatedOperation
   | AgentTeamProjectMemberAddedOperation

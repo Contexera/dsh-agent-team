@@ -11,7 +11,8 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 - Agent 的 Thread 与 Main stream read 在 ledger 结果上增加[按上下文调整的呈现](../team-collaboration/tools.zh.md#team_thread)：缺失的近期 Message 背景与已可见正文的省略说明。工具按输出上限选出能渲染的前缀，Thread receipt 以 `selectedThroughSequence` 记录这个界限，旧 receipt 仍按缺省 batch 解释；Host 只提交该前缀。Human read、Remote 参数与 replay 语义均不变，重放不依赖 Session。
 - mutation 进入 Host authority，并提交一条 durable operation。
 - 重放会重算每条记录应有的 Inbox delta 并逐项比较，所以改变既有 kind 校验规则的版本要先写一条 `team/rules-version-adopted`（Host actor，`{ version }`）。每条记录按它之前最新的标记校验；没有标记的 ledger 为版本 1。标记由 `initialize` 在它自己排队的提交里追加，因此早于之后的所有写入，包括启动恢复。标记只升不降，每个版本至多一条；ledger 采用的版本高于本构建实现的版本时拒绝打开。
-- 当前构建实现版本 7。挂载时若 ledger 的最新标记低于它，只追加一次版本 7 标记；全新 ledger 在 `team/initialized` 之后立即写入该标记，已经处于版本 7 的 ledger 重新打开不会再写。下面关于版本 2 规则的内容仍只描述各自的记录段，而不是当前标记。
+- 当前构建实现版本 8。挂载时若 ledger 的最新标记低于它，只追加一次版本 8 标记；全新 ledger 在 `team/initialized` 之后立即写入该标记，已经处于版本 8 的 ledger 重新打开不会再写。下面关于版本 2 规则的内容仍只描述各自的记录段，而不是当前标记。
+- 版本 8 新增 `team/project-owner-responsibility-updated`，并给 `team/project-owner-added` 增加可选的 `responsibility`。两者在版本 8 以下的记录段内都被拒绝，因此更早的构建写下的 ledger 仍逐字节重放，其 owner 记录继续读作未说明；只实现到版本 7 的 build 会在解析这两种形状之前先被版本 8 标记拒绝。所以升级不需要数据迁移——由标记本身决定哪些记录段可以携带新字段。
 - 规则版本 2 起，Host 还会提交 `team/main-message-posted`、`team/main-stream-read` 和 `team/thread-started`，它们在版本 1 的记录段内会被拒绝，而 `team/message-sent` 在版本 2 的记录段内被拒绝。Host 不再写 `team/message-sent`（开 Thread 用 `startThread`），它只在版本 1 的记录段内重放。
 - 0.2.5 预览开关打开过的 ledger 正是落在这条拒绝上：它带版本 2 标记，而它当年开 Thread 走的 `sendMessage` 仍无守卫地写版本 1 的 `team/message-sent`，因此只有当该段内没有这条记录时才能打开。该开关本就只用于一次性的 `DSH_HOME`。
 - inbox delta 可带可选的 `mainMarkers` 列表，使用独立的 marker 形状（`projectRef` 加 `messageRef` 或 `activityRef`）。它只在确有变化时出现，所以版本 1 的记录保持存储字节不变；离开的 Member 的 Main stream marker 随同一 operation 与其他 inbox 状态一起清除。

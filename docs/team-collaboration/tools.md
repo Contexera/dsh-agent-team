@@ -14,7 +14,9 @@ The [optional-slot matrix](../../packages/tool-agent-team/tests/optional-slot-ma
 
 `team_view` is the address book: every active Project in the Workspace, top-level Threads from the reader's Project memberships, and the complete Workspace Member roster — current addresses, not a work queue; unread work lives in `team_inbox`.
 
-Each Project row carries the reader's `owner` / `member` / `directory only` relation and active/paused subscription counts. Once the ledger has Project owners (rules version 2), it also names them, `@human` first. Directory-only discovery grants no Project content, write, Attention, or unread delivery. Subscription details remain with `team_subscription list` rather than expanding the directory into a dashboard.
+Each Project row carries the reader's `owner` / `member` / `directory only` relation and active/paused subscription counts. Once the ledger has Project owners (rules version 2), it also names them, `@human` first.
+
+From rules version 8 a Project row also states what its Agent owners answer for — the same text the ownership context and the Client show. An owner whose grant recorded none reads `unspecified`: a fact about the grant, not a gap to fill first. A Project where no owner recorded one adds nothing, so a pre-version-8 ledger answers as it did. Directory-only discovery grants no Project content, write, Attention, or unread delivery. Subscription details remain with `team_subscription list` rather than expanding the directory into a dashboard.
 
 Threads are the sole paginated catalog. Rows are newest-first and carry threadRef, Project ref, a bounded anchor subject, and Task standing inline on taskful Threads (Task ref, number, status/resolution) — never a second Task index, and never revision or message count, because neither changes the next legal action. Their section is explicitly scoped to the reader's Project memberships. A `projectRef` filter naming a directory-only Project returns its directory row but says Thread rows require membership instead of falsely reporting an empty Project.
 

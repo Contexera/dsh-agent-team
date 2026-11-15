@@ -1,5 +1,16 @@
 import { activityFact, type ActivityFact } from '@contexera/dsh-agent-team/host'
-import type { AgentTeamActivity, AgentTeamMainActivity } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamActivity, AgentTeamMainActivity, AgentTeamOwnerActivity } from '@contexera/dsh-agent-team/types'
+
+/**
+ * Every ownership kind the ledger writes to a Main stream. Typed as a complete
+ * record so a new kind fails to compile here instead of silently rendering as
+ * `undefined` — which fails the whole Main stream read, not just its own row.
+ */
+const OWNERSHIP_ACTIVITY_KINDS: Readonly<Record<AgentTeamOwnerActivity['kind'], true>> = {
+  'owner-added': true,
+  'owner-removed': true,
+  'owner-responsibility-updated': true,
+}
 
 /** The immutable Activity fields a tool result carries; no current Task or Claim state is among them. */
 export interface ActivityViewFields {
@@ -31,7 +42,7 @@ export function activityFromView(value: ActivityViewFields, projectRef?: string)
   if (value.kind !== 'activity' || value.activityRef === undefined || value.actor === undefined || value.activity === undefined) return undefined
   const base = { activityRef: value.activityRef, sequence: value.sequence, actor: value.actor }
   if (projectRef !== undefined) {
-    if (value.memberId === undefined || (value.activity !== 'owner-added' && value.activity !== 'owner-removed')) return undefined
+    if (value.memberId === undefined || !Object.hasOwn(OWNERSHIP_ACTIVITY_KINDS, value.activity)) return undefined
     return activityFact({ ...base, kind: value.activity, memberId: value.memberId, projectRef } as AgentTeamMainActivity)
   }
   if (value.threadRef === undefined) return undefined

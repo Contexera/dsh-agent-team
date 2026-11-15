@@ -335,7 +335,7 @@ const subscriptionActivitySchema = z.object({
 const ownerActivitySchema = z.object({
   activityRef: activityRefSchema,
   projectRef: projectRefSchema,
-  kind: z.union([z.literal('owner-added'), z.literal('owner-removed')]),
+  kind: z.union([z.literal('owner-added'), z.literal('owner-removed'), z.literal('owner-responsibility-updated')]),
   memberId: memberIdSchema,
   actor: memberIdSchema,
   sequence: z.number().int().positive(),
@@ -681,7 +681,14 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/project-owner-added'),
     data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, memberId: memberIdSchema,
-      activity: mainActivitySchema, inbox: inboxDeltaSchema }).strict(),
+      responsibility: z.string().optional(), activity: mainActivitySchema, inbox: inboxDeltaSchema }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/project-owner-responsibility-updated'),
+    data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, memberId: memberIdSchema,
+      responsibility: z.string(), activity: mainActivitySchema, inbox: inboxDeltaSchema }).strict(),
   }).strict(),
   z.object({
     ...operationBase,

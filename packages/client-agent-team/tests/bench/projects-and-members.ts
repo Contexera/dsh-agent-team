@@ -79,7 +79,7 @@ export function createProjectsAndMembersDouble(options?: { readonly initialProje
     ? [{ projectRef: 'project:engineering', workspaceId: 'w1', name: 'engineering', description: 'Engineering work', createdAtSequence: 1 }]
     : []
   let memberships: Array<Record<string, unknown>> = []
-  let owners: Array<{ projectRef: string; memberId: string }> = []
+  let owners: Array<{ projectRef: string; memberId: string; responsibility?: string }> = []
 
   const createProject = vi.fn(async (request: AgentTeamCreateProjectRequest) => {
     const project = {
@@ -103,10 +103,11 @@ export function createProjectsAndMembersDouble(options?: { readonly initialProje
 
   let projectOwnerFailure: string | undefined
   const failProjectOwnerWrite = (message?: string): void => { projectOwnerFailure = message }
-  const writeProjectOwner = (add: boolean) => async (request: { requestId: string; workspaceId: string; projectRef: string; memberId: string }) => {
+  const writeProjectOwner = (add: boolean) => async (request: { requestId: string; workspaceId: string; projectRef: string; memberId: string; responsibility?: string }) => {
     if (projectOwnerFailure !== undefined) return { ok: false as const, error: { message: projectOwnerFailure } }
     owners = owners.filter(owner => !(owner.projectRef === request.projectRef && owner.memberId === request.memberId))
-    if (add) owners = [...owners, { projectRef: request.projectRef, memberId: request.memberId }]
+    if (add) owners = [...owners, { projectRef: request.projectRef, memberId: request.memberId,
+      ...(request.responsibility === undefined || request.responsibility.trim() === '' ? {} : { responsibility: request.responsibility.trim() }) }]
     return {
       ok: true as const,
       value: {
@@ -118,6 +119,14 @@ export function createProjectsAndMembersDouble(options?: { readonly initialProje
   }
   const addProjectOwner = vi.fn(writeProjectOwner(true))
   const removeProjectOwner = vi.fn(writeProjectOwner(false))
+  const updateProjectOwner = vi.fn(async (request: { requestId: string; workspaceId: string; projectRef: string; memberId: string; responsibility: string }) => {
+    if (projectOwnerFailure !== undefined) return { ok: false as const, error: { message: projectOwnerFailure } }
+    // The Host replaces the text on the grant it already holds; it never regrants.
+    owners = owners.map(owner => owner.projectRef === request.projectRef && owner.memberId === request.memberId
+      ? { projectRef: owner.projectRef, memberId: owner.memberId, ...(request.responsibility.trim() === '' ? {} : { responsibility: request.responsibility.trim() }) }
+      : owner)
+    return { ok: true as const, value: { receipt: {}, projectRef: request.projectRef, ownerIds: owners.filter(owner => owner.projectRef === request.projectRef).map(owner => owner.memberId) } }
+  })
 
   const updateMember = vi.fn(async (request: { requestId: string; memberId: string; handle: string; description: string; model?: { provider: string; model: string } }) => {
     memberRows = memberRows.map(entry => entry.member.memberId === request.memberId
@@ -203,6 +212,7 @@ export function createProjectsAndMembersDouble(options?: { readonly initialProje
     archiveProject,
     addProjectOwner,
     removeProjectOwner,
+    updateProjectOwner,
     failProjectOwnerWrite,
     modelCatalog,
     putAttachment,

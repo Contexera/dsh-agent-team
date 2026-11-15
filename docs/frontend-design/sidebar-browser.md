@@ -30,6 +30,12 @@ An edit replaces the route without clearing it back to the Host default. Changin
 
 The Project editor's Owners section renders the Human first as a fixed owner with no remove control, then Agent owners with a remove button each, then the Workspace's enabled or suspended Agents not yet owners, each with an add button. Writes go through `addProjectOwner` / `removeProjectOwner`, non-optimistically; a Host error stays in the section's alert.
 
+Each Agent owner also carries its responsibility: one line of the recorded text, or `未说明` / `Unspecified` when the grant records none, with a small outline Edit control at the row's end.
+
+Editing opens a two-row textarea seeded with the recorded text on the dialog's own field surface — the Input's 14px/22px text, md radius, l4 stroke, layer-1 fill and dimmed placeholder, with focus moving the stroke instead of drawing a ring — and an outline Cancel beside a primary Save at the row's end. Blank is a real instruction — clear the text — so it submits an empty value instead of acting as a no-op, and a refused write leaves the form open on the draft with the Host's message while the projection keeps the old text.
+
+Above the addable list, one optional field states the responsibility the next grant will record; a committed grant consumes it and the field starts blank again. The text is the projection's, never the draft's: a row shows what the Host stored only after the refresh returns it.
+
 A question mark beside the sidebar's Projects label, and another beside this section's Owners label, each shows its explanation on hover, to the right of the mark. Covering the row beside it is accepted. A Project is a standing scope, mentioning someone outside it adds them, and who receives a message depends on following and on being mentioned. Each mark is its own button, so reading it does not fold the section or submit the editor.
 
 When a Member's generation is swapped, the Agents panel observes the old→new Session binding and follows exactly once — only when the embedded page equals the observed old live Session id — and never redirects an archive view. No surface offers to reset a Member's context. The narrow rail's four icon buttons read top-down Inbox (`IconQueueOutlineRegular`) → Task board (`IconChecklistOutlineRegular`) → Projects (`IconListPenOutlineRegular`) → Agents (`IconAgentPresetOutlineRegular`), all at 16px; the member icon stays unused by the rail.

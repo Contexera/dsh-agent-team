@@ -46,6 +46,10 @@ Workspace 目录可见性与 Project 参与是两件事。每个 Workspace Membe
 
 ledger 采用规则版本 2 之后，Project 有 owner：Human 恒为每个 Project 的 owner 且不存储；Agent owner 由 Human 增删（`team/project-owner-added` / `team/project-owner-removed`），目标须参与该 Project 所在 Workspace 且为 enabled 或 suspended。离开该 Workspace、归档或删除会结束 Agent 的 owner 身份，暂停不会。
 
+规则版本 8 起，Agent owner 的授权还带一个 `responsibility`：一段有界文本，至多 2,000 字符，说明这个 owner 在该 Project 里负责什么结果。它是第三层，不改写另外两层——Member description 仍是跨 Project 的全局描述，Project description 仍是 Project 内共享的描述，而同一个 Agent 可以在不同 Project 里负责不同结果。Host 写入前 trim，空值表示未说明。
+
+没有携带该字段的授权，以及版本 8 之前写下的所有授权，都读作未说明。这是授权本身的一项普通事实，不是需要修复的故障，因此没有任何地方把它报成缺失，也没有读者把缺失当作错误。文本的变更走 `team/project-owner-responsibility-updated`，而不是先撤回再重新授权，所以授权的 `since` 和它起始的 Main stream Attention 行都在编辑后保留；同一个 operation 通过 owner Activity 路径通知该 owner，通知未送达不改变已提交的文本。
+
 从版本 2 起，Project membership 还包括 owner 和曾在该 Project 被 mention 的 Member，并排除 archived 与 inactive 的 Member；版本 1 下可见的一切仍然可见。
 
 规则版本 2 起，每个 Project 还有独立于所有 Thread 的 Main stream。任何 Project member 都可以发言（`team/main-message-posted`）。Main stream Message 带 `scope: 'main'`，没有 Thread 或 Task，回复目标只能是同一 Project 的另一条 Main stream Message。点名某个 Member 或回复其 Message（Human 也算）会给对方一个 Main stream marker；`@all` 只是普通文本。

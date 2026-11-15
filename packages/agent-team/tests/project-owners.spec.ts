@@ -4,7 +4,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool } from './helpers/memory-backend.ts'
 import { openTestTable } from './helpers/ledger-harness.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
-import type { AgentTeamAgentMember, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamRequestId } from '../src/types.ts'
+import type { AgentTeamAgentMember, AgentTeamMemberId, AgentTeamOperation, AgentTeamProjectRef, AgentTeamRequestId } from '../src/types.ts'
 
 const alpha = WorkspaceId('workspace:alpha')
 const beta = WorkspaceId('workspace:beta')
@@ -113,7 +113,7 @@ describe('Project owners', () => {
     expect(added.value.ownerIds).toEqual([owner])
     expect((await ledger.addProjectOwner(request)).committed).toBe(false)
     expect(ledger.view({ workspaceId: alpha }).owners).toEqual([{ projectRef, memberId: owner }])
-    expect(ledger.ownedProjects(owner).map(project => project.projectRef)).toEqual([projectRef])
+    expect(ledger.ownedProjects(owner).map(owned => owned.project.projectRef)).toEqual([projectRef])
     expect(visible(ledger, owner)).toEqual([projectRef])
     expect(visible(ledger, other)).toEqual([])
 
@@ -181,5 +181,114 @@ describe('Project owners', () => {
     }
     expect(await enrolled(1)).toBe(true)
     expect(await enrolled(2)).toBe(false)
+  })
+})
+
+describe('the responsibility an owner answers for', () => {
+  const update = (memberId: AgentTeamMemberId, responsibility: string, projectRef: AgentTeamProjectRef) =>
+    ({ requestId: requestId('owner-update'), actor: human, workspaceId: alpha, projectRef, memberId, responsibility })
+
+  it('records what a grant was written with and reads it back on every surface', async () => {
+    const { ledger, owner, projectRef, change } = await seed(8)
+    await ledger.addProjectOwner({ ...change(owner), responsibility: '  owns the release checklist  ' })
+    // Trimmed on write, so the stored text is the text every surface renders.
+    expect(ledger.view({ workspaceId: alpha }).owners).toEqual([{ projectRef, memberId: owner, responsibility: 'owns the release checklist' }])
+    expect(ledger.projectOwnersOf(projectRef)).toEqual([{ projectRef, memberId: owner, responsibility: 'owns the release checklist' }])
+    expect(ledger.ownedProjects(owner)).toEqual([{ project: expect.objectContaining({ projectRef }), responsibility: 'owns the release checklist' }])
+  })
+
+  it('reads a grant written before the field existed as unspecified', async () => {
+    const { ledger, owner, projectRef, change } = await seed(2)
+    await ledger.addProjectOwner(change(owner))
+    // Absence, not an empty string: the projection says nothing was recorded.
+    expect(ledger.view({ workspaceId: alpha }).owners).toEqual([{ projectRef, memberId: owner }])
+    expect(ledger.ownedProjects(owner)).toEqual([{ project: expect.objectContaining({ projectRef }) }])
+  })
+
+  it('replaces the text without re-granting, and replays as one record', async () => {
+    const { table, ledger, owner, projectRef, change } = await seed(8)
+    await ledger.addProjectOwner({ ...change(owner), responsibility: 'first' })
+    const before = ledger['state'].owners.get(projectRef)?.get(owner)
+    const updated = await ledger.updateProjectOwner(update(owner, 'second', projectRef))
+    expect(updated.committed).toBe(true)
+    // The grant survives: same sequence, same owner, only the text moved.
+    expect(ledger['state'].owners.get(projectRef)?.get(owner)).toEqual({ since: before?.since, responsibility: 'second' })
+    expect(ledger.projectOwnerIds(projectRef)).toEqual([owner])
+    expect(ledger.view({ workspaceId: alpha }).owners).toEqual([{ projectRef, memberId: owner, responsibility: 'second' }])
+
+    const replayed = new AgentTeamLedger(table)
+    await replayed.initialize()
+    expect(replayed.view({ workspaceId: alpha }).owners).toEqual([{ projectRef, memberId: owner, responsibility: 'second' }])
+    // One appended record, never a remove followed by a new grant.
+    expect(replayed['state'].ordered.filter(operation => operation.kind === 'team/project-owner-added')).toHaveLength(1)
+    expect(replayed['state'].ordered.filter(operation => operation.kind === 'team/project-owner-responsibility-updated')).toHaveLength(1)
+  })
+
+  it('clears the text when the Human submits an empty one', async () => {
+    const { ledger, owner, projectRef, change } = await seed(8)
+    await ledger.addProjectOwner({ ...change(owner), responsibility: 'owns the checklist' })
+    await ledger.updateProjectOwner(update(owner, '   ', projectRef))
+    expect(ledger.view({ workspaceId: alpha }).owners).toEqual([{ projectRef, memberId: owner }])
+    // An explicit clear still records that the Human cleared it.
+    expect(ledger['state'].ordered.at(-1)).toMatchObject({ kind: 'team/project-owner-responsibility-updated', data: { responsibility: '' } })
+  })
+
+  it('refuses an update for a non-owner, an archived Project, and the Human', async () => {
+    const { ledger, owner, other, projectRef, change } = await seed(8)
+    await expect(ledger.updateProjectOwner(update(other, 'text', projectRef))).rejects.toThrow(/does not own Project/u)
+    await expect(ledger.updateProjectOwner(update(AGENT_TEAM_HUMAN_MEMBER_ID, 'text', projectRef))).rejects.toThrow(/a responsibility describes an Agent owner/u)
+    await ledger.addProjectOwner(change(owner))
+    await ledger.archiveProject({ requestId: requestId('archive-project'), actor: human, workspaceId: alpha, projectRef })
+    await expect(ledger.updateProjectOwner(update(owner, 'text', projectRef))).rejects.toThrow(/archived/u)
+  })
+
+  it('refuses text over the bound and keeps the bound out of the stored record', async () => {
+    const { ledger, owner, projectRef, change } = await seed(8)
+    await expect(ledger.addProjectOwner({ ...change(owner), responsibility: 'x'.repeat(2001) })).rejects.toThrow(/at most 2000 characters/u)
+    await ledger.addProjectOwner({ ...change(owner), responsibility: 'x'.repeat(2000) })
+    expect(ledger.view({ workspaceId: alpha }).owners[0]?.responsibility).toHaveLength(2000)
+    await expect(ledger.updateProjectOwner(update(owner, 'y'.repeat(2001), projectRef))).rejects.toThrow(/at most 2000 characters/u)
+  })
+
+  it('answers a repeated update idempotently and collides on a changed payload', async () => {
+    const { ledger, owner, projectRef, change } = await seed(8)
+    await ledger.addProjectOwner(change(owner))
+    const request = update(owner, 'steady', projectRef)
+    expect((await ledger.updateProjectOwner(request)).committed).toBe(true)
+    const replay = await ledger.updateProjectOwner(request)
+    expect(replay.committed).toBe(false)
+    await expect(ledger.updateProjectOwner({ ...request, responsibility: 'different' })).rejects.toThrow(/reused/u)
+  })
+
+  it('refuses a responsibility while the ledger runs below rules version 8', async () => {
+    const { ledger, owner, projectRef, change } = await seed(7)
+    // The grant itself is version 2; only the text needs version 8, so a version 7
+    // ledger keeps granting owners and refuses to record what they answer for.
+    await ledger.addProjectOwner(change(owner))
+    await expect(ledger.updateProjectOwner(update(owner, 'text', projectRef))).rejects.toThrow(/responsibilities need rules version 8/u)
+    await ledger.removeProjectOwner(change(owner))
+    await expect(ledger.addProjectOwner({ ...change(owner), responsibility: 'text' })).rejects.toThrow(/responsibilities need rules version 8/u)
+  })
+
+  it('refuses a responsibility carried inside a version 7 segment on replay', async () => {
+    const { table, ledger, owner, change } = await seed(8)
+    await ledger.addProjectOwner({ ...change(owner), responsibility: 'owns the checklist' })
+    // Lower the marker so the grant sits in a version 7 segment. No build could have
+    // written that record there, so replay must name the version instead of accepting
+    // the field because this build happens to understand it.
+    const records = [...table.entries()]
+    const marker = records.find(([, operation]) => operation.kind === 'team/rules-version-adopted')!
+    await table.put(marker[0], { ...marker[1], data: { version: 7 } } as AgentTeamOperation)
+    // Replay refuses the record itself, before any read can serve it.
+    expect(() => new AgentTeamLedger(table)).toThrow(/responsibilities need rules version 8/u)
+  })
+
+  it('drops the text when the ownership is withdrawn', async () => {
+    const { ledger, owner, projectRef, change } = await seed(8)
+    await ledger.addProjectOwner({ ...change(owner), responsibility: 'owns the checklist' })
+    await ledger.removeProjectOwner(change(owner))
+    expect(ledger.projectOwnerIds(projectRef)).toEqual([])
+    expect(ledger.view({ workspaceId: alpha }).owners).toEqual([])
+    expect(ledger.ownedProjects(owner)).toEqual([])
   })
 })

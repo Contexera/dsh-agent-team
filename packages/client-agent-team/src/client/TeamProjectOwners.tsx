@@ -1,5 +1,5 @@
-import { useState, type CSSProperties } from 'react'
-import { IconQuestionOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { Button, IconQuestionOutlineRegular, Input, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   AgentTeamClientMemberStatus,
@@ -7,6 +7,7 @@ import type {
   AgentTeamProject,
   AgentTeamProjectOwnerRequest,
   AgentTeamProjectOwnerResult,
+  AgentTeamProjectOwnerUpdateRequest,
 } from '@contexera/dsh-agent-team/types'
 import type { TeamSidebarProps } from './slots.ts'
 import { TeamMemberRow } from './TeamMemberRow.tsx'
@@ -19,14 +20,18 @@ import rowCss from './member-row.module.css'
 import sidebarCss from './sidebar.module.css'
 
 type OwnerWrite = (request: AgentTeamProjectOwnerRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
+type OwnerUpdate = (request: AgentTeamProjectOwnerUpdateRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
 
 /** The Human owns every Project and is fixed; Agent owners are written through the Host and appear only after the projection refresh. */
-export function TeamProjectOwners({ project, members, ownerIds, addProjectOwner, removeProjectOwner, humanIdentity, onCommitted, t }: {
+export function TeamProjectOwners({ project, members, ownerIds, responsibilities, addProjectOwner, removeProjectOwner, updateProjectOwner, humanIdentity, onCommitted, t }: {
   readonly project: AgentTeamProject
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly ownerIds: ReadonlySet<AgentTeamMemberId>
+  /** What each Agent owner answers for; a missing entry is unspecified, which is a fact about the grant and not a fault. */
+  readonly responsibilities: ReadonlyMap<AgentTeamMemberId, string>
   readonly addProjectOwner: OwnerWrite
   readonly removeProjectOwner: OwnerWrite
+  readonly updateProjectOwner: OwnerUpdate
   readonly humanIdentity: TeamSidebarProps['humanIdentity']
   readonly onCommitted: () => Promise<void> | void
   readonly t: TeamSidebarProps['t']
@@ -36,13 +41,32 @@ export function TeamProjectOwners({ project, members, ownerIds, addProjectOwner,
   const humanImage = useAvatarImage(identity.avatarUrl)
   const [pending, setPending] = useState<AgentTeamMemberId>()
   const [error, setError] = useState<string>()
+  // The seat being edited, and the text on its way to the Host. Both are local:
+  // the projection stays the one authority, so a committed edit shows only after
+  // the refresh returns the record the Host actually stored.
+  const [editing, setEditing] = useState<AgentTeamMemberId>()
+  const [draft, setDraft] = useState('')
+  // What the next grant will record. Blank is allowed here and means unspecified,
+  // which is why the management tool asks for it and this entry point does not.
+  const [addDraft, setAddDraft] = useState('')
+  // The form replaces the control that opened it, so it owns the focus move in both directions: the field
+  // takes focus as it mounts, and closing the form returns it to that row's own Edit control once the row
+  // is interactive again — a committed save keeps the row disabled until its refresh lands.
+  const editButtons = useRef(new Map<AgentTeamMemberId, HTMLButtonElement>())
+  const closedEdit = useRef<AgentTeamMemberId>()
+  useEffect(() => {
+    const closed = closedEdit.current
+    if (editing !== undefined || closed === undefined || pending !== undefined) return
+    closedEdit.current = undefined
+    editButtons.current.get(closed)?.focus()
+  }, [editing, pending])
   const owners = members.filter(status => ownerIds.has(status.member.memberId))
   const eligible = members.filter(status => !ownerIds.has(status.member.memberId)
     && (status.member.state === 'enabled' || status.member.state === 'suspended')
     && status.workspaceIds.includes(project.workspaceId))
 
-  const write = async (write: OwnerWrite, status: AgentTeamClientMemberStatus): Promise<void> => {
-    if (pending !== undefined) return
+  const write = async (write: OwnerWrite, status: AgentTeamClientMemberStatus, responsibility?: string): Promise<boolean> => {
+    if (pending !== undefined) return false
     setPending(status.member.memberId)
     setError(undefined)
     try {
@@ -51,9 +75,39 @@ export function TeamProjectOwners({ project, members, ownerIds, addProjectOwner,
         workspaceId: project.workspaceId,
         projectRef: project.projectRef,
         memberId: status.member.memberId,
+        ...(responsibility === undefined ? {} : { responsibility }),
       })
-      if (result.ok) await onCommitted()
-      else setError(result.error.message)
+      if (!result.ok) {
+        setError(result.error.message)
+        return false
+      }
+      await onCommitted()
+      return true
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      return false
+    } finally {
+      setPending(undefined)
+    }
+  }
+  const submitResponsibility = async (event: FormEvent<HTMLFormElement>, status: AgentTeamClientMemberStatus): Promise<void> => {
+    event.preventDefault()
+    if (pending !== undefined) return
+    setPending(status.member.memberId)
+    setError(undefined)
+    try {
+      const result = await updateProjectOwner({
+        requestId: mintRequestId(),
+        workspaceId: project.workspaceId,
+        projectRef: project.projectRef,
+        memberId: status.member.memberId,
+        responsibility: draft,
+      })
+      if (result.ok) {
+        closedEdit.current = status.member.memberId
+        setEditing(undefined)
+        await onCommitted()
+      } else setError(result.error.message)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -66,7 +120,10 @@ export function TeamProjectOwners({ project, members, ownerIds, addProjectOwner,
       label: pending === status.member.memberId ? t('projectOwnerPending') : t(`projectOwner${kind}`),
       ariaLabel: t(`projectOwner${kind}Label`, { handle }),
       disabled: pending !== undefined,
-      onSelect: () => { void write(kind === 'Add' ? addProjectOwner : removeProjectOwner, status) },
+      // The text was written into this grant, so it does not silently ride along
+      // to the next one; a refused write keeps it, because nothing consumed it.
+      onSelect: () => { void write(kind === 'Add' ? addProjectOwner : removeProjectOwner, status, kind === 'Add' ? addDraft : undefined)
+        .then(committed => { if (committed && kind === 'Add') setAddDraft('') }) },
     }
   }
 
@@ -93,14 +150,46 @@ export function TeamProjectOwners({ project, members, ownerIds, addProjectOwner,
             <small>{t('projectOwnerHumanHint')}</small>
           </span>
         </div>
-        {owners.map(status => <TeamMemberRow key={status.member.memberId} status={status} t={t} action={action('Remove', status)} />)}
+        {owners.map(status => {
+          const memberId = status.member.memberId
+          const responsibility = responsibilities.get(memberId)
+          const handle = status.member.handle.replace(/^@/, '')
+          return (
+            <div key={memberId} data-team-project-owner={memberId}>
+              <TeamMemberRow status={status} t={t} action={action('Remove', status)} />
+              {editing === memberId
+                ? <form className={createCss.field} onSubmit={event => { void submitResponsibility(event, status) }}>
+                  <label className={createCss.sectionLabel} htmlFor={`owner-responsibility-${memberId}`}>{t('projectOwnerResponsibilityLabel', { handle })}</label>
+                  <textarea autoFocus id={`owner-responsibility-${memberId}`} className={createCss.textarea} rows={2} value={draft}
+                    disabled={pending !== undefined} placeholder={t('projectOwnerResponsibilityPlaceholder')}
+                    onChange={event => { setDraft(event.target.value) }} />
+                  <div className={createCss.responsibilityActions}>
+                    <Button type="button" size="sm" variant="outline" disabled={pending !== undefined}
+                      onClick={() => { closedEdit.current = memberId; setEditing(undefined) }}>{t('projectOwnerResponsibilityCancel')}</Button>
+                    <Button type="submit" size="sm" variant="primary" disabled={pending !== undefined}>{t('projectOwnerResponsibilitySave')}</Button>
+                  </div>
+                </form>
+                : <p className={`${createCss.state} ${createCss.ownerResponsibility}`} data-team-project-owner-responsibility={memberId}>
+                  <span className={createCss.ownerResponsibilityText}>{responsibility ?? t('projectOwnerResponsibilityUnspecified')}</span>
+                  <Button type="button" size="sm" variant="outline" disabled={pending !== undefined} aria-label={t('projectOwnerResponsibilityEditLabel', { handle })}
+                    ref={node => { if (node === null) editButtons.current.delete(memberId); else editButtons.current.set(memberId, node) }}
+                    onClick={() => { setEditing(memberId); setDraft(responsibility ?? '') }}>{t('projectOwnerResponsibilityEdit')}</Button>
+                </p>}
+            </div>
+          )
+        })}
       </div>
       <span className={createCss.sectionLabel}>{t('projectOwnersAddable')}</span>
       {eligible.length === 0
         ? <p className={createCss.state}>{t('projectOwnersNoneEligible')}</p>
-        : <div className={createCss.roster}>
-          {eligible.map(status => <TeamMemberRow key={status.member.memberId} status={status} t={t} action={action('Add', status)} />)}
-        </div>}
+        : <>
+          <label className={createCss.sectionLabel} htmlFor="team-owner-add-responsibility">{t('projectOwnerResponsibilityAddLabel')}</label>
+          <Input id="team-owner-add-responsibility" className={createCss.input!} value={addDraft} disabled={pending !== undefined}
+            placeholder={t('projectOwnerResponsibilityPlaceholder')} onChange={event => { setAddDraft(event.target.value) }} />
+          <div className={createCss.roster}>
+            {eligible.map(status => <TeamMemberRow key={status.member.memberId} status={status} t={t} action={action('Add', status)} />)}
+          </div>
+        </>}
       {error !== undefined && <p className={createCss.error} role="alert">{error}</p>}
     </div>
   )

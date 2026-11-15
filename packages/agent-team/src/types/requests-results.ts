@@ -6,6 +6,7 @@ import type {
   AgentTeamAttachmentId,
   AgentTeamProject,
   AgentTeamProjectMembership,
+  AgentTeamProjectOwner,
   AgentTeamProjectRef,
   AgentTeamClaim,
   AgentTeamClaimActivity,
@@ -116,6 +117,18 @@ export interface AgentTeamProjectOwnerRequest {
   readonly workspaceId: WorkspaceId
   readonly projectRef: AgentTeamProjectRef
   readonly memberId: AgentTeamMemberId
+  /** What the new owner answers for, trimmed; blank or absent leaves it unspecified. Ignored on a withdrawal. */
+  readonly responsibility?: string
+}
+
+/** Human intent to replace one Agent owner's responsibility without touching the ownership itself. */
+export interface AgentTeamProjectOwnerUpdateRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly memberId: AgentTeamMemberId
+  /** The whole replacement text, trimmed; an empty one means unspecified. */
+  readonly responsibility: string
 }
 
 /** Result of changing or idempotently resolving one Project owner, with the Project's Agent owners after it. */
@@ -1468,8 +1481,8 @@ export interface AgentTeamView {
   /** Present for the Agent address book; never used to authorize the content catalog above. */
   readonly directory?: AgentTeamWorkspaceDirectory
   readonly members: readonly AgentTeamProjectMembership[]
-  /** Agent owners of the listed Projects. The Human owns every Project and is not listed. */
-  readonly owners: readonly AgentTeamProjectMembership[]
+  /** Agent owners of the listed Projects with the responsibility each answers for; the Human owns every Project and is not listed. */
+  readonly owners: readonly AgentTeamProjectOwner[]
   /** Validation rules version the ledger has adopted; Project owners exist from version 2. */
   readonly rulesVersion: number
   /** Catalog of the response's scope: visible Tasks, their Threads, ordinals, and Claims. With `includeCatalog` this is the whole request scope; otherwise only the Tasks and Threads the fact page and named Thread carry. */

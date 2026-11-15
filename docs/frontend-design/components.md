@@ -209,7 +209,7 @@ The first tab is `主对话`, the Project's Main stream (`TeamMainStream`), read
 
 A Thread card is the feed's one large target: the page ground at rest behind a hairline and the md radius, inset 10px/12px like the composer card. Its pointer answer is the surface itself — the interactive fill the Inbox row takes — not a border that only lightens, which left the fill untouched and made the one reacting edge fainter under the pointer.
 
-The Main stream holds five entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), owner-added/owner-removed activity rows, subscription lifecycle lines, Thread cards, and published subscription events.
+The Main stream holds five entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), ownership activity rows, subscription lifecycle lines, Thread cards, and published subscription events. An ownership row names the fact it is — the grant, the withdrawal, or the edit that replaced what the owner answers for — so an edit never reads as a withdrawal.
 
 A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status, who holds it, and — until it resolves — its live Claim owners followed by `认领`, or `待认领`. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page. Responsibility is the one fact a card cannot leave out: the reader transfers a Task from the card's Thread, so the card is also where they check who has it now.
 

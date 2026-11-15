@@ -164,6 +164,55 @@
   gap: 2px;
 }
 
+/* The recorded responsibility and its edit control share one row: the text is the authority and
+   takes the slack, while the control stays a small secondary action at the row's end. */
+.ownerResponsibility {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.ownerResponsibilityText {
+  overflow-wrap: anywhere;
+}
+
+/* The edit form's actions sit at the row's end in the dialog footer's own order and gap: the outline
+   cancel first, the primary save last. */
+.responsibilityActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* The dialog's Input primitive is single-line; a responsibility can be a sentence, so the edit field
+   takes that surface's frame — 14px/22px text, the md radius, the layer-1 fill, the dimmed
+   placeholder, and the l4 neutral at the 1px the model picker above already paints it with — and
+   grows to two rows instead of scrolling sideways. Focus moves the stroke exactly as it does on the
+   Input beside it, rather than adding a second focus language. */
+.textarea {
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md, 12px);
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  padding: 6px 8px;
+  resize: vertical;
+  width: 100%;
+}
+
+.textarea:focus {
+  border-color: var(--dsw-alias-state-business-primary);
+  outline: none;
+}
+
+.textarea::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
 /* The Project dialog's owners block sits under the form, which the Modal body does not space. */
 .ownersSection {
   display: grid;

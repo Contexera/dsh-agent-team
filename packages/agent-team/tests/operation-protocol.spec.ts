@@ -550,7 +550,7 @@ const rulesVersionAdopted: Op<'team/rules-version-adopted'> = {
   data: { version: 2 },
 }
 
-const ownerActivity = (kind: 'owner-added' | 'owner-removed', sequence: number): AgentTeamOwnerActivity => ({
+const ownerActivity = (kind: 'owner-added' | 'owner-removed' | 'owner-responsibility-updated', sequence: number): AgentTeamOwnerActivity => ({
   activityRef: `activity:protocol-${kind}` as AgentTeamActivityRef, projectRef, kind, memberId, actor: human.memberId, sequence, occurredAt: instant,
 })
 const ownerInbox = (activity: AgentTeamMainActivity): AgentTeamInboxDelta => ({
@@ -563,6 +563,14 @@ const projectOwnerAdded: Op<'team/project-owner-added'> = {
   previousOperationId,
   kind: 'team/project-owner-added',
   data: { workspaceId: alpha, projectRef, memberId, activity: ownerActivity('owner-added', 30), inbox: ownerInbox(ownerActivity('owner-added', 30)) },
+}
+
+const projectOwnerResponsibilityUpdated: Op<'team/project-owner-responsibility-updated'> = {
+  ...opBase('operation:protocol-36', 'request:protocol-project-owner-responsibility-updated', 36),
+  previousOperationId,
+  kind: 'team/project-owner-responsibility-updated',
+  data: { workspaceId: alpha, projectRef, memberId, responsibility: 'owns the release checklist',
+    activity: ownerActivity('owner-responsibility-updated', 36), inbox: ownerInbox(ownerActivity('owner-responsibility-updated', 36)) },
 }
 
 const projectOwnerRemoved: Op<'team/project-owner-removed'> = {
@@ -1115,6 +1123,21 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
         return out
       },
       changed: () => ledger.removeProjectOwner({ requestId: projectOwnerRemoved.requestId, actor: human, ...projectOwnerRemoved.data, memberId: AGENT_TEAM_HUMAN_MEMBER_ID }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
+  },
+  'team/project-owner-responsibility-updated': {
+    stored: projectOwnerResponsibilityUpdated,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.updateProjectOwner({ requestId: projectOwnerResponsibilityUpdated.requestId, actor: human, ...projectOwnerResponsibilityUpdated.data })
+        expect(out.value.projectRef, 'the owner mapper answers with the stored Project').toBe(projectRef)
+        return out
+      },
+      changed: () => ledger.updateProjectOwner({ requestId: projectOwnerResponsibilityUpdated.requestId, actor: human,
+        ...projectOwnerResponsibilityUpdated.data, responsibility: 'owns something else entirely' }),
     },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'delta' },
@@ -1945,7 +1968,8 @@ function committedValue<T>(result: AgentTeamLedgerResult<T>): T {
 }
 
 /** Kinds added after the rename: no record ever carried a Channel spelling of their name. */
-const kindsBornAsProject: ReadonlySet<AgentTeamOperation['kind']> = new Set(['team/project-owner-added', 'team/project-owner-removed'])
+const kindsBornAsProject: ReadonlySet<AgentTeamOperation['kind']> = new Set(['team/project-owner-added', 'team/project-owner-removed',
+  'team/project-owner-responsibility-updated'])
 
 describe('operation protocol coverage', () => {
   beforeAll(async () => { await seedLedger() })

@@ -116,7 +116,7 @@
 - 同一卡片家族也服务唯一的跨 Workspace 看板（`TeamTaskBoardPage`，从侧栏「任务看板」入口进入，见 [sidebar-browser.zh.md](sidebar-browser.zh.md)）：所有可见 Workspace 的 open Task 摆进三个未完结状态列，每张卡带 Project 名前缀，空态同一条规则（空态文案独站，列头不并立），不带未读徽标——那仍是 Project 面上按 Thread 计的未读事实。
 - 第一个页签是 `主对话`，即 Project 的 Main stream（`TeamMainStream`）：从 `mainStreamHistory` 先读最新一页，更早的页用 `beforeSequence`。
 
-- Thread 卡片是 feed 里唯一的大号目标：静息落在页面底色上、发丝描边、md 圆角，与 composer 卡同一套 10px/12px 内缩。指针应答落在表面本身——收件箱行那一档交互填充——而不是只把描边变淡：原先的写法既没动底色，又让唯一会反应的那条边在指针下更浅。时间线按 ledger 顺序有五类条目：Main 消息（同一个 `TeamMessage` 行，保留悬停引用与复制）、owner 增删的活动行、订阅生命周期行、Thread 卡片、已发布的订阅事件。
+- Thread 卡片是 feed 里唯一的大号目标：静息落在页面底色上、发丝描边、md 圆角，与 composer 卡同一套 10px/12px 内缩。指针应答落在表面本身——收件箱行那一档交互填充——而不是只把描边变淡：原先的写法既没动底色，又让唯一会反应的那条边在指针下更浅。时间线按 ledger 顺序有五类条目：Main 消息（同一个 `TeamMessage` 行，保留悬停引用与复制）、owner 活动行、订阅生命周期行、Thread 卡片、已发布的订阅事件。owner 活动行点明自己是哪一种事实——授权、撤回，还是替换该负责人责任的编辑——因此编辑不会读成撤回。
 - 卡片是一个按钮，展示 Thread 的当前状态，不按状态跃迁逐条追加：讨论卡片显示首行、回复数与参与人数；Task 卡片显示编号、状态、谁持有它，以及（未了结时的）现有 Claim 持有者后接「认领」，或「待认领」。讨论卡片打开 Thread 侧面板；Task 卡片打开该 Task 的 Thread 页。
 - 责任是卡片唯一不能省掉的事实：读者就是在卡片的 Thread 里转交 Task，所以卡片也是他确认「现在归谁」的地方。页签挂载期间，standing 里有未读或 marker 就通过 `readMainStream` 确认已读。
 - 卡标题、chip 标题、引用行、收件箱摘要与看板卡标题都是压缩文本：取正文首个非空行、把 Markdown 投成纯文本、再按面截断——投影在截断之前，`**…**` 不会被切开留下配不上的开标记。Message 正文在它作为正文出现的地方照旧渲染 Markdown。

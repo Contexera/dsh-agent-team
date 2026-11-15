@@ -6,7 +6,9 @@
 `memory.md` 是有界路由索引，不是仓库。索引只装四样东西：身份与职责、必须每步生效的长期规则、当前在手，以及每个主题簇一行。`notes/` 按需读取，从不注入。Member 把索引常态保持在 8 KiB 以内，硬顶 16 KiB。超过硬顶，索引整块不再注入。注入块始终自带用量说明。维护手艺（什么配得上一行、三层结构、压实与降级）归内置 `member-memory-manager` core skill。skill 写作归 `member-skill-manager`，两套手艺同源。persona 只常驻一条：索引必须有界，细节留在索引点名的那篇笔记里。Member 首次生成的 `memory.md` 脚手架陈述同样的小节。
 
 ## Member 上下文注入
-Member 每一步的上下文由四个分类块组成：身份、Project ownership、Workspace 参与和私有记忆。每个块都是独立的 surface message；同类的新块在语义上覆盖旧块——旧消息仍留在 Session 日志和 surface 中，直到压缩——没有变化的类别不追加内容。ownership 和参与始终给出完整列表，包括 ownership 撤销为空，以及参与从多个 Workspace 缩为一个。
+Member 每一步的上下文由四个分类块组成：身份、Project ownership、Workspace 参与和私有记忆。每个块都是独立的 surface message；同类的新块在语义上覆盖旧块——旧消息仍留在 Session 日志和 surface 中，直到压缩——没有变化的类别不追加内容。
+
+ownership 和参与始终给出完整列表，包括 ownership 撤销为空，以及参与从多个 Workspace 缩为一个。每行 ownership 都写明该负责人在这一个 Project 里负责什么；没有记录的责任读作未说明——这是授权本身的普通事实，不是 Member 需要补上的缺口。
 
 私有记忆有两种形态。完整索引是基线。`memory.md` 变化后，Member 只收到一条简短提示：先前副本已过时、文件位置和当前预算占用。判断以最新的 memory 事件对照文件当前状态，旧的匹配提示不能掩盖后来的变化。提示不是索引：压缩后只剩提示时，仍会补发最新的完整基线。索引缺失、不可读或超出预算时，说明当前状况及其路径，不再注入内容。
 

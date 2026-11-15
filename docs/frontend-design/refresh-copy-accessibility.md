@@ -19,7 +19,7 @@ Section headers, expand/collapse buttons, menus, listbox/options, the 「作为�
 
 Every icon button has an accessible label; decoration is hidden. A Thread entry's door is one native button whose label carries both the Thread and its unread count; the capsule drawn beside it is `aria-hidden`, and the owner stack is a single labeled `role="img"` that stays outside the button so its name survives. Timeline uses a dedicated message-timeline label.
 
-The Agent and Project edit dialogs focus the name on entry and return focus to the originating row on close.
+The Agent and Project edit dialogs focus the name on entry and return focus to the originating row on close. Opening an owner responsibility edit focuses its textarea, and closing it — cancel or a committed save — returns focus to that row's Edit control.
 
 Unread and run dividers have `role="separator"`; visible UI changes require desktop 1440×960, 390×844, and keyboard browser checks.
 

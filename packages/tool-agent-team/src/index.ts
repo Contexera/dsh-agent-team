@@ -1456,7 +1456,13 @@ const teamView = defineTool({
       projects: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         projectRef: { type: 'string', required: true }, name: { type: 'string', required: true },
         // Present only once the ledger has Project owners (rules version 2).
-        owners: { type: 'array', items: { type: 'string' } }, role: { type: 'string' },
+        owners: { type: 'array', items: { type: 'string' } },
+        // What each Agent owner answers for here; `unspecified` is a neutral
+        // statement about the grant, not a fault to report.
+        ownerResponsibilities: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+          handle: { type: 'string', required: true }, responsibility: { type: 'string', required: true },
+        } } },
+        role: { type: 'string' },
         subscriptions: { type: 'object', additionalProperties: false, properties: {
           active: { type: 'number', required: true }, paused: { type: 'number', required: true },
         } },
@@ -1485,7 +1491,9 @@ const teamView = defineTool({
           const counts = project.subscriptions === undefined ? '' : project.subscriptions.active === 0 && project.subscriptions.paused === 0
             ? ' · subscriptions 0'
             : ` · subscriptions ${project.subscriptions.active === 0 ? '' : `${project.subscriptions.active} active`}${project.subscriptions.active > 0 && project.subscriptions.paused > 0 ? ', ' : ''}${project.subscriptions.paused === 0 ? '' : `${project.subscriptions.paused} paused`}`
-          return `${project.projectRef} · ${project.name}${project.owners === undefined ? '' : ` · owners ${project.owners.map(handle => `@${handle}`).join(', ')} · you: ${project.role}`}${counts}`
+          const responsibilities = project.ownerResponsibilities === undefined || project.ownerResponsibilities.length === 0 ? ''
+            : ` · responsibility ${project.ownerResponsibilities.map(owner => `@${owner.handle}: ${owner.responsibility}`).join('; ')}`
+          return `${project.projectRef} · ${project.name}${project.owners === undefined ? '' : ` · owners ${project.owners.map(handle => `@${handle}`).join(', ')} · you: ${project.role}`}${responsibilities}${counts}`
         }))
         lines.push('')
       }
@@ -1528,8 +1536,15 @@ const teamView = defineTool({
         const { project, ownerIds, participating, subscriptions } = entry
         if (!ownership) return { projectRef: project.projectRef, name: project.name, subscriptions,
           role: participating ? 'member' : 'directory only' }
+        const projectOwners = view.owners.filter(owner => owner.projectRef === project.projectRef)
         return { projectRef: project.projectRef, name: project.name, subscriptions,
           owners: [host.humanHandle(), ...ownerIds.map(memberId => handles.get(memberId) ?? memberId)],
+          // Only when at least one owner recorded text: a Project whose every grant
+          // is unspecified adds no field and no token, and a pre-version-8 ledger
+          // answers exactly as it did before the field existed. Once it appears, an
+          // owner without text reads `unspecified` rather than being left out.
+          ...(projectOwners.every(owner => owner.responsibility === undefined) ? {} : { ownerResponsibilities: projectOwners
+            .map(owner => ({ handle: handles.get(owner.memberId) ?? owner.memberId, responsibility: owner.responsibility ?? 'unspecified' })) }),
           role: participating ? (self !== undefined && ownerIds.includes(self.memberId) ? 'owner' : 'member') : 'directory only' }
       }),
       directoryOnly: args.projectRef !== undefined && view.directory.projects.length === 1 && !view.directory.projects[0]!.participating,

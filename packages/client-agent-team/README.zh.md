@@ -20,6 +20,7 @@ Client 使用以下 Host 接口：
 - `resolveTaskRefs`：将已知 branded Task ref 解析为展示编号及所属 Project/Thread，供导航使用。
 - `updateProject`：提交项目名称/说明的展示事实修改。
 - `addProjectOwner` / `removeProjectOwner`：在项目编辑对话框中增删 Agent 负责人；仅当 Host `view` 报告规则版本 ≥ 2 时渲染该区块，Human 始终作为固定负责人列出。
+- `updateProjectOwner`：替换某个 Agent 负责人在这一个 Project 里负责什么，不动授权本身。对话框显示已存文本，没有记录时读作「未说明」/`Unspecified`，并可原地编辑；在新增输入框里填写的文本随下一次授权一起提交。留空是明确指令——清空文本——因此按空值提交而不是当作无操作；写入被拒时表单停在草稿上并显示 Host 的消息，投影仍保留旧文本。
 - `postMainMessage` / `startThread` / `readMainStream` / `mainStreamHistory`：驱动项目主对话；仅当 Host `view` 报告规则版本 ≥ 2 时项目页使用它们（第一个页签变为主对话，composer 的 `讨论/任务` 开关用于开讨论与 Task）。
 - `archiveProject`：把项目从所有面收起，事实保留（暂无恢复入口）。
 - `updateMember`：提交 Agent 名称/说明编辑，以及可选的成员级模型覆盖。

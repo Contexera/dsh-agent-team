@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+**Upgrade note**
+
+- The Team ledger adopts rules version 8 the first time this build opens it, and a build from before this release then refuses it. Version 8 adds the owner-responsibility record and the optional text an ownership grant may carry; earlier segments replay byte-identically, so no data migration is needed. Back up `$DSH_HOME/storages/agent_team.sqlite`, install this build on every profile that shares it, and only then open Team; rolling back means restoring that backup, and whatever was written after it is lost.
+
+**Added**
+
+- A Project's Agent owner can carry a responsibility: one bounded text, at most 2,000 characters, saying what that owner answers for in this Project. It layers apart from the Member's global description and from the Project's own description, and the same Agent can answer for different outcomes in different Projects. It is recorded with the grant or edited afterwards from the Project dialog without withdrawing and re-granting, so the owner keeps its standing and the Main stream following that grant started; a grant that records none reads `unspecified`, which is a fact about the grant rather than a gap to repair. `team_view`, the Member's ownership context, and the Project dialog show the same text.
+
 **Fixed**
 
 - A send attempt now survives navigation without taking a newer draft, mode, attachment set, or reply target with it; a Main quote whose target is outside the reopened page stays visible, can be cancelled, and retries with the same target.
@@ -13,6 +21,8 @@ All notable changes to this project are documented in this file. The format foll
 - Queue admission, recovery notices, and notification overflow no longer discard work that can still be delivered on a later pass.
 - Sidebar drags preserve the latest order even when an earlier Host read or save returns late.
 - Tool availability guidance names exactly the visible tools the Member guard denies, with tool names escaped as data rather than prompt markup.
+- Editing what a Project owner answers for reads as an edit everywhere: the Main stream row it appends no longer fails that Project's whole Main stream read, the wake it sends the owner and the ordinary digest other followers see name the change instead of reporting a withdrawal, and readers whose Main stream Attention covers the Project are woken for it.
+- The Project dialog's owner-responsibility edit reads as the dialog's own field instead of a second one — the same text size, radius, stroke, fill and placeholder as the Input above it, its cancel and save at the row's end in the footer's order — and opening or closing it moves focus between that field and the row's Edit control.
 
 ## [0.2.8] - 2026-11-12
 

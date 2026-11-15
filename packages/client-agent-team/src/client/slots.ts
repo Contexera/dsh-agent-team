@@ -6,6 +6,7 @@ import type {
   AgentTeamArchiveMemberRequest,
   AgentTeamArchiveMemberResult,
   AgentTeamProjectOwnerRequest,
+  AgentTeamProjectOwnerUpdateRequest,
   AgentTeamProjectOwnerResult,
   AgentTeamProjectRef,
   AgentTeamClientMemberStatus,
@@ -148,6 +149,7 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     archiveProject: (request: AgentTeamArchiveProjectRequest) => Promise<RemoteResult<AgentTeamArchiveProjectResult>>
     addProjectOwner: (request: AgentTeamProjectOwnerRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
     removeProjectOwner: (request: AgentTeamProjectOwnerRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
+    updateProjectOwner: (request: AgentTeamProjectOwnerUpdateRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
     humanIdentity: TeamHumanIdentitySource
     updateMember: (request: AgentTeamUpdateMemberRequest) => Promise<RemoteResult<AgentTeamMemberResult>>
     /** One Member's reminders for Member detail; the Host judges participation, never the seat. */

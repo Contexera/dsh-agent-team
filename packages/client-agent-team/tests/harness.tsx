@@ -154,6 +154,7 @@ export async function createClientBench(options?: ClientTestBenchOptions) {
         archiveProject: projectsAndMembers.archiveProject,
         addProjectOwner: projectsAndMembers.addProjectOwner,
         removeProjectOwner: projectsAndMembers.removeProjectOwner,
+        updateProjectOwner: projectsAndMembers.updateProjectOwner,
         updateMember: projectsAndMembers.updateMember,
         recoverMember: projectsAndMembers.recoverMember,
         archiveMember: projectsAndMembers.archiveMember,

@@ -254,7 +254,10 @@ export function TeamMainStream({
           <p className={threadCss.activityRow} ><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{text}</span></p>
         </div>
       }
-      const text = t(activity.kind === 'owner-added' ? 'mainOwnerAdded' : 'mainOwnerRemoved', {
+      // Three owner facts share this row: the grant, the withdrawal, and the edit
+      // that replaces what the owner answers for without touching the grant.
+      const text = t(activity.kind === 'owner-added' ? 'mainOwnerAdded'
+        : activity.kind === 'owner-removed' ? 'mainOwnerRemoved' : 'mainOwnerResponsibilityUpdated', {
         actor: nameOf(activity.actor), member: nameOf(activity.memberId),
       })
       return <div className={streamCss.entry} data-main-entry="activity" data-unread={unread} key={mainEntryKey(entry)}>

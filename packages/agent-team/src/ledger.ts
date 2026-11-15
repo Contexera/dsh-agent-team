@@ -36,12 +36,14 @@ import type {
   AgentTeamArchiveProjectResult,
   AgentTeamArchiveMemberRequest,
   AgentTeamArchiveMemberResult,
+  AgentTeamOwnedProject,
   AgentTeamProject,
   AgentTeamChangeScope,
   AgentTeamProjectArchivedOperation,
   AgentTeamProjectCreatedOperation,
   AgentTeamProjectMemberAddedOperation,
   AgentTeamProjectMemberRemovedOperation,
+  AgentTeamProjectOwner,
   AgentTeamProjectRef,
   AgentTeamProjectUpdatedOperation,
   AgentTeamReleaseSnapshot,
@@ -97,6 +99,7 @@ import type {
   AgentTeamMemberSessionRecycledOperation,
   AgentTeamRulesVersionAdoptedOperation,
   AgentTeamProjectOwnerAddedOperation,
+  AgentTeamProjectOwnerResponsibilityUpdatedOperation,
   AgentTeamProjectOwnerRemovedOperation,
   AgentTeamMemberSuspendedOperation,
   AgentTeamMemberUpdatedOperation,
@@ -177,6 +180,7 @@ import type {
   AgentTeamUpdateProjectRequest,
   AgentTeamProjectOwnerRequest,
   AgentTeamProjectOwnerResult,
+  AgentTeamProjectOwnerUpdateRequest,
   AgentTeamUpdateProjectResult,
   AgentTeamSubscription,
   AgentTeamSubscriptionAcceptResult,
@@ -289,7 +293,7 @@ export const TASK_BOARD_FINISHED_PER_PROJECT = 5
  * instead of failing on an unknown operation kind mid-replay. Version 7 adds continuation links and the native turn /
  * input arrays settled with a Worker; version-6 Worker records stay valid without those fields.
  */
-export const AGENT_TEAM_RULES_VERSION = 7
+export const AGENT_TEAM_RULES_VERSION = 8
 
 /**
  * The bounded, single-line reason a finished run gives its Thread. It is derived
@@ -308,6 +312,34 @@ function workerRunReasonOf(settlement: AgentTeamWorkerSettlement): string | unde
   const text = said === '' ? fallback : said
   return characterLength(text) <= WORKER_REASON_MAX_CHARACTERS
     ? text : `${truncateToCharacters(text, WORKER_REASON_MAX_CHARACTERS - 1)}…`
+}
+
+/**
+ * The bound on one owner responsibility. It is a single free-text sentence or
+ * short paragraph about the result this Member answers for — not a job spec and
+ * not a structured tree — so the bound keeps it readable in every surface that
+ * renders it: the Member context, team_view, and the Web owner list.
+ */
+export const AGENT_TEAM_OWNER_RESPONSIBILITY_MAX_CHARACTERS = 2000
+
+/**
+ * The one owner-responsibility rule, applied before a write: trim, refuse what
+ * is over the bound, and read an empty result as unspecified. Absence and the
+ * empty string therefore mean the same thing on every surface, and a record
+ * written before rules version 8 needs no rewriting to read as unspecified.
+ */
+function ownerResponsibilityOf(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  const trimmed = value.trim()
+  if (characterLength(trimmed) > AGENT_TEAM_OWNER_RESPONSIBILITY_MAX_CHARACTERS) {
+    throw new Error(`a Project owner responsibility must be at most ${AGENT_TEAM_OWNER_RESPONSIBILITY_MAX_CHARACTERS} characters; this one is ${characterLength(trimmed)}`)
+  }
+  return trimmed === '' ? undefined : trimmed
+}
+
+/** Whether a responsibility already on a record is one this build could have written. */
+function isStoredOwnerResponsibilityText(value: string): boolean {
+  return value === value.trim() && value !== '' && characterLength(value) <= AGENT_TEAM_OWNER_RESPONSIBILITY_MAX_CHARACTERS
 }
 
 function freezeActor(actor: AgentTeamActor): AgentTeamActor {
@@ -432,6 +464,10 @@ export interface AgentTeamAuthorizedUpdateProjectRequest extends AgentTeamUpdate
 }
 
 export interface AgentTeamAuthorizedProjectOwnerRequest extends AgentTeamProjectOwnerRequest {
+  readonly actor: AgentTeamHumanActor
+}
+
+export interface AgentTeamAuthorizedProjectOwnerUpdateRequest extends AgentTeamProjectOwnerUpdateRequest {
   readonly actor: AgentTeamHumanActor
 }
 
@@ -665,6 +701,16 @@ interface PreparedRead extends PreparedReadReceipt {
   readonly earlierFactCount: number
 }
 
+/**
+ * One Agent owner inside the projection: when the grant happened, and what the
+ * Member answers for. The responsibility is absent on records written before
+ * rules version 8 and whenever the Human left it unspecified.
+ */
+interface ProjectOwnerRecord {
+  readonly since: number
+  readonly responsibility?: string
+}
+
 interface Projection {
   readonly byRequest: Map<AgentTeamRequestId, AgentTeamOperation>
   readonly byOperation: Map<AgentTeamOperationId, AgentTeamOperation>
@@ -728,8 +774,8 @@ interface Projection {
   readonly observationsByThread: Map<AgentTeamThreadRef, AgentTeamAttentionObservation[]>
   /** Rules version the next record is validated under: the newest marker replayed so far, else 1. */
   rulesVersion: number
-  /** Agent owners per Project with the sequence that made each one an owner; the Human owns every Project and is never stored. */
-  readonly owners: Map<AgentTeamProjectRef, Map<AgentTeamMemberId, number>>
+  /** Agent owners per Project with the sequence that made each one an owner and what it answers for; the Human owns every Project and is never stored. */
+  readonly owners: Map<AgentTeamProjectRef, Map<AgentTeamMemberId, ProjectOwnerRecord>>
   /** Members named by a mention anywhere in each Project; one input to rules-version-2 Project membership. */
   readonly mentionedByProject: Map<AgentTeamProjectRef, Set<AgentTeamMemberId>>
   /** Main stream entries per Project in ledger order: Messages, owner Activities, and one card source per Thread anchor. */
@@ -779,6 +825,7 @@ const REPLACED_AT_V2_KINDS: readonly string[] = ['team/message-sent']
 const V6_ONLY_KINDS: readonly string[] = ['team/worker-started', 'team/worker-settled']
 /** Steer receipts extend the version-7 Worker ledger; a pre-7 segment never carries one. */
 const V7_ONLY_KINDS: readonly string[] = ['team/worker-steer-admitted', 'team/worker-steer-recorded']
+const V8_ONLY_KINDS: readonly string[] = ['team/project-owner-responsibility-updated']
 
 type WorkerVersionedExecution = Pick<AgentTeamWorkerStartRecord, 'workerRef' | 'continuedFrom'>
   & Pick<AgentTeamWorkerSettlement, 'nativeTurnIds' | 'nativeInputIds'>
@@ -2805,19 +2852,65 @@ export class AgentTeamLedger {
     return this.changeProjectOwner(request, 'team/project-owner-removed')
   }
 
+  /**
+   * Replace one Agent owner's responsibility. The ownership itself is untouched:
+   * this appends a new record instead of removing and re-granting, so the Member
+   * keeps its grant, its Main stream attention and its history across the edit.
+   */
+  updateProjectOwner(request: AgentTeamAuthorizedProjectOwnerUpdateRequest): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
+    return this.enqueue(async () => {
+      // Stored as the trimmed text, with '' meaning unspecified: the record then
+      // says explicitly that the Human cleared it, and replay needs no absence.
+      const responsibility = ownerResponsibilityOf(request.responsibility) ?? ''
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        if (existing.kind !== 'team/project-owner-responsibility-updated' || !this.sameActor(existing.actor, request.actor)
+          || existing.data.workspaceId !== request.workspaceId || existing.data.projectRef !== request.projectRef
+          || existing.data.memberId !== request.memberId
+          || (existing as AgentTeamProjectOwnerResponsibilityUpdatedOperation).data.responsibility !== responsibility) {
+          this.throwRequestCollision(request.requestId)
+        }
+        return this.resolved(this.projectOwnerResult(existing))
+      }
+      this.assertHumanActor(request.actor)
+      const base = { workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberId, responsibility }
+      const problem = this.projectOwnerChangeProblem(this.state, 'team/project-owner-responsibility-updated', base)
+      if (problem !== undefined) throw new Error(problem)
+      const sequence = this.nextSequence()
+      const envelope = this.operationBase(request, sequence)
+      const activity: AgentTeamOwnerActivity = Object.freeze({ activityRef: this.ref('activity'), projectRef: request.projectRef,
+        kind: 'owner-responsibility-updated' as const, memberId: request.memberId, actor: request.actor.memberId, sequence, occurredAt: envelope.occurredAt })
+      const operation: AgentTeamProjectOwnerResponsibilityUpdatedOperation = Object.freeze({
+        ...envelope, kind: 'team/project-owner-responsibility-updated',
+        data: Object.freeze({ ...base, responsibility, activity, inbox: this.ownerActivityInboxDelta(activity) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.projectOwnerResult(operation))
+    })
+  }
+
   private changeProjectOwner(
     request: AgentTeamAuthorizedProjectOwnerRequest,
     kind: 'team/project-owner-added' | 'team/project-owner-removed',
   ): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
     return this.enqueue(async () => {
+      // A grant names what the Member answers for; a withdrawal carries no
+      // responsibility at all, so a caller that sends one is ignored rather
+      // than refused — the field only ever describes a live grant.
+      const responsibility = kind === 'team/project-owner-added' ? ownerResponsibilityOf(request.responsibility) : undefined
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         if (existing.kind !== kind || !this.sameActor(existing.actor, request.actor) || existing.data.workspaceId !== request.workspaceId
-          || existing.data.projectRef !== request.projectRef || existing.data.memberId !== request.memberId) this.throwRequestCollision(request.requestId)
+          || existing.data.projectRef !== request.projectRef || existing.data.memberId !== request.memberId
+          || (kind === 'team/project-owner-added' && (existing as AgentTeamProjectOwnerAddedOperation).data.responsibility !== responsibility)) {
+          this.throwRequestCollision(request.requestId)
+        }
         return this.resolved(this.projectOwnerResult(existing))
       }
       this.assertHumanActor(request.actor)
-      const base = { workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberId }
+      const base = { workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberId,
+        ...(responsibility === undefined ? {} : { responsibility }) }
       const problem = this.projectOwnerChangeProblem(this.state, kind, base)
       if (problem !== undefined) throw new Error(problem)
       const sequence = this.nextSequence()
@@ -2841,7 +2934,7 @@ export class AgentTeamLedger {
       const endedMainAttention = kind === 'team/project-owner-removed'
         ? this.grantedMainAttentionEnds(this.state, request.memberId, request.projectRef) : []
       const inbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention, endedMainAttention)
-      const data = Object.freeze({ ...base, activity, inbox,
+      const data = Object.freeze({ ...base, ...(responsibility === undefined ? {} : { responsibility }), activity, inbox,
         ...(kind === 'team/project-owner-removed' ? { transfers: returned.transfers, tasks: returned.tasks, threads: returned.threads } : {}) })
       const operation: AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation = Object.freeze({
         ...envelope, kind, data,
@@ -2855,18 +2948,29 @@ export class AgentTeamLedger {
   /** The one owner-change rule, judged against the live projection on write and the replay projection on load. */
   private projectOwnerChangeProblem(
     projection: Projection,
-    kind: 'team/project-owner-added' | 'team/project-owner-removed',
-    data: { readonly workspaceId: WorkspaceId; readonly projectRef: AgentTeamProjectRef; readonly memberId: AgentTeamMemberId },
+    kind: 'team/project-owner-added' | 'team/project-owner-removed' | 'team/project-owner-responsibility-updated',
+    data: { readonly workspaceId: WorkspaceId; readonly projectRef: AgentTeamProjectRef; readonly memberId: AgentTeamMemberId
+      readonly responsibility?: string },
   ): string | undefined {
     if (projection.rulesVersion < 2) return `Project owners need rules version 2; this ledger runs version ${projection.rulesVersion}`
+    // Both shapes that carry a responsibility are version 8: the update record
+    // always does, and a grant only when the Human wrote one with it.
+    if (projection.rulesVersion < 8 && data.responsibility !== undefined) {
+      return `Project owner responsibilities need rules version 8; this ledger runs version ${projection.rulesVersion}`
+    }
     const project = projection.projects.get(data.projectRef)
     if (project === undefined || project.workspaceId !== data.workspaceId) return `unknown Project '${data.projectRef}' in Workspace '${data.workspaceId}'`
     if (project.state === 'archived') return `Project '${data.projectRef}' is archived and no longer accepts Team work`
     if (data.memberId === AGENT_TEAM_HUMAN_MEMBER_ID) {
-      return kind === 'team/project-owner-added' ? 'the Human already owns every Project' : 'the Human owns every Project and cannot be removed'
+      if (kind === 'team/project-owner-added') return 'the Human already owns every Project'
+      if (kind === 'team/project-owner-removed') return 'the Human owns every Project and cannot be removed'
+      return 'the Human owns every Project; a responsibility describes an Agent owner'
     }
     const owned = projection.owners.get(data.projectRef)?.has(data.memberId) === true
     if (kind === 'team/project-owner-removed') return owned ? undefined : `Agent Member '${data.memberId}' does not own Project '${data.projectRef}'`
+    if (kind === 'team/project-owner-responsibility-updated') {
+      return owned ? undefined : `Agent Member '${data.memberId}' does not own Project '${data.projectRef}', so it has no responsibility there to update`
+    }
     const member = projection.members.get(data.memberId)
     if (member === undefined) return `unknown Agent Member '${data.memberId}'`
     if (member.state !== 'enabled' && member.state !== 'suspended') return `Agent Member '${member.handle}' is ${member.state} and cannot own a Project`
@@ -4614,8 +4718,7 @@ export class AgentTeamLedger {
           return state !== undefined && state !== 'inactive' && state !== 'archived'
             && this.isProjectMemberFrom(this.state, projectRef, memberId)
         }).sort().map(memberId => Object.freeze({ projectRef, memberId })))),
-      owners: Object.freeze([...projectRefs].flatMap(projectRef => this.projectOwnerIds(projectRef)
-        .map(memberId => Object.freeze({ projectRef, memberId })))),
+      owners: Object.freeze([...projectRefs].flatMap(projectRef => this.projectOwnersOf(projectRef))),
       rulesVersion: this.state.rulesVersion,
       tasks: Object.freeze(catalogTasks),
       threads: Object.freeze(catalogThreads),
@@ -4680,6 +4783,15 @@ export class AgentTeamLedger {
     return this.state.projects.has(projectRef)
   }
 
+  /** Agent owners of one Project with what each answers for, sorted. The Human owns every Project and is not listed. */
+  projectOwnersOf(projectRef: AgentTeamProjectRef): readonly AgentTeamProjectOwner[] {
+    const owners = this.state.owners.get(projectRef)
+    if (owners === undefined) return Object.freeze([])
+    return Object.freeze([...owners.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([memberId, record]) => Object.freeze({ projectRef, memberId,
+        ...(record.responsibility === undefined ? {} : { responsibility: record.responsibility }) })))
+  }
+
   /** Agent owners of one Project, sorted. The Human owns every Project and is not listed. */
   projectOwnerIds(projectRef: AgentTeamProjectRef): readonly AgentTeamMemberId[] {
     return Object.freeze([...this.state.owners.get(projectRef)?.keys() ?? []].sort())
@@ -4728,10 +4840,14 @@ export class AgentTeamLedger {
     return Object.freeze({ ...subscription, notify: Object.freeze([subscription.createdBy]) })
   }
 
-  /** Active Projects the Agent Member owns, in creation order. */
-  ownedProjects(memberId: AgentTeamMemberId): readonly AgentTeamProject[] {
-    return Object.freeze([...this.state.projects.values()]
-      .filter(project => project.state === 'active' && this.state.owners.get(project.projectRef)?.has(memberId) === true))
+  /** Active Projects the Agent Member owns, in creation order, each with what it answers for there. */
+  ownedProjects(memberId: AgentTeamMemberId): readonly AgentTeamOwnedProject[] {
+    return Object.freeze([...this.state.projects.values()].flatMap(project => {
+      if (project.state !== 'active') return []
+      const record = this.state.owners.get(project.projectRef)?.get(memberId)
+      if (record === undefined) return []
+      return [Object.freeze({ project, ...(record.responsibility === undefined ? {} : { responsibility: record.responsibility }) })]
+    }))
   }
 
   validate(): void {
@@ -4912,6 +5028,10 @@ export class AgentTeamLedger {
       case 'team/project-owner-added':
         // Ownership shows on the Project rows and widens who sees the Project.
         return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
+      case 'team/project-owner-responsibility-updated':
+        // The replacement text shows on the same Project rows and in the new
+        // owner's context, and it appends a Main stream Activity.
+        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
       case 'team/project-owner-removed':
         // Removal also appends transfer facts on the Tasks it returns, so an
         // open Thread re-renders its new responsibility line.
@@ -4970,7 +5090,8 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/main-message-posted'
       || (operation.kind === 'team/thread-started' && operation.data.task === undefined)
       || operation.kind === 'team/project-owner-added'
-      || operation.kind === 'team/project-owner-removed') {
+      || operation.kind === 'team/project-owner-removed'
+      || operation.kind === 'team/project-owner-responsibility-updated') {
       const sender = operation.actor.kind === 'host' ? undefined : operation.actor.memberId
       const projectRef = operation.kind === 'team/main-message-posted' ? operation.data.message.projectRef : operation.data.projectRef
       for (const memberId of this.mainStreamRecipientsFrom(this.state, projectRef)) {
@@ -5046,6 +5167,7 @@ export class AgentTeamLedger {
       case 'team/rules-version-adopted':
       case 'team/project-owner-added':
       case 'team/project-owner-removed':
+      case 'team/project-owner-responsibility-updated':
       case 'team/subscription-created':
       case 'team/subscription-updated':
       case 'team/subscription-paused':
@@ -5130,6 +5252,9 @@ export class AgentTeamLedger {
     if (V7_ONLY_KINDS.includes(operation.kind) && projection.rulesVersion < 7) {
       throw new Error(`agent-team operation ${operation.sequence} (${operation.kind}) needs rules version 7; its segment runs version ${projection.rulesVersion}`)
     }
+    if (V8_ONLY_KINDS.includes(operation.kind) && projection.rulesVersion < 8) {
+      throw new Error(`agent-team operation ${operation.sequence} (${operation.kind}) needs rules version 8; its segment runs version ${projection.rulesVersion}`)
+    }
     // A caller's steer request id may also be the id of the continuation it
     // opens. No other record may reuse that id while a steer admission owns it.
     const admittedSteer = projection.workerSteerRequests.get(operation.requestId)
@@ -5205,6 +5330,10 @@ export class AgentTeamLedger {
       assertHuman()
       const problem = this.projectOwnerChangeProblem(projection, operation.kind, operation.data)
       if (problem !== undefined) throw new Error(`agent-team operation ${operation.sequence}: ${problem}`)
+      // A grant records the responsibility it was written with, already trimmed
+      // and inside the bound; an absent one is older than version 8 or blank.
+      if (operation.kind === 'team/project-owner-added' && operation.data.responsibility !== undefined
+        && !isStoredOwnerResponsibilityText(operation.data.responsibility)) throw new Error('invalid Project owner responsibility')
       const { activity } = operation.data
       if (activity.projectRef !== operation.data.projectRef || activity.memberId !== operation.data.memberId
         || activity.kind !== (operation.kind === 'team/project-owner-added' ? 'owner-added' : 'owner-removed')
@@ -5236,6 +5365,27 @@ export class AgentTeamLedger {
       if (operation.kind === 'team/project-owner-removed') {
         this.validateAccountabilityReturns(operation.data, returned, projection, refs)
       }
+      return
+    }
+    if (operation.kind === 'team/project-owner-responsibility-updated') {
+      assertHuman()
+      const problem = this.projectOwnerChangeProblem(projection, operation.kind, operation.data)
+      if (problem !== undefined) throw new Error(`agent-team operation ${operation.sequence}: ${problem}`)
+      // '' is the recorded way to say unspecified, so a stored value is either
+      // that or text that was trimmed and fits the bound when it was written.
+      if (operation.data.responsibility !== '' && !isStoredOwnerResponsibilityText(operation.data.responsibility)) {
+        throw new Error('invalid Project owner responsibility')
+      }
+      const { activity } = operation.data
+      if (activity.projectRef !== operation.data.projectRef || activity.memberId !== operation.data.memberId
+        || activity.kind !== 'owner-responsibility-updated'
+        || activity.actor !== actorMemberId() || activity.sequence !== operation.sequence || activity.occurredAt !== operation.occurredAt) {
+        throw new Error('invalid Project owner activity')
+      }
+      this.addRef(refs, activity.activityRef)
+      const ownerInbox = this.ownerActivityInboxDelta(activity)
+      if (!this.sameInboxDelta(operation.data.inbox, ownerInbox, [])) throw new Error('invalid Project owner inbox projection')
+      this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [], [], [activity])
       return
     }
     if (operation.kind === 'team/rules-version-adopted') {
@@ -6521,9 +6671,25 @@ export class AgentTeamLedger {
       return
     }
     if (operation.kind === 'team/project-owner-added') {
-      const owners = target.owners.get(operation.data.projectRef) ?? new Map<AgentTeamMemberId, number>()
-      owners.set(operation.data.memberId, operation.sequence)
+      const owners = target.owners.get(operation.data.projectRef) ?? new Map<AgentTeamMemberId, ProjectOwnerRecord>()
+      owners.set(operation.data.memberId, Object.freeze({ since: operation.sequence,
+        ...(operation.data.responsibility === undefined ? {} : { responsibility: operation.data.responsibility }) }))
       target.owners.set(operation.data.projectRef, owners)
+      this.recordNamed(target, operation.data.projectRef, [operation.data.memberId])
+      this.appendMainActivity(target, operation.data.activity)
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+    if (operation.kind === 'team/project-owner-responsibility-updated') {
+      // Only the text the grant answers for changes: the sequence that made the
+      // Member an owner, its Main stream attention and its history stay as they
+      // were, which is why this is not a withdrawal followed by a new grant.
+      const owners = target.owners.get(operation.data.projectRef)
+      const current = owners?.get(operation.data.memberId)
+      if (owners !== undefined && current !== undefined) {
+        owners.set(operation.data.memberId, Object.freeze({ since: current.since,
+          ...(operation.data.responsibility === '' ? {} : { responsibility: operation.data.responsibility }) }))
+      }
       this.recordNamed(target, operation.data.projectRef, [operation.data.memberId])
       this.appendMainActivity(target, operation.data.activity)
       this.applyInboxDelta(target, operation.data.inbox)
@@ -9183,7 +9349,8 @@ export class AgentTeamLedger {
     return Object.freeze({ receipt: this.receipt(operation), project: operation.data.project, memberIds: operation.data.memberIds })
   }
 
-  private projectOwnerResult(operation: AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation): AgentTeamProjectOwnerResult {
+  private projectOwnerResult(operation: AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation
+    | AgentTeamProjectOwnerResponsibilityUpdatedOperation): AgentTeamProjectOwnerResult {
     return Object.freeze({ receipt: this.receipt(operation), projectRef: operation.data.projectRef, ownerIds: this.projectOwnerIds(operation.data.projectRef) })
   }
 

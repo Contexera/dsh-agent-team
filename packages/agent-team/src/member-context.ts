@@ -6,7 +6,7 @@ import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type ContextFormed, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { matchesAnyProducerKind } from './context-source.ts'
-import type { AgentTeamAgentMember, AgentTeamProject } from './types.ts'
+import type { AgentTeamAgentMember, AgentTeamOwnedProject } from './types.ts'
 import { memberMemoryDirectoryPath } from './member-runtime.ts'
 
 export const name = 'contexera-agent-team-member-context'
@@ -73,7 +73,7 @@ export function apply(ctx: Context): void {
 
 interface MemberContextHost {
   workspacesForAgent(agent: Agent): readonly { readonly workspaceId: string; readonly path: string | undefined; readonly default: boolean }[]
-  ownedProjectsForAgent(agent: Agent): readonly AgentTeamProject[] | undefined
+  ownedProjectsForAgent(agent: Agent): readonly AgentTeamOwnedProject[] | undefined
 }
 
 async function memberContextMessages(
@@ -164,11 +164,17 @@ export function renderMemberIdentity(member: Pick<AgentTeamAgentMember, 'handle'
     : `Team identity: you are @${member.handle} — ${member.description}`
 }
 
-/** Rendered even when empty, so a withdrawn ownership replaces the earlier list instead of lingering in context. */
-export function renderMemberOwnership(projects: readonly Pick<AgentTeamProject, 'projectRef' | 'name' | 'workspaceId'>[]): string {
+/**
+ * Rendered even when empty, so a withdrawn ownership replaces the earlier list
+ * instead of lingering in context. An unspecified responsibility is stated as
+ * such: it is a neutral fact about the grant, not a fault to repair, and it is
+ * the same word the Web owner list uses.
+ */
+export function renderMemberOwnership(owned: readonly AgentTeamOwnedProject[]): string {
   const header = 'Team Project ownership — this list replaces all earlier ownership context.'
-  if (projects.length === 0) return `${header}\nYou own no Projects.`
-  return [header, 'You own these Projects:', ...projects.map(project => `- ${project.name} ${project.projectRef} (Workspace ${project.workspaceId})`)].join('\n')
+  if (owned.length === 0) return `${header}\nYou own no Projects.`
+  return [header, 'You own these Projects:', ...owned.map(({ project, responsibility }) =>
+    `- ${project.name} ${project.projectRef} (Workspace ${project.workspaceId}) — responsibility: ${responsibility ?? 'unspecified'}`)].join('\n')
 }
 
 /** Rendered at every count, so a later list can replace one Workspace, or none, as clearly as it replaces several. */

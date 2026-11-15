@@ -235,8 +235,10 @@ import type {
   AgentTeamTestSubscriptionRequest,
   AgentTeamUpdateProjectRequest,
   AgentTeamUpdateSubscriptionRequest,
+  AgentTeamOwnedProject,
   AgentTeamProject,
   AgentTeamProjectOwnerRequest,
+  AgentTeamProjectOwnerUpdateRequest,
   AgentTeamProjectOwnerResult,
   AgentTeamUpdateProjectResult,
   AgentTeamUpdateMemberRequest,
@@ -1474,6 +1476,16 @@ export default class AgentTeam extends TypertRemoteService {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
     const result = await this.requireLedger().addProjectOwner({ ...request, actor: agentTeamHumanActor() })
+    if (result.committed) this.emitCommitted(result.value.receipt)
+    return result.value
+  }
+
+  /** Human edit of what one Agent owner answers for; the ownership itself and its Attention stay. */
+  @Remote('updateProjectOwner')
+  async updateProjectOwner(request: AgentTeamProjectOwnerUpdateRequest): Promise<AgentTeamProjectOwnerResult> {
+    this.requireAccepting()
+    this.requireWorkspace(request.workspaceId)
+    const result = await this.requireLedger().updateProjectOwner({ ...request, actor: agentTeamHumanActor() })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
@@ -2801,7 +2813,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Live participation addresses; paths remain owned by the Harness registry. */
   /** Active Projects the Agent's Member owns, for the per-step Member context; undefined while the ledger predates Project owners. */
-  ownedProjectsForAgent(agent: Agent): readonly AgentTeamProject[] | undefined {
+  ownedProjectsForAgent(agent: Agent): readonly AgentTeamOwnedProject[] | undefined {
     const member = this.memberForAgent(agent)
     const ledger = this.requireLedger()
     if (member === undefined || ledger.status().rulesVersion < 2) return undefined

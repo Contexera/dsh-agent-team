@@ -24,6 +24,8 @@ import { useEditDialogSave } from './team-dialog-save.ts'
 import createCss from './create.module.css'
 import css from './sidebar.module.css'
 
+const EMPTY_RESPONSIBILITIES: ReadonlyMap<AgentTeamMemberId, string> = new Map()
+
 interface TeamProjectsPanelProps {
   readonly workspaceId: WorkspaceId
   readonly loadMembers: TeamSidebarProps['loadMembers']
@@ -34,6 +36,7 @@ interface TeamProjectsPanelProps {
   readonly archiveProject: TeamSidebarProps['archiveProject']
   readonly addProjectOwner: TeamSidebarProps['addProjectOwner']
   readonly removeProjectOwner: TeamSidebarProps['removeProjectOwner']
+  readonly updateProjectOwner: TeamSidebarProps['updateProjectOwner']
   readonly humanIdentity: TeamSidebarProps['humanIdentity']
   readonly creatingAgents: readonly AgentTeamAddMemberRequest[]
   readonly selectedProjectRef?: AgentTeamProjectRef
@@ -160,6 +163,19 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
     return byProject
   }, [view])
 
+  // The same projection rows that name the owners carry what each answers for,
+  // so the list and its text can never disagree about who owns what.
+  const responsibilities = useMemo(() => {
+    const byProject = new Map<AgentTeamProjectRef, Map<AgentTeamMemberId, string>>()
+    for (const item of view?.owners ?? []) {
+      if (item.responsibility === undefined) continue
+      const byMember = byProject.get(item.projectRef) ?? new Map<AgentTeamMemberId, string>()
+      byMember.set(item.memberId, item.responsibility)
+      byProject.set(item.projectRef, byMember)
+    }
+    return byProject
+  }, [view])
+
   const closeForm = () => {
     if (mutating) return
     setFormOpen(false)
@@ -263,8 +279,10 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
                   members={members}
                   joinedIds={joined}
                   ownerIds={ownership.get(project.projectRef) ?? new Set<AgentTeamMemberId>()}
+                  responsibilities={responsibilities.get(project.projectRef) ?? EMPTY_RESPONSIBILITIES}
                   addProjectOwner={props.addProjectOwner}
                   removeProjectOwner={props.removeProjectOwner}
+                  updateProjectOwner={props.updateProjectOwner}
                   humanIdentity={props.humanIdentity}
                   selected={selectedProjectRef === project.projectRef}
                   updateProject={updateProject}
@@ -289,13 +307,15 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
   )
 }
 
-function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, removeProjectOwner, humanIdentity, selected, updateProject, archiveProject, onCommitted, onEditCommitted, selectProject, t }: {
+function ProjectRow({ project, members, joinedIds, ownerIds, responsibilities, addProjectOwner, removeProjectOwner, updateProjectOwner, humanIdentity, selected, updateProject, archiveProject, onCommitted, onEditCommitted, selectProject, t }: {
   readonly project: AgentTeamProject
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly joinedIds: ReadonlySet<AgentTeamMemberId>
   readonly ownerIds: ReadonlySet<AgentTeamMemberId>
+  readonly responsibilities: ReadonlyMap<AgentTeamMemberId, string>
   readonly addProjectOwner: TeamSidebarProps['addProjectOwner']
   readonly removeProjectOwner: TeamSidebarProps['removeProjectOwner']
+  readonly updateProjectOwner: TeamSidebarProps['updateProjectOwner']
   readonly humanIdentity: TeamSidebarProps['humanIdentity']
   readonly selected: boolean
   readonly updateProject: TeamSidebarProps['updateProject']
@@ -370,8 +390,10 @@ function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, re
           members={members}
           joinedIds={joinedIds}
           ownerIds={ownerIds}
+          responsibilities={responsibilities}
           addProjectOwner={addProjectOwner}
           removeProjectOwner={removeProjectOwner}
+          updateProjectOwner={updateProjectOwner}
           humanIdentity={humanIdentity}
           updateProject={updateProject}
           onCommitted={onEditCommitted}
@@ -384,13 +406,15 @@ function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, re
 }
 
 /** Name and description commit through one durable update; membership keeps its own immediate add/remove flow. */
-function ProjectEditorDialog({ project, members, ownerIds, addProjectOwner, removeProjectOwner, humanIdentity, updateProject, onCommitted, onClose, t }: {
+function ProjectEditorDialog({ project, members, ownerIds, responsibilities, addProjectOwner, removeProjectOwner, updateProjectOwner, humanIdentity, updateProject, onCommitted, onClose, t }: {
   readonly project: AgentTeamProject
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly joinedIds: ReadonlySet<AgentTeamMemberId>
   readonly ownerIds: ReadonlySet<AgentTeamMemberId>
+  readonly responsibilities: ReadonlyMap<AgentTeamMemberId, string>
   readonly addProjectOwner: TeamSidebarProps['addProjectOwner']
   readonly removeProjectOwner: TeamSidebarProps['removeProjectOwner']
+  readonly updateProjectOwner: TeamSidebarProps['updateProjectOwner']
   readonly humanIdentity: TeamSidebarProps['humanIdentity']
   readonly updateProject: TeamSidebarProps['updateProject']
   readonly onCommitted: () => Promise<void> | void
@@ -446,8 +470,10 @@ function ProjectEditorDialog({ project, members, ownerIds, addProjectOwner, remo
         project={project}
         members={members}
         ownerIds={ownerIds}
+        responsibilities={responsibilities}
         addProjectOwner={addProjectOwner}
         removeProjectOwner={removeProjectOwner}
+        updateProjectOwner={updateProjectOwner}
         humanIdentity={humanIdentity}
         onCommitted={onCommitted}
         t={t}

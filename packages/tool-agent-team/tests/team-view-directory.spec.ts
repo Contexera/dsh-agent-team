@@ -4,7 +4,8 @@ import { EmptyAdapter, realHarness, requestId } from '../../agent-team/tests/hel
 import { teamTools } from './render-text.ts'
 
 interface ViewResult {
-  projects: { projectRef: string; role: string; subscriptions: { active: number; paused: number } }[]
+  projects: { projectRef: string; role: string; subscriptions: { active: number; paused: number }
+    ownerResponsibilities?: { handle: string; responsibility: string }[] }[]
   threads: { subject: string }[]
   tasks: { projectRef: string }[]
   members: { memberId: string }[]
@@ -74,5 +75,51 @@ describe('team_view Workspace directory', () => {
     await expect(execute(tools.get('team_thread')!, outsiderAgent, {
       action: 'history', threadRef: otherTask.thread.threadRef,
     })).rejects.toThrow(/not_project_member/)
+  })
+
+  it('states what owners answer for only once somebody recorded it, and never guesses a value', async () => {
+    const test = await realHarness(new EmptyAdapter())
+    const viewTool = teamTools().get('team_view')!
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('responsibility-project'), workspaceId: test.workspaceId,
+      name: 'releases', description: '', memberIds: [] })
+    const projectRef = project.project.projectRef
+    const first = await test.ctx.agentTeam.addMember({ requestId: requestId('responsibility-first'), workspaceId: test.workspaceId,
+      handle: 'first', description: '', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
+    const second = await test.ctx.agentTeam.addMember({ requestId: requestId('responsibility-second'), workspaceId: test.workspaceId,
+      handle: 'second', description: '', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
+    const firstAgent = test.ctx.agents.get(first.status.member.sessionId)!
+    await test.ctx.agentTeam.addProjectOwner({ requestId: requestId('responsibility-grant-first'), workspaceId: test.workspaceId,
+      projectRef, memberId: first.status.member.memberId })
+    await test.ctx.agentTeam.addProjectOwner({ requestId: requestId('responsibility-grant-second'), workspaceId: test.workspaceId,
+      projectRef, memberId: second.status.member.memberId })
+
+    // Nobody recorded text, so the row says nothing: the field is absent, not `[]`
+    // and not a row of `unspecified` that would read as a recorded answer.
+    const silent = await execute<ViewResult>(viewTool, firstAgent, {})
+    expect(silent.projects[0]!.ownerResponsibilities).toBeUndefined()
+    expect(rendered(viewTool, {}, silent)).not.toContain('responsibility')
+
+    await test.ctx.agentTeam.updateProjectOwner({ requestId: requestId('responsibility-set'), workspaceId: test.workspaceId,
+      projectRef, memberId: first.status.member.memberId, responsibility: 'owns the release checklist' })
+    const recorded = await execute<ViewResult>(viewTool, firstAgent, {})
+    // Owner rows are ordered by Member id, which the Host mints, so the pair is
+    // asserted by content rather than by a position this test cannot control.
+    expect(recorded.projects[0]!.ownerResponsibilities).toEqual(expect.arrayContaining([
+      { handle: 'first', responsibility: 'owns the release checklist' },
+      { handle: 'second', responsibility: 'unspecified' },
+    ]))
+    const line = rendered(viewTool, {}, recorded)
+    expect(line).toContain('· responsibility ')
+    expect(line).toContain('@first: owns the release checklist')
+    expect(line).toContain('@second: unspecified')
+
+    // Clearing the only recorded text returns the row to "nobody recorded it":
+    // the update stores `''` while the projection drops the field, so this is the
+    // one place where the presence rule and that normalization have to agree.
+    await test.ctx.agentTeam.updateProjectOwner({ requestId: requestId('responsibility-clear'), workspaceId: test.workspaceId,
+      projectRef, memberId: first.status.member.memberId, responsibility: '' })
+    const cleared = await execute<ViewResult>(viewTool, firstAgent, {})
+    expect(cleared.projects[0]!.ownerResponsibilities).toBeUndefined()
+    expect(rendered(viewTool, {}, cleared)).not.toContain('responsibility')
   })
 })

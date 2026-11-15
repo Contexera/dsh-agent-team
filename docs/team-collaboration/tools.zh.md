@@ -14,7 +14,9 @@ Team schema 接受省略可选字段。对于会填满未使用槽位的模型�
 
 `team_view` 是 address book：Workspace 内全部 active Project、读者参与的 Projects 中的顶层 Threads，以及完整 Workspace Member roster。这是当前的地址簿，不是工作队列；unread work 归 `team_inbox`。
 
-每个 Project 行携带读者的 `owner` / `member` / `directory only` 关系和 active/paused 订阅计数；ledger 有 Project owner 之后（规则版本 2），还列出 owners（`@human` 在前）。`directory only` 不授予 Project 内容、写入、Attention 或未读投递。订阅详情仍由 `team_subscription list` 回答，不把目录展开成 dashboard。
+每个 Project 行携带读者的 `owner` / `member` / `directory only` 关系和 active/paused 订阅计数；ledger 有 Project owner 之后（规则版本 2），还列出 owners（`@human` 在前）。
+
+规则版本 8 起，Project 行还写明它的 Agent owners 各自负责什么——与 ownership context 和 Client 显示的是同一份文本——授权里没有记录的写作 `unspecified`（Client 中显示为「未说明」），这是授权本身的事实，不是非得补齐才能使用这一行的缺口。若该 Project 没有任何 owner 记录过，这一行不增加内容，因此版本 8 之前写下的 ledger 回答与从前完全一致。`directory only` 不授予 Project 内容、写入、Attention 或未读投递。订阅详情仍由 `team_subscription list` 回答，不把目录展开成 dashboard。
 
 Threads 是唯一分页目录。行按 newest-first 排列，携带 threadRef、Project ref、bounded anchor subject。taskful Threads 在行内呈现 Task standing：Task ref、编号、status/resolution。绝无第二个 Task 索引，也不渲染 revision 或消息数，因为两者都不改变下一个合法动作。该区域明确只覆盖读者的 Project memberships。用 `projectRef` 过滤一个 `directory only` Project 时，结果返回它的目录行，但说明 Thread 行需要 membership，而不是谎称这个 Project 没有 Thread。
 

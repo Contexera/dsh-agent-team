@@ -63,7 +63,17 @@ describe('Main notices attribute ordinary facts and keep the reader relation', (
     expect(combined).toContain('human: Ordinary Main update')
     expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing)
       .toMatchObject({ unreadCount: 2, directCount: 0 })
-  })
+
+    // Editing what the owner answers for is a third ownership fact: the digest
+    // names the edit instead of reading every non-grant as a withdrawal.
+    adapter.enqueue(textResponse('Noted the responsibility change.'))
+    await ctx.agentTeam.updateProjectOwner({ requestId: requestId('owner-responsibility'), workspaceId,
+      projectRef, memberId: target.status.member.memberId, responsibility: 'owns the release checklist' })
+    await runTurn(agent, adapter, 3)
+    const edited = latestNotice(agent)
+    expect(edited).toContain('human updated what target answers for in the Project')
+    expect(edited).not.toContain('removed target as a Project owner')
+  }, 20_000)
 
   it('names each Project on its own ordinary Main stream count when two Projects differ', async () => {
     const adapter = new ScriptedAdapter()

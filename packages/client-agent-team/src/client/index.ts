@@ -9,6 +9,7 @@ import type {
   AgentTeamInboxRequest,
   AgentTeamTaskBoardRequest,
   AgentTeamProjectOwnerRequest,
+  AgentTeamProjectOwnerUpdateRequest,
   AgentTeamStartThreadRequest,
   AgentTeamPostMainMessageRequest,
   AgentTeamMainStreamReadRequest,
@@ -251,6 +252,7 @@ function teamSharedRemotes(
     archiveProject: (request: AgentTeamArchiveProjectRequest) => ctx.remote.agentTeam.archiveProject(request),
     addProjectOwner: (request: AgentTeamProjectOwnerRequest) => ctx.remote.agentTeam.addProjectOwner(request),
     removeProjectOwner: (request: AgentTeamProjectOwnerRequest) => ctx.remote.agentTeam.removeProjectOwner(request),
+    updateProjectOwner: (request: AgentTeamProjectOwnerUpdateRequest) => ctx.remote.agentTeam.updateProjectOwner(request),
     updateMember: (request: AgentTeamUpdateMemberRequest) => ctx.remote.agentTeam.updateMember(request),
     // Member detail's reminder list and cancel: a Human surface over the same Host authority
     // the Member's own `team_reminder` tool uses, so a reminder is withdrawn exactly once.

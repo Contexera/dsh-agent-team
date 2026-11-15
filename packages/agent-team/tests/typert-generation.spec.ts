@@ -73,6 +73,7 @@ const EXPECTED_REMOTE_METHODS = [
   'transferTask',
   'updateMember',
   'updateProject',
+  'updateProjectOwner',
   'updateSubscription',
   'view',
   'workerRuns',

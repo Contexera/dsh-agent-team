@@ -310,7 +310,9 @@ function mainOrdinaryDigest(entries: readonly AgentTeamMainTimelineEntry[], proj
       if (!('memberId' in activity)) return subscriptionActivitySentence(activity, lookup)
       const actor = lookup.printableSender(activity.actor)
       const target = lookup.printableSender(activity.memberId)
-      return activity.kind === 'owner-added' ? `${actor} added ${target} as a Project owner` : `${actor} removed ${target} as a Project owner`
+      return activity.kind === 'owner-added' ? `${actor} added ${target} as a Project owner`
+        : activity.kind === 'owner-removed' ? `${actor} removed ${target} as a Project owner`
+          : `${actor} updated what ${target} answers for in the Project`
     }, entry => entry.occurredAt)
 }
 
@@ -348,9 +350,14 @@ function mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: Agen
       if (onSurface) {
         return ['Team Project ownership changed', `${activity.activityRef} (Project ${project.projectRef}) — already in current context; still unread`].join('\n')
       }
+      // Three ownership facts reach this notice. An edit is neither a grant nor a
+      // withdrawal, so it must not read as one: the new text is in the Main stream
+      // fact this marker points at, and the notice only says what changed.
       const text = activity.kind === 'owner-added'
         ? `@human made you an owner of Project ${project.name} (${project.projectRef}). Owners answer for the Project: start its discussions and Tasks and keep its work moving.`
-        : `@human removed you as an owner of Project ${project.name} (${project.projectRef}). You can still take part in it.`
+        : activity.kind === 'owner-removed'
+          ? `@human removed you as an owner of Project ${project.name} (${project.projectRef}). You can still take part in it.`
+          : `@human updated what you answer for in Project ${project.name} (${project.projectRef}). Your ownership is unchanged; read the Main stream for the text it now records.`
       return ['Team Project ownership changed', `Occurred at: ${formatTeamTimestamp(entry.occurredAt)}`, activityText(activityFact(activity)), text].join('\n')
     }
     const header = activity.kind === 'subscription-paused' ? 'Team subscription paused' : 'Team subscription update'

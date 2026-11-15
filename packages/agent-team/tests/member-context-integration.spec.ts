@@ -151,7 +151,7 @@ describe('Team Member private memory composition', () => {
     await writeFile(memoryFile, 'index v1')
     const ctx = new Context()
     const agent = surfaceAgent(ctx)
-    let owned: { projectRef: string; name: string; workspaceId: string }[] = []
+    let owned: { project: { projectRef: string; name: string; workspaceId: string }; responsibility?: string }[] = []
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
         ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: 'tester' }
@@ -171,10 +171,10 @@ describe('Team Member private memory composition', () => {
     expect(texts(update)[0]).not.toContain('index v2')
     expect(await step(ctx, agent)).toEqual([])
 
-    owned = [{ projectRef: 'project:alpha', name: 'alpha', workspaceId: 'workspace:default' }]
+    owned = [{ project: { projectRef: 'project:alpha', name: 'alpha', workspaceId: 'workspace:default' } }]
     const granted = await step(ctx, agent)
     expect(texts(granted)).toHaveLength(1)
-    expect(texts(granted)[0]).toContain('You own these Projects:\n- alpha project:alpha (Workspace workspace:default)')
+    expect(texts(granted)[0]).toContain('You own these Projects:\n- alpha project:alpha (Workspace workspace:default) — responsibility: unspecified')
     expect(texts(granted)[0]).not.toContain('Private memory')
     await ctx.fiber.dispose()
   })
@@ -304,7 +304,7 @@ describe('Team Member private memory composition', () => {
     await writeFile(join(root, 'memory.md'), 'index v1')
     const ctx = new Context()
     const agent = surfaceAgent(ctx)
-    let owned: { projectRef: string; name: string; workspaceId: string }[] = []
+    let owned: { project: { projectRef: string; name: string; workspaceId: string }; responsibility?: string }[] = []
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
         ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: 'tester' }
@@ -318,7 +318,7 @@ describe('Team Member private memory composition', () => {
     const idle = await step(ctx, agent)
     await writeFile(join(root, 'memory.md'), 'index v2')
     const edited = await step(ctx, agent)
-    owned = [{ projectRef: 'project:p', name: 'P', workspaceId: 'workspace:default' }]
+    owned = [{ project: { projectRef: 'project:p', name: 'P', workspaceId: 'workspace:default' } }]
     const granted = await step(ctx, agent)
     const idleAgain = await step(ctx, agent)
     compactSurface(agent, 'compaction summary')
@@ -362,8 +362,8 @@ describe('Team Member private memory composition', () => {
     await writeFile(join(root, 'memory.md'), 'index')
     const ctx = new Context()
     const agent = surfaceAgent(ctx)
-    let owned: { projectRef: string; name: string; workspaceId: string }[] = [
-      { projectRef: 'project:alpha', name: 'alpha', workspaceId: 'workspace:default' },
+    let owned: { project: { projectRef: string; name: string; workspaceId: string }; responsibility?: string }[] = [
+      { project: { projectRef: 'project:alpha', name: 'alpha', workspaceId: 'workspace:default' } },
     ]
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
@@ -584,7 +584,7 @@ describe('Team Member private memory composition', () => {
     await writeFile(join(root, 'memory.md'), 'own index')
     const ctx = new Context()
     const agent = surfaceAgent(ctx)
-    let owned: { projectRef: string; name: string; workspaceId: string }[] | undefined
+    let owned: { project: { projectRef: string; name: string; workspaceId: string }; responsibility?: string }[] | undefined
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent
         ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
@@ -603,10 +603,10 @@ describe('Team Member private memory composition', () => {
     expect(unowned).toHaveLength(1)
     expect(unowned[0]).toContain('You own no Projects.')
 
-    owned = [{ projectRef: 'project:alpha', name: 'alpha', workspaceId: 'workspace:default' }]
+    owned = [{ project: { projectRef: 'project:alpha', name: 'alpha', workspaceId: 'workspace:default' } }]
     const owning = texts(await step(ctx, agent))
     expect(owning).toHaveLength(1)
-    expect(owning[0]).toContain('You own these Projects:\n- alpha project:alpha (Workspace workspace:default)')
+    expect(owning[0]).toContain('You own these Projects:\n- alpha project:alpha (Workspace workspace:default) — responsibility: unspecified')
     expect(await step(ctx, agent)).toEqual([])
     await ctx.fiber.dispose()
   })

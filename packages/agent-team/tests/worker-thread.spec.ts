@@ -279,7 +279,7 @@ describe('a continued Worker execution', () => {
 })
 
 describe('rules version 7 Worker compatibility', () => {
-  it('replays a legal version 6 Worker and adopts version 7 once', async () => {
+  it('replays a legal version 6 Worker and adopts the current rules version once', async () => {
     const team = await seed(6)
     const sourceRef = 'worker:v6-compatible' as AgentTeamWorkerRef
     await startRun(team, { workerRef: sourceRef, threadRef: team.threadRef })
@@ -294,7 +294,7 @@ describe('rules version 7 Worker compatibility', () => {
     expect(() => upgraded.validate()).not.toThrow()
     expect(upgraded.workerExecution(sourceRef)).toEqual(before)
     expect((await storedOperations(table)).filter(operation => operation.kind === 'team/rules-version-adopted')
-      .map(operation => operation.data)).toEqual([{ version: 6 }, { version: 7 }])
+      .map(operation => operation.data)).toEqual([{ version: 6 }, { version: AGENT_TEAM_RULES_VERSION }])
     await closeAll()
 
     const reopenedTable = await openTableOver(team.pool)
@@ -330,7 +330,7 @@ describe('rules version 7 Worker compatibility', () => {
       .rejects.toThrow(/native Worker anchors .* need rules version 7/u)
   })
 
-  it('makes a version 6 reader reject a version 7 ledger at the marker before Worker parsing', async () => {
+  it('makes a version 6 reader reject a newer ledger at the marker before Worker parsing', async () => {
     const team = await seed()
     const sourceRef = 'worker:v7-marker-source' as AgentTeamWorkerRef
     await startRun(team, { workerRef: sourceRef })
@@ -341,7 +341,7 @@ describe('rules version 7 Worker compatibility', () => {
 
     const table = await openTableOver(team.pool)
     expect(() => new AgentTeamLedger(table, { rulesVersion: 6 }))
-      .toThrow(/adopted rules version 7, but this build implements up to 6; open it with a newer release/u)
+      .toThrow(new RegExp(`adopted rules version ${AGENT_TEAM_RULES_VERSION}, but this build implements up to 6; open it with a newer release`, 'u'))
   })
 })
 
@@ -482,14 +482,14 @@ describe('a Worker event at the Thread tail', () => {
 })
 
 describe('a ledger an older build opens', () => {
-  it('refuses it and asks for a newer release, because the segment adopted version 7', async () => {
+  it('refuses it and asks for a newer release, because the segment adopted a newer version', async () => {
     const team = await seed()
     await startRun(team, { workerRef: 'worker:eleven', threadRef: team.threadRef })
     // The same medium, read by a build that only implements version 5: the
     // adoption record the Worker kinds arrived with is what it refuses.
     const table = await openTableOver(team.pool)
     expect(() => new AgentTeamLedger(table, { rulesVersion: 5 }))
-      .toThrow(/adopted rules version 7, but this build implements up to 5; open it with a newer release/)
+      .toThrow(new RegExp(`adopted rules version ${AGENT_TEAM_RULES_VERSION}, but this build implements up to 5; open it with a newer release`, 'u'))
   })
 })
 
