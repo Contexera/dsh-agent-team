@@ -29,6 +29,7 @@ Run the smallest sufficient checks for the change:
 npm run generate:typert
 npm run typecheck
 npm run check:docs
+npm run check:e2e-docs
 npm run check:core-skills
 npm run check:boundaries
 npm run check:versions
@@ -77,7 +78,7 @@ Changes affecting browser bundles, Client modules, slots, Remote activation, bun
 npm run test:browser
 ```
 
-For fast local iteration on one or more of the 9 surface lanes under `scripts/e2e/*.e2e.ts`, pass lane name filters after `--`:
+For fast local iteration on one or more of the surface lanes under `scripts/e2e/*.e2e.ts`, pass lane name filters after `--` (see [`e2e-lanes.md`](e2e-lanes.md) for the full lane catalog, contracts, and triggers):
 
 ```sh
 npm run test:browser -- team-manager team-inbox-and-recovery

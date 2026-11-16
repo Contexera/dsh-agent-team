@@ -9,7 +9,6 @@ import type { Page } from 'playwright'
 import {
   EXTRA_TOOL_SHOTS,
   ONE_PIXEL_PNG,
-  SETTINGS_SHOTS,
   UI09_SHOTS,
   acknowledgeReloadConnectionLoss,
   browser,
@@ -17,7 +16,6 @@ import {
   closeScenario,
   connectFreshWorkspaceZh,
   focusRing,
-  getDshRuntimeVersion,
   maxHorizontalScroll,
   openSettings,
   openTeamPage,
@@ -183,6 +181,12 @@ it('configures the Team page identity from Settings in real Web', async () => {
   }))
   expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.clientWidth)
   expect((await panel.boundingBox())!.width).toBeLessThanOrEqual(390)
+  const environmentBlock = panel.locator('[data-environment]')
+  await environmentBlock.waitFor()
+  await expect.poll(async () => await environmentBlock.getAttribute('data-environment')).toBe('ok')
+  const envBox = (await environmentBlock.boundingBox())!
+  const panelBox = (await panel.boundingBox())!
+  expect(envBox.x + envBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1)
   const narrowContext = await panel.getByRole('region', { name: '上下文' }).evaluate((element) => {
     const label = element.querySelector('label') as HTMLElement
     const input = element.querySelector('input') as HTMLElement
@@ -313,101 +317,6 @@ it('configures the Team page identity from Settings in real Web', async () => {
   })
   expect(identityGeometry).toEqual({ width: 18, height: 18, radius: '50%' })
   await page.screenshot({ path: join(UI09_SHOTS, 'human-identity-in-inbox-stack.png'), fullPage: true })
-  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
-}, 180_000)
-
-it('paints the Team mark on the Team settings nav row', async () => {
-  const { page, consoleWatch } = await openTeamPage({ stayInOrdinaryMode: true })
-  await openSettings(page)
-  const panel = page.getByRole('dialog')
-  const teamRow = panel.getByRole('button', { name: '团队', exact: true })
-  await teamRow.waitFor()
-
-  const probe = await teamRow.evaluate(el => {
-    const seat = el.querySelector('[class*="navIcon"]')
-    const svg = seat?.querySelector('svg') ?? null
-    const path = svg?.querySelector('path') ?? null
-    const dot = svg?.querySelector('circle') ?? null
-    const box = svg?.getBoundingClientRect() ?? null
-    return {
-      glyphCount: seat === null ? -1 : seat.querySelectorAll('svg').length,
-      ringPath: path?.getAttribute('d') ?? null,
-      dot: dot === null ? null : { cx: dot.getAttribute('cx'), cy: dot.getAttribute('cy'), r: dot.getAttribute('r') },
-      ink: path === null ? null : getComputedStyle(path).stroke,
-      box: box === null ? null : { width: box.width, height: box.height },
-    }
-  })
-  expect(probe.glyphCount).toBe(1)
-  expect(probe.ringPath).toBe('M11.7 10.15A4.9 4.9 0 1 1 11.7 5.85')
-  expect(probe.dot).toEqual({ cx: '12.7', cy: '8', r: '1.6' })
-  expect(probe.ink).not.toBe('none')
-  expect(probe.box).toEqual({ width: 16, height: 16 })
-
-  const rows = await panel.evaluate(root => [...root.querySelectorAll('nav button')].map(button => {
-    const svg = button.querySelector('svg')
-    return {
-      name: (button.textContent ?? '').trim(),
-      ring: svg?.querySelector('path')?.getAttribute('d') ?? null,
-      dots: svg?.querySelectorAll('circle').length ?? -1,
-    }
-  }))
-  expect(rows.length).toBeGreaterThan(1)
-  expect(rows.filter(row => row.ring === 'M11.7 10.15A4.9 4.9 0 1 1 11.7 5.85').map(row => row.name)).toEqual(['团队'])
-  expect(rows.filter(row => row.dots > 0).map(row => row.name)).toEqual(['团队'])
-
-  await page.screenshot({ path: join(SETTINGS_SHOTS, 'settings-nav-desktop.png'), fullPage: true })
-
-  await page.setViewportSize({ width: 390, height: 844 })
-  await settleLayout(page)
-  await page.screenshot({ path: join(SETTINGS_SHOTS, 'settings-nav-narrow.png'), fullPage: true })
-
-  await teamRow.click()
-  await expect.poll(async () => await teamRow.getAttribute('aria-current')).toBe('true')
-  const selected = await teamRow.evaluate(el => {
-    const seat = el.querySelector('[class*="navIcon"]')
-    const svg = seat?.querySelector('svg') ?? null
-    return {
-      glyphCount: seat === null ? -1 : seat.querySelectorAll('svg').length,
-      width: svg === null ? -1 : svg.getBoundingClientRect().width,
-    }
-  })
-  expect(selected.glyphCount).toBe(1)
-  expect(selected.width).toBe(16)
-
-  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
-}, 180_000)
-
-it('states the local environment check on the Team page', async () => {
-  const { page, consoleWatch } = await openTeamPage({ stayInOrdinaryMode: true })
-
-  await openSettings(page)
-  const panel = page.getByRole('dialog')
-  await panel.getByRole('button', { name: '团队', exact: true }).click()
-  const block = panel.locator('[data-environment]')
-  await block.waitFor()
-  await expect.poll(async () => await block.getAttribute('data-environment')).toBe('ok')
-  expect(await block.textContent()).toContain('在支持范围内')
-  expect(await block.textContent()).toContain(`正在运行的 DSH ${getDshRuntimeVersion()} 在我们声明的支持范围内。`)
-  expect(await block.textContent()).not.toContain('>=0.1.7-rc.1')
-  expect(await block.textContent()).not.toContain('我们实测认证的组合')
-  expect(await block.locator('a').count()).toBe(0)
-  expect(await block.textContent()).not.toContain('unknown')
-  await page.screenshot({ path: join(UI09_SHOTS, 'environment-check-ok.png'), fullPage: true })
-
-  await page.setViewportSize({ width: 390, height: 844 })
-  await settleLayout(page)
-  await page.screenshot({ path: join(UI09_SHOTS, 'environment-check-narrow.png'), fullPage: true })
-  const narrow = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth,
-  }))
-  expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.clientWidth)
-  const blockBox = (await block.boundingBox())!
-  const panelBox = (await panel.boundingBox())!
-  expect(blockBox.x + blockBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1)
-  await page.setViewportSize({ width: 1440, height: 960 })
-  await settleLayout(page)
-
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)
 

@@ -369,44 +369,6 @@ it('keeps four same-origin Team pages responsive and independently subscribed', 
   }
 }, 120_000)
 
-it('toggles the complete bundle without restarting the session controller', async () => {
-  let localScaffold: WebScaffold | undefined
-  try {
-    const { home, stagedBundle } = await installLocalBundle()
-    localScaffold = await launchWebScaffold({ harnessHome: home, profile: { packages: [{ dir: stagedBundle, enabled: false }] } })
-    const sessionController = [...localScaffold.ctx.loader.entries()].find(entry => entry.id === 'session-controller')?.fiber
-
-    const enabled = await localScaffold.ctx.pluginManager.setBundleEnabled('@contexera/dsh-agent-team', true)
-    expect(enabled, JSON.stringify(enabled)).toMatchObject({ application: 'applied' })
-    expect(localScaffold.ctx.get('agentTeam')).toBeDefined()
-    const workspace = await localScaffold.ctx.workspaceRegistry.create(localScaffold.workspaceCwd, 'toggle-persistence')
-    const project = await localScaffold.ctx.agentTeam.createProject({
-      requestId: 'toggle-persistence' as never,
-      workspaceId: workspace.id,
-      name: 'toggle-persistence',
-      description: '',
-    })
-    expect(localScaffold.ctx.agentTeam.status().projectCount).toBe(1)
-    expect(localScaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(true)
-    expect([...localScaffold.ctx.loader.entries()].find(entry => entry.id === 'session-controller')?.fiber).toBe(sessionController)
-
-    const disabled = await localScaffold.ctx.pluginManager.setBundleEnabled('@contexera/dsh-agent-team', false)
-    expect(disabled, JSON.stringify(disabled)).toMatchObject({ application: 'applied' })
-    expect(localScaffold.ctx.get('agentTeam')).toBeUndefined()
-    expect(localScaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(false)
-    expect([...localScaffold.ctx.loader.entries()].find(entry => entry.id === 'session-controller')?.fiber).toBe(sessionController)
-
-    expect(await localScaffold.ctx.pluginManager.setBundleEnabled('@contexera/dsh-agent-team', true)).toMatchObject({ application: 'applied' })
-    expect(localScaffold.ctx.get('agentTeam')).toBeDefined()
-    expect(localScaffold.ctx.agentTeam.status().projectCount).toBe(1)
-    expect(localScaffold.ctx.agentTeam.view({ workspaceId: project.project.workspaceId }).projects[0]?.name).toBe('toggle-persistence')
-    expect(localScaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(true)
-    expect([...localScaffold.ctx.loader.entries()].find(entry => entry.id === 'session-controller')?.fiber).toBe(sessionController)
-  } finally {
-    await localScaffold?.close()
-  }
-}, 30_000)
-
 it('reaches Team mode, its three global faces, and the shortcut reference from the keyboard', async () => {
   const { page, consoleWatch } = await openTeamPage({ stayInOrdinaryMode: true, platform: 'MacIntel' })
   const mode = (): Promise<string | null> => page.evaluate(() => document.documentElement.dataset.agentTeamMode ?? null)

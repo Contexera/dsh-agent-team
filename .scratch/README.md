@@ -25,6 +25,7 @@
 
 | 月 | 工作项 | 一句话结论 | 链接 |
 | --- | --- | --- | --- |
+| 2026-11 | e2e-agent-test-routing | E2E 测试选择与反馈闭环：根 `AGENTS.md` 加 Test selection、新增中英文 `e2e-lanes` 目录与 `check:e2e-docs`、`run-browser-test.mjs` 支持 `--list`/阶段耗时/`summary.json`、下沉 bundle toggle 与 Settings 重复项（24→21 tests / 200 screenshots），3 次全量均 `193.58s`、单 lane 均 `14.44s` 全绿。 | [README](archive/2026-11/e2e-agent-test-routing/README.md) |
 | 2026-11 | test-suite-slimming | 测试套件精简与提速：修复 Skill 监听并发 Flake 与 Webhook 空等（Vitest 22.24–24.74s、0 flake），支持 `npm run test:browser -- <lane>` 单表面快检（~12s），7 个 E2E 下沉低层并将 21→9 条 Surface Lanes，全量 E2E `197.55s` 通过全部 24 测试 / 204 截图与 `[1440, 390]` 门禁。 | [README](archive/2026-11/test-suite-slimming/README.md) |
 | 2026-11 | team-management-agent | 团队管理专用 Session、owner 责任、九个管理工具、独立私有记忆与两份内置引导 skills 的 01–08 全部验收并合入本地 master；真实模型下的自然语言使用仍待 Human。 | [README](archive/2026-11/team-management-agent/README.md) |
 | 2026-11 | test-system-overhaul | 测试底座自托管与五层 Vitest 分层落地；16 项故障注入检出 16/16，26 个 E2E 与 195 张截图通过，复核问题已修复。 | [README](archive/2026-11/test-system-overhaul/README.md) |
