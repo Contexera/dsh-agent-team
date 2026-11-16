@@ -1,10 +1,24 @@
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import type { Locator, Page } from './__external-agent-team-support.ts'
+import { chromium } from 'playwright'
+import type { Browser } from 'playwright'
+import type { Locator, Page, WebScaffold } from './__external-agent-team-support.ts'
 import {
-  BROWSER_ARTIFACTS, ONE_PIXEL_PNG, browser, chooseMemberModel, closeScenario, memberAgent, openTeamPage,
-  scaffold, settleLayout, waitForMemberAgent,
+  BROWSER_ARTIFACTS,
+  CHROME,
+  ONE_PIXEL_PNG,
+  UI09_SHOTS,
+  browser,
+  chooseMemberModel,
+  closeScenario,
+  installLocalBundle,
+  launchWebScaffold,
+  memberAgent,
+  openTeamPage,
+  scaffold,
+  settleLayout,
+  waitForMemberAgent,
 } from './__external-agent-team-support.ts'
 
 const SHOTS = join(BROWSER_ARTIFACTS, 'timeline-anchor')
@@ -290,3 +304,203 @@ it('keeps Thread and Main reading anchors through history and arrivals in real W
   console.log(JSON.stringify({ browser: browser!.version(), evidence }))
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 300_000)
+
+it('keeps four same-origin Team pages responsive and independently subscribed', async () => {
+  let localScaffold: WebScaffold | undefined
+  let localBrowser: Browser | undefined
+  try {
+    const { home, stagedBundle } = await installLocalBundle()
+    localScaffold = await launchWebScaffold({ harnessHome: home, profile: { packages: [{ dir: stagedBundle, enabled: true }] } })
+    const workspace = await localScaffold.ctx.workspaceRegistry.create(localScaffold.workspaceCwd, 'multi-web')
+    await localScaffold.ctx.agentTeam.createProject({ requestId: 'multi-project' as never, workspaceId: workspace.id, name: 'multi-web', description: 'Multi-page regression' })
+    localBrowser = await chromium.launch({ headless: true, executablePath: CHROME })
+    const context = await localBrowser.newContext({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
+    const pages: Page[] = []
+    let membersRequest: { url: string; body: string } | undefined
+    context.on('request', request => {
+      if (request.url().endsWith('/agentTeam/members')) membersRequest = { url: request.url(), body: request.postData()! }
+    })
+    const probe = async (page: Page) => {
+      expect(membersRequest).toBeDefined()
+      const result = await page.evaluate(async request => {
+        const start = performance.now()
+        const response = await fetch(request.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request.body, signal: AbortSignal.timeout(3000) })
+        return { status: response.status, body: await response.json(), ms: performance.now() - start }
+      }, membersRequest!)
+      expect(result.status).toBe(200)
+      expect(result.body.result.ok).toBe(true)
+      console.log(`Team multi-page query (${pages.length} pages): ${Math.round(result.ms)}ms`)
+    }
+    for (let index = 0; index < 4; index++) {
+      const page = await context.newPage()
+      pages.push(page)
+      await page.goto(localScaffold.authenticatedUrl, { waitUntil: 'domcontentloaded' })
+      if (index === 0) await page.getByRole('button', { name: '团队', exact: true }).click()
+      await page.getByRole('button', { name: '# multi-web', exact: true }).click()
+      await page.getByRole('heading', { name: '# multi-web', exact: true }).waitFor()
+      await probe(page)
+    }
+    const composer = pages[0]!.locator('[data-team-project] textarea')
+    await composer.fill('来自第一页的消息')
+    await pages[0]!.getByRole('button', { name: '发送', exact: true }).click()
+    for (const page of pages) await page.locator('[data-team-project] article').filter({ hasText: '来自第一页的消息' }).waitFor()
+    await pages.shift()!.close()
+    await probe(pages[0]!)
+    await pages[0]!.getByRole('button', { name: '对话', exact: true }).click()
+    await probe(pages[1]!)
+    const separate = await localBrowser.newContext({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
+    const other = await separate.newPage()
+    await other.goto(localScaffold.authenticatedUrl)
+    await other.getByRole('button', { name: '团队', exact: true }).click()
+    await other.getByRole('button', { name: '# multi-web', exact: true }).click()
+    await other.locator('[data-team-project] textarea').fill('来自独立浏览器的消息')
+    await other.getByRole('button', { name: '发送', exact: true }).click()
+    await pages[1]!.locator('[data-team-project] article').filter({ hasText: '来自独立浏览器的消息' }).waitFor()
+    await pages[1]!.screenshot({ path: join(BROWSER_ARTIFACTS, 'multi-web-desktop.png'), fullPage: true })
+    await pages[1]!.setViewportSize({ width: 390, height: 844 })
+    await settleLayout(pages[1]!)
+    await pages[1]!.screenshot({ path: join(BROWSER_ARTIFACTS, 'multi-web-mobile.png'), fullPage: true })
+  } finally {
+    try {
+      await localBrowser?.close()
+    } finally {
+      await localScaffold?.close()
+    }
+  }
+}, 120_000)
+
+it('toggles the complete bundle without restarting the session controller', async () => {
+  let localScaffold: WebScaffold | undefined
+  try {
+    const { home, stagedBundle } = await installLocalBundle()
+    localScaffold = await launchWebScaffold({ harnessHome: home, profile: { packages: [{ dir: stagedBundle, enabled: false }] } })
+    const sessionController = [...localScaffold.ctx.loader.entries()].find(entry => entry.id === 'session-controller')?.fiber
+
+    const enabled = await localScaffold.ctx.pluginManager.setBundleEnabled('@contexera/dsh-agent-team', true)
+    expect(enabled, JSON.stringify(enabled)).toMatchObject({ application: 'applied' })
+    expect(localScaffold.ctx.get('agentTeam')).toBeDefined()
+    const workspace = await localScaffold.ctx.workspaceRegistry.create(localScaffold.workspaceCwd, 'toggle-persistence')
+    const project = await localScaffold.ctx.agentTeam.createProject({
+      requestId: 'toggle-persistence' as never,
+      workspaceId: workspace.id,
+      name: 'toggle-persistence',
+      description: '',
+    })
+    expect(localScaffold.ctx.agentTeam.status().projectCount).toBe(1)
+    expect(localScaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(true)
+    expect([...localScaffold.ctx.loader.entries()].find(entry => entry.id === 'session-controller')?.fiber).toBe(sessionController)
+
+    const disabled = await localScaffold.ctx.pluginManager.setBundleEnabled('@contexera/dsh-agent-team', false)
+    expect(disabled, JSON.stringify(disabled)).toMatchObject({ application: 'applied' })
+    expect(localScaffold.ctx.get('agentTeam')).toBeUndefined()
+    expect(localScaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(false)
+    expect([...localScaffold.ctx.loader.entries()].find(entry => entry.id === 'session-controller')?.fiber).toBe(sessionController)
+
+    expect(await localScaffold.ctx.pluginManager.setBundleEnabled('@contexera/dsh-agent-team', true)).toMatchObject({ application: 'applied' })
+    expect(localScaffold.ctx.get('agentTeam')).toBeDefined()
+    expect(localScaffold.ctx.agentTeam.status().projectCount).toBe(1)
+    expect(localScaffold.ctx.agentTeam.view({ workspaceId: project.project.workspaceId }).projects[0]?.name).toBe('toggle-persistence')
+    expect(localScaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(true)
+    expect([...localScaffold.ctx.loader.entries()].find(entry => entry.id === 'session-controller')?.fiber).toBe(sessionController)
+  } finally {
+    await localScaffold?.close()
+  }
+}, 30_000)
+
+it('reaches Team mode, its three global faces, and the shortcut reference from the keyboard', async () => {
+  const { page, consoleWatch } = await openTeamPage({ stayInOrdinaryMode: true, platform: 'MacIntel' })
+  const mode = (): Promise<string | null> => page.evaluate(() => document.documentElement.dataset.agentTeamMode ?? null)
+  expect(await mode()).toBeNull()
+
+  await page.keyboard.press('Meta+Alt+KeyT')
+  await expect.poll(mode).toBe('team')
+
+  await page.getByRole('button', { name: '新建项目' }).click()
+  const createProject = page.getByRole('dialog', { name: '新建项目' })
+  await createProject.getByLabel('名称').fill('shortcut')
+  await createProject.getByRole('button', { name: '创建项目' }).click()
+  await page.getByRole('button', { name: '# shortcut', exact: true }).click()
+  await page.locator('[data-team-composer] textarea').waitFor()
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('TEXTAREA')
+  await page.keyboard.press('Meta+Alt+KeyM')
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe('TEXTAREA')
+
+  const snapshot = (): Promise<Record<string, unknown>> => page.evaluate(() => JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as Record<string, unknown>)
+  await page.getByRole('button', { name: '讨论/任务' }).click()
+  await page.getByRole('checkbox', { name: '作为任务' }).check()
+  await page.getByRole('textbox', { name: '消息内容' }).fill('返回键验收')
+  await page.getByRole('button', { name: '发送', exact: true }).click()
+  await expect.poll(() => page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true')
+  await page.getByRole('button', { name: '打开 Task #1' }).click()
+  await page.locator('main[data-team-thread]').waitFor()
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('main[data-team-thread]').waitFor({ state: 'detached' })
+  await page.locator('[data-team-project]').waitFor()
+  await expect.poll(async () => (await snapshot()).threadRef).toBeUndefined()
+  expect((await snapshot()).projectRef).toMatch(/^project:/)
+
+  await page.keyboard.press('Meta+Alt+ArrowRight')
+  await page.locator('main[data-team-thread]').waitFor()
+  await expect.poll(async () => (await snapshot()).threadRef).toMatch(/^thread:/)
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('main[data-team-thread]').waitFor({ state: 'detached' })
+  await page.locator('[data-team-project]').waitFor()
+
+  await page.keyboard.press('Meta+Alt+Digit1')
+  await page.locator('[data-team-inbox]').waitFor()
+  await page.screenshot({ path: join(UI09_SHOTS, 'shortcut-inbox.png'), fullPage: true })
+
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('[data-team-inbox]').waitFor({ state: 'detached' })
+  await page.locator('[data-team-conversation]').waitFor()
+  await expect.poll(async () => (await snapshot()).inbox).toBeUndefined()
+
+  await page.keyboard.press('Meta+Alt+Digit2')
+  await page.locator('[data-team-task-board]').waitFor()
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('[data-team-task-board]').waitFor({ state: 'detached' })
+  await page.locator('[data-team-conversation]').waitFor()
+  await expect.poll(async () => (await snapshot()).board).toBeUndefined()
+
+  await page.keyboard.press('Meta+Alt+Digit3')
+  await expect.poll(async () => (await snapshot()).manager).toBe(true)
+  await page.locator('[data-composer-input][contenteditable="true"]').waitFor()
+  await expect.poll(() => page.locator('[data-global-panel]').count()).toBe(0)
+  await page.screenshot({ path: join(UI09_SHOTS, 'shortcut-manager.png'), fullPage: true })
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await expect.poll(async () => (await snapshot()).manager).toBeUndefined()
+  await page.locator('[data-team-conversation]').waitFor()
+
+  const welcome = await snapshot()
+  await page.keyboard.press('Meta+Alt+ArrowLeft')
+  await page.locator('[data-team-conversation]').waitFor()
+  expect(await snapshot()).toEqual(welcome)
+
+  await page.keyboard.press('Meta+Alt+KeyT')
+  await expect.poll(mode).toBeNull()
+
+  await page.keyboard.press('Meta+Slash')
+  const reference = page.getByRole('dialog', { name: '快捷键' })
+  await reference.waitFor()
+  const application = reference.getByRole('region', { name: '应用操作' })
+  for (const label of ['进入或退出团队模式', '收件箱', '任务看板', '团队管理', '聚焦输入框', '返回', '前进', '上一个项目', '下一个项目',
+    '收件箱第 1 项', '收件箱第 9 项']) {
+    expect(await application.getByText(label, { exact: true }).count()).toBe(1)
+  }
+  await page.screenshot({ path: join(UI09_SHOTS, 'shortcut-reference.png'), fullPage: true })
+
+  await application.getByText('聚焦输入框', { exact: true }).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(UI09_SHOTS, 'shortcut-reference-team.png'), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await page.screenshot({ path: join(UI09_SHOTS, 'shortcut-reference-narrow.png'), fullPage: true })
+  const narrow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }))
+  expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.clientWidth)
+
+  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
+}, 180_000)

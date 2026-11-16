@@ -831,7 +831,11 @@ describe('the webhook trigger', () => {
     const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
     if (created.kind !== 'changed') throw new Error('expected a committed create')
     const subscriptionRef = created.subscription.subscriptionRef
+    const pumpSpy = fakeTimers.spyOn(booted.ctx.agentTeam as unknown as { pumpWebhookAdmissions(): Promise<void> }, 'pumpWebhookAdmissions')
+      .mockResolvedValueOnce(undefined)
     const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    expect(pumpSpy).toHaveBeenCalledTimes(1)
+    pumpSpy.mockRestore()
     if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
     // The owner rewrites the script while the request is still in the queue.
     const edited = await booted.ctx.agentTeam.updateSubscription({ requestId: requestId('edit'), workspaceId, projectRef,
@@ -885,7 +889,11 @@ describe('the webhook trigger', () => {
     const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
     if (created.kind !== 'changed') throw new Error('expected a committed create')
     const token = addressToken(created.webhookAddress)
+    const pumpSpy = fakeTimers.spyOn(booted.ctx.agentTeam as unknown as { pumpWebhookAdmissions(): Promise<void> }, 'pumpWebhookAdmissions')
+      .mockResolvedValueOnce(undefined)
     const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
+    expect(pumpSpy).toHaveBeenCalledTimes(1)
+    pumpSpy.mockRestore()
     if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
     // The owner turns the subscription into a timer: the address goes, the queue
     // does not — the provider already has a 202 for this request.
@@ -1352,9 +1360,13 @@ describe('the webhook trigger', () => {
     await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
     await pump(booted)
     expect(checkpointRow(pool, subscriptionRef)?.consecutiveFailures).toBe(1)
+    const pumpSpy = fakeTimers.spyOn(booted.ctx.agentTeam as unknown as { pumpWebhookAdmissions(): Promise<void> }, 'pumpWebhookAdmissions')
+      .mockResolvedValue(undefined)
     for (let index = 0; index < 2; index += 1) {
       expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).toMatchObject({ kind: 'queued' })
     }
+    expect(pumpSpy).toHaveBeenCalledTimes(2)
+    pumpSpy.mockRestore()
     const rows = (booted.ctx.agentTeam as unknown as { subscriptionAdmissionsTable: {
       put(key: string, record: unknown): Promise<unknown> } }).subscriptionAdmissionsTable
     // Legacy spent rows carry no accounting progress to resume.
@@ -1511,13 +1523,18 @@ describe('the webhook trigger', () => {
     const created = await first.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
     if (created.kind !== 'changed') throw new Error('expected a committed create')
     const token = addressToken(created.webhookAddress)
+    const pumpSpy = fakeTimers.spyOn(first.ctx.agentTeam as unknown as { pumpWebhookAdmissions(): Promise<void> }, 'pumpWebhookAdmissions')
+      .mockResolvedValue(undefined)
     const intake = (host: typeof first) => host.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
     for (let index = 0; index < 10; index += 1) expect(await intake(first)).toMatchObject({ kind: 'queued' })
+    expect(pumpSpy).toHaveBeenCalledTimes(10)
+    pumpSpy.mockRestore()
     // A restart, not a reload: the store closes and a new Host opens the same medium.
     await first.fiber.dispose()
     await first.facility.closeAll()
-    const second = await boot(pool, shell, process.cwd(), configured)
-    live.push({ dispose: async () => { await second.fiber.dispose() } })
+    const secondShell = gatedShell('{"id":"a","title":"A"}\n')
+    const second = await boot(pool, secondShell, process.cwd(), configured)
+    live.push({ dispose: async () => { secondShell.release(); await second.fiber.dispose() } })
     expect(await intake(second), 'ten deliveries were durable before their 202, so none of them died with the process')
       .toEqual({ kind: 'queue-full', retryAfterSeconds: 60 })
   })
@@ -1768,7 +1785,8 @@ describe('the webhook trigger', () => {
     releasePause.resolve()
     await expect.poll(() => second.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef })
       .entries[0]?.subscription.state).toBe('paused')
-    await new Promise(resolve => setTimeout(resolve, 1_100))
+    await (second.ctx.agentTeam as unknown as { subscriptionScheduler: { runTick(): Promise<void> } })
+      .subscriptionScheduler.runTick()
     expect(secondShell.requests.filter(request => request.env?.DSH_TEAM_TRIGGER === 'interval'),
       'the committed pause keeps the interval stopped').toHaveLength(0)
     expect(admissionRows(pool)).toHaveLength(0)

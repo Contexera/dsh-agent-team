@@ -74,6 +74,14 @@ git diff --check HEAD
 npm run test:browser
 ```
 
+如果在本地只想快速迭代 `scripts/e2e/*.e2e.ts` 中的一条或多条 surface lane，可以在 `--` 后传入 lane 名称过滤：
+
+```sh
+npm run test:browser -- team-manager team-inbox-and-recovery
+```
+
+过滤模式仍会先构建、stage bundle 并校验本次捕获的截图，但会跳过全套 `[1440, 390]` 双宽度完整性门禁；在完成 UI 或 Client 改动前，仍须运行无过滤的全量 `npm run test:browser`。
+
 改动 Team 控件或界面的可见 UI 变更，额外运行机械的设计语言审计（含 shipped 参考 tripwire）：
 
 ```sh

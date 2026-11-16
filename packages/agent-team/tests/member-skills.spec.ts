@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -94,22 +94,17 @@ describe('Agent Team member-private skills', () => {
     const member = await addMember(ctx, workspaceId, 'holder')
     const agent = liveAgent(ctx, member.sessionId)
 
-    // Default catalog = the plugin's bundled core skills; no
-    // project/user/global roots leak in. Ordinary sessions see
-    // nothing.
-    expect(await catalogNames(ctx, agent)).toEqual(['member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
+    // Default catalog = the plugin's bundled core skills; no project/user/global
+    // roots leak in. Ordinary sessions see nothing.
     const ordinary = await ctx.agents.create({ sessionId: SessionId('ordinary-skills') })
     onTestFinished(async () => { await ordinary.dispose() })
     expect(await catalogNames(ctx, ordinary.agent)).toEqual([])
 
     // Self-install: a SKILL.md written into the private directory is
     // discovered by the next catalog query of that Member alone. The
-    // filesystem watcher needs its stability window, so wait for the
-    // discovery rather than racing it.
+    // The first catalog read discovers the private root and its installed file.
     await writeFile(join(member.privateMemoryPath, 'skills', 'code-review.md'), SKILL_MD('code-review', 'Review changes', 'Review the diff carefully.'))
-    await vi.waitFor(async () => {
-      expect(await catalogNames(ctx, agent)).toEqual(['code-review', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
-    })
+    expect(await catalogNames(ctx, agent)).toEqual(['code-review', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
 
     // A sibling Member keeps exactly the bundled set — neither the private
     // skill nor the directory is shared.
@@ -257,9 +252,7 @@ describe('Agent Team member-private skills', () => {
     const agent = liveAgent(ctx, member.sessionId)
     await writeFile(join(member.privateMemoryPath, 'skills', 'alpha.md'), SKILL_MD('alpha', 'Alpha skill', 'Alpha body.'))
     await writeFile(join(member.privateMemoryPath, 'skills', 'beta.md'), SKILL_MD('beta', 'Beta skill', 'Beta body.'))
-    await vi.waitFor(async () => {
-      expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
-    })
+    expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
 
     // Explicit selection: only the listed name is listed or loadable. The
     // unselected skill stays on disk (filtering is list()-output, not
@@ -294,9 +287,7 @@ describe('Agent Team member-private skills', () => {
     const skillsDir = join(member.privateMemoryPath, 'skills')
     await writeFile(join(skillsDir, 'ephemeral.md'), SKILL_MD('ephemeral', 'Ephemeral', 'Gone with the Member.'))
     const agent = liveAgent(ctx, member.sessionId)
-    await vi.waitFor(async () => {
-      expect(await catalogNames(ctx, agent)).toEqual(['ephemeral', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
-    })
+    expect(await catalogNames(ctx, agent)).toEqual(['ephemeral', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
 
     // Removal deletes the whole private namespace, skills included.
     await ctx.agentTeam.removeMember({ requestId: requestId('remove'), memberId: member.memberId })
@@ -308,9 +299,7 @@ describe('Agent Team member-private skills', () => {
     const member = await addMember(ctx, workspaceId, 'durable')
     await writeFile(join(member.privateMemoryPath, 'skills', 'keeper.md'), SKILL_MD('keeper', 'Keeper', 'Survives restarts.'))
     const agent = liveAgent(ctx, member.sessionId)
-    await vi.waitFor(async () => {
-      expect(await catalogNames(ctx, agent)).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
-    })
+    expect(await catalogNames(ctx, agent)).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
 
     await ctx.agentTeam.suspendMember({ requestId: requestId('suspend'), memberId: member.memberId })
     const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('resume'), memberId: member.memberId })

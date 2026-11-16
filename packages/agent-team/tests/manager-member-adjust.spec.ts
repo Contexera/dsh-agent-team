@@ -488,7 +488,7 @@ describe('Team manager Member adjustment', () => {
     const sessionId = memberOf(ctx, workspaceId, memberRef)!.member.sessionId
 
     await runTool(ctx, manager, 'member_state', 'replay-resume-suspend-1', { action: 'suspend', memberRef, requestId: 'replay-resume-suspend-1' })
-    const resumed = await runTool(ctx, manager, 'member_state', 'replay-resume-1', { action: 'resume', memberRef, requestId: 'replay-resume-1' })
+    const resumed = await runTool(ctx, manager, 'member_state', 'replay-resume-1', { action: 'resume', memberRef, requestId: 'replay-resume-resume-1' })
     expect(resumed.isError).toBe(false)
     if (resumed.isError) return
     const suspendedAgain = await runTool(ctx, manager, 'member_state', 'replay-resume-suspend-2', {
@@ -496,7 +496,7 @@ describe('Team manager Member adjustment', () => {
     })
     expect(suspendedAgain.isError).toBe(false)
 
-    const replayed = await runTool(ctx, manager, 'member_state', 'replay-resume-2', { action: 'resume', memberRef, requestId: 'replay-resume-1' })
+    const replayed = await runTool(ctx, manager, 'member_state', 'replay-resume-2', { action: 'resume', memberRef, requestId: 'replay-resume-resume-1' })
     expect(replayed.isError).toBe(false)
     if (replayed.isError) return
     const value = replayed.value as { receipt: { operationId: string }; status: { availability: string } }

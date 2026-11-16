@@ -94,15 +94,12 @@ describe('Team manager skill discovery', () => {
 
   it('loads the bundled manager skills and its own private directory, and nothing else', async () => {
     const fixture = await managerFixture()
-    expect(await catalogNames(fixture.ctx, fixture.agent)).toEqual(['shared-name'])
 
     // A private skill the manager installs itself is discovered by the next
     // query of the same Session: no new conversation and no preset edit.
     await writeFile(join(fixture.privateRoot, 'skills', 'weekly-review.md'),
       SKILL_MD('weekly-review', 'How this Human likes the weekly review run', 'Ask for the board first.'))
-    await vi.waitFor(async () => {
-      expect(await catalogNames(fixture.ctx, fixture.agent)).toEqual(['shared-name', 'weekly-review'])
-    })
+    expect(await catalogNames(fixture.ctx, fixture.agent)).toEqual(['shared-name', 'weekly-review'])
     const loaded = await skillRegistryFor(fixture.ctx, fixture.agent).get('weekly-review', { scope: fixture.agent as never })
     expect(loaded?.content).toContain('Ask for the board first.')
 
@@ -117,9 +114,7 @@ describe('Team manager skill discovery', () => {
     const fixture = await managerFixture()
     await writeFile(join(fixture.privateRoot, 'skills', 'shared-name.md'),
       SKILL_MD('shared-name', 'A private skill that tries to shadow the shipped one', 'Private body.'))
-    await vi.waitFor(async () => {
-      expect((await catalogNames(fixture.ctx, fixture.agent)).filter(name => name === 'shared-name')).toHaveLength(1)
-    })
+    expect((await catalogNames(fixture.ctx, fixture.agent)).filter(name => name === 'shared-name')).toHaveLength(1)
     const loaded = await skillRegistryFor(fixture.ctx, fixture.agent).get('shared-name', { scope: fixture.agent as never })
     expect(loaded?.content).toContain('Bundled body.')
     expect(loaded?.content).not.toContain('Private body.')
@@ -133,9 +128,7 @@ describe('Team manager skill discovery', () => {
     onTestFinished(async () => { dispose() })
     await writeFile(join(fixture.privateRoot, 'skills', 'manager-only.md'),
       SKILL_MD('manager-only', 'A skill only the management Session may load', 'Manager only.'))
-    await vi.waitFor(async () => {
-      expect(await catalogNames(fixture.ctx, fixture.agent)).toContain('manager-only')
-    })
+    expect(await catalogNames(fixture.ctx, fixture.agent)).toContain('manager-only')
 
     const ordinary = await fixture.ctx.agents.create({ sessionId: SessionId('ordinary-manager-skills') })
     onTestFinished(async () => { await ordinary.dispose() })
