@@ -10,6 +10,7 @@ This directory contains the maintained engineering documentation for this reposi
 | --- | --- | --- |
 | [`development/README.md`](development/README.md) | Setup, commands, generated artifacts, live/UI preview, browser replay, and release checks | Starting development, running verification, changing a package, or changing release layout |
 | [`development/start-and-checks.md`](development/start-and-checks.md) | Setup and the verification gradient | Starting work, or deciding which check a change needs |
+| [`development/e2e-lanes.md`](development/e2e-lanes.md) | E2E browser lanes, real Web/Harness contracts, lower-layer tests, and trigger rules | Selecting a targeted `test:browser` lane or verifying assembled-Web coverage |
 | [`development/generated-and-seams.md`](development/generated-and-seams.md) | Browser evidence, generated files, package seams, and adding a Host operation | Touching generated files, package seams, or a Host operation |
 | [`development/environments-and-install.md`](development/environments-and-install.md) | Sandbox/CI environments and external installation verification | Running in CI, or verifying an installed bundle |
 | [`development/storage-and-delivery.md`](development/storage-and-delivery.md) | Ledger storage routing, notification regression, and the delivery checklist | Changing storage routing, notifications, or preparing a delivery |
@@ -47,6 +48,6 @@ Editing or adding a document under `docs/`? Routing branches and the maintenance
 - **Host or domain changes:** [`architecture/README.md`](architecture/README.md) for boundaries, [`domain-model.md`](domain-model.md) for vocabulary; `packages/agent-team/src/` and its tests are the authority. Use `.scratch/README.md` to locate historical decisions when needed.
 - **Tools or preset changes:** the relevant sections of [`architecture/README.md`](architecture/README.md), then the Harness cookbook and subsystem docs.
 - **Client or UI changes:** [`frontend-design/README.md`](frontend-design/README.md) for the UI system, [`harness-navigation.md`](harness-navigation.md) for the cross-repository route.
-- **Installation, build, tests, or Remote generation:** [`development/README.md`](development/README.md), then the actual `package.json` or script implementation.
+- **Installation, build, tests, or Remote generation:** [`development/README.md`](development/README.md), then the actual `package.json` or script implementation; use [`development/e2e-lanes.md`](development/e2e-lanes.md) to pick a targeted browser lane.
 - **Measuring or changing Team performance:** [`development/team-performance.md`](development/team-performance.md), then the matching benchmark or semantic probe.
 - **Publishing a release:** [`release-runbook.md`](release-runbook.md) for the procedure and its gates, then [`dsh-release-compatibility.md`](dsh-release-compatibility.md) for the certification that must precede any peer-range change.

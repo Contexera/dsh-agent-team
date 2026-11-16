@@ -29,6 +29,7 @@ corepack pnpm install
 npm run generate:typert
 npm run typecheck
 npm run check:docs
+npm run check:e2e-docs
 npm run check:core-skills
 npm run check:boundaries
 npm run check:versions
@@ -74,7 +75,7 @@ git diff --check HEAD
 npm run test:browser
 ```
 
-如果在本地只想快速迭代 `scripts/e2e/*.e2e.ts` 中的一条或多条 surface lane，可以在 `--` 后传入 lane 名称过滤：
+如果在本地只想快速迭代 `scripts/e2e/*.e2e.ts` 中的一条或多条 surface lane，可以在 `--` 后传入 lane 名称过滤（完整 lane 目录、契约与触发条件见 [`e2e-lanes.zh.md`](e2e-lanes.zh.md)）：
 
 ```sh
 npm run test:browser -- team-manager team-inbox-and-recovery

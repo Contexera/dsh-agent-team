@@ -61,6 +61,7 @@ const BLOCK_CHARACTER_CEILINGS = {
   'architecture/tools-and-preset.md': [605, 458],
   'architecture/workspace-session-storage.md': [576, 584],
   'development/README.md': [105, 64],
+  'development/e2e-lanes.md': [350, 220],
   'development/environments-and-install.md': [597, 569],
   'development/generated-and-seams.md': [515, 362],
   'development/start-and-checks.md': [595, 415],

@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | [`development/README.zh.md`](development/README.zh.md) | 安装、命令、生成物、live/UI preview、browser replay 和发布检查 | 开始开发、运行验证、修改 package 或发布布局 |
 | [`development/start-and-checks.zh.md`](development/start-and-checks.zh.md) | 上手与检查梯度 | 开始开发，或判断一次改动该跑哪道门 |
+| [`development/e2e-lanes.zh.md`](development/e2e-lanes.zh.md) | E2E 浏览器 lane 目录、真实 Web/Harness 契约、低层测试与触发规则 | 选择定向 `test:browser` lane 或核对 assembled-Web 覆盖 |
 | [`development/generated-and-seams.zh.md`](development/generated-and-seams.zh.md) | 浏览器证据、生成文件、package 接缝与新增 Host operation | 修改生成物、package 接缝或 Host operation |
 | [`development/environments-and-install.zh.md`](development/environments-and-install.zh.md) | 沙箱/CI 环境与外部安装验证 | 在 CI 里跑，或验证已安装的 bundle |
 | [`development/storage-and-delivery.zh.md`](development/storage-and-delivery.zh.md) | Ledger 存储路由、通知回归与交付前核对 | 修改存储路由、通知，或准备交付 |
@@ -47,6 +48,6 @@
 - **改 Host 或 domain：** 边界查 [`architecture/README.zh.md`](architecture/README.zh.md)，词汇查 [`domain-model.zh.md`](domain-model.zh.md)；`packages/agent-team/src/` 和测试是权威。需要决策来由时再按 `.scratch/README.md` 查 archive。
 - **改 tools 或 preset：** 查 [`architecture/README.zh.md`](architecture/README.zh.md) 的对应章节，再查 Harness cookbook 和 subsystem 文档。
 - **改 Client 或 UI：** UI 体系查 [`frontend-design/README.zh.md`](frontend-design/README.zh.md)，跨仓库路线查 [`harness-navigation.zh.md`](harness-navigation.zh.md)。
-- **改安装、构建、测试或 Remote 生成：** 查 [`development/README.zh.md`](development/README.zh.md)，再看对应 `package.json` / script 的实际实现。
+- **改安装、构建、测试或 Remote 生成：** 查 [`development/README.zh.md`](development/README.zh.md)，再看对应 `package.json` / script 的实际实现；选择定向浏览器 lane 查 [`development/e2e-lanes.zh.md`](development/e2e-lanes.zh.md)。
 - **测量或修改 Team 性能：** 查 [`development/team-performance.zh.md`](development/team-performance.zh.md)，再运行对应的 benchmark 或语义探针。
 - **发布一个版本：** 流程与各道门查 [`release-runbook.zh.md`](release-runbook.zh.md)；放宽 peer 范围之前必须先做的认证查 [`dsh-release-compatibility.zh.md`](dsh-release-compatibility.zh.md)。
