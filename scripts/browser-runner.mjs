@@ -15,6 +15,8 @@ const VALUE_FLAGS = new Set([
   '-c',
   '--bail',
   '--testTimeout',
+  '--maxWorkers',
+  '--max-workers',
 ])
 
 export function parseRunnerArgs(rawArgs) {
@@ -107,6 +109,27 @@ export function planLaneBatches(selectedLanes, { shard = false, maxWorkers = 2 }
     { name: 'serial-heavy', lanes: serial, vitestFlags: [] },
     { name: 'parallel-light', lanes: parallel, vitestFlags: ['--fileParallelism', `--maxWorkers=${String(maxWorkers)}`] },
   ]
+}
+
+export function allowsPhaseMarker(flags) {
+  let fileParallelism = false
+  let maxWorkers
+  for (let index = 0; index < flags.length; index += 1) {
+    const flag = flags[index]
+    if (flag === '--fileParallelism' || flag === '--fileParallelism=true' || flag === '--file-parallelism' || flag === '--file-parallelism=true') {
+      fileParallelism = true
+    } else if (flag === '--fileParallelism=false' || flag === '--file-parallelism=false' || flag === '--no-fileParallelism' || flag === '--no-file-parallelism') {
+      fileParallelism = false
+    } else if (flag.startsWith('--maxWorkers=') || flag.startsWith('--max-workers=')) {
+      const value = Number.parseInt(flag.slice(flag.indexOf('=') + 1), 10)
+      if (Number.isInteger(value)) maxWorkers = value
+    } else if ((flag === '--maxWorkers' || flag === '--max-workers') && index + 1 < flags.length) {
+      index += 1
+      const value = Number.parseInt(flags[index], 10)
+      if (Number.isInteger(value)) maxWorkers = value
+    }
+  }
+  return !fileParallelism || maxWorkers === 1
 }
 
 export function aggregateTestSummaries(summaries) {

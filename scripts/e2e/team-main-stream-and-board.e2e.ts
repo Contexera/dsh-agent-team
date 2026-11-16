@@ -222,6 +222,7 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   const boardBand = await bandOf()
   expect(boardBand).not.toBeNull()
   await page.getByRole('button', { name: '收件箱' }).click()
+  await page.locator('[data-team-inbox]').waitFor()
   await settleLayout(page)
   const inboxBand = await bandOf()
   expect(inboxBand).toEqual(boardBand)

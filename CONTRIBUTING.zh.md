@@ -30,7 +30,7 @@
 
 ## CI 会跑什么
 
-一个 PR 跑两条 lane：`ubuntu-latest` 与 `windows-latest`。两条 lane 执行同一套六步环境契约——corepack shim、钉住的 Harness checkout、Harness 安装与构建、本仓库安装、bundle 构建、path facade——然后跑 `npm run typecheck` 与 `npm test`。**只改文档**的 `master` push 会跳过门禁，PR 永远不跳。`npm run test:browser` 故意不进 CI，浏览器验收是本地步骤：改动可见时，这份证据要你自己附上。环境契约本身、以及必须与钉住 tag 一起改动的三个文件，见 [`docs/development/environments-and-install.zh.md`](docs/development/environments-and-install.zh.md) §「沙箱与 CI 环境」。
+一个 PR 跑两条 lane：`ubuntu-latest` 与 `windows-latest`。两条 lane 执行同一套六步环境契约——corepack shim、钉住的 Harness checkout、Harness 安装与构建、本仓库安装、bundle 构建、path facade——并在 `checks` job 完成仓库级静态检查后跑 `npm run typecheck` 与 `npm run test:ci`。**只改文档**的 `master` push 会跳过门禁，PR 永远不跳。`npm run test:browser` 故意不进 CI，浏览器验收是本地步骤：改动可见时，这份证据要你自己附上。环境契约本身、以及必须与钉住 tag 一起改动的三个文件，见 [`docs/development/environments-and-install.zh.md`](docs/development/environments-and-install.zh.md) §「沙箱与 CI 环境」。
 
 ## PR 里应该有什么
 

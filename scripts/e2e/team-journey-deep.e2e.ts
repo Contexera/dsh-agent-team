@@ -2,7 +2,7 @@ import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
 import type { Browser } from 'playwright'
 import { BROWSER_ARTIFACTS, CHROME, UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, actionBandGeometry, closeScenario, connectFreshWorkspaceZh, entryClusterEdges, entryUnreadCapsule, focusRing, inkContrast, installLocalBundle, launchWebScaffold, maxHorizontalScroll, openSidebar, resolveAliasColor, settleAnimations, settleLayout, taskEntryClusterLefts, taskEntryLineSelector, taskEntryRow, visibleSidebarWidth, watchConsole, chooseMemberModel } from './__external-agent-team-support.ts'
-import type { Locator, WebScaffold } from './__external-agent-team-support.ts'
+import type { WebScaffold } from './__external-agent-team-support.ts'
 
 let scaffold: WebScaffold | undefined
 let browser: Browser | undefined

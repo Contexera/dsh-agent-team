@@ -15,13 +15,14 @@ Targeted runs (`npm run test:browser -- <lane>`) give fast surface feedback duri
 | Host, ledger, Remote, permissions, subscriptions, Worker state | `npx vitest run --project unit` or targeted integration spec | `npm test` and `npm run typecheck` |
 | Client state machine, DOM interaction, error copy | Targeted `packages/client-agent-team/tests/*.client.spec.tsx` | `npm test` and `npm run typecheck` |
 | Slot, preset, bundle manifest, ordinary DSH restore, geometry, multi-page | Targeted `npm run test:browser -- <lane>` | Unfiltered `npm run test:browser` and `node scripts/audit-ui-parity.mjs` |
-| Cross-surface flow, `scripts/run-browser-test.mjs`, `scripts/e2e/support.ts`, release | Unfiltered `npm run test:browser` | `npm test`, `npm run typecheck`, `npm run lint`, `npm run test:browser` |
+| Cross-surface flow, `scripts/run-browser-test.mjs`, `scripts/e2e/support.ts` | Unfiltered `npm run test:browser` | `npm test`, `npm run typecheck`, `npm run lint`, `npm run test:browser` |
+| Complete Team journey, broad shell/visual regression, release | `npm run test:browser -- --deep` | `npm test`, `npm run typecheck`, `npm run lint`, `npm run test:browser -- --deep` |
 
 ## Full-run scheduling
 
 The unfiltered runner keeps `team-journey` and `team-manager` in a serial heavy batch because running them beside other full Harness scenarios caused hook timeouts. The deep profile replaces `team-journey` with `team-journey-deep`.
 
-The remaining lanes run in a bounded two-worker batch after the heavy batch. Targeted runs keep their requested Vitest flags and are never reshaped automatically.
+The remaining lanes run in a bounded two-worker batch after the heavy batch. Targeted runs or runs with custom Vitest flags keep their requested arguments and are never reshaped automatically.
 
 Set `DSH_E2E_SCHEDULING=serial` on a constrained machine to force one serial batch. Set `DSH_E2E_MAX_WORKERS` to change the light-batch worker limit.
 
@@ -42,7 +43,7 @@ Set `DSH_E2E_SCHEDULING=serial` on a constrained machine to force one serial bat
 - **File and command:** `scripts/e2e/team-journey-deep.e2e.ts` — `npm run test:browser -- team-journey-deep` or `npm run test:browser -- --deep`
 - **Real Web/Harness contract:** The complete cross-surface Team journey: shell geometry, Member/Project/Thread/Task/Claim/DM/Board mutations, attachment and responsive UI assertions, reload persistence, archiving, plugin exit, and ordinary DSH restoration.
 - **Lower-layer tests:** The same Host/integration and Client specs as `team-journey`, plus the owning surface lanes for detailed behavior.
-- **Trigger:** Broad Team shell redesign, cross-surface navigation changes, deep visual regression review, or release acceptance that explicitly includes the complete journey.
+- **Trigger:** Broad Team shell redesign, cross-surface navigation changes, deep visual regression review, or release acceptance.
 - **Required evidence:** `artifacts/browser/ui-01/` to `ui-06/` (`1440` and `390` viewports), zero console warnings/page errors, clean ordinary DSH restore.
 - **Not responsible for:** Replacing the focused Inbox, Manager, Worker, Settings, Subscription, or Main/Board lane contracts.
 - **Scale and cost:** 1 deep test (about 48s as a single lane in the current baseline).

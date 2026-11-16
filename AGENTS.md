@@ -54,8 +54,8 @@ Run the narrowest applicable check, then escalate for the changed surface. The e
 - **Host, Ledger, Remote, permissions, persistence, subscriptions, Worker state:** run targeted Vitest (`npx vitest run --project unit` or the relevant integration spec) first, then `npm test` and `npm run typecheck`.
 - **Client state machine, DOM interaction, error copy:** run the targeted `packages/client-agent-team/tests/*.client.spec.tsx` first.
 - **Slot, preset, bundle manifest, ordinary DSH restore, real keyboard/layout, multi-page:** run the matching targeted browser lane (`npm run test:browser -- <lane>`) listed in [`docs/development/e2e-lanes.md`](docs/development/e2e-lanes.md).
-- **Complete Team journey or broad shell/visual regression:** add `--deep` to run the `team-journey-deep` profile; the default full run uses the shorter Team smoke.
-- **Cross-surface flow, release, or `scripts/run-browser-test.mjs` / `scripts/e2e/support.ts`:** run unfiltered `npm run test:browser` (with `CHROME_PATH` when `/usr/bin/google-chrome` is absent, e.g. macOS).
+- **Complete Team journey, broad shell/visual regression, or release:** add `--deep` (`npm run test:browser -- --deep`) to run the `team-journey-deep` profile; the default full run uses the shorter Team smoke.
+- **Cross-surface flow or `scripts/run-browser-test.mjs` / `scripts/e2e/support.ts`:** run unfiltered `npm run test:browser` (with `CHROME_PATH` when `/usr/bin/google-chrome` is absent, e.g. macOS).
 - Targeted lanes are development feedback; unfiltered `npm run test:browser` is the delivery gate for assembled-Web changes.
 - When Chrome, Harness, or another required environment is unavailable, report the exact unverified scope instead of claiming browser pass. Always report: changed surface, expected checks, checks actually run, and unrun checks with reasons.
 

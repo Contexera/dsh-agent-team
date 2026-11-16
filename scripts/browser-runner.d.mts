@@ -57,6 +57,7 @@ export function planLaneBatches(
   selectedLanes: readonly SelectedLane[],
   options?: { readonly shard?: boolean; readonly maxWorkers?: number },
 ): LaneBatch[]
+export function allowsPhaseMarker(flags: readonly string[]): boolean
 export function aggregateTestSummaries(summaries: readonly (TestSummary | null)[]): TestSummary | null
 export function formatLaneList(
   allE2eFiles: readonly string[],

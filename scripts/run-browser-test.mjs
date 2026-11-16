@@ -9,6 +9,7 @@ import { assertScreenshotEvidence, readScreenshots } from './browser-evidence.mj
 import {
   LANE_ALIASES,
   aggregateTestSummaries,
+  allowsPhaseMarker,
   buildSummary,
   formatLaneList,
   formatSummaryText,
@@ -40,7 +41,7 @@ const catalogText = await readFile(join(root, 'docs', 'development', 'e2e-lanes.
 const contracts = parseLaneContracts(catalogText)
 
 if (list) {
-  console.log(formatLaneList(allE2eFiles, contracts, LANE_ALIASES))
+  console.log(formatLaneList(deep ? allE2eFiles : actualE2eFiles, contracts, LANE_ALIASES))
   process.exit(0)
 }
 
@@ -202,13 +203,20 @@ try {
         .map(lane => renderedByScenario.get(lane.file))
         .filter(path => typeof path === 'string')
         .map(path => path.slice(harness.length + 1).replaceAll('\\', '/'))
+      const batchEnv = { ...process.env }
+      await rm(phaseFile, { force: true })
+      if (allowsPhaseMarker([...vitestFlags, ...batch.vitestFlags])) {
+        batchEnv.DSH_E2E_PHASE_FILE = phaseFile
+      } else {
+        delete batchEnv.DSH_E2E_PHASE_FILE
+      }
       try {
         await runPnpm(['exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
           ...files,
           '--reporter=verbose', '--reporter=json', `--outputFile.json=${reportFile}`,
           ...vitestFlags, ...batch.vitestFlags],
         harness,
-        { ...process.env, DSH_E2E_PHASE_FILE: phaseFile })
+        batchEnv)
         batchSummaries.push({ name: batch.name, status: 'passed', durationMs: Date.now() - batchStartedAt, lanes: batch.lanes.map(lane => lane.name) })
       } catch (error) {
         failedBatch = batch.name

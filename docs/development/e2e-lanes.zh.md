@@ -15,13 +15,14 @@
 | Host、ledger、Remote、权限、订阅、Worker 状态 | `npx vitest run --project unit` 或对应 integration spec | `npm test` 与 `npm run typecheck` |
 | Client 状态机、DOM 交互、错误文案 | 对应 `packages/client-agent-team/tests/*.client.spec.tsx` | `npm test` 与 `npm run typecheck` |
 | slot、preset、bundle manifest、普通 DSH 恢复、几何、多页面 | 定向 `npm run test:browser -- <lane>` | 无过滤 `npm run test:browser` 与 `node scripts/audit-ui-parity.mjs` |
-| 跨表面流程、`scripts/run-browser-test.mjs`、`scripts/e2e/support.ts`、发布 | 无过滤 `npm run test:browser` | `npm test`、`npm run typecheck`、`npm run lint`、`npm run test:browser` |
+| 跨表面流程、`scripts/run-browser-test.mjs`、`scripts/e2e/support.ts` | 无过滤 `npm run test:browser` | `npm test`、`npm run typecheck`、`npm run lint`、`npm run test:browser` |
+| 完整 Team 旅程、大范围 Shell/视觉回归、发布 | `npm run test:browser -- --deep` | `npm test`、`npm run typecheck`、`npm run lint`、`npm run test:browser -- --deep` |
 
 ## 全量运行调度
 
 无过滤 Runner 会先串行运行 `team-journey` 与 `team-manager`。这两条 lane 启动的完整 Harness 成本最高，与其他场景同时运行时曾出现 hook 超时。深度模式会用 `team-journey-deep` 替换 `team-journey`。
 
-其余 lane 随后使用最多两个 Worker 运行。定向运行保留调用方传入的 Vitest 参数，不会自动改成分组调度。
+其余 lane 随后使用最多两个 Worker 运行。定向运行或传入自定义 Vitest 参数时保留调用方参数，不会自动改成分组调度。
 
 资源受限时可设置 `DSH_E2E_SCHEDULING=serial` 强制全量串行；设置 `DSH_E2E_MAX_WORKERS` 可调整轻量批次的 Worker 数量。
 
@@ -42,7 +43,7 @@
 - **文件与命令：** `scripts/e2e/team-journey-deep.e2e.ts` — `npm run test:browser -- team-journey-deep` 或 `npm run test:browser -- --deep`
 - **真实 Web/Harness 契约：** 完整跨表面 Team 旅程：Shell 几何、Member/Project/Thread/Task/Claim/DM/Board 变更、附件与响应式 UI 断言、reload 持久化、归档、插件退出及普通 DSH 恢复。
 - **低层测试：** 与 `team-journey` 相同的 Host/integration 与 Client spec，以及各表面 lane 负责的详细行为。
-- **触发条件：** Team Shell 大范围重设计、跨表面导航改动、深度视觉回归审查，或明确要求完整旅程的发布验收。
+- **触发条件：** Team Shell 大范围重设计、跨表面导航改动、深度视觉回归审查或发布验收。
 - **必需证据：** `artifacts/browser/ui-01/` 至 `ui-06/`（`1440` 与 `390` 视口）、零 console 警告/页面错误、普通 DSH 恢复干净。
 - **不负责证明：** 替代 Inbox、Manager、Worker、Settings、Subscription 或 Main/Board lane 的专门契约。
 - **规模与成本：** 1 个深度测试（当前单 lane 基线约 48s）。

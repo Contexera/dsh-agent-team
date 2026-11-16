@@ -5,6 +5,7 @@ import {
   closeScenario,
   openTeamPage,
   scaffold,
+  settleLayout,
 } from './__external-agent-team-support.ts'
 
 const SMOKE_SHOTS = join(BROWSER_ARTIFACTS, 'team-journey-smoke')
@@ -43,6 +44,15 @@ it('installs the bundle, crosses the Team surface, survives reload, and restores
   await page.getByRole('tab', { name: '看板' }).waitFor()
   await page.getByRole('button', { name: '打开 Task #1', exact: true }).waitFor()
   await page.screenshot({ path: join(SMOKE_SHOTS, 'team-task.png'), fullPage: true })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await page.getByRole('button', { name: '打开 Task #1', exact: true }).waitFor()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
+  await page.screenshot({ path: join(SMOKE_SHOTS, 'team-task-narrow.png'), fullPage: true })
+
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
 
   await page.reload()
   await projectEntry.waitFor()

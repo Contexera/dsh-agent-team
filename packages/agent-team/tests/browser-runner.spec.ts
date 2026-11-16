@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import {
   LANE_ALIASES,
   aggregateTestSummaries,
+  allowsPhaseMarker,
   buildSummary,
   formatLaneList,
   formatSummaryText,
@@ -44,6 +45,14 @@ describe('browser-runner', () => {
       deep: true,
       fileFilters: [],
       vitestFlags: [],
+      narrowed: false,
+    })
+
+    expect(parseRunnerArgs(['--fileParallelism', '--maxWorkers', '2'])).toEqual({
+      list: false,
+      deep: false,
+      fileFilters: [],
+      vitestFlags: ['--fileParallelism', '--maxWorkers', '2'],
       narrowed: false,
     })
   })
@@ -124,6 +133,35 @@ describe('browser-runner', () => {
       { name: 'parallel-light', lanes: ['team-inbox-and-recovery'], flags: ['--fileParallelism', '--maxWorkers=2'] },
     ])
     expect(planLaneBatches(selected, { shard: false })).toHaveLength(1)
+
+    expect(planLaneBatches([
+      { name: 'team-journey-deep', file: 'team-journey-deep.e2e.ts', contract: '' },
+      { name: 'team-subscriptions', file: 'team-subscriptions.e2e.ts', contract: '' },
+    ], { shard: true, maxWorkers: 2 }).map(batch => ({
+      name: batch.name,
+      lanes: batch.lanes.map(lane => lane.name),
+    }))).toEqual([
+      { name: 'serial-heavy', lanes: ['team-journey-deep'] },
+      { name: 'parallel-light', lanes: ['team-subscriptions'] },
+    ])
+
+    expect(planLaneBatches([
+      { name: 'team-journey', file: 'team-journey.e2e.ts', contract: '' },
+      { name: 'team-manager', file: 'team-manager.e2e.ts', contract: '' },
+    ], { shard: true })).toHaveLength(1)
+
+    expect(planLaneBatches([
+      { name: 'team-subscriptions', file: 'team-subscriptions.e2e.ts', contract: '' },
+      { name: 'team-worker-lifecycle', file: 'team-worker-lifecycle.e2e.ts', contract: '' },
+    ], { shard: true })).toHaveLength(1)
+  })
+
+  it('enables the single-writer phase marker only for serial batches', () => {
+    expect(allowsPhaseMarker([])).toBe(true)
+    expect(allowsPhaseMarker(['--fileParallelism', '--maxWorkers=2'])).toBe(false)
+    expect(allowsPhaseMarker(['--fileParallelism', '--maxWorkers', '1'])).toBe(true)
+    expect(allowsPhaseMarker(['--fileParallelism'])).toBe(false)
+    expect(allowsPhaseMarker(['--fileParallelism', '--no-fileParallelism'])).toBe(true)
   })
 
   it('aggregates test counts across scheduled batches', () => {
