@@ -1,4 +1,5 @@
 export declare const LANE_ALIASES: ReadonlyMap<string, string>
+export declare const SERIAL_LANES: ReadonlySet<string>
 
 export interface ParsedRunnerArgs {
   readonly list: boolean
@@ -13,14 +14,27 @@ export interface SelectedLane {
   readonly contract: string
 }
 
+export interface TestSummary {
+  readonly total: number
+  readonly passed: number
+  readonly failed: number
+}
+
+export interface LaneBatch {
+  readonly name: string
+  readonly lanes: SelectedLane[]
+  readonly vitestFlags: string[]
+}
+
 export interface BrowserRunSummary {
   readonly status: 'passed' | 'failed'
   readonly mode: 'targeted' | 'full'
   readonly lane: string[]
   readonly contract: Array<{ readonly lane: string; readonly contract: string }>
-  readonly tests: { readonly total: number; readonly passed: number; readonly failed: number } | null
-  readonly phase: { readonly failed: string | null; readonly scenario: string | null }
+  readonly tests: TestSummary | null
+  readonly phase: { readonly failed: string | null; readonly scenario: string | null; readonly batch: string | null }
   readonly duration: { readonly totalMs: number; readonly phases: Record<string, number> }
+  readonly batches: Array<{ readonly name: string; readonly status: 'passed' | 'failed'; readonly durationMs: number; readonly lanes: string[] }>
   readonly screenshots: number
   readonly artifactPath: string
   readonly environmentBlocker: string | null
@@ -38,6 +52,11 @@ export function resolveLanes(options: {
   readonly aliases?: ReadonlyMap<string, string>
   readonly contracts?: ReadonlyMap<string, string>
 }): { readonly matchedE2eFiles: string[]; readonly selectedLanes: SelectedLane[] }
+export function planLaneBatches(
+  selectedLanes: readonly SelectedLane[],
+  options?: { readonly shard?: boolean; readonly maxWorkers?: number },
+): LaneBatch[]
+export function aggregateTestSummaries(summaries: readonly (TestSummary | null)[]): TestSummary | null
 export function formatLaneList(
   allE2eFiles: readonly string[],
   contracts?: ReadonlyMap<string, string>,
@@ -50,10 +69,12 @@ export function buildSummary(options: {
   readonly phases: Record<string, number>
   readonly failedPhase?: string | null
   readonly scenarioPhase?: string | null
-  readonly tests?: { readonly total: number; readonly passed: number; readonly failed: number } | null
+  readonly tests?: TestSummary | null
+  readonly batches?: readonly { readonly name: string; readonly status: 'passed' | 'failed'; readonly durationMs: number; readonly lanes: string[] }[]
   readonly screenshots?: number
   readonly artifactPath: string
   readonly environmentBlocker?: string | null
   readonly error?: string | null
+  readonly failedBatch?: string | null
 }): BrowserRunSummary
 export function formatSummaryText(summary: BrowserRunSummary): string

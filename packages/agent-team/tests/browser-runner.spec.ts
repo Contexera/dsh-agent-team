@@ -3,11 +3,13 @@ import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import {
   LANE_ALIASES,
+  aggregateTestSummaries,
   buildSummary,
   formatLaneList,
   formatSummaryText,
   parseLaneContracts,
   parseRunnerArgs,
+  planLaneBatches,
   resolveLanes,
 } from '../../../scripts/browser-runner.mjs'
 
@@ -72,12 +74,14 @@ describe('browser-runner', () => {
       selectedLanes,
       phases: { preflight: 10, staging: 100, vitest: 5000, evidence: 5, cleanup: 20 },
       tests: { total: 3, passed: 3, failed: 0 },
+      batches: [{ name: 'default', status: 'passed', durationMs: 5000, lanes: ['team-manager'] }],
       screenshots: 6,
       artifactPath: join('/tmp', 'artifacts', 'browser'),
     })
     expect(passed.needsFullAcceptance).toBe(true)
     expect(passed.duration.totalMs).toBe(5135)
     expect(formatSummaryText(passed)).toContain('needsFullAcceptance=true')
+    expect(formatSummaryText(passed)).toContain('batch=default status=passed')
 
     const failed = buildSummary({
       status: 'failed',
@@ -92,5 +96,30 @@ describe('browser-runner', () => {
     expect(failed.phase.failed).toBe('preflight')
     expect(failed.environmentBlocker).toContain('Chrome')
     expect(formatSummaryText(failed)).toContain('failedPhase=preflight')
+  })
+
+  it('keeps heavy lanes serial and bounds the light lane batch', () => {
+    const selected = [
+      { name: 'team-journey', file: 'team-journey.e2e.ts', contract: '' },
+      { name: 'team-manager', file: 'team-manager.e2e.ts', contract: '' },
+      { name: 'team-inbox-and-recovery', file: 'team-inbox-and-recovery.e2e.ts', contract: '' },
+    ]
+    expect(planLaneBatches(selected, { shard: true, maxWorkers: 2 }).map(batch => ({
+      name: batch.name,
+      lanes: batch.lanes.map(lane => lane.name),
+      flags: batch.vitestFlags,
+    }))).toEqual([
+      { name: 'serial-heavy', lanes: ['team-journey', 'team-manager'], flags: [] },
+      { name: 'parallel-light', lanes: ['team-inbox-and-recovery'], flags: ['--fileParallelism', '--maxWorkers=2'] },
+    ])
+    expect(planLaneBatches(selected, { shard: false })).toHaveLength(1)
+  })
+
+  it('aggregates test counts across scheduled batches', () => {
+    expect(aggregateTestSummaries([
+      { total: 3, passed: 3, failed: 0 },
+      null,
+      { total: 17, passed: 16, failed: 1 },
+    ])).toEqual({ total: 20, passed: 19, failed: 1 })
   })
 })

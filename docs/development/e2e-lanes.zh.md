@@ -17,6 +17,14 @@
 | slot、preset、bundle manifest、普通 DSH 恢复、几何、多页面 | 定向 `npm run test:browser -- <lane>` | 无过滤 `npm run test:browser` 与 `node scripts/audit-ui-parity.mjs` |
 | 跨表面流程、`scripts/run-browser-test.mjs`、`scripts/e2e/support.ts`、发布 | 无过滤 `npm run test:browser` | `npm test`、`npm run typecheck`、`npm run lint`、`npm run test:browser` |
 
+## 全量运行调度
+
+无过滤 Runner 会先串行运行 `team-journey` 与 `team-manager`。这两条 lane 启动的完整 Harness 成本最高，与其他场景同时运行时曾出现 hook 超时。
+
+其余 lane 随后使用最多两个 Worker 运行。定向运行保留调用方传入的 Vitest 参数，不会自动改成分组调度。
+
+资源受限时可设置 `DSH_E2E_SCHEDULING=serial` 强制全量串行；设置 `DSH_E2E_MAX_WORKERS` 可调整轻量批次的 Worker 数量。
+
 ## Lane 目录
 
 ### `team-journey`

@@ -17,6 +17,14 @@ Targeted runs (`npm run test:browser -- <lane>`) give fast surface feedback duri
 | Slot, preset, bundle manifest, ordinary DSH restore, geometry, multi-page | Targeted `npm run test:browser -- <lane>` | Unfiltered `npm run test:browser` and `node scripts/audit-ui-parity.mjs` |
 | Cross-surface flow, `scripts/run-browser-test.mjs`, `scripts/e2e/support.ts`, release | Unfiltered `npm run test:browser` | `npm test`, `npm run typecheck`, `npm run lint`, `npm run test:browser` |
 
+## Full-run scheduling
+
+The unfiltered runner keeps `team-journey` and `team-manager` in a serial heavy batch because running them beside other full Harness scenarios caused hook timeouts.
+
+The remaining lanes run in a bounded two-worker batch after the heavy batch. Targeted runs keep their requested Vitest flags and are never reshaped automatically.
+
+Set `DSH_E2E_SCHEDULING=serial` on a constrained machine to force one serial batch. Set `DSH_E2E_MAX_WORKERS` to change the light-batch worker limit.
+
 ## Lane catalog
 
 ### `team-journey`

@@ -2,6 +2,9 @@ export const LANE_ALIASES = new Map([
   ['team-settings-nav-icon', 'team-settings-and-tools'],
 ])
 
+/** These lanes hold the largest stateful journeys and stay out of the parallel batch. */
+export const SERIAL_LANES = new Set(['team-journey', 'team-manager'])
+
 const VALUE_FLAGS = new Set([
   '-t',
   '--testNamePattern',
@@ -86,6 +89,31 @@ export function resolveLanes({ allE2eFiles, fileFilters, aliases = LANE_ALIASES,
   return { matchedE2eFiles, selectedLanes }
 }
 
+export function planLaneBatches(selectedLanes, { shard = false, maxWorkers = 2 } = {}) {
+  if (!shard || selectedLanes.length < 2) {
+    return [{ name: 'default', lanes: selectedLanes, vitestFlags: [] }]
+  }
+  const serial = selectedLanes.filter(lane => SERIAL_LANES.has(lane.name))
+  const parallel = selectedLanes.filter(lane => !SERIAL_LANES.has(lane.name))
+  if (serial.length === 0 || parallel.length === 0) {
+    return [{ name: 'default', lanes: selectedLanes, vitestFlags: [] }]
+  }
+  return [
+    { name: 'serial-heavy', lanes: serial, vitestFlags: [] },
+    { name: 'parallel-light', lanes: parallel, vitestFlags: ['--fileParallelism', `--maxWorkers=${String(maxWorkers)}`] },
+  ]
+}
+
+export function aggregateTestSummaries(summaries) {
+  const valid = summaries.filter(summary => summary !== null)
+  if (valid.length === 0) return null
+  return valid.reduce((total, summary) => ({
+    total: total.total + summary.total,
+    passed: total.passed + summary.passed,
+    failed: total.failed + summary.failed,
+  }), { total: 0, passed: 0, failed: 0 })
+}
+
 export function formatLaneList(allE2eFiles, contracts = new Map(), aliases = LANE_ALIASES) {
   const reverseAliases = new Map()
   for (const [alias, target] of aliases.entries()) {
@@ -112,10 +140,12 @@ export function buildSummary({
   failedPhase = null,
   scenarioPhase = null,
   tests = null,
+  batches = [],
   screenshots = 0,
   artifactPath,
   environmentBlocker = null,
   error = null,
+  failedBatch = null,
 }) {
   const totalMs = Object.values(phases).reduce((sum, ms) => sum + (typeof ms === 'number' ? ms : 0), 0)
   const needsFullAcceptance = mode === 'targeted'
@@ -137,11 +167,13 @@ export function buildSummary({
     phase: {
       failed: failedPhase,
       scenario: scenarioPhase,
+      batch: failedBatch,
     },
     duration: {
       totalMs,
       phases,
     },
+    batches,
     screenshots,
     artifactPath,
     environmentBlocker,
@@ -161,7 +193,10 @@ export function formatSummaryText(summary) {
     lines.push(`[test:browser] tests=total:${summary.tests.total},passed:${summary.tests.passed},failed:${summary.tests.failed}`)
   }
   if (summary.phase.failed) {
-    lines.push(`[test:browser] failedPhase=${summary.phase.failed}${summary.phase.scenario ? ` scenarioPhase=${summary.phase.scenario}` : ''}`)
+    lines.push(`[test:browser] failedPhase=${summary.phase.failed}${summary.phase.scenario ? ` scenarioPhase=${summary.phase.scenario}` : ''}${summary.phase.batch ? ` batch=${summary.phase.batch}` : ''}`)
+  }
+  for (const batch of summary.batches ?? []) {
+    lines.push(`[test:browser] batch=${batch.name} status=${batch.status} duration=${batch.durationMs}ms lanes=${batch.lanes.join(',')}`)
   }
   if (summary.environmentBlocker) {
     lines.push(`[test:browser] environmentBlocker=${summary.environmentBlocker}`)
