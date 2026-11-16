@@ -45,9 +45,11 @@ A resolved checkout that does not exist aborts immediately with the sibling Harn
 
 **The bundle's own dependencies are its whole external surface. ** Nothing outside the host closure and this repository is resolved by name any more: the root manifest declares `yaml` and `zod` alone, and both are linked into the Typert analysis package by `generate-typert.mjs` from this repository's own install. A profile install therefore brings nothing else in, and CI needs no extra provisioning step.
 
-**CI lanes.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs on pull requests, pushes to `master`, and `workflow_dispatch`. A fast `checks` job runs on `ubuntu-latest` without checking out Harness (`check:docs`, `check:core-skills`, `check:boundaries`, `check:versions`, `check:comments`, `check:scratch`, and `lint`) and classifies whether code or package files changed.
+**CI lanes.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs on pull requests, pushes to `master`, and `workflow_dispatch`. A fast `checks` job runs on `ubuntu-latest` without checking out Harness (`check:docs`, `check:e2e-docs`, `check:core-skills`, `check:boundaries`, `check:versions`, `check:comments`, `check:scratch`, and `lint`) and classifies whether code or package files changed.
 
-When non-doc files change (or on `workflow_dispatch`), `linux` (`ubuntu-latest`) and `windows` (`windows-latest`) run in parallel with cached pnpm store and built Harness artifacts keyed by runner OS and `DSH_HARNESS_TAG`. Both build, sync paths, typecheck, and run `npm test`; `linux` also runs `check:artifact`, `verify-desktop-strip-boot.mjs`, and `audit-ui-parity.mjs`, while Windows runs in git bash (`shell: bash`) with directory junctions.
+When non-doc files change (or on `workflow_dispatch`), `linux` (`ubuntu-latest`) and `windows` (`windows-latest`) run in parallel with cached pnpm store and built Harness artifacts keyed by runner OS and `DSH_HARNESS_TAG`. Both build, sync paths, typecheck, and run `npm run test:ci` after the shared static gates. The preceding build/typecheck steps have already generated Typert, so this command keeps only the Harness-dependent facade check and full Vitest suite.
+
+`linux` also runs `check:artifact`, `verify-desktop-strip-boot.mjs`, and `audit-ui-parity.mjs`, while Windows runs in git bash (`shell: bash`) with directory junctions.
 
 Scope guard: no coverage matrix, no release automation, and no `test:browser` — browser acceptance stays a local step. The Windows lane is the regression fence for filesystem-identifier bugs (issues #7/#8). When certification advances `DSH_HARNESS_TAG`, update the workflow env and this document together with the DSH peer ranges; `npm run check:versions` refuses a mismatch.
 
