@@ -3,7 +3,7 @@ export const LANE_ALIASES = new Map([
 ])
 
 /** These lanes hold the largest stateful journeys and stay out of the parallel batch. */
-export const SERIAL_LANES = new Set(['team-journey', 'team-manager'])
+export const SERIAL_LANES = new Set(['team-journey', 'team-journey-deep', 'team-manager'])
 
 const VALUE_FLAGS = new Set([
   '-t',
@@ -21,10 +21,15 @@ export function parseRunnerArgs(rawArgs) {
   const fileFilters = []
   const vitestFlags = []
   let list = false
+  let deep = false
   for (let index = 0; index < rawArgs.length; index += 1) {
     const argument = rawArgs[index]
     if (argument === '--list') {
       list = true
+      continue
+    }
+    if (argument === '--deep') {
+      deep = true
       continue
     }
     if (argument.startsWith('-')) {
@@ -39,7 +44,7 @@ export function parseRunnerArgs(rawArgs) {
   }
   const narrowed = fileFilters.length > 0
     || vitestFlags.some(argument => /^--?(t|testNamePattern|test-name-pattern)(=|$)/.test(argument))
-  return { list, fileFilters, vitestFlags, narrowed }
+  return { list, deep, fileFilters, vitestFlags, narrowed }
 }
 
 export function laneNameFromFile(fileName) {

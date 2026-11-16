@@ -83,6 +83,8 @@ npm run test:browser -- team-manager team-inbox-and-recovery
 
 过滤模式仍会先构建、stage bundle 并校验本次捕获的截图，但会跳过全套 `[1440, 390]` 双宽度完整性门禁；在完成 UI 或 Client 改动前，仍须运行无过滤的全量 `npm run test:browser`。
 
+默认无过滤运行使用短版 `team-journey` 冒烟。涉及完整跨表面旅程、Team Shell、导航或大范围视觉回归时，运行 `npm run test:browser -- --deep`。
+
 改动 Team 控件或界面的可见 UI 变更，额外运行机械的设计语言审计（含 shipped 参考 tripwire）：
 
 ```sh

@@ -86,6 +86,8 @@ npm run test:browser -- team-manager team-inbox-and-recovery
 
 Filtered runs still build and stage the bundle and assert captured screenshot pairs, but skip the `[1440, 390]` dual-width completeness gate across the whole suite; run the unfiltered `npm run test:browser` before concluding a UI or Client change.
 
+The default unfiltered run uses the short `team-journey` smoke. For complete cross-surface journey coverage, run `npm run test:browser -- --deep`; use this profile for broad Team shell, navigation, or visual-regression changes.
+
 Visible UI changes touching Team controls or surfaces additionally run the mechanical design-language audit (shipped-reference tripwires included):
 
 ```sh

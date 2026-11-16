@@ -3,6 +3,7 @@ export declare const SERIAL_LANES: ReadonlySet<string>
 
 export interface ParsedRunnerArgs {
   readonly list: boolean
+  readonly deep: boolean
   readonly fileFilters: string[]
   readonly vitestFlags: string[]
   readonly narrowed: boolean

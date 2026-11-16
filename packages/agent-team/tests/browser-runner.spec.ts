@@ -17,6 +17,7 @@ describe('browser-runner', () => {
   it('parses --list, file filters, and vitest flags without leaking --list to vitest', () => {
     expect(parseRunnerArgs(['--list'])).toEqual({
       list: true,
+      deep: false,
       fileFilters: [],
       vitestFlags: [],
       narrowed: false,
@@ -24,6 +25,7 @@ describe('browser-runner', () => {
 
     expect(parseRunnerArgs(['team-manager', '-t', 'replacement', '--bail=1'])).toEqual({
       list: false,
+      deep: false,
       fileFilters: ['team-manager'],
       vitestFlags: ['-t', 'replacement', '--bail=1'],
       narrowed: true,
@@ -31,9 +33,18 @@ describe('browser-runner', () => {
 
     expect(parseRunnerArgs(['-t', 'only-one'])).toEqual({
       list: false,
+      deep: false,
       fileFilters: [],
       vitestFlags: ['-t', 'only-one'],
       narrowed: true,
+    })
+
+    expect(parseRunnerArgs(['--deep'])).toEqual({
+      list: false,
+      deep: true,
+      fileFilters: [],
+      vitestFlags: [],
+      narrowed: false,
     })
   })
 

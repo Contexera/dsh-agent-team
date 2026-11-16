@@ -29,9 +29,13 @@ const artifacts = join(root, 'artifacts', 'browser')
 const summaryPath = join(artifacts, 'summary.json')
 const evidenceWidths = [1440, 390]
 
-const { list, fileFilters, vitestFlags, narrowed } = parseRunnerArgs(process.argv.slice(2))
+const { list, deep, fileFilters, vitestFlags, narrowed } = parseRunnerArgs(process.argv.slice(2))
 const sourceDir = join(root, 'scripts', 'e2e')
-const allE2eFiles = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts')).sort()
+const actualE2eFiles = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts')).sort()
+const deepRequested = deep || fileFilters.some(token => token.includes('team-journey-deep'))
+const allE2eFiles = actualE2eFiles.filter(name => deepRequested
+  ? name !== 'team-journey.e2e.ts'
+  : !name.endsWith('-deep.e2e.ts'))
 const catalogText = await readFile(join(root, 'docs', 'development', 'e2e-lanes.md'), 'utf8')
 const contracts = parseLaneContracts(catalogText)
 
