@@ -103,6 +103,21 @@ process.on('SIGTERM', () => process.exit(0))
 process.on('SIGINT', () => process.exit(0))
 `
 
+const writeFakeCodex = async (root: string): Promise<string> => {
+  if (process.platform === 'win32') {
+    const source = join(root, 'fake-codex.js')
+    const executable = join(root, 'codex.cmd')
+    await writeFile(source, FAKE_CODEX)
+    await writeFile(executable, '@echo off\r\nnode "%~dp0fake-codex.js" %*\r\n')
+    return executable
+  }
+
+  const executable = join(root, 'codex')
+  await writeFile(executable, FAKE_CODEX)
+  await chmod(executable, 0o755)
+  return executable
+}
+
 const textChunks = (text: string): StreamChunk[] => [
   { type: 'block-start', index: 0, blockType: 'text' },
   { type: 'text-delta', index: 0, text },
@@ -131,9 +146,7 @@ it('wakes an owner from a subscription, lets it delegate through team_worker, an
   const { ctx, workspaceId, root } = harness
   await ctx.plugin(SubagentRuntime)
 
-  const fakeCodex = join(root, 'codex')
-  await writeFile(fakeCodex, FAKE_CODEX)
-  await chmod(fakeCodex, 0o755)
+  const fakeCodex = await writeFakeCodex(root)
 
   const stdoutText = '{"id":"wake-owner","title":"委派并继续回应"}\n'
   let spillIndex = 0
