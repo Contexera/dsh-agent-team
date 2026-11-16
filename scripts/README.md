@@ -36,7 +36,7 @@ Run through `npm run check:*`; several are also part of `npm test` (see `start-a
 
 | File | Does | Trigger |
 | --- | --- | --- |
-| `run-browser-test.mjs` | Keyless browser acceptance: clears the run's screenshot directory once, renders `scripts/e2e/*` into a temporary harness, drives the real journey in Chromium, and afterwards refuses a run whose screenshots are missing or unreadable. | `npm run test:browser` |
+| `run-browser-test.mjs` | Keyless browser acceptance: clears the run's screenshot directory once, renders `scripts/e2e/*` into a temporary harness, drives the default smoke/deep journey in Chromium, and afterwards refuses a run whose screenshots are missing or unreadable. | `npm run test:browser` or `npm run test:browser -- --deep` |
 | `run-preview.mjs` | Live-model preview lane: renders `team-ui.preview.ts` into the harness. | `npm run preview` |
 | `run-ui-preview.mjs` | Keyless UI preview lane: renders `team-ui.ui-preview.ts` into the harness. | `npm run preview:ui` |
 | `audit-ui-parity.mjs` | Static design-language audit of the Team Client CSS/TSX against `docs/frontend-design/principles-and-language.md`; run after visible-UI changes and DSH upgrades. | `node scripts/audit-ui-parity.mjs` |

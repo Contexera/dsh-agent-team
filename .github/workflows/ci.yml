@@ -93,6 +93,7 @@ jobs:
       - name: Run static and hygiene gates
         run: |
           npm run check:docs
+          npm run check:e2e-docs
           npm run check:core-skills
           npm run check:boundaries
           npm run check:versions
@@ -195,7 +196,10 @@ jobs:
         run: npm run typecheck
 
       - name: Test
-        run: npm test
+        # Build and typecheck already generated Typert; the checks job already ran
+        # repository-wide static and hygiene gates. Keep this lane focused on the
+        # Harness-dependent facade check and full Vitest suite.
+        run: npm run test:ci
 
   windows:
     needs: checks
@@ -279,4 +283,7 @@ jobs:
         run: npm run typecheck
 
       - name: Test
-        run: npm test
+        # Build and typecheck already generated Typert; the checks job already ran
+        # repository-wide static and hygiene gates. Keep this lane focused on the
+        # Harness-dependent facade check and full Vitest suite.
+        run: npm run test:ci

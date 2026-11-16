@@ -40,6 +40,7 @@
     "check:artifact": "node scripts/check-artifact.mjs .",
     "check:public-baseline": "node scripts/check-public-baseline.mjs .",
     "test": "npm run generate:typert && npm run check:facades && npm run check:docs && npm run check:e2e-docs && npm run check:core-skills && npm run check:boundaries && npm run check:versions && npm run check:comments && npm run check:scratch && vitest run",
+    "test:ci": "npm run check:facades && vitest run",
     "test:unit": "vitest run --project unit",
     "test:browser": "npm run build && node scripts/run-browser-test.mjs",
     "bench:team": "node --import tsx scripts/team-performance/team-performance-baseline.ts",

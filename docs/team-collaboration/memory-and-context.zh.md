@@ -90,7 +90,7 @@ Host 把一条 `<system-reminder>` steer 进发现或提交这次验收的那个
 边界不传递任何东西，既没有 handoff 也没有公告，所以提醒只在真会发生时陈述后果；preset 未挂载压缩引擎时，提醒不会声称会压缩。
 
 ## Assembled acceptance
-`npm run test:browser` 用 credential-free Harness Web scaffold 验证 public Client 与 Host chain。代表性 trace 执行以下动作：
+默认 `npm run test:browser` 用 credential-free Harness Web scaffold 跑 `team-journey` 冒烟与各表面 lane，完整旅程运行 `npm run test:browser -- --deep`。完整 assembled acceptance trace 执行以下动作：
 
 - 默认 taskless top-level Thread。
 - 默认关闭的 Human「作为任务」control。

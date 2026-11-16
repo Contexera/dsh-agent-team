@@ -8,11 +8,14 @@ import { harnessDir } from './harness-dir.mjs'
 import { assertScreenshotEvidence, readScreenshots } from './browser-evidence.mjs'
 import {
   LANE_ALIASES,
+  aggregateTestSummaries,
+  allowsPhaseMarker,
   buildSummary,
   formatLaneList,
   formatSummaryText,
   parseLaneContracts,
   parseRunnerArgs,
+  planLaneBatches,
   resolveLanes,
 } from './browser-runner.mjs'
 
@@ -27,14 +30,18 @@ const artifacts = join(root, 'artifacts', 'browser')
 const summaryPath = join(artifacts, 'summary.json')
 const evidenceWidths = [1440, 390]
 
-const { list, fileFilters, vitestFlags, narrowed } = parseRunnerArgs(process.argv.slice(2))
+const { list, deep, fileFilters, vitestFlags, narrowed } = parseRunnerArgs(process.argv.slice(2))
 const sourceDir = join(root, 'scripts', 'e2e')
-const allE2eFiles = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts')).sort()
+const actualE2eFiles = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts')).sort()
+const deepRequested = deep || fileFilters.some(token => token.includes('team-journey-deep'))
+const allE2eFiles = actualE2eFiles.filter(name => deepRequested
+  ? name !== 'team-journey.e2e.ts'
+  : !name.endsWith('-deep.e2e.ts'))
 const catalogText = await readFile(join(root, 'docs', 'development', 'e2e-lanes.md'), 'utf8')
 const contracts = parseLaneContracts(catalogText)
 
 if (list) {
-  console.log(formatLaneList(allE2eFiles, contracts, LANE_ALIASES))
+  console.log(formatLaneList(deep ? allE2eFiles : actualE2eFiles, contracts, LANE_ALIASES))
   process.exit(0)
 }
 
@@ -46,16 +53,25 @@ const { matchedE2eFiles, selectedLanes } = resolveLanes({
 })
 const scenarios = ['support.ts', ...matchedE2eFiles]
 const mode = narrowed ? 'targeted' : 'full'
+const parallelWorkers = Number.parseInt(process.env.DSH_E2E_MAX_WORKERS ?? '2', 10)
+const scheduling = process.env.DSH_E2E_SCHEDULING ?? 'balanced'
+const laneBatches = planLaneBatches(selectedLanes, {
+  shard: mode === 'full' && vitestFlags.length === 0 && scheduling !== 'serial',
+  maxWorkers: Number.isInteger(parallelWorkers) && parallelWorkers > 0 ? parallelWorkers : 2,
+})
 
 console.log(`[test:browser] mode=${mode} lanes=${selectedLanes.map(lane => lane.name).join(',')}`)
 for (const lane of selectedLanes) {
   console.log(`[test:browser] contract(${lane.name}): ${lane.contract}`)
 }
+for (const batch of laneBatches) {
+  console.log(`[test:browser] schedule=${batch.name} lanes=${batch.lanes.map(lane => lane.name).join(',')}`)
+}
 
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-agent-team-browser-'))
 const bundleTemplate = join(temporary, 'bundle-template', '@contexera', 'dsh-agent-team')
 const phaseFile = join(temporary, 'scenario-phase.json')
-const vitestReportFile = join(temporary, 'vitest-report.json')
+const vitestReportFiles = []
 
 const quote = value => value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
 
@@ -128,12 +144,15 @@ const readJsonIfPresent = async path => {
 
 const phases = {}
 const rendered = []
+const renderedByScenario = new Map()
 let currentPhase = 'preflight'
 let failedPhase = null
 let environmentBlocker = null
 let screenshots = 0
 let testsSummary = null
 let runError = null
+let failedBatch = null
+const batchSummaries = []
 
 try {
   // Clear artifacts once before the run, then recreate directory for summary.json.
@@ -169,17 +188,45 @@ try {
     // Harness checkout is a stray untracked file in a repository this bundle
     // must not modify.
     rendered.push(target)
+    renderedByScenario.set(scenario, target)
   }
   phases.staging = Date.now() - stagingStart
 
   currentPhase = 'vitest'
   const vitestStart = Date.now()
-  await runPnpm(['exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
-    ...rendered.filter(path => path.endsWith('.e2e.ts')).map(path => path.slice(harness.length + 1).replaceAll('\\', '/')),
-    '--reporter=verbose', '--reporter=json', `--outputFile.json=${vitestReportFile}`, ...vitestFlags],
-  harness,
-  { ...process.env, DSH_E2E_PHASE_FILE: phaseFile })
-  phases.vitest = Date.now() - vitestStart
+  try {
+    for (const batch of laneBatches) {
+      const batchStartedAt = Date.now()
+      const reportFile = join(temporary, `vitest-report-${batch.name}.json`)
+      vitestReportFiles.push(reportFile)
+      const files = batch.lanes
+        .map(lane => renderedByScenario.get(lane.file))
+        .filter(path => typeof path === 'string')
+        .map(path => path.slice(harness.length + 1).replaceAll('\\', '/'))
+      const batchEnv = { ...process.env }
+      await rm(phaseFile, { force: true })
+      if (allowsPhaseMarker([...vitestFlags, ...batch.vitestFlags])) {
+        batchEnv.DSH_E2E_PHASE_FILE = phaseFile
+      } else {
+        delete batchEnv.DSH_E2E_PHASE_FILE
+      }
+      try {
+        await runPnpm(['exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
+          ...files,
+          '--reporter=verbose', '--reporter=json', `--outputFile.json=${reportFile}`,
+          ...vitestFlags, ...batch.vitestFlags],
+        harness,
+        batchEnv)
+        batchSummaries.push({ name: batch.name, status: 'passed', durationMs: Date.now() - batchStartedAt, lanes: batch.lanes.map(lane => lane.name) })
+      } catch (error) {
+        failedBatch = batch.name
+        batchSummaries.push({ name: batch.name, status: 'failed', durationMs: Date.now() - batchStartedAt, lanes: batch.lanes.map(lane => lane.name) })
+        throw error
+      }
+    }
+  } finally {
+    phases.vitest = Date.now() - vitestStart
+  }
 
   currentPhase = 'evidence'
   const evidenceStart = Date.now()
@@ -200,14 +247,16 @@ try {
   try {
     await Promise.all(rendered.map(path => rm(path, { force: true })))
     const phaseMarker = await readJsonIfPresent(phaseFile)
-    const vitestReport = await readJsonIfPresent(vitestReportFile)
-    if (vitestReport && typeof vitestReport.numTotalTests === 'number') {
-      testsSummary = {
-        total: vitestReport.numTotalTests,
-        passed: vitestReport.numPassedTests ?? 0,
-        failed: vitestReport.numFailedTests ?? 0,
-      }
-    }
+    const vitestReports = await Promise.all(vitestReportFiles.map(readJsonIfPresent))
+    testsSummary = aggregateTestSummaries(vitestReports.map(vitestReport => (
+      vitestReport && typeof vitestReport.numTotalTests === 'number'
+        ? {
+            total: vitestReport.numTotalTests,
+            passed: vitestReport.numPassedTests ?? 0,
+            failed: vitestReport.numFailedTests ?? 0,
+          }
+        : null
+    )))
     if (failedPhase === null && screenshots === 0) {
       const existing = await readScreenshots(artifacts).catch(() => [])
       screenshots = existing.length
@@ -223,10 +272,12 @@ try {
       failedPhase,
       scenarioPhase: failedPhase === 'vitest' ? (phaseMarker?.phase ?? null) : null,
       tests: testsSummary,
+      batches: batchSummaries,
       screenshots,
       artifactPath: artifacts,
       environmentBlocker,
       error: runError instanceof Error ? runError.message : (runError ? String(runError) : null),
+      failedBatch,
     })
     await mkdir(artifacts, { recursive: true })
     await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8')
