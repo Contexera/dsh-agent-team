@@ -23,7 +23,6 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import AgentTeam from '../src/index.ts'
-import { ManagerSessionRuntime } from '../src/manager-session.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { EmptyAdapter, GatedAdapter, realHarness, ScriptedAdapter, textResponse, toolCallResponse, waitFor, waitForArchive, waitForIdle, requestId, persistenceRaceError } from './helpers/member-harness.ts'
@@ -631,11 +630,19 @@ describe('Agent Team Member lifecycle', () => {
 
   it('does not hold Team disposal on a stuck manager pre-restore', async () => {
     const { ctx, teamFiber } = await realHarness()
+    const opened = await ctx.agentTeam.openManagerSession({})
+    if (opened.status !== 'ready') throw new Error('expected a ready manager Session')
     await teamFiber.dispose()
 
-    const preRestore = vi.spyOn(ManagerSessionRuntime.prototype, 'preRestore').mockReturnValue(new Promise(() => {}))
+    const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
+    let started = false
+    vi.spyOn(ctx.sessionPersistence, 'open').mockImplementation((...args) => {
+      if (args[0] !== opened.sessionId) return realOpen(...args)
+      started = true
+      return new Promise(() => {})
+    })
     const boot = await ctx.plugin(AgentTeam)
-    await vi.waitFor(() => { expect(preRestore).toHaveBeenCalled() }, { timeout: 5_000 })
+    await vi.waitFor(() => { expect(started).toBe(true) }, { timeout: 5_000 })
     const disposing = boot.dispose()
     const disposed = await Promise.race([
       disposing.then(() => true),

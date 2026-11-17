@@ -329,8 +329,8 @@ export const AGENT_TEAM_PRESET_MARKER = Symbol.for('@contexera/dsh-agent-team.pr
 
 const ORPHANED_MEMBER_DIAGNOSTIC = 'Member preset composition was lost after a reload; its tools are unavailable. Resume rebuilds the member in place.'
 const NOTIFICATION_QUEUE_THRESHOLD = 8
-/** Grace for aborted startup effects to release their handles before teardown continues. */
-const STARTUP_RECOVERY_SHUTDOWN_GRACE_MS = 500
+/** Grace for an aborted manager runtime to release its handle before teardown continues. */
+const MANAGER_SHUTDOWN_GRACE_MS = 100
 /**
  * How many consecutive Member-reminder consumption writes may fail before the
  * Host stops rederiving the notice for them. Each retry spends one of the
@@ -725,8 +725,6 @@ export default class AgentTeam extends TypertRemoteService {
   })()
   /** Aborts every Host-owned background operation that would otherwise outlive teardown. */
   private readonly shutdownController = new AbortController()
-  /** Startup recovery continues after Host readiness; teardown cancels the in-flight pass before closing Team storage. */
-  private startupRecovery?: Promise<void>
   private accepting = true
   /** One adoption attempt per boot: the two readiness edges fire once each, and this keeps their attempt single. */
   private legacyAdoptionStarted = false
@@ -1308,7 +1306,7 @@ export default class AgentTeam extends TypertRemoteService {
       // through the runtime), so the chains below can drain to zero first.
       this.shutdown.resolve()
       this.shutdownController.abort({ kind: 'disposed' })
-      // Abort manager restoration before waiting for the startup pass. Its
+      // Abort manager restoration before its bounded disposal drain. The
       // runtime chain also owns the handle disposal performed below.
       const managerDisposal = this.managerRuntime?.dispose()
       void managerDisposal?.catch((error: unknown) => {
@@ -1329,10 +1327,9 @@ export default class AgentTeam extends TypertRemoteService {
       // one of the two maps (new ones reject at enqueue), so this snapshot
       // drains them all.
       await Promise.all([...this.memberLifecycleTails.values(), ...this.additionLifecycleTails.values()])
-      const startupPending: Promise<unknown>[] = []
-      if (this.startupRecovery !== undefined) startupPending.push(this.startupRecovery)
-      if (managerDisposal !== undefined) startupPending.push(managerDisposal)
-      await this.settleStartupWithinShutdownGrace(startupPending)
+      // Member startup effects self-cancel and fence late handles. Only the
+      // manager chain needs a drain window to release its current handle.
+      if (managerDisposal !== undefined) await this.settleManagerWithinShutdownGrace(managerDisposal)
       await this.reminderEvaluationTail
       await Promise.all([...this.handles.values()].map(handle => this.disposeWithWakeGuard(handle)))
       this.handles.clear()
@@ -1407,23 +1404,17 @@ export default class AgentTeam extends TypertRemoteService {
     // readiness use their normal add path and must not be restored twice.
     const startupMembers = ledger.listMembers()
     const startupRecovery = this.restoreAfterBoot(ledger, startupMembers)
-    this.startupRecovery = startupRecovery
-    void startupRecovery.then(
-      () => { if (this.startupRecovery === startupRecovery) delete this.startupRecovery },
-      error => {
-        if (this.startupRecovery === startupRecovery) delete this.startupRecovery
-        if (this.accepting) this.ctx.logger.warn(`agent-team: startup recovery stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`)
-      },
-    )
+    void startupRecovery.catch(error => {
+      if (this.accepting) this.ctx.logger.warn(`agent-team: startup recovery stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`)
+    })
   }
 
-  /** Give cancelled startup effects one bounded drain window; an uncooperative I/O cannot hold Host teardown. */
-  private async settleStartupWithinShutdownGrace(pending: readonly Promise<unknown>[]): Promise<void> {
-    if (pending.length === 0) return
+  /** Give manager disposal one bounded drain window; uncooperative restoration I/O cannot hold Host teardown. */
+  private async settleManagerWithinShutdownGrace(pending: Promise<unknown>): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined
-    const grace = new Promise<void>(resolve => { timer = setTimeout(resolve, STARTUP_RECOVERY_SHUTDOWN_GRACE_MS) })
+    const grace = new Promise<void>(resolve => { timer = setTimeout(resolve, MANAGER_SHUTDOWN_GRACE_MS) })
     try {
-      await Promise.race([Promise.allSettled(pending).then(() => {}), grace])
+      await Promise.race([Promise.allSettled([pending]).then(() => {}), grace])
     } finally {
       if (timer !== undefined) clearTimeout(timer)
     }
