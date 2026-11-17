@@ -25,8 +25,9 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import AgentTeam from '../src/index.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
-import { EmptyAdapter, GatedAdapter, realHarness, ScriptedAdapter, textResponse, toolCallResponse, waitFor, waitForIdle, requestId, persistenceRaceError } from './helpers/member-harness.ts'
+import { EmptyAdapter, GatedAdapter, realHarness, ScriptedAdapter, textResponse, toolCallResponse, waitFor, waitForArchive, waitForIdle, requestId, persistenceRaceError } from './helpers/member-harness.ts'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, basename, sep } from 'node:path'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -350,6 +351,7 @@ describe('Agent Team Member lifecycle', () => {
 
     // Startup finishes the owed hide half from the durable state alone and
     // never activates the archived Member as an enabled one.
+    await waitForArchive(ctx, added.status.member.sessionId)
     expect(archived).toEqual([added.status.member.sessionId])
     const restored = ctx.agentTeam.members().find(item => item.member.memberId === memberId)
     expect(restored).toMatchObject({ availability: 'archived', presence: 'unavailable' })
@@ -382,6 +384,7 @@ describe('Agent Team Member lifecycle', () => {
     await teamFiber.dispose()
     await ctx.plugin(AgentTeam)
 
+    await waitForArchive(ctx, added.status.member.sessionId)
     expect(archived).toEqual([added.status.member.sessionId])
     expect(ctx.agents.get(added.status.member.sessionId)).toBeUndefined()
     expect(ctx.agentTeam['handles'].has(memberId)).toBe(false)
@@ -410,6 +413,7 @@ describe('Agent Team Member lifecycle', () => {
     await teamFiber.dispose()
     await ctx.plugin(AgentTeam)
 
+    await waitFor(() => existsSync(memoryPath) ? undefined : true)
     await expect(access(memoryPath)).rejects.toThrow()
     expect(archived).toEqual([added.status.member.sessionId])
     expect(ctx.agentTeam['handles'].has(memberId)).toBe(false)
@@ -434,6 +438,10 @@ describe('Agent Team Member lifecycle', () => {
     await teamFiber.dispose()
     const boot = await ctx.plugin(AgentTeam)
     expect(boot).toBeDefined()
+    await waitFor(() => {
+      const status = ctx.agentTeam.members().find(item => item.member.memberId === keeper.status.member.memberId)
+      return status?.availability === 'active' ? status : undefined
+    })
     expect(ctx.agentTeam.members().find(item => item.member.memberId === removed.status.member.memberId)?.availability).toBe('inactive')
     expect(ctx.agentTeam.members().find(item => item.member.memberId === keeper.status.member.memberId)?.availability).toBe('active')
     await expect(access(removed.status.member.privateMemoryPath)).resolves.toBeUndefined()
@@ -444,6 +452,7 @@ describe('Agent Team Member lifecycle', () => {
     rmFault.match = ''
     await boot.dispose()
     await ctx.plugin(AgentTeam)
+    await waitFor(() => existsSync(removed.status.member.privateMemoryPath) ? undefined : true)
     await expect(access(removed.status.member.privateMemoryPath)).rejects.toThrow()
     expect(archived).toEqual([removed.status.member.sessionId])
     expect(ctx.agentTeam.members().find(item => item.member.memberId === keeper.status.member.memberId)?.availability).toBe('active')
@@ -568,6 +577,35 @@ describe('Agent Team Member lifecycle', () => {
     expect(ctx.tools.schemas(rebuilt).length).toBeGreaterThan(0)
   })
 
+  it('does not hold Host boot on a persisted Member restore', async () => {
+    const { ctx, workspaceId, teamFiber } = await realHarness()
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('boot-restore-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
+    await teamFiber.dispose()
+
+    let release!: () => void
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
+    vi.spyOn(ctx.sessionPersistence, 'open').mockImplementation(async (...args) => {
+      await blocked
+      return realOpen(...args)
+    })
+
+    const boot = ctx.plugin(AgentTeam)
+    const booted = await Promise.race([
+      boot.then(() => true),
+      new Promise<boolean>(resolve => { setTimeout(() => resolve(false), 100) }),
+    ])
+    release()
+    await boot
+
+    expect(booted).toBe(true)
+    const restored = await waitFor(() => {
+      const status = ctx.agentTeam.members().find(item => item.member.memberId === added.status.member.memberId)
+      return status?.availability === 'active' ? status : undefined
+    })
+    expect(restored.member.sessionId).toBe(added.status.member.sessionId)
+  })
+
   it('re-derives a Member\u2019s failed last turn when the Host restarts', async () => {
     // The runtime failure slot is process-local memory, so nothing of it
     // survives a restart. Its durable source is the Session log, and a
@@ -588,12 +626,12 @@ describe('Agent Team Member lifecycle', () => {
     await teamFiber.dispose()
     await ctx.plugin(AgentTeam)
 
-    // Straight after the boot the Member has already been woken by the
-    // restart, so it is working rather than still marked failed — the error
-    // presence returns once that turn settles on the same durable failure.
-    const booting = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-    expect(booting?.availability).toBe('active')
-    expect(booting?.presence).toBe('working')
+    // Recovery is asynchronous after Host readiness. Wait for the Member to
+    // publish its live handle, then let the durable failed turn settle.
+    const booting = await waitFor(() => {
+      const status = ctx.agentTeam.members().find(item => item.member.memberId === memberId)
+      return status?.availability === 'active' ? status : undefined
+    })
     const agent = ctx.agents.get(booting!.member.sessionId)!
     await agent.whenIdle()
     const after = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
@@ -721,7 +759,7 @@ describe('Agent Team Member lifecycle', () => {
     await teamFiber.dispose()
     await ctx.plugin(AgentTeam)
     expect(ctx.agentTeam.status().agentMemberCount).toBe(1)
-    const agent = ctx.agents.get(bare.status.member.sessionId)!
+    const agent = await waitFor(() => ctx.agents.get(bare.status.member.sessionId))
     expect(agent).toBeDefined()
 
     // A message to an empty Project commits with an empty notification set.
@@ -1656,7 +1694,7 @@ describe('Agent Team Member lifecycle', () => {
     const info = vi.spyOn(ctx.logger, 'info')
     await teamFiber.dispose()
     await ctx.plugin(AgentTeam)
-    const restored = ctx.agents.get(builder.status.member.sessionId)!
+    const restored = await waitFor(() => ctx.agents.get(builder.status.member.sessionId))
     await restored.whenIdle()
     const lastRequest = JSON.stringify(adapter.requests.at(-1)!.messages)
     expect(lastRequest).toContain('Team Inbox has unread work')

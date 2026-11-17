@@ -165,7 +165,11 @@ describe('Team manager Session Host runtime', () => {
     await first.teamFiber.dispose()
 
     const second = await realHarness(undefined, 'jsonl', { root: first.root }, false, undefined, 'sqlite')
-    const agent = second.ctx.agents.get(opened.sessionId)
+    const agent = await vi.waitFor(() => {
+      const live = second.ctx.agents.get(opened.sessionId)
+      if (live === undefined) throw new Error('manager Session restore is still pending')
+      return live
+    })
     expect(agent).toBeDefined()
     expect(second.ctx.agentPresets.composedPreset(agent!.ctx)).toBe('team-manager')
     expect(agent!.session.ownEvents().filter(event => event.type === 'sandbox/mode')).toHaveLength(1)

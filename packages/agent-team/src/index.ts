@@ -721,6 +721,8 @@ export default class AgentTeam extends TypertRemoteService {
   })()
   /** Aborts every Host-owned background operation that would otherwise outlive teardown. */
   private readonly shutdownController = new AbortController()
+  /** Startup recovery continues after Host readiness; teardown waits for the in-flight pass before closing Team storage. */
+  private startupRecovery?: Promise<void>
   private accepting = true
   /** One adoption attempt per boot: the two readiness edges fire once each, and this keeps their attempt single. */
   private legacyAdoptionStarted = false
@@ -1304,6 +1306,7 @@ export default class AgentTeam extends TypertRemoteService {
       // one of the two maps (new ones reject at enqueue), so this snapshot
       // drains them all.
       await Promise.all([...this.memberLifecycleTails.values(), ...this.additionLifecycleTails.values()])
+      if (this.startupRecovery !== undefined) await Promise.allSettled([this.startupRecovery])
       await this.reminderEvaluationTail
       await Promise.all([...this.handles.values()].map(handle => this.disposeWithWakeGuard(handle)))
       this.handles.clear()
@@ -1374,50 +1377,89 @@ export default class AgentTeam extends TypertRemoteService {
     // A downtime make-up is derived from the durable ledger, so boot evaluates
     // it once rather than waiting for the next scheduled occurrence.
     this.scheduleMemberReminderEvaluation()
-    // One metadata listing serves every Member restore; per-member list calls
-    // would repeat the same I/O linearly during startup.
-    const persistedSessions = new Set((await this.persistedSessionHeaders()).map(snapshot => snapshot.header.id))
-    await this.sweepWorkspaceParticipations(ledger)
-    for (const member of ledger.listMembers()) {
-      if (member.state === 'enabled') {
-        // A swap that committed but never finished leaves no live handle to reveal it: startup derives the outstanding effects from the ledger and the registry's archive set.
-        // A Workspace fault must not keep the Member from running, so activation still runs when the retire half cannot be finished.
-        try {
-          await this.finishMemberTransition(member.memberId, { knownSessions: persistedSessions })
-        } catch (error) {
-          this.ctx.logger.warn(`agent-team: could not finish the recorded Session transition for member '${member.handle}': ${error instanceof Error ? error.message : String(error)}`)
-        }
-        // Activation reads the binding as it stands NOW: finishing the
-        // transition above may have moved the Member onto its successor, and
-        // activating the row this loop was entered with would resume the
-        // generation the ledger already retired.
-        const current = ledger.getMember(member.memberId)
-        if (current !== undefined && !this.handles.has(current.memberId)) {
-          await this.activateMember(current, undefined, persistedSessions)
-        }
-      } else {
-        // Every other durable state converges through the effect table its operation runs after commit, finishing a crash or failed call between commit and effect.
-        // One Member's fault must not fail the boot: it is logged and retried at the next startup.
-        try {
-          await this.convergeMemberEffects(member)
-        } catch (error) {
-          this.ctx.logger.warn(`agent-team: could not converge member '${member.handle}' to its '${member.state}' state: ${error instanceof Error ? error.message : String(error)}`)
-        }
-      }
-    }
-    // Timers start last: every Member is settled, so a run that finishes
-    // immediately can already reach the owners it must notify.
-    // Restore the registered manager Session once dependencies and the ledger
-    // are ready. A manager failure is reported, never fatal to Host boot.
+    await this.startSubscriptionRuntime(subscriptionDomain)
+    // Session recovery is deliberately outside Host readiness. A persisted
+    // Member may require a full log read, preset composition, and Session
+    // resume. None of those should make the Desktop declare the Host dead.
+    // Freeze the startup roster before yielding. Members created after Host
+    // readiness use their normal add path and must not be restored twice.
+    const startupMembers = ledger.listMembers()
+    const startupRecovery = this.restoreAfterBoot(ledger, startupMembers)
+    this.startupRecovery = startupRecovery
+    void startupRecovery.then(
+      () => { if (this.startupRecovery === startupRecovery) delete this.startupRecovery },
+      error => {
+        if (this.startupRecovery === startupRecovery) delete this.startupRecovery
+        this.ctx.logger.warn(`agent-team: startup recovery stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`)
+      },
+    )
+  }
+
+  /** Restore durable Member and manager effects after the Host has become usable. */
+  private async restoreAfterBoot(ledger: AgentTeamLedger, startupMembers: readonly AgentTeamAgentMember[]): Promise<void> {
+    let persistedSessions: ReadonlySet<SessionId> | undefined
     try {
-      const restored = await this.managerRuntime.preRestore()
+      // One metadata listing serves every Member restore. If the listing is
+      // transiently unavailable, each activation can still ask the backend for
+      // its own Session and reports its own diagnostic.
+      persistedSessions = new Set((await this.persistedSessionHeaders()).map(snapshot => snapshot.header.id))
+    } catch (error) {
+      this.ctx.logger.warn(`agent-team: startup Session listing failed; Members will inspect their own Sessions: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    await this.sweepWorkspaceParticipations(ledger)
+    await Promise.all(startupMembers.map(member => this.restoreMemberAfterBoot(member, persistedSessions)))
+    // A manager failure is reported, never fatal to Host boot. The manager
+    // runtime serializes a concurrent user open behind this recovery.
+    try {
+      const restored = await this.managerRuntime?.preRestore()
       if (restored?.status === 'unavailable') {
         this.ctx.logger.warn(`agent-team: manager Session pre-restore failed: ${restored.diagnostic.class}: ${restored.diagnostic.detail}`)
       }
     } catch (error) {
       this.ctx.logger.warn(`agent-team: manager Session pre-restore failed: ${error instanceof Error ? error.message : String(error)}`)
     }
-    await this.startSubscriptionRuntime(subscriptionDomain)
+  }
+
+  private async restoreMemberAfterBoot(member: AgentTeamAgentMember, knownSessions: ReadonlySet<SessionId> | undefined): Promise<void> {
+    try {
+      await this.enqueueLifecycle(member.memberId, async () => {
+        const current = this.requireLedger().getMember(member.memberId)
+        if (current === undefined) return
+        if (current.state === 'enabled') {
+          // A swap that committed but never finished leaves no live handle to
+          // reveal it. Derive the outstanding effects from the ledger.
+          try {
+            await this.finishMemberTransition(current.memberId, {
+              ...(knownSessions === undefined ? {} : { knownSessions }),
+              skipColdRecycle: true,
+            })
+          } catch (error) {
+            this.ctx.logger.warn(`agent-team: could not finish the recorded Session transition for member '${current.handle}': ${error instanceof Error ? error.message : String(error)}`)
+          }
+          // Activation reads the binding as it stands now because finishing
+          // the transition above may have moved the Member to its successor.
+          const latest = this.requireLedger().getMember(current.memberId)
+          if (latest !== undefined && latest.state === 'enabled' && !this.handles.has(latest.memberId)) {
+            await this.activateMember(latest, undefined, knownSessions, undefined, {
+              signal: this.shutdownController.signal,
+              skipColdRecycle: true,
+            })
+          }
+        } else {
+          // One Member's fault must not prevent the other Members from
+          // converging after boot.
+          try {
+            await this.convergeMemberEffects(current)
+          } catch (error) {
+            this.ctx.logger.warn(`agent-team: could not converge member '${current.handle}' to its '${current.state}' state: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+      })
+    } catch (error) {
+      if (this.accepting) {
+        this.ctx.logger.warn(`agent-team: startup recovery for member '${member.handle}' was not admitted: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
   }
 
   /**
@@ -1936,6 +1978,7 @@ export default class AgentTeam extends TypertRemoteService {
   private async finishMemberTransition(memberId: AgentTeamMemberId, options?: {
     readonly knownSessions?: ReadonlySet<SessionId>
     readonly forkedFrom?: SessionId
+    readonly skipColdRecycle?: boolean
   }): Promise<void> {
     const member = this.requireLedger().getMember(memberId)
     if (member === undefined || member.state !== 'enabled') return
@@ -1947,7 +1990,8 @@ export default class AgentTeam extends TypertRemoteService {
     }
     await this.archiveRetiredSession(transition.previousSessionId)
     if (this.handles.get(memberId) === undefined) {
-      await this.activateMember(member, undefined, options?.knownSessions, options?.forkedFrom)
+      await this.activateMember(member, undefined, options?.knownSessions, options?.forkedFrom,
+        options?.skipColdRecycle === true ? { skipColdRecycle: true } : undefined)
     }
   }
 
@@ -4006,7 +4050,7 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
-  private async activateMember(member: AgentTeamAgentMember, knownWorkspacePath?: string, knownSessions?: ReadonlySet<SessionId>, forkedFrom?: SessionId, options?: { readonly deferNotify?: boolean }): Promise<void> {
+  private async activateMember(member: AgentTeamAgentMember, knownWorkspacePath?: string, knownSessions?: ReadonlySet<SessionId>, forkedFrom?: SessionId, options?: { readonly deferNotify?: boolean; readonly signal?: AbortSignal; readonly skipColdRecycle?: boolean }): Promise<void> {
     if (this.handles.has(member.memberId)) return
     let created: AgentHandle | undefined
     try {
@@ -4018,9 +4062,12 @@ export default class AgentTeam extends TypertRemoteService {
       await this.memberRuntime.initializePrivateMemory(sanitizedMemoryPath, member.privateMemoryPath)
       const persisted = knownSessions !== undefined ? knownSessions.has(member.sessionId)
         : await this.sessionPersisted(member.sessionId)
-      // A restart or resume meets the same wake boundary a message does: a cold stored generation is replaced instead of resumed.
-      // A planned activation of a successor (`forkedFrom`) never re-decides; the swap that built it already did.
-      if (forkedFrom === undefined && persisted) {
+      // Explicit resume and ordinary wake paths may replace a cold stored
+      // generation before it receives input. Host startup passes
+      // `skipColdRecycle` so restarting preserves the current visible Session.
+      // A planned activation of a successor (`forkedFrom`) never re-decides;
+      // the swap that built it already did.
+      if (forkedFrom === undefined && persisted && options?.skipColdRecycle !== true) {
         const plan = await this.planWakeForMember(member, undefined)
         if (plan.action === 'recycle') {
           this.ctx.logger.info(`agent-team: activating ${this.memberScope(member.memberId, member.sessionId)} swaps its cold generation: idle ${plan.idleMs}ms over ${plan.thresholds.idleMs}ms, context ${plan.contextTokens} over ${plan.thresholds.minContextTokens}`)
@@ -4092,7 +4139,7 @@ export default class AgentTeam extends TypertRemoteService {
       const lineageParent = forkedFrom ?? (!persisted ? this.requireLedger().previousSessionForMember(member.memberId) : undefined)
       let recoveryCarried = 0
       created = persisted
-        ? await this.ctx.agents.resume({ resumeSessionId: member.sessionId, agentOptions, setup })
+        ? await this.ctx.agents.resume({ resumeSessionId: member.sessionId, agentOptions, setup, ...(options?.signal === undefined ? {} : { signal: options.signal }) })
         : await this.ctx.agents.create({
             sessionId: member.sessionId,
             meta: {
@@ -4101,6 +4148,7 @@ export default class AgentTeam extends TypertRemoteService {
             },
             agentOptions,
             setup,
+            ...(options?.signal === undefined ? {} : { signal: options.signal }),
           })
       this.memberRuntime.mountMemberSkillProvider(member, created.agent.ctx, member.capabilities?.skills?.allow)
       // Both capability effects are now live: record the intent the surface reflects so a later edit or retry compares against reality.

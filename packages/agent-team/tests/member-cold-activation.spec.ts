@@ -11,7 +11,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { realHarness, ScriptedAdapter, textResponse, waitFor, waitForArchive, requestId } from './helpers/member-harness.ts'
 
 describe('Agent Team cold-generation activation (ticket 05)', () => {
-  it('starts a fresh generation at startup instead of resuming a cold, large Session', async () => {
+  it('resumes a cold, large Session at startup and preserves its history', async () => {
     vi.useFakeTimers()
     try {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
@@ -28,18 +28,19 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
       pressureState.bySession.set(sessionId, 130_000)
       await vi.advanceTimersByTimeAsync(61 * 60_000)
 
-      // A restart re-activates from the ledger binding alone: the stored log is
-      // priced first, and a cold generation is never even resumed.
+      // Startup restores the bound Session without applying the wake recycle
+      // policy. The history remains attached to the same visible Session.
       await teamFiber.dispose()
       await ctx.plugin(AgentTeam)
 
-      const successor = await vi.waitFor(() => {
-        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-        if (current === undefined || current.member.sessionId === sessionId) throw new Error('swap not applied yet')
-        return current.member.sessionId
+      const restored = await vi.waitFor(() => {
+        const live = ctx.agents.get(sessionId)
+        if (live === undefined) throw new Error('not reactivated yet')
+        return live
       }, { timeout: 20_000 })
-      expect(ctx.agents.get(successor)).toBeDefined()
-      expect(ctx.agents.get(sessionId)).toBeUndefined()
+      expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.member.sessionId).toBe(sessionId)
+      expect(ctx.agents.get(sessionId)).toBeDefined()
+      expect(JSON.stringify(restored.session.ownEvents())).toContain('First look done.')
     } finally {
       vi.useRealTimers()
     }
