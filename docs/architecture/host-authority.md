@@ -327,7 +327,7 @@ The transaction aborts the startup signal (the only cancellation channel before 
 
 The engine's result decides the ending, not the request. A natural completion or failure that landed first keeps its real state and the stop answers with it.
 
-Every terminal result waits for native cleanup, bounded at five seconds; a cleanup that rejects or exceeds that bound turns the ending into `failed` with an unconfirmed-cleanup diagnostic. A cancelled run whose disposal rejected is therefore never `stopped`, because a stop nobody confirmed would be a claim the Host cannot support. The partial output the run already produced rides that same result, so the one Inbox notice keeps the text and the caveat together.
+Every terminal result waits for native cleanup, bounded at ten seconds; a cleanup that rejects or exceeds that bound turns the ending into `failed` with an unconfirmed-cleanup diagnostic. A cancelled run whose disposal rejected is therefore never `stopped`, because a stop nobody confirmed would be a claim the Host cannot support. The partial output the run already produced rides that same result, so the one Inbox notice keeps the text and the caveat together.
 
 Unloading the bundle is the same transaction at Host scale, in order: refuse new delegations and continuations, cancel every start still opening — including one whose opening record is still being written, which is sealed instead of opening an engine — and wait up to five seconds for those starts, continuation admissions, and active steer calls before disposing what is published. A continuation still reading native history or writing its opening record therefore either completes before storage closes or rechecks the unload fence and writes nothing.
 
