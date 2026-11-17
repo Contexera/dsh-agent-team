@@ -506,6 +506,29 @@ describe('a running Worker with accepted steer input', () => {
     await expect(run.dispose()).rejects.toThrow(/stage: dispose/)
   })
 
+  it('allows cleanup to finish after the native Windows process-tree capture budget', async () => {
+    const session = new FakeSession()
+    runtimeControl.session = session
+    const run = await startWorkerRun(request(), spec('codex'))
+    await vi.waitFor(() => { expect(runtimeControl.awaitCalls).toBe(1) })
+    vi.useFakeTimers()
+    try {
+      vi.spyOn(session, 'dispose').mockImplementation(async () => {
+        await new Promise<void>(resolve => { setTimeout(resolve, 5_001) })
+      })
+      let settled: Awaited<typeof run.result> | undefined
+      void run.result.then(result => { settled = result })
+      session.result({ kind: 'completed' }, [session.initialInputId])
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(settled).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(settled).toMatchObject({ stopReason: 'completed' })
+      await expect(run.dispose()).resolves.toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('bounds cleanup that never answers before releasing its terminal result', async () => {
     const session = new FakeSession()
     runtimeControl.session = session
@@ -519,7 +542,7 @@ describe('a running Worker with accepted steer input', () => {
     try {
       session.text('answer', 'answer before stuck cleanup')
       session.result({ kind: 'completed' }, [session.initialInputId])
-      await vi.advanceTimersByTimeAsync(5_001)
+      await vi.advanceTimersByTimeAsync(10_001)
       expect(settled).toMatchObject({ stopReason: 'error',
         output: [{ type: 'text', text: 'answer before stuck cleanup' }],
         diagnostic: expect.stringContaining('engine may still be active') })
