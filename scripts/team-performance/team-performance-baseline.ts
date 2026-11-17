@@ -280,6 +280,11 @@ async function coldBootChild(): Promise<void> {
     stages.restoreActivationMs = 0
     const restoreBegin = now()
     await host.ctx.plugin(AgentTeam)
+    const restoreDeadline = now() + 20_000
+    while (host.ctx.agentTeam.members().filter(member => member.availability === 'active').length < 2) {
+      if (now() >= restoreDeadline) throw new Error('Cold boot fixture did not finish Member restore')
+      await new Promise<void>(resolveRestore => setImmediate(resolveRestore))
+    }
     stages.populatedHostRestoreMs = elapsed(restoreBegin)
     const members = host.ctx.agentTeam.members()
     counters.restoredMembers = members.filter(member => member.availability === 'active').length

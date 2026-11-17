@@ -125,7 +125,9 @@ export class ManagerSessionRuntime {
               pointer.sessionId,
             )
         }
-        return this.resolveStoredPointer(pointer, {
+        // Keep the rejection inside this try: preRestore reports a classified
+        // unavailable result instead of throwing an asynchronous read failure.
+        return await this.resolveStoredPointer(pointer, {
           archived: () => undefined,
           missing: () => undefined,
           outsideMessage: 'the registered manager Session is already live outside the manager runtime',
@@ -286,7 +288,8 @@ export class ManagerSessionRuntime {
     if (this.liveOutsideManager(pointer.sessionId)) {
       return this.unavailable('session-unreadable', options.outsideMessage, pointer.sessionId)
     }
-    const stored = await this.deps.reader.read(pointer.sessionId)
+    const stored = await this.deps.reader.read(pointer.sessionId, this.abort.signal)
+    if (this.disposed) return this.unavailable('runtime', 'Team manager runtime is disposed', pointer.sessionId)
     if (!stored.ok) {
       if (stored.failure.kind === 'missing') return await options.missing()
       return this.readFailure(stored.failure)
@@ -324,11 +327,19 @@ export class ManagerSessionRuntime {
       return this.activationFailure('session-resume', error, pointer.sessionId)
     }
 
+    if (this.disposed) {
+      await this.disposeCandidate(installed)
+      return this.unavailable('runtime', 'Team manager runtime is disposed', pointer.sessionId)
+    }
     try {
       await workspace.attachSession(pointer.sessionId)
     } catch (error) {
       await this.disposeCandidate(installed)
       return this.activationFailure('session-attach', error, pointer.sessionId)
+    }
+    if (this.disposed) {
+      await this.disposeCandidate(installed)
+      return this.unavailable('runtime', 'Team manager runtime is disposed', pointer.sessionId)
     }
 
     const previous = this.publish(installed)

@@ -243,9 +243,15 @@ it('wakes an owner from a subscription, lets it delegate through team_worker, an
     && JSON.stringify(agent.session.snapshotEvents().filter(e => e.type === 'assistant/message')).includes('我继续回应 Human。')
     ? true : undefined, 20_000)
 
-  expect(runs().find(run => run.workerRef === target!.workerRef)?.state).toBe('stopped')
-  expect(runs().find(run => run.workerRef === sibling!.workerRef)?.state).toBe('running')
   const settled = await ctx.agentTeam.readThreadForAgent(agent, { requestId: requestId('sub-worker-settled'), workspaceId, threadRef })
+  const targetRun = runs().find(run => run.workerRef === target!.workerRef)
+  const targetSettlement = settled.facts.find(entry => entry.fact.kind === 'activity'
+    && entry.fact.activity.kind === 'worker_settled' && entry.fact.activity.workerRef === target!.workerRef)
+  const targetRecord = (ctx.agentTeam as unknown as {
+    ledger?: { workerExecution(workerRef: string): unknown }
+  }).ledger?.workerExecution(target!.workerRef)
+  expect(targetRun?.state, JSON.stringify({ targetRun, targetRecord, targetSettlement })).toBe('stopped')
+  expect(runs().find(run => run.workerRef === sibling!.workerRef)?.state).toBe('running')
   expect(settled.workerStates?.find(run => run.workerRef === target!.workerRef)).toMatchObject({ state: 'stopped', unconfirmed: false })
   expect(settled.workerStates?.find(run => run.workerRef === sibling!.workerRef)).toMatchObject({ state: 'running' })
   expect(settled.facts.filter(entry => entry.fact.kind === 'activity' && entry.fact.activity.kind === 'worker_settled')).toHaveLength(1)

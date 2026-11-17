@@ -26,9 +26,10 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 - Agent lifecycle、replay、authorization、idempotency 和 revision checks 留在 Host。durable unread 变化可通过 public safe-boundary API 产生一条有界、合并的通知：direct mention 携带 Message 和 source；direct Task/Claim Activity 携带完整事件；ordinary unread 携带 Thread-first route、有界摘要和溢出数量，存在 Task 时带 overlay。Promotion 通过 Activity markers 到达 followers。通知不是第二权威，也不保证恰好处理一次。
 - 通知先排缺失的 direct 信号，再排 reminder 与普通摘要；其排序、上限和字符预算见 [attention-and-messaging.zh.md](../team-collaboration/attention-and-messaging.zh.md)。
 - 已提交的 Session transition（`team/member-session-renewed`、`team/member-session-rolled-over`、`team/member-session-recycled`）记录的是 desired binding，而不是已完成的切换。retire 旧代与 activate 目标都是 ledger 写入之外的 Host 效果。startup 与 Member 的显式 recovery 动作都会补完被中断的 transition，依据记录的 previous Session。每个效果各自推导自己是否已完成。live handle 不能证明 archive 那一半跑过。重复请求只返回已记录的 receipt 与诚实状态，不再提交一次绑定。
+- 如果 reload 后仍有另一个 live Agent 持有当前 binding 的 write handle，Member 保持 unavailable，直到那个 owner dispose。释放会把一次 runtime-only 重试排入队列，仍针对同一 binding，不会再产生一次 transition。
 - 这条 transition 记录就是一次换代的全部 lineage。后继 Session 的 header 不写 `parentSession`——那个字段专指 subagent 的创建者——所以想找退役 Session 的读者去读 ledger，而不是读 header。
 - 每个 durable Member state 只有一组期望的外部 effect，即 [Member Lifecycle](../domain-model.zh.md#member-lifecycle) 表。每一次 lifecycle operation 在 commit 之后重跑这组 effect。startup 对每个非 enabled Member 也重跑同一组。archive、suspension、remove 因此走同一条推导重跑收敛，不做第二次 durable 写入。即使 Workspace/Session/filesystem 调用被 crash 或失败打断，也一样收敛。
-- startup 绝不把非 enabled Member 激活为 enabled。启动阶段失败的 effect 只记日志，下一次 boot 重试，不让 boot 失败。同一 Member 的 lifecycle operation 按提交序串行；不同 Member 从不排在彼此的等待之后。
+- startup 绝不把非 enabled Member 激活为 enabled。启动阶段失败的 effect 只记日志，下一次 boot 重试，不让 boot 失败。Member 与 manager 的恢复在 Host ready 之后才开始。teardown 会取消 listing 与 activation；已取消的 Member startup effect 自己拦截晚到的 handle，只有 manager disposal 会等待 100ms 的 drain 宽限期。因此卡住的恢复既不会拖住 boot，也不会拖住 shutdown。同一 Member 的 lifecycle operation 按提交序串行；不同 Member 以及 manager 从不排在彼此的等待之后。
 - Task 提醒由 Host 在 Team 事件后评估并写入 `team/reminder-raised`，不使用 timer。其可选 `reminderMarkers` Inbox delta 仅属于一个接收者；marker 被读取消费后，replay 仍保留完整 episode 用于去重。
 - Member reminder 由 Host 写入 `team/member-reminder-created`、`team/member-reminder-raised`、`team/member-reminder-consumed`、`team/member-reminder-cancelled`。触发依据是 Host 自己的 timer 与 Team 事件，不是模型写的 schedule 文本。
 - ledger 只存创建、每次 raise、消费与取消。raise 出的 occurrence 带只属于其唯一接收者的私有 `memberReminderMarkers` Inbox delta；每个 reminder 只写一个 marker，未读的 occurrence 因此被替换而不是叠加。archived 或 removed 的 Member 与 Member Lifecycle 表同样派生：全部取消。
@@ -297,7 +298,7 @@ provider 还保留引擎的原生 session 身份与工作目录，并把只读�
 
 终态由引擎的结果决定，而不是由请求决定。先到的自然完成或失败保留真实状态，停止回答的就是它。
 
-每个终态结果都会等待原生清理，界限为五秒；清理被拒绝或超过这个界限时，执行记为 `failed` 并说明清理未确认。被取消的执行若 dispose 被拒绝，绝不报 `stopped`，因为没人确认的停止是 Host 支撑不了的断言。执行已经产出的部分输出随同一份结果走，所以那一次 Inbox 通知把文本与保留意见放在一起。
+每个终态结果都会等待原生清理，界限为十秒；清理被拒绝或超过这个界限时，执行记为 `failed` 并说明清理未确认。被取消的执行若 dispose 被拒绝，绝不报 `stopped`，因为没人确认的停止是 Host 支撑不了的断言。执行已经产出的部分输出随同一份结果走，所以那一次 Inbox 通知把文本与保留意见放在一起。
 
 卸载是同一事务在 Host 尺度的展开，顺序是：拒绝新委派与续跑；取消所有仍在启动的执行——包括还在写 started 记录的那一个，它被封口而不是去开引擎——并最多花五秒等待这些启动、续跑准入和活动 steer 调用结束，再 dispose 已发布的。仍在读原生历史或写 opening 记录的续跑，因此要么在存储关闭前完成，要么在重查卸载屏障后不写任何东西。这段启动等待之后，steer 持久化屏障拒绝迟到的 alias 准入和结果写入。对每个终态也最多等五秒；仍未确认的封口；等挂起的终态与 steer 写入；最后才释放 provider 注册。五秒界限不会取消一个已经开始却不再回答的存储写入。被封口的执行保留 `running` 记录、不再接受任何迟到的终态，所以关闭存储不会与一次写入赛跑。
 

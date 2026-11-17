@@ -113,9 +113,9 @@ export class StoredSessionReader {
   constructor(private readonly ctx: Context) {}
 
   /** Reads one stored Session completely; the handle is closed on every path and failures are returned as a category, never thrown. */
-  async read(sessionId: SessionId): Promise<StoredSessionReadResult> {
+  async read(sessionId: SessionId, signal?: AbortSignal): Promise<StoredSessionReadResult> {
     try {
-      const handle = await this.ctx.sessionPersistence.open(sessionId, 'read')
+      const handle = await this.ctx.sessionPersistence.open(sessionId, 'read', signal === undefined ? undefined : { signal })
       try {
         const { events } = await handle.read()
         return { ok: true, inspection: { header: handle.header, inheritedEventCount: handle.inheritedEventCount, events } }

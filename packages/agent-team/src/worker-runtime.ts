@@ -365,8 +365,9 @@ function completedTurn(outcome: TurnOutcome, output: readonly ContentBlock[]): S
   }
 }
 
-// Native cleanup must confirm before publication, but cannot pin the Host forever.
-const WORKER_CLEANUP_DEADLINE_MS = 5_000
+// OAR can spend its own 5-second Windows process-tree capture budget before
+// signalling the child; leave time for the exit confirmation after that phase.
+const WORKER_CLEANUP_DEADLINE_MS = 10_000
 
 async function disposeSession(session: Session, spec: WorkerRunSpec): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined

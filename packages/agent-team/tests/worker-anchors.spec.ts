@@ -409,7 +409,11 @@ describe('the anchors one run\'s ending carries', () => {
     await harness.teamFiber.dispose()
     await ctx.plugin(AgentTeam)
     ;(ctx.agentTeam['config'] as unknown as { worker: unknown }).worker = { get: () => workerRow().worker }
-    const resumedAgent = ctx.agents.get(member.sessionId) as Agent
+    const resumedAgent = await vi.waitFor(() => {
+      const live = ctx.agents.get(member.sessionId)
+      if (live === undefined) throw new Error('Member restore is still pending')
+      return live
+    }) as Agent
     expect(executionOf(ctx.agentTeam, run.workerRef)).toEqual(original)
     // A receipt replay must not depend on a native record still being readable,
     // and must never turn an already submitted request into a continuation.

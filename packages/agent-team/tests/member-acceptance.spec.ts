@@ -446,7 +446,7 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       await h.ctx.plugin(AgentTeam)
       const blocked = await waitFor(() => {
         const status = h.ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-        return status !== undefined && status.availability === 'unavailable' ? status : undefined
+        return status !== undefined && status.availability === 'unavailable' && status.diagnostic !== undefined ? status : undefined
       })
       expect(blocked.diagnostic).toMatchObject({ class: 'session-refused', sessionId, detail: 'cannot safely transform unclassified message source (test seam)' })
 

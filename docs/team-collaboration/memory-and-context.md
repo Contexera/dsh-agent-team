@@ -58,7 +58,9 @@ This is a trigger, not a physical ceiling: a tool result can cross it before the
 
 The successor's identity derives from the retired Session, so a restart between the commit and the activation finishes the same swap rather than minting a second one. An older log's pending intent or checkpoint anchor is read only for legacy recovery; no current build writes one.
 
-The ordinary swap has one trigger: a wake aimed at an idle Member, whether that wake is a notification, a DM, or an activation at startup or resume. It is strict — the generation must have been idle longer than 60 minutes and measure more than 128000 context tokens — and every fact it cannot establish answers resume, the conservative direction because a swap that should not have happened costs a Member its working trail.
+The ordinary swap has one trigger: a wake aimed at an idle Member through a notification, a DM, or an explicit Member resume. It is strict — the generation must have been idle longer than 60 minutes and measure more than 128000 context tokens — and every fact it cannot establish answers resume, the conservative direction because a swap that should not have happened costs a Member its working trail. Host startup restoration only reattaches the ledger's current Session and does not recycle it because the Host restarted.
+
+An already committed transition is still finished; startup simply does not create a new one.
 
 `wakeRecycle` is a volatile Host-row group (`enabled`, `idleMs`, `minContextTokens`); the Team settings page renders no form for it, and `enabled: false` turns the swap off.
 

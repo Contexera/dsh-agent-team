@@ -165,12 +165,38 @@ describe('Team manager Session Host runtime', () => {
     await first.teamFiber.dispose()
 
     const second = await realHarness(undefined, 'jsonl', { root: first.root }, false, undefined, 'sqlite')
-    const agent = second.ctx.agents.get(opened.sessionId)
+    const agent = await vi.waitFor(() => {
+      const live = second.ctx.agents.get(opened.sessionId)
+      if (live === undefined) throw new Error('manager Session restore is still pending')
+      return live
+    })
     expect(agent).toBeDefined()
     expect(second.ctx.agentPresets.composedPreset(agent!.ctx)).toBe('team-manager')
     expect(agent!.session.ownEvents().filter(event => event.type === 'sandbox/mode')).toHaveLength(1)
     expect(agent!.session.ownEvents().filter(event => event.type === 'session/title')).toHaveLength(1)
     expect(await second.ctx.agentTeam.openManagerSession({})).toEqual(opened)
+  })
+
+  it('cancels an in-flight pre-restore when the manager runtime is disposed', async () => {
+    const { ctx, workspaceId, checkout, root } = await realHarness()
+    const store = new MemoryPointerStore()
+    store.pointer = { sessionId: SessionId('manager-blocked-restore'), workspaceId }
+    let started = false
+    const runtime = runtimeFor(ctx, {
+      store,
+      root,
+      workspace: { workspaceId, path: checkout },
+      reader: {
+        read: (_sessionId, signal) => new Promise<StoredSessionReadResult>((_, reject) => {
+          started = true
+          signal?.addEventListener('abort', () => { reject(new Error('test restore cancelled')) }, { once: true })
+        }),
+      },
+    })
+    const restoring = runtime.preRestore()
+    await vi.waitFor(() => { expect(started).toBe(true) })
+    await runtime.dispose()
+    expect(await restoring).toMatchObject({ status: 'unavailable' })
   })
 
   it('sets the default title only when absent and ignores a rename failure', async () => {

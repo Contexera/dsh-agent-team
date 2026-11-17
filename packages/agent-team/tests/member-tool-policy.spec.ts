@@ -582,7 +582,11 @@ describe('Agent Team member tool policy', () => {
     // reactivation rebuild the same restricted surface from durable intent.
     await teamFiber.dispose()
     await ctx.plugin(AgentTeam)
-    const restored = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === narrow.memberId)
+    const restored = await vi.waitFor(() => {
+      const status = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === narrow.memberId)
+      if (status?.availability !== 'active') throw new Error('Member restore is still pending')
+      return status
+    })
     expect(restored?.availability, JSON.stringify(restored)).toBe('active')
     expect(restored?.capabilityState).toBe('applied')
     expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...MEMBER_NARROWED_TOOL_NAMES, 'ordinary_tool'].sort())

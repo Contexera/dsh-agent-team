@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, it, onTestFinished } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -309,7 +309,11 @@ describe('Agent Team member-private skills', () => {
     // Host restart: the provider remounts at activation and re-discovers.
     await teamFiber.dispose()
     await ctx.plugin(AgentTeam)
-    const restored = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === member.memberId)
+    const restored = await vi.waitFor(() => {
+      const status = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === member.memberId)
+      if (status?.availability !== 'active') throw new Error('Member restore is still pending')
+      return status
+    })
     expect(restored?.availability).toBe('active')
     expect(await catalogNames(ctx, liveAgent(ctx, member.sessionId))).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
   })

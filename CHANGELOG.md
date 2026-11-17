@@ -47,6 +47,8 @@ All notable changes to this project are documented in this file. The format foll
 - The manager gate's failure is the surface failure the rest of the Client draws — the message and its retry on one line, at that failure's own size — instead of a third arrangement of its own, and a long Host diagnostic wraps inside the band instead of pushing the retry control off it.
 - The extra-tool settings catalog no longer offers the nine manager-owned Team tools as Member grants. Foreign global and Agent-scoped tools remain discoverable and grantable.
 - A private-memory block names its `memory.md`, `notes/`, and `skills/` paths with the platform separator the Host joins them with, so a Windows Session is given `C:\…\manager\memory.md` instead of a mixed `C:\…\manager/memory.md`, and the stale-copy notice names the same file the baseline did.
+- Team startup no longer waits for Member or manager Session restoration, and teardown cancels a stuck restore instead of moving the boot hang into shutdown. Restart restoration resumes the ledger's current Session without applying cold-generation recycling. If a reload leaves the previous Agent holding that Session's write handle, its disposal automatically retries the same binding, preserving history without requiring manual recovery.
+- Worker cleanup confirmation no longer times out before the native runtime's own Windows process-tree capture can finish; a genuinely unconfirmed disposal still records `failed` rather than `stopped`.
 
 ## [0.2.8] - 2026-11-12
 
