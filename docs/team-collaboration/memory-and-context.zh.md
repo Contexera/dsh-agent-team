@@ -48,7 +48,7 @@ Member 的上下文只有两个机制，且都不由模型发起。
 
 新代的身份从被退役的 Session 派生，所以 commit 与激活之间重启会补完同一次换代，而不是另造一代。旧日志里的 pending 意图或 checkpoint 锚点只为 legacy 恢复而读；当前构建不再写其中任何一种。
 
-常规换代只有一个触发点：一次通过通知、DM 或显式 Member resume 指向 idle Member 的唤醒。判定是严格的——这一代必须已经 idle 超过 60 分钟，且实测 context 超过 128000 token——而任何无法确立的事实都答 resume。Host 启动恢复只重新挂载 ledger 当前绑定的 Session，不会因为 Host 重启就单独换代。那是保守的那一侧，因为不该发生的换代会让 Member 丢掉工作轨迹。
+常规换代只有一个触发点：一次通过通知、DM 或显式 Member resume 指向 idle Member 的唤醒。判定是严格的——这一代必须已经 idle 超过 60 分钟，且实测 context 超过 128000 token——而任何无法确立的事实都答 resume。Host 启动恢复只重新挂载 ledger 当前绑定的 Session，不会因为 Host 重启就单独换代。已经提交的 transition 仍会补完；启动只是不会新创建一次。那是保守的那一侧，因为不该发生的换代会让 Member 丢掉工作轨迹。
 
 `wakeRecycle` 是 Host 行上一个 volatile 配置组（`enabled`、`idleMs`、`minContextTokens`）；Team 设置页不为它渲染表单，`enabled: false` 关掉换代。
 

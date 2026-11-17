@@ -23,6 +23,7 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import AgentTeam from '../src/index.ts'
+import { ManagerSessionRuntime } from '../src/manager-session.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { EmptyAdapter, GatedAdapter, realHarness, ScriptedAdapter, textResponse, toolCallResponse, waitFor, waitForArchive, waitForIdle, requestId, persistenceRaceError } from './helpers/member-harness.ts'
@@ -455,7 +456,10 @@ describe('Agent Team Member lifecycle', () => {
     await waitFor(() => existsSync(removed.status.member.privateMemoryPath) ? undefined : true)
     await expect(access(removed.status.member.privateMemoryPath)).rejects.toThrow()
     expect(archived).toEqual([removed.status.member.sessionId])
-    expect(ctx.agentTeam.members().find(item => item.member.memberId === keeper.status.member.memberId)?.availability).toBe('active')
+    await waitFor(() => {
+      const status = ctx.agentTeam.members().find(item => item.member.memberId === keeper.status.member.memberId)
+      return status?.availability === 'active' ? status : undefined
+    })
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
@@ -606,6 +610,41 @@ describe('Agent Team Member lifecycle', () => {
     expect(restored.member.sessionId).toBe(added.status.member.sessionId)
   })
 
+  it('does not hold Team disposal on a stuck startup Session listing', async () => {
+    const { ctx, workspaceId, teamFiber } = await realHarness()
+    await ctx.agentTeam.addMember({ requestId: requestId('boot-list-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
+    await teamFiber.dispose()
+
+    let release!: () => void
+    const blocked = new Promise<never>((_, reject) => { release = () => { reject(new Error('test listing released')) } })
+    vi.spyOn(ctx.sessionPersistence, 'list').mockReturnValue(blocked)
+    const boot = await ctx.plugin(AgentTeam)
+    const disposing = boot.dispose()
+    const disposed = await Promise.race([
+      disposing.then(() => true),
+      new Promise<boolean>(resolve => { setTimeout(() => resolve(false), 2_000) }),
+    ])
+    release()
+    await disposing
+    expect(disposed).toBe(true)
+  })
+
+  it('does not hold Team disposal on a stuck manager pre-restore', async () => {
+    const { ctx, teamFiber } = await realHarness()
+    await teamFiber.dispose()
+
+    const preRestore = vi.spyOn(ManagerSessionRuntime.prototype, 'preRestore').mockReturnValue(new Promise(() => {}))
+    const boot = await ctx.plugin(AgentTeam)
+    await vi.waitFor(() => { expect(preRestore).toHaveBeenCalled() }, { timeout: 5_000 })
+    const disposing = boot.dispose()
+    const disposed = await Promise.race([
+      disposing.then(() => true),
+      new Promise<boolean>(resolve => { setTimeout(() => resolve(false), 2_000) }),
+    ])
+    await disposing
+    expect(disposed).toBe(true)
+  })
+
   it('re-derives a Member\u2019s failed last turn when the Host restarts', async () => {
     // The runtime failure slot is process-local memory, so nothing of it
     // survives a restart. Its durable source is the Session log, and a
@@ -700,6 +739,36 @@ describe('Agent Team Member lifecycle', () => {
     await ctx.agentTeam.suspendMember({ requestId: requestId('suspend'), memberId: added.status.member.memberId })
     await expect(ctx.agentTeam.recoverMember({ requestId: requestId('restart-suspended'), workspaceId, memberId: added.status.member.memberId }))
       .rejects.toThrow('only enabled Members can be restarted')
+  })
+
+  it('restores a Member when the previous owner releases its Session write handle', async () => {
+    const { ctx, workspaceId, teamFiber } = await realHarness()
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('owned-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
+    const memberId = added.status.member.memberId
+    const sessionId = added.status.member.sessionId
+    await teamFiber.dispose()
+
+    // A bundle reload can mount the new Team before the old Team has released
+    // its Agents. Model that overlap with an ordinary owner of the same log.
+    const foreign = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
+    await ctx.plugin(AgentTeam)
+    const blocked = await waitFor(() => {
+      const status = ctx.agentTeam.members().find(item => item.member.memberId === memberId)
+      return status?.diagnostic?.class === 'activation' ? status : undefined
+    }, 20_000)
+    expect(blocked.availability).toBe('unavailable')
+    expect(blocked.member.sessionId).toBe(sessionId)
+
+    // The release, not another durable write or an operator recovery, is the
+    // trigger: the new Team now owns the same Session and its complete history.
+    await foreign.dispose()
+    const restored = await waitFor(() => {
+      const status = ctx.agentTeam.members().find(item => item.member.memberId === memberId)
+      return status?.availability === 'active' ? status : undefined
+    }, 20_000)
+    expect(restored.member.sessionId).toBe(sessionId)
+    expect(ctx.agentPresets.composedPreset(ctx.agents.get(sessionId)!.ctx)).toBe('team-member')
+    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
   it('resumes a suspended Member without consulting the persistence tree walk', async () => {

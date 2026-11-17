@@ -329,6 +329,8 @@ export const AGENT_TEAM_PRESET_MARKER = Symbol.for('@contexera/dsh-agent-team.pr
 
 const ORPHANED_MEMBER_DIAGNOSTIC = 'Member preset composition was lost after a reload; its tools are unavailable. Resume rebuilds the member in place.'
 const NOTIFICATION_QUEUE_THRESHOLD = 8
+/** Grace for aborted startup effects to release their handles before teardown continues. */
+const STARTUP_RECOVERY_SHUTDOWN_GRACE_MS = 500
 /**
  * How many consecutive Member-reminder consumption writes may fail before the
  * Host stops rederiving the notice for them. Each retry spends one of the
@@ -579,6 +581,8 @@ export default class AgentTeam extends TypertRemoteService {
   /** The probe once it answers with a family, cached for the composition's lifetime; a refusal is retried. */
   private subscriptionShellProbe: Promise<ShellFamilyProbe> | undefined
   private readonly handles = new Map<AgentTeamMemberId, AgentHandle>()
+  /** Members whose latest activation found the bound Session's write handle owned by another live Agent. */
+  private readonly sessionOwnershipBlocked = new Set<AgentTeamMemberId>()
   /** Reader of the awaited context-projection registration; unloading Team releases it. */
   private contextProjection: ProjectionHandle<TeamContextProjectionState> | undefined
   /** Agent ids with a turn in flight; restarts must wait for the boundary. */
@@ -721,7 +725,7 @@ export default class AgentTeam extends TypertRemoteService {
   })()
   /** Aborts every Host-owned background operation that would otherwise outlive teardown. */
   private readonly shutdownController = new AbortController()
-  /** Startup recovery continues after Host readiness; teardown waits for the in-flight pass before closing Team storage. */
+  /** Startup recovery continues after Host readiness; teardown cancels the in-flight pass before closing Team storage. */
   private startupRecovery?: Promise<void>
   private accepting = true
   /** One adoption attempt per boot: the two readiness edges fire once each, and this keeps their attempt single. */
@@ -1248,6 +1252,19 @@ export default class AgentTeam extends TypertRemoteService {
       this.memberReminderWakes.delete(message.id)
       this.consumeMemberReminders(carried)
     })
+    this.ctx.on('agent/disposed', ({ agent }) => {
+      if (!this.accepting) return
+      // The Agent's write handle is closed before this event, but its Session
+      // registry detach runs just after it. Let that synchronous teardown end
+      // before the lifecycle queue tries to publish the replacement.
+      queueMicrotask(() => {
+        if (!this.accepting) return
+        for (const memberId of this.sessionOwnershipBlocked) {
+          const member = this.ledger?.getMember(memberId)
+          if (member?.sessionId === agent.id) this.restoreAfterSessionRelease(memberId, agent.id)
+        }
+      })
+    })
     this.ctx.on('agent/inbox/discarded', ({ agent, message }) => {
       // A discard this Host itself initiated is expected whatever tracked it: the
       // acceptance reminder is not in `pendingTeamWakes`, so this check must not
@@ -1291,6 +1308,12 @@ export default class AgentTeam extends TypertRemoteService {
       // through the runtime), so the chains below can drain to zero first.
       this.shutdown.resolve()
       this.shutdownController.abort({ kind: 'disposed' })
+      // Abort manager restoration before waiting for the startup pass. Its
+      // runtime chain also owns the handle disposal performed below.
+      const managerDisposal = this.managerRuntime?.dispose()
+      void managerDisposal?.catch((error: unknown) => {
+        this.ctx.logger.warn(`agent-team: manager runtime disposal failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
       this.memberRuntime.releaseTurnWaits()
       this.recovery.dispose()
       this.contextManagement.dispose()
@@ -1306,19 +1329,18 @@ export default class AgentTeam extends TypertRemoteService {
       // one of the two maps (new ones reject at enqueue), so this snapshot
       // drains them all.
       await Promise.all([...this.memberLifecycleTails.values(), ...this.additionLifecycleTails.values()])
-      if (this.startupRecovery !== undefined) await Promise.allSettled([this.startupRecovery])
+      const startupPending: Promise<unknown>[] = []
+      if (this.startupRecovery !== undefined) startupPending.push(this.startupRecovery)
+      if (managerDisposal !== undefined) startupPending.push(managerDisposal)
+      await this.settleStartupWithinShutdownGrace(startupPending)
       await this.reminderEvaluationTail
       await Promise.all([...this.handles.values()].map(handle => this.disposeWithWakeGuard(handle)))
       this.handles.clear()
       this.memberRuntime.disposeAll()
       this.runningAgents.clear()
-      // Stop the manager Agent before its pointer domain and the shared SQLite
-      // backend close; a late open must never write into a closed store.
-      try {
-        await this.managerRuntime?.dispose()
-      } catch (error) {
-        this.ctx.logger.warn(`agent-team: manager runtime disposal failed: ${error instanceof Error ? error.message : String(error)}`)
-      }
+      // Manager restoration was aborted before the bounded drain above. Late
+      // completions dispose their candidates instead of publishing into a
+      // runtime whose pointer domain and shared SQLite backend are closing.
       try {
         await managerDomain?.close()
       } catch (error) {
@@ -1390,9 +1412,21 @@ export default class AgentTeam extends TypertRemoteService {
       () => { if (this.startupRecovery === startupRecovery) delete this.startupRecovery },
       error => {
         if (this.startupRecovery === startupRecovery) delete this.startupRecovery
-        this.ctx.logger.warn(`agent-team: startup recovery stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`)
+        if (this.accepting) this.ctx.logger.warn(`agent-team: startup recovery stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`)
       },
     )
+  }
+
+  /** Give cancelled startup effects one bounded drain window; an uncooperative I/O cannot hold Host teardown. */
+  private async settleStartupWithinShutdownGrace(pending: readonly Promise<unknown>[]): Promise<void> {
+    if (pending.length === 0) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const grace = new Promise<void>(resolve => { timer = setTimeout(resolve, STARTUP_RECOVERY_SHUTDOWN_GRACE_MS) })
+    try {
+      await Promise.race([Promise.allSettled(pending).then(() => {}), grace])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
   }
 
   /** Restore durable Member and manager effects after the Host has become usable. */
@@ -1402,22 +1436,25 @@ export default class AgentTeam extends TypertRemoteService {
       // One metadata listing serves every Member restore. If the listing is
       // transiently unavailable, each activation can still ask the backend for
       // its own Session and reports its own diagnostic.
-      persistedSessions = new Set((await this.persistedSessionHeaders()).map(snapshot => snapshot.header.id))
+      persistedSessions = new Set((await this.persistedSessionHeaders(this.shutdownController.signal)).map(snapshot => snapshot.header.id))
     } catch (error) {
-      this.ctx.logger.warn(`agent-team: startup Session listing failed; Members will inspect their own Sessions: ${error instanceof Error ? error.message : String(error)}`)
+      if (this.accepting) this.ctx.logger.warn(`agent-team: startup Session listing failed; Members will inspect their own Sessions: ${error instanceof Error ? error.message : String(error)}`)
     }
+    if (!this.accepting) return
     await this.sweepWorkspaceParticipations(ledger)
-    await Promise.all(startupMembers.map(member => this.restoreMemberAfterBoot(member, persistedSessions)))
-    // A manager failure is reported, never fatal to Host boot. The manager
-    // runtime serializes a concurrent user open behind this recovery.
+    if (!this.accepting) return
+    const membersRestored = Promise.all(startupMembers.map(member => this.restoreMemberAfterBoot(member, persistedSessions)))
+    // The manager has an independent Session and must not queue behind one
+    // stuck Member. A failure is reported, never fatal to Host boot.
     try {
-      const restored = await this.managerRuntime?.preRestore()
+      const restored = await this.requireManagerRuntime().preRestore()
       if (restored?.status === 'unavailable') {
         this.ctx.logger.warn(`agent-team: manager Session pre-restore failed: ${restored.diagnostic.class}: ${restored.diagnostic.detail}`)
       }
     } catch (error) {
-      this.ctx.logger.warn(`agent-team: manager Session pre-restore failed: ${error instanceof Error ? error.message : String(error)}`)
+      if (this.accepting) this.ctx.logger.warn(`agent-team: manager Session pre-restore failed: ${error instanceof Error ? error.message : String(error)}`)
     }
+    await membersRestored
   }
 
   private async restoreMemberAfterBoot(member: AgentTeamAgentMember, knownSessions: ReadonlySet<SessionId> | undefined): Promise<void> {
@@ -1431,6 +1468,7 @@ export default class AgentTeam extends TypertRemoteService {
           try {
             await this.finishMemberTransition(current.memberId, {
               ...(knownSessions === undefined ? {} : { knownSessions }),
+              signal: this.shutdownController.signal,
               skipColdRecycle: true,
             })
           } catch (error) {
@@ -1463,11 +1501,38 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
+   * A disposed Agent has already closed its Session write handle. Retry only a
+   * Member whose latest activation was blocked by that exact binding; all
+   * other activation failures keep their existing manual-recovery semantics.
+   */
+  private restoreAfterSessionRelease(memberId: AgentTeamMemberId, releasedSessionId: SessionId): void {
+    this.sessionOwnershipBlocked.delete(memberId)
+    void this.enqueueLifecycle(memberId, async () => {
+      const current = this.requireLedger().getMember(memberId)
+      if (current === undefined || current.state !== 'enabled' || current.sessionId !== releasedSessionId || this.handles.has(memberId)) return
+      await this.finishMemberTransition(memberId, {
+        signal: this.shutdownController.signal,
+        skipColdRecycle: true,
+      })
+      const latest = this.requireLedger().getMember(memberId)
+      if (latest !== undefined && latest.state === 'enabled' && !this.handles.has(memberId)) {
+        await this.activateMember(latest, undefined, undefined, undefined, {
+          signal: this.shutdownController.signal,
+          skipColdRecycle: true,
+        })
+      }
+    }).catch((error: unknown) => {
+      if (this.accepting) this.ctx.logger.warn(`agent-team: post-release activation failed for member '${this.memberLabel(memberId)}': ${failureDetail(error)}`)
+    })
+  }
+
+  /**
    * Lazy Workspace-deletion handling: deletion is detectable only through the registry (no event).
    * A dead non-default participation is withdrawn through the normal leave path; a dead default Workspace is left alone and the Member surfaces as unavailable.
    */
   private async sweepWorkspaceParticipations(ledger: AgentTeamLedger): Promise<void> {
     for (const member of ledger.listMembers()) {
+      if (!this.accepting) return
       if (member.state === 'inactive' || member.state === 'archived') continue
       for (const workspaceId of ledger.workspacesOf(member.memberId)) {
         if (workspaceId === member.workspaceId || this.ctx.workspaceRegistry.get(workspaceId) !== undefined) continue
@@ -1978,6 +2043,7 @@ export default class AgentTeam extends TypertRemoteService {
   private async finishMemberTransition(memberId: AgentTeamMemberId, options?: {
     readonly knownSessions?: ReadonlySet<SessionId>
     readonly forkedFrom?: SessionId
+    readonly signal?: AbortSignal
     readonly skipColdRecycle?: boolean
   }): Promise<void> {
     const member = this.requireLedger().getMember(memberId)
@@ -1990,8 +2056,10 @@ export default class AgentTeam extends TypertRemoteService {
     }
     await this.archiveRetiredSession(transition.previousSessionId)
     if (this.handles.get(memberId) === undefined) {
-      await this.activateMember(member, undefined, options?.knownSessions, options?.forkedFrom,
-        options?.skipColdRecycle === true ? { skipColdRecycle: true } : undefined)
+      await this.activateMember(member, undefined, options?.knownSessions, options?.forkedFrom, {
+        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        ...(options?.skipColdRecycle === true ? { skipColdRecycle: true } : {}),
+      })
     }
   }
 
@@ -4013,12 +4081,26 @@ export default class AgentTeam extends TypertRemoteService {
    * Session headers currently durable in the persistence backend. A disposed Session's log is retired without awaiting,
    * so the JSONL backend's transient win32 staging directories (.dsh-mkdir-*) can surface as ENOENT; the idempotent read backs off briefly.
    */
-  private async persistedSessionHeaders() {
+  private async persistedSessionHeaders(signal?: AbortSignal) {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await this.ctx.sessionPersistence.list()
+        const listing = this.ctx.sessionPersistence.list(signal === undefined ? undefined : { signal })
+        if (signal === undefined) return await listing
+        // Passing the signal lets a cooperative backend cancel its I/O; the
+        // race also releases Team teardown from a backend that never settles.
+        let onAbort!: () => void
+        const cancelled = new Promise<never>((_, reject) => {
+          onAbort = () => { reject(signal.reason instanceof Error ? signal.reason : new Error('Team Host is shutting down')) }
+          signal.addEventListener('abort', onAbort, { once: true })
+        })
+        try {
+          if (signal.aborted) onAbort()
+          return await Promise.race([listing, cancelled])
+        } finally {
+          signal.removeEventListener('abort', onAbort)
+        }
       } catch (error) {
-        if (attempt >= 3 || (error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw error
+        if (signal?.aborted || attempt >= 3 || (error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw error
         await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 25))
       }
     }
@@ -4052,6 +4134,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   private async activateMember(member: AgentTeamAgentMember, knownWorkspacePath?: string, knownSessions?: ReadonlySet<SessionId>, forkedFrom?: SessionId, options?: { readonly deferNotify?: boolean; readonly signal?: AbortSignal; readonly skipColdRecycle?: boolean }): Promise<void> {
     if (this.handles.has(member.memberId)) return
+    this.sessionOwnershipBlocked.delete(member.memberId)
     let created: AgentHandle | undefined
     try {
       const workspace = this.requireWorkspace(member.workspaceId)
@@ -4158,6 +4241,11 @@ export default class AgentTeam extends TypertRemoteService {
       // that landed while this activation ran must not leave a live handle
       // behind, because that handle is what every surface reads as "present".
       const current = this.requireLedger().getMember(member.memberId)
+      if (!this.accepting) {
+        await this.disposeWithWakeGuard(created)
+        this.memberRuntime.forgetMember(member.memberId)
+        return
+      }
       if (current === undefined || current.state !== 'enabled') {
         await this.disposeWithWakeGuard(created)
         this.memberRuntime.forgetMember(member.memberId)
@@ -4165,6 +4253,7 @@ export default class AgentTeam extends TypertRemoteService {
         return
       }
       this.handles.set(member.memberId, created)
+      this.sessionOwnershipBlocked.delete(member.memberId)
       this.memberIdle.status(member.memberId, created.agent.status, Date.now())
       this.clearMemberFailure(member.memberId, 'activation')
       this.clearMemberFailure(member.memberId, 'preTurnCancellation')
@@ -4205,6 +4294,12 @@ export default class AgentTeam extends TypertRemoteService {
       }
       this.memberRuntime.forgetMember(member.memberId)
       const message = error instanceof Error ? error.message : String(error)
+      // The class name is the stable cross-module error category: development
+      // compositions can load two copies of the persistence package, making an
+      // `instanceof` check miss the very ownership failure this retry serves.
+      if (error instanceof Error && error.name === 'SessionAlreadyOwnedError') {
+        this.sessionOwnershipBlocked.add(member.memberId)
+      }
       this.ctx.logger.warn(`agent-team: activation failed for member '${this.memberLabel(member.memberId)}': ${message}`)
       this.setActivationDiagnostic(member.memberId, this.activationDiagnosticOf(error, member.sessionId))
     } finally {

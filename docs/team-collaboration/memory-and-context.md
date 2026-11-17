@@ -60,6 +60,8 @@ The successor's identity derives from the retired Session, so a restart between 
 
 The ordinary swap has one trigger: a wake aimed at an idle Member through a notification, a DM, or an explicit Member resume. It is strict — the generation must have been idle longer than 60 minutes and measure more than 128000 context tokens — and every fact it cannot establish answers resume, the conservative direction because a swap that should not have happened costs a Member its working trail. Host startup restoration only reattaches the ledger's current Session and does not recycle it because the Host restarted.
 
+An already committed transition is still finished; startup simply does not create a new one.
+
 `wakeRecycle` is a volatile Host-row group (`enabled`, `idleMs`, `minContextTokens`); the Team settings page renders no form for it, and `enabled: false` turns the swap off.
 
 The cold path decides from storage, not from a live Agent: a stored Session is rebuilt from its own log and its inbox inspected, and a pending ordinary message there keeps that generation instead of recycling it; a live generation is asked the same question from its queue before any context pricing.
