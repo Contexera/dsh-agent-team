@@ -243,7 +243,8 @@ it('wakes an owner from a subscription, lets it delegate through team_worker, an
     && JSON.stringify(agent.session.snapshotEvents().filter(e => e.type === 'assistant/message')).includes('我继续回应 Human。')
     ? true : undefined, 20_000)
 
-  expect(runs().find(run => run.workerRef === target!.workerRef)?.state).toBe('stopped')
+  const targetRun = runs().find(run => run.workerRef === target!.workerRef)
+  expect(targetRun?.state, JSON.stringify(targetRun)).toBe('stopped')
   expect(runs().find(run => run.workerRef === sibling!.workerRef)?.state).toBe('running')
   const settled = await ctx.agentTeam.readThreadForAgent(agent, { requestId: requestId('sub-worker-settled'), workspaceId, threadRef })
   expect(settled.workerStates?.find(run => run.workerRef === target!.workerRef)).toMatchObject({ state: 'stopped', unconfirmed: false })
