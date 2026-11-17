@@ -98,9 +98,9 @@ The Host steers one `<system-reminder>` into the turn that noticed or committed 
 Nothing crosses the boundary — no handoff, no announcement — so the reminder states the consequence only when it is true, and a preset that mounts no compaction engine is never told otherwise.
 
 ## Assembled acceptance
-`npm run test:browser` uses a credential-free Harness Web scaffold. It verifies default taskless Thread creation, default-off Human 「作为任务」, Human promotion and Host reread, taskless header/Claim gating, a version-2 mention delivering directly with no invitation confirmation, Agent Inbox read/reply, Human Project/Thread state, reload persistence, desktop/390×844/keyboard paths, Team exit, and ordinary DSH restoration.
+`npm run test:browser` runs the `team-journey` smoke and focused surface lanes on a credential-free Harness Web scaffold; `npm run test:browser -- --deep` adds the complete journey. Together they verify default taskless Thread creation, default-off Human 「作为任务」, Human promotion and Host reread, taskless header/Claim gating, a version-2 mention delivering directly, Agent Inbox read/reply, Human Project/Thread state, reload persistence, desktop/390×844/keyboard paths, Team exit, and ordinary DSH restoration.
 
-The same journey drives the Human's own durable writes: Thread follow and unfollow, whose control reads the Host observation rather than its own guess, and Task transfer to a Thread follower, including the mend of a finished Task whose accountable has lost Project ownership. Real Agent-loop integration tests separately cover safe-boundary wake and direct, Activity, and ordinary digest notification forms.
+That `--deep` journey drives the Human's own durable writes: Thread follow and unfollow, whose control reads the Host observation rather than its own guess, and Task transfer to a Thread follower, including the mend of a finished Task whose accountable has lost Project ownership. Real Agent-loop integration tests separately cover safe-boundary wake and direct, Activity, and ordinary digest notification forms.
 
 That journey measures the band as well as driving it: one band holds every control at one height, radius, inset, stroke and step, and the follow control's two standings differ by a fill.
 

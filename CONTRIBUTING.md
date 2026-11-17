@@ -30,7 +30,7 @@ Run the smallest sufficient set for the change, then escalate with its surface:
 
 ## What CI runs
 
-A pull request runs two lanes, `ubuntu-latest` and `windows-latest`. Each lane executes the same six-step environment contract — corepack shims, pinned Harness checkout, Harness install and build, this repository's install, bundle build, path facades — and then `npm run typecheck` and `npm test`. A documentation-only push to `master` skips the gate; a pull request never does. `npm run test:browser` is deliberately not in CI, so browser acceptance stays a local step: include that evidence yourself when your change is visible. The contract and the three files that must move together with the pinned tag: [`docs/development/environments-and-install.md`](docs/development/environments-and-install.md) § "Sandbox and CI environments".
+A pull request runs two lanes, `ubuntu-latest` and `windows-latest`. Each lane executes the same six-step environment contract — corepack shims, pinned Harness checkout, Harness install and build, this repository's install, bundle build, path facades — and then `npm run typecheck` and `npm run test:ci` after the `checks` job runs the repository-wide static gates. A documentation-only push to `master` skips the gate; a pull request never does. `npm run test:browser` is deliberately not in CI, so browser acceptance stays a local step: include that evidence yourself when your change is visible. The contract and the three files that must move together with the pinned tag: [`docs/development/environments-and-install.md`](docs/development/environments-and-install.md) § "Sandbox and CI environments".
 
 ## What a pull request should contain
 

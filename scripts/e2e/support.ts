@@ -57,6 +57,16 @@ export async function chooseMemberModel(page: Page, dialog: Locator): Promise<vo
   await expect.poll(() => page.locator('[role="menu"]').count()).toBe(0)
 }
 
+export async function setScenarioPhase(phase: 'harness-boot' | 'page-action' | 'host-projection'): Promise<void> {
+  const phaseFile = process.env.DSH_E2E_PHASE_FILE
+  if (!phaseFile) return
+  try {
+    await writeFile(phaseFile, JSON.stringify({ phase, updatedAt: new Date().toISOString() }), 'utf8')
+  } catch {
+    // Best-effort phase marker for outer runner diagnostics.
+  }
+}
+
 /**
  * Boot one scenario: stage the bundle, launch the scaffold, open a Chromium
  * page, connect a fresh Workspace and enter Team mode.
@@ -79,6 +89,7 @@ export async function openTeamPage(options: {
   readonly page: Page
   readonly consoleWatch: { warnings: string[]; pageErrors: string[] }
 }> {
+  await setScenarioPhase('harness-boot')
   const { home, stagedBundle } = await installLocalBundle()
   try {
     // The public origin is installation config, not a page setting, so a lane that
@@ -107,6 +118,7 @@ export async function openTeamPage(options: {
     await page.goto(scaffold.authenticatedUrl)
     await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
     if (!options.stayInOrdinaryMode) await page.getByRole('button', { name: '团队', exact: true }).click()
+    await setScenarioPhase('page-action')
     return { page, consoleWatch }
   } catch (error) {
     await closeScenario()

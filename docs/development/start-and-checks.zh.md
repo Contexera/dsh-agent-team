@@ -29,6 +29,7 @@ corepack pnpm install
 npm run generate:typert
 npm run typecheck
 npm run check:docs
+npm run check:e2e-docs
 npm run check:core-skills
 npm run check:boundaries
 npm run check:versions
@@ -54,7 +55,8 @@ git diff --check HEAD
 - `npm run check:comments`：把一条注释规则变成机械检查，范围是 `packages/*/src` 与 `scripts/`，排除 `vendor/`：注释不得引用 `.scratch/`、工作项编号或验收标准，因为发布包的读者打不开它们，且工作历史不是权威。裸的 `issue #<n>` 可以保留，它指向真实的 GitHub issue；`Task #<n>` 也一样，它是已文档化的 Team 实体。这里刻意不设行数预算：一条注释是否值得保留，是数行数判不了的，注释质量靠定期阅读注释来审查。`node scripts/check-comments.mjs --budgets` 只打印每个 scope 的注释水位表，不做判定。
 - `npm run check:scratch`：把归档工作区的规则变成机械检查。索引与工作项目录一致、每个工作项有入口 README、归档 README 里的链接可解析、已封存的票只有带 `> 已归档` 说明时才允许保留进行中状态、月份总览覆盖该月全部工作项。归档 spec 与 materials 里的历史代码引用不在范围内；不需要相邻 Harness 检出。CI 的 `checks` job 在每次 PR 与 push 上运行它；需要 Harness 的 lane 仍跳过工作历史。
 - `npm run check:facades`：只比不写。按相邻 Harness checkout 重算 path facades。已提交的 `tsconfig*.json` 或 `.generated-harness` 标记只要与生成结果不同就报错。给 `scripts/sync-paths.mjs` 加了 subpath，就不可能不带上重新生成的 facades。它由 `npm test` 捆绑执行。全新 clone 必须先重新生成 facades，见 [`environments-and-install.zh.md`](./environments-and-install.zh.md)。
-- `npm test`：先生成 Typert、跑 `check:facades`、`check:docs`、`check:core-skills`、`check:boundaries`、`check:versions`、`check:comments` 与 `check:scratch`，再运行全部 Vitest project。
+- `npm test`：先生成 Typert、跑 `check:facades`、`check:docs`、`check:e2e-docs`、`check:core-skills`、`check:boundaries`、`check:versions`、`check:comments` 与 `check:scratch`，再运行全部 Vitest project。
+- `npm run test:ci`：在 CI 的 build 与 typecheck 已生成 Typert 后，检查依赖 Harness 的 facades，再运行全部 Vitest project。CI 的 `checks` job 会在 Linux 与 Windows lane 之前统一运行仓库级静态与卫生检查，因此两条 lane 使用这个聚焦命令，不改变本地 `npm test` 的完整契约。
 - `npm run test:unit`（或 `npx vitest run --project unit`）：仅运行 5s 预算的快速单元测试。`vitest.config.ts` 集中管理全部超时预算，划分为五个互斥 project：`unit`（5s）、`integration`（60s）、`worker-long`（120s test / 30s hook）、`benchmark`（900s，由 `DSH_BENCH_STORAGE=1` 显式启用）与 `shared-host`（30s test/hook）；单个测试文件不得再使用 `vi.setConfig` 或内联超时参数。
 - Client 测试台（`packages/client-agent-team/tests/harness.tsx`）会让「渲染中的 shipped slot entry 崩过」的 spec 直接失败。shipped error boundary 会把异常吞掉、只经 `console.error` 报告，没有这道护栏时页面已经消失而套件仍然全绿。该测试台同时补齐 jsdom 缺的浏览器 API（`ResizeObserver`、`document.fonts`）与完整的 `conversation` service 面。缺一个 observable 成员不是「少一个方法」，而是 renderer hook cache 里的 `WeakMap.set(undefined)` 抛错。
 - Vitest 通过 `scripts/isolate-dsh-home.setup.ts` 给每个测试文件一次性 `DSH_HOME`。隔离的是各 Member activation 的 `$DSH_HOME/agent-team/members/member:*` 私有 memory。需要特定 home 的测试自行保存/恢复该变量（见 `member-lifecycle.spec.ts`）。启动不会自动清理账本不认识的 Member 目录。显式 Member remove 才删除该 Member 的私有 memory。介质重置后的旧目录须由操作者手动删除 `member:` 目录。
@@ -74,13 +76,15 @@ git diff --check HEAD
 npm run test:browser
 ```
 
-如果在本地只想快速迭代 `scripts/e2e/*.e2e.ts` 中的一条或多条 surface lane，可以在 `--` 后传入 lane 名称过滤：
+如果在本地只想快速迭代 `scripts/e2e/*.e2e.ts` 中的一条或多条 surface lane，可以在 `--` 后传入 lane 名称过滤（完整 lane 目录、契约与触发条件见 [`e2e-lanes.zh.md`](e2e-lanes.zh.md)）：
 
 ```sh
 npm run test:browser -- team-manager team-inbox-and-recovery
 ```
 
 过滤模式仍会先构建、stage bundle 并校验本次捕获的截图，但会跳过全套 `[1440, 390]` 双宽度完整性门禁；在完成 UI 或 Client 改动前，仍须运行无过滤的全量 `npm run test:browser`。
+
+默认无过滤运行使用短版 `team-journey` 冒烟。涉及完整跨表面旅程、Team Shell、导航或大范围视觉回归时，运行 `npm run test:browser -- --deep`。
 
 改动 Team 控件或界面的可见 UI 变更，额外运行机械的设计语言审计（含 shipped 参考 tripwire）：
 

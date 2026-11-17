@@ -7,6 +7,7 @@
 | Page | Owns |
 | --- | --- |
 | [start-and-checks.zh.md](start-and-checks.zh.md) | 适用范围、上手步骤，以及检查梯度与发布期门 |
+| [e2e-lanes.zh.md](e2e-lanes.zh.md) | E2E 浏览器 lane 目录、真实 Web/Harness 契约、低层测试与定向触发规则 |
 | [generated-and-seams.zh.md](generated-and-seams.zh.md) | UI 改动的浏览器证据、生成物、package 接缝，以及新增 Host operation 的清单 |
 | [environments-and-install.zh.md](environments-and-install.zh.md) | 沙箱与 CI 环境，以及外部安装的验证 |
 | [storage-and-delivery.zh.md](storage-and-delivery.zh.md) | Team ledger 存在哪、多页面通知回归，以及交付前核对清单 |

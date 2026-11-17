@@ -1,9 +1,10 @@
 import { access, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentTeamOperation } from '../src/types.ts'
-import { harness } from './helpers/host-harness.ts'
+import AgentTeam from '../src/index.ts'
+import { harness, sqliteHarness } from './helpers/host-harness.ts'
 import { EmptyAdapter, realHarness, requestId } from './helpers/member-harness.ts'
 import { mountTeamMemberHost, pushDshHome, runCleanupSteps } from './helpers/team-host-fixture.ts'
 
@@ -136,5 +137,34 @@ describe('test harness lifecycle and invariants', () => {
       errors: [expect.objectContaining({ message: 'first error' }), expect.objectContaining({ message: 'third error' })],
     })
     expect(ran).toEqual(['first', 'second', 'third'])
+  })
+
+  it('disposes and re-enables AgentTeam without restarting sibling fibers and preserves ledger state', async () => {
+    const parent = await ownedParent()
+    try {
+      const h = await sqliteHarness(join(parent, 'team.sqlite'))
+      const sibling = h.ctx.plugin(() => {})
+      await h.ctx.agentTeam.createProject({
+        requestId: requestId('toggle-persistence'),
+        workspaceId: h.workspaceId,
+        name: 'toggle-persistence',
+        description: '',
+      })
+      expect(h.ctx.agentTeam.status().projectCount).toBe(1)
+
+      await h.fiber.dispose()
+      expect(h.ctx.get('agentTeam')).toBeUndefined()
+      expect(sibling.uid).not.toBeNull()
+
+      const reenabled = h.ctx.plugin(AgentTeam, { workspaceRoot: h.workspaceId })
+      await vi.waitFor(() => { expect(h.ctx.get('agentTeam')).toBeDefined() })
+      expect(h.ctx.agentTeam.status().projectCount).toBe(1)
+      expect(h.ctx.agentTeam.view({ workspaceId: h.workspaceId }).projects[0]?.name).toBe('toggle-persistence')
+      expect(sibling.uid).not.toBeNull()
+      await reenabled.dispose()
+      await h.close()
+    } finally {
+      await rm(parent, { recursive: true, force: true })
+    }
   })
 })

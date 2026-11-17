@@ -5,7 +5,19 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { harnessDir } from './harness-dir.mjs'
-import { assertScreenshotEvidence } from './browser-evidence.mjs'
+import { assertScreenshotEvidence, readScreenshots } from './browser-evidence.mjs'
+import {
+  LANE_ALIASES,
+  aggregateTestSummaries,
+  allowsPhaseMarker,
+  buildSummary,
+  formatLaneList,
+  formatSummaryText,
+  parseLaneContracts,
+  parseRunnerArgs,
+  planLaneBatches,
+  resolveLanes,
+} from './browser-runner.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const harness = harnessDir
@@ -14,71 +26,70 @@ const chrome = process.env.CHROME_PATH ?? '/usr/bin/google-chrome'
 // scenario posts to it from outside — so it takes an ephemeral port instead of
 // fighting a running `dsh web` instance, or the previous scenario, for the default.
 process.env.DSH_TEAM_WEBHOOK_PORT = process.env.DSH_TEAM_WEBHOOK_PORT ?? '0'
-const temporary = await mkdtemp(join(tmpdir(), 'dsh-agent-team-browser-'))
-const bundleTemplate = join(temporary, 'bundle-template', '@contexera', 'dsh-agent-team')
-/** The screenshots this run leaves for review: desktop and the 390×844 narrow lane. */
 const artifacts = join(root, 'artifacts', 'browser')
+const summaryPath = join(artifacts, 'summary.json')
 const evidenceWidths = [1440, 390]
 
-const VALUE_FLAGS = new Set(['-t', '--testNamePattern', '--test-name-pattern', '--reporter', '-r', '--config', '-c', '--bail', '--testTimeout'])
-const fileFilters = []
-const vitestFlags = []
-const rawArgs = process.argv.slice(2)
-for (let index = 0; index < rawArgs.length; index += 1) {
-  const argument = rawArgs[index]
-  if (argument.startsWith('-')) {
-    vitestFlags.push(argument)
-    if (VALUE_FLAGS.has(argument) && !argument.includes('=') && index + 1 < rawArgs.length) {
-      index += 1
-      vitestFlags.push(rawArgs[index])
-    }
-  } else {
-    fileFilters.push(argument)
-  }
-}
-const narrowed = fileFilters.length > 0 || vitestFlags.some(argument => /^--?(t|testNamePattern|test-name-pattern)(=|$)/.test(argument))
-
-// Every scenario is its own file under scripts/e2e/, so the runner renders and
-// runs each one inside the harness checkout. Keeping them separate means one
-// slow journey cannot widen another's budget, and a failure names its file.
-// `support.ts` rides along as a sibling, because the rendered files import it
-// relatively — exactly where the one monolithic script used to sit.
+const { list, deep, fileFilters, vitestFlags, narrowed } = parseRunnerArgs(process.argv.slice(2))
 const sourceDir = join(root, 'scripts', 'e2e')
-const allE2eFiles = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts')).sort()
-// Keep a renamed surface selector usable after lane consolidation; resolve it
-// to the current lane before staging files.
-const laneAliases = new Map([
-  ['team-settings-nav-icon', 'team-settings-and-tools'],
-])
-const resolvedFileFilters = fileFilters.flatMap(token => {
-  const alias = laneAliases.get(token)
-  return alias === undefined ? [token] : [token, alias]
-})
-const matchedE2eFiles = fileFilters.length === 0
-  ? allE2eFiles
-  : allE2eFiles.filter(name => resolvedFileFilters.some(token => name.includes(token)))
-if (matchedE2eFiles.length === 0) {
-  throw new Error(`No E2E lane matched filter [${fileFilters.join(', ')}]. Available: ${allE2eFiles.join(', ')}`)
+const actualE2eFiles = (await readdir(sourceDir)).filter(name => name.endsWith('.e2e.ts')).sort()
+const deepRequested = deep || fileFilters.some(token => token.includes('team-journey-deep'))
+const allE2eFiles = actualE2eFiles.filter(name => deepRequested
+  ? name !== 'team-journey.e2e.ts'
+  : !name.endsWith('-deep.e2e.ts'))
+const catalogText = await readFile(join(root, 'docs', 'development', 'e2e-lanes.md'), 'utf8')
+const contracts = parseLaneContracts(catalogText)
+
+if (list) {
+  console.log(formatLaneList(deep ? allE2eFiles : actualE2eFiles, contracts, LANE_ALIASES))
+  process.exit(0)
 }
+
+const { matchedE2eFiles, selectedLanes } = resolveLanes({
+  allE2eFiles,
+  fileFilters,
+  aliases: LANE_ALIASES,
+  contracts,
+})
 const scenarios = ['support.ts', ...matchedE2eFiles]
+const mode = narrowed ? 'targeted' : 'full'
+const parallelWorkers = Number.parseInt(process.env.DSH_E2E_MAX_WORKERS ?? '2', 10)
+const scheduling = process.env.DSH_E2E_SCHEDULING ?? 'balanced'
+const laneBatches = planLaneBatches(selectedLanes, {
+  shard: mode === 'full' && vitestFlags.length === 0 && scheduling !== 'serial',
+  maxWorkers: Number.isInteger(parallelWorkers) && parallelWorkers > 0 ? parallelWorkers : 2,
+})
+
+console.log(`[test:browser] mode=${mode} lanes=${selectedLanes.map(lane => lane.name).join(',')}`)
+for (const lane of selectedLanes) {
+  console.log(`[test:browser] contract(${lane.name}): ${lane.contract}`)
+}
+for (const batch of laneBatches) {
+  console.log(`[test:browser] schedule=${batch.name} lanes=${batch.lanes.map(lane => lane.name).join(',')}`)
+}
+
+const temporary = await mkdtemp(join(tmpdir(), 'dsh-agent-team-browser-'))
+const bundleTemplate = join(temporary, 'bundle-template', '@contexera', 'dsh-agent-team')
+const phaseFile = join(temporary, 'scenario-phase.json')
+const vitestReportFiles = []
 
 const quote = value => value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
 
-const run = (command, args, cwd) => new Promise((resolveRun, reject) => {
+const run = (command, args, cwd, env = process.env) => new Promise((resolveRun, reject) => {
   // Windows: bare-name pnpm shim spawns fail (.cmd ENOENT, and Node 22+ refuses shell-less .cmd spawns), so go through cmd.exe with the argument string quoted.
   const child = process.platform === 'win32'
-    ? spawn(`${command} ${args.join(' ')}`, { cwd, stdio: 'inherit', env: process.env, shell: true })
-    : spawn(command, args, { cwd, stdio: 'inherit', env: process.env })
+    ? spawn(`${command} ${args.join(' ')}`, { cwd, stdio: 'inherit', env, shell: true })
+    : spawn(command, args, { cwd, stdio: 'inherit', env })
   child.once('error', reject)
   child.once('exit', code => code === 0 ? resolveRun() : reject(new Error(`${command} exited with ${code}`)))
 })
 
-const runPnpm = async (args, cwd) => {
+const runPnpm = async (args, cwd, env = process.env) => {
   try {
-    await run('corepack', ['pnpm', ...args], cwd)
+    await run('corepack', ['pnpm', ...args], cwd, env)
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      await run('pnpm', args, cwd)
+      await run('pnpm', args, cwd, env)
       return
     }
     throw error
@@ -123,15 +134,49 @@ const stageBundleTemplate = async () => {
   console.log(`staged read-only bundle template once in ${Date.now() - startedAt}ms`)
 }
 
+const readJsonIfPresent = async path => {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+const phases = {}
 const rendered = []
+const renderedByScenario = new Map()
+let currentPhase = 'preflight'
+let failedPhase = null
+let environmentBlocker = null
+let screenshots = 0
+let testsSummary = null
+let runError = null
+let failedBatch = null
+const batchSummaries = []
+
 try {
-  await access(join(harness, 'apps/web/dist/index.html'), constants.R_OK)
-  await access(chrome, constants.X_OK)
-  await stageBundleTemplate()
-  // The run owns its screenshots, so the one clear happens here, before the
-  // first scenario writes one. A scenario that cleared them would delete
-  // evidence another scenario already produced, and vitest decides that order.
+  // Clear artifacts once before the run, then recreate directory for summary.json.
   await rm(artifacts, { recursive: true, force: true })
+  await mkdir(artifacts, { recursive: true })
+
+  const preflightStart = Date.now()
+  try {
+    await access(join(harness, 'apps/web/dist/index.html'), constants.R_OK)
+  } catch (error) {
+    environmentBlocker = `Missing built Harness web app at ${join(harness, 'apps/web/dist/index.html')}`
+    throw error
+  }
+  try {
+    await access(chrome, constants.X_OK)
+  } catch (error) {
+    environmentBlocker = `Missing executable Chrome at ${chrome} (set CHROME_PATH if installed elsewhere)`
+    throw error
+  }
+  phases.preflight = Date.now() - preflightStart
+
+  currentPhase = 'staging'
+  const stagingStart = Date.now()
+  await stageBundleTemplate()
   for (const scenario of scenarios) {
     const template = await readFile(join(sourceDir, scenario), 'utf8')
     const target = join(harness, 'apps/web', 'tests', scenario === 'support.ts' ? '__external-agent-team-support.ts' : `__external-agent-team-${scenario}`)
@@ -143,19 +188,110 @@ try {
     // Harness checkout is a stray untracked file in a repository this bundle
     // must not modify.
     rendered.push(target)
+    renderedByScenario.set(scenario, target)
   }
-  await runPnpm(['exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
-    ...rendered.filter(path => path.endsWith('.e2e.ts')).map(path => path.slice(harness.length + 1).replaceAll('\\', '/')),
-    '--reporter=verbose', ...vitestFlags], harness)
-  // A green suite whose directory is empty or unreadable is the failure this
-  // gate exists for: the screenshots are the acceptance evidence.
+  phases.staging = Date.now() - stagingStart
+
+  currentPhase = 'vitest'
+  const vitestStart = Date.now()
+  try {
+    for (const batch of laneBatches) {
+      const batchStartedAt = Date.now()
+      const reportFile = join(temporary, `vitest-report-${batch.name}.json`)
+      vitestReportFiles.push(reportFile)
+      const files = batch.lanes
+        .map(lane => renderedByScenario.get(lane.file))
+        .filter(path => typeof path === 'string')
+        .map(path => path.slice(harness.length + 1).replaceAll('\\', '/'))
+      const batchEnv = { ...process.env }
+      await rm(phaseFile, { force: true })
+      if (allowsPhaseMarker([...vitestFlags, ...batch.vitestFlags])) {
+        batchEnv.DSH_E2E_PHASE_FILE = phaseFile
+      } else {
+        delete batchEnv.DSH_E2E_PHASE_FILE
+      }
+      try {
+        await runPnpm(['exec', 'vitest', 'run', '--config', 'vitest.web.config.ts',
+          ...files,
+          '--reporter=verbose', '--reporter=json', `--outputFile.json=${reportFile}`,
+          ...vitestFlags, ...batch.vitestFlags],
+        harness,
+        batchEnv)
+        batchSummaries.push({ name: batch.name, status: 'passed', durationMs: Date.now() - batchStartedAt, lanes: batch.lanes.map(lane => lane.name) })
+      } catch (error) {
+        failedBatch = batch.name
+        batchSummaries.push({ name: batch.name, status: 'failed', durationMs: Date.now() - batchStartedAt, lanes: batch.lanes.map(lane => lane.name) })
+        throw error
+      }
+    }
+  } finally {
+    phases.vitest = Date.now() - vitestStart
+  }
+
+  currentPhase = 'evidence'
+  const evidenceStart = Date.now()
   if (!narrowed) {
-    console.log(`browser evidence: ${await assertScreenshotEvidence(artifacts, evidenceWidths)} screenshots`)
+    screenshots = await assertScreenshotEvidence(artifacts, evidenceWidths)
+    console.log(`browser evidence: ${screenshots} screenshots`)
   } else {
     const hasArtifacts = await access(artifacts).then(() => true, () => false)
-    console.log(`browser evidence (filtered): ${hasArtifacts ? await assertScreenshotEvidence(artifacts, []) : 0} screenshots`)
+    screenshots = hasArtifacts ? await assertScreenshotEvidence(artifacts, []) : 0
+    console.log(`browser evidence (filtered): ${screenshots} screenshots`)
   }
+  phases.evidence = Date.now() - evidenceStart
+} catch (error) {
+  failedPhase = currentPhase
+  runError = error
 } finally {
-  await Promise.all(rendered.map(path => rm(path, { force: true })))
-  await rm(temporary, { recursive: true, force: true })
+  const cleanupStart = Date.now()
+  try {
+    await Promise.all(rendered.map(path => rm(path, { force: true })))
+    const phaseMarker = await readJsonIfPresent(phaseFile)
+    const vitestReports = await Promise.all(vitestReportFiles.map(readJsonIfPresent))
+    testsSummary = aggregateTestSummaries(vitestReports.map(vitestReport => (
+      vitestReport && typeof vitestReport.numTotalTests === 'number'
+        ? {
+            total: vitestReport.numTotalTests,
+            passed: vitestReport.numPassedTests ?? 0,
+            failed: vitestReport.numFailedTests ?? 0,
+          }
+        : null
+    )))
+    if (failedPhase === null && screenshots === 0) {
+      const existing = await readScreenshots(artifacts).catch(() => [])
+      screenshots = existing.length
+    }
+    await rm(temporary, { recursive: true, force: true })
+    phases.cleanup = Date.now() - cleanupStart
+
+    const summary = buildSummary({
+      status: failedPhase === null ? 'passed' : 'failed',
+      mode,
+      selectedLanes,
+      phases,
+      failedPhase,
+      scenarioPhase: failedPhase === 'vitest' ? (phaseMarker?.phase ?? null) : null,
+      tests: testsSummary,
+      batches: batchSummaries,
+      screenshots,
+      artifactPath: artifacts,
+      environmentBlocker,
+      error: runError instanceof Error ? runError.message : (runError ? String(runError) : null),
+      failedBatch,
+    })
+    await mkdir(artifacts, { recursive: true })
+    await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8')
+    console.log(formatSummaryText(summary))
+  } catch (cleanupError) {
+    if (runError === null) {
+      failedPhase = 'cleanup'
+      runError = cleanupError
+    } else {
+      console.error('Cleanup error:', cleanupError)
+    }
+  }
+}
+
+if (runError !== null) {
+  throw runError
 }

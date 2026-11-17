@@ -13,6 +13,7 @@ Run through `npm run check:*`; several are also part of `npm test` (see `start-a
 | File | Does | Trigger |
 | --- | --- | --- |
 | `check-docs.mjs` | Maintained-doc gate: bilingual pairs with a working switcher, resolving relative links and `#fragment`s, agreeing indexes, equal heading outlines, and per-file longest-block ceilings. `--budgets` prints the ceiling table instead of deciding. | `npm run check:docs` |
+| `check-e2e-docs.mjs` | E2E doc consistency gate: ensures `scripts/e2e/*.e2e.ts` files, `docs/development/e2e-lanes.md` / `.zh.md`, `laneAliases` in `run-browser-test.mjs`, and `scripts/README.md` agree. | `npm run check:e2e-docs` |
 | `check-core-skills.mjs` | Shipped `core-skills` contract: front matter names the directory, description is a real index entry, prompt budget, and every link stays inside the skill directory. `--root <dir>` checks another tree. | `npm run check:core-skills` |
 | `check-package-boundaries.mjs` | Refuses a `packages/*/src` file reaching another package by a relative specifier that escapes its own directory. References are read from the TypeScript syntax tree, so an `export … from` re-export and a bare side-effect `import` count while text that merely quotes one does not, and a declaration that binds no value is exempt. `--root <dir>` checks another tree (fixture spec: `packages/agent-team/tests/check-package-boundaries.spec.ts`). | `npm run check:boundaries` |
 | `check-version-consistency.mjs` | Every surface that states the certified DSH baseline must agree, and that baseline must be the lower bound of every `@deepseek-ai/dsh-*` peer range. `--root <dir>`. | `npm run check:versions` |
@@ -35,7 +36,7 @@ Run through `npm run check:*`; several are also part of `npm test` (see `start-a
 
 | File | Does | Trigger |
 | --- | --- | --- |
-| `run-browser-test.mjs` | Keyless browser acceptance: clears the run's screenshot directory once, renders `scripts/e2e/*` into a temporary harness, drives the real journey in Chromium, and afterwards refuses a run whose screenshots are missing or unreadable. | `npm run test:browser` |
+| `run-browser-test.mjs` | Keyless browser acceptance: clears the run's screenshot directory once, renders `scripts/e2e/*` into a temporary harness, drives the default smoke/deep journey in Chromium, and afterwards refuses a run whose screenshots are missing or unreadable. | `npm run test:browser` or `npm run test:browser -- --deep` |
 | `run-preview.mjs` | Live-model preview lane: renders `team-ui.preview.ts` into the harness. | `npm run preview` |
 | `run-ui-preview.mjs` | Keyless UI preview lane: renders `team-ui.ui-preview.ts` into the harness. | `npm run preview:ui` |
 | `audit-ui-parity.mjs` | Static design-language audit of the Team Client CSS/TSX against `docs/frontend-design/principles-and-language.md`; run after visible-UI changes and DSH upgrades. | `node scripts/audit-ui-parity.mjs` |
@@ -50,7 +51,7 @@ Run through `npm run check:*`; several are also part of `npm test` (see `start-a
 
 | File | Does | Consumer |
 | --- | --- | --- |
-| `e2e/` (support.ts + 10 `*.e2e.ts`) | The keyless journey scenarios — `team-journey`, `team-main-stream`, `team-multi-page`, `team-page-identity`, `team-project-owners`, `team-thread-ref-chip`, `team-bundle-toggle`, `team-environment-check`, `team-board-task-focus`, `team-settings-nav-icon`; `support.ts` carries the shared staging/boot plumbing and never touches the run's screenshots. | read and rendered by `run-browser-test.mjs` |
+| `e2e/` (`support.ts` + `*.e2e.ts` lanes) | Keyless browser journey scenarios (`support.ts` carries shared staging/boot plumbing without clearing run screenshots); the authoritative lane catalog lives in [`../docs/development/e2e-lanes.md`](../docs/development/e2e-lanes.md). | read and rendered by `run-browser-test.mjs` |
 | `team-ui.preview.ts` | Template for the live-preview lane. | read/rendered by `run-preview.mjs` |
 | `team-ui.ui-preview.ts` | Template for the keyless UI-preview lane. | read/rendered by `run-ui-preview.mjs` |
 
@@ -62,6 +63,7 @@ Run through `npm run check:*`; several are also part of `npm test` (see `start-a
 | `dsh-peers.mjs` (+ `.d.mts`) | The `@deepseek-ai/dsh-*` peer-range predicate: those ranges must reduce to exactly one DSH generation. | `check-public-baseline.mjs`, `packages/agent-team/tests/shipping.spec.ts` |
 | `public-baseline-statement.mjs` (+ `.d.mts`) | Parses the certified-baseline token from one public surface. | `check-public-baseline.mjs` (+ `public-baseline-statement.spec.ts`) |
 | `browser-evidence.mjs` (+ `.d.mts`) | Reads a finished browser run's screenshots and refuses missing, truncated, or empty-directory evidence, including a promised desktop or 390×844 viewport width with no screenshot. | `run-browser-test.mjs` (+ `browser-evidence.spec.ts`) |
+| `browser-runner.mjs` (+ `.d.mts`) | Parses runner CLI flags (`--list`, lane filters, vitest flags), resolves `LANE_ALIASES` and contracts from `docs/development/e2e-lanes.md`, and builds structured/stdout run summaries. | `run-browser-test.mjs` (+ `browser-runner.spec.ts`) |
 | `standard-decorators.ts` | Vite pre-transform plugin for standard (TC39) decorators before esbuild sees them. | `vitest.config.ts` |
 | `link-harness-packages.mjs` | Symlinks every sibling harness workspace package into `node_modules` so host tests resolve the on-disk layout a real profile install produces. | run manually for local host-test setup |
 | `isolate-dsh-home.setup.ts` | Vitest setup that gives each test file its own throwaway `DSH_HOME`. | `vitest.config.ts` setup files |

@@ -49,6 +49,16 @@ When deleting comments in bulk, a green test suite proves nothing about the chan
 
 Run the narrowest applicable check, then escalate for the changed surface. The exact workflow is in [`docs/development/start-and-checks.md`](docs/development/start-and-checks.md).
 
+### Test selection
+
+- **Host, Ledger, Remote, permissions, persistence, subscriptions, Worker state:** run targeted Vitest (`npx vitest run --project unit` or the relevant integration spec) first, then `npm test` and `npm run typecheck`.
+- **Client state machine, DOM interaction, error copy:** run the targeted `packages/client-agent-team/tests/*.client.spec.tsx` first.
+- **Slot, preset, bundle manifest, ordinary DSH restore, real keyboard/layout, multi-page:** run the matching targeted browser lane (`npm run test:browser -- <lane>`) listed in [`docs/development/e2e-lanes.md`](docs/development/e2e-lanes.md).
+- **Complete Team journey, broad shell/visual regression, or release:** add `--deep` (`npm run test:browser -- --deep`) to run the `team-journey-deep` profile; the default full run uses the shorter Team smoke.
+- **Cross-surface flow or `scripts/run-browser-test.mjs` / `scripts/e2e/support.ts`:** run unfiltered `npm run test:browser` (with `CHROME_PATH` when `/usr/bin/google-chrome` is absent, e.g. macOS).
+- Targeted lanes are development feedback; unfiltered `npm run test:browser` is the delivery gate for assembled-Web changes.
+- When Chrome, Harness, or another required environment is unavailable, report the exact unverified scope instead of claiming browser pass. Always report: changed surface, expected checks, checks actually run, and unrun checks with reasons.
+
 `npm run test:browser` is required for changes that can affect the assembled Web bundle, Client loading, slot takeover, Remote activation, or visible UI. It uses the adjacent Harness checkout and a temporary profile; it does not modify the Harness repository permanently.
 
 Release cadence is batched: between releases the operator daily-drives a locally linked build as a lightweight acceptance channel, so choose the narrowest applicable check per change instead of demanding full acceptance for every small fix. When asking the operator to preview or accept a change, point them at the dev profile (`dsh web --profile web-dev`); the default `web` profile stays on the published stable release. See "Profile 模式与发布节奏" in [`docs/development/environments-and-install.md`](docs/development/environments-and-install.md).
