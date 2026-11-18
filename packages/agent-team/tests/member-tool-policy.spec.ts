@@ -1661,7 +1661,8 @@ describe('profile extra tool-name grants', () => {
   })
 
   it('lists exact grant candidates outside activated baselines and protected controls', async () => {
-    const { ctx } = shared
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId } = shared
     testCleanups.push(ctx.tools.register(defineContentToolFixture({
       name: 'team_worker', description: 'not the Team switch', parameters: {}, execute: async () => [{ type: 'text', text: 'never' }],
     })))
@@ -1673,14 +1674,31 @@ describe('profile extra tool-name grants', () => {
     })))
     const scoped = await ctx.agents.create({ sessionId: SessionId('t30-manager-tool-scope') })
     testCleanups.push(() => scoped.dispose())
+    testCleanups.push(scoped.agent.ctx.tools.register(defineContentToolFixture({
+      name: 't30_ordinary_only', description: 'ordinary-only', parameters: {}, execute: async () => [{ type: 'text', text: 'never' }],
+    })))
     for (const name of MANAGER_TEAM_TOOLS) {
       testCleanups.push(scoped.agent.ctx.tools.register(defineContentToolFixture({
         name, description: 'manager-owned', parameters: {}, execute: async () => [{ type: 'text', text: 'never' }],
       })))
     }
+    const member = await addMember(ctx, workspaceId, 't30-member-scope')
+    testCleanups.push(liveAgent(ctx, member).ctx.tools.register(defineContentToolFixture({
+      name: 't30_member_scoped', description: 'member-scoped', parameters: {}, execute: async () => [{ type: 'text', text: 'ok' }],
+    })))
+    for (const name of ['team_task_create', 'team_task_get', 'team_task_list', 'team_task_update']) {
+      testCleanups.push(ctx.tools.register(defineContentToolFixture({
+        name, description: 'DSH shared board', parameters: {}, execute: async () => [{ type: 'text', text: 'never' }],
+      })))
+    }
     const catalog = ctx.agentTeam.toolCatalogForClient({})
     expect(catalog.names).toContain('t30_catalogued')
     expect(catalog.names).toContain('t30_not a grant name')
+    expect(catalog.names).toContain('t30_member_scoped')
+    expect(catalog.names).not.toContain('t30_ordinary_only')
+    for (const name of ['team_task_create', 'team_task_get', 'team_task_list', 'team_task_update']) {
+      expect(catalog.names).not.toContain(name)
+    }
     expect(catalog.names).not.toContain('ordinary_tool')
     expect(catalog.names).not.toContain('spare_tool')
     expect(catalog.names).not.toContain('team_worker')
