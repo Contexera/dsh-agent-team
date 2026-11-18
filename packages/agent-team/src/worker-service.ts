@@ -44,6 +44,7 @@ import { DEFAULT_WORKER_SANDBOX, WORKER_DIAGNOSTIC_MAX_CHARACTERS, WORKER_ENGINE
   WORKER_TASK_PREVIEW_MAX_CHARACTERS, type WorkerEngine } from './worker-settings.ts'
 import {
   TeamWorkerProvider,
+  WORKER_CLEANUP_DEADLINE_MS,
   WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC,
   WORKER_PROVIDER_NAMES,
   WorkerFailure,
@@ -208,13 +209,15 @@ function boundedSteerReason(reason: string): string {
   return text === '' ? 'the engine gave no reason' : truncateToCharacters(text, WORKER_STEER_REASON_MAX_CHARACTERS)
 }
 
+/** How long unload waits for starts, continuation admissions, and active steer calls before disposing published runs. */
+const WORKER_OPENING_DEADLINE_MS = 5_000
+
 /**
- * How long an unloading Host waits for an engine to report its ending before it
- * lets go. A run that outlasts it keeps its recorded start with no ending, which
- * the next read reports as unconfirmed rather than holding the Host open — and
- * the run is sealed so a late ending is never written after storage closes.
+ * How long unload waits for each ending before sealing its record. Native
+ * cleanup gets its full budget, plus one second for the timeout to become a
+ * durable `failed` ending instead of being sealed as an unconfirmed `running`.
  */
-const WORKER_SETTLE_DEADLINE_MS = 5_000
+const WORKER_SETTLE_DEADLINE_MS = WORKER_CLEANUP_DEADLINE_MS + 1_000
 
 /** How long one stop request waits for cleanup before it reports that the run is still stopping. */
 const WORKER_STOP_DEADLINE_MS = 10_000
@@ -1114,7 +1117,7 @@ export class WorkerRegistry {
       ...[...this.steeringByRequest.values()].map(pending => pending.outcome),
       ...this.steerCalls,
     ]
-    await within(Promise.allSettled(opening), WORKER_SETTLE_DEADLINE_MS)
+    await within(Promise.allSettled(opening), WORKER_OPENING_DEADLINE_MS)
     // A steer call that outlasted the wait is left unconfirmed: from here no
     // later outcome may begin a write before storage closes below.
     this.steerPersistenceClosed = true
