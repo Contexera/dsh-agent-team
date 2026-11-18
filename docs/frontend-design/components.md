@@ -139,13 +139,13 @@ The Team Remote owns each profile write. A read that started before the write ca
 
 The Client injects `configForms` — a shipped service every settings consumer uses — and constructs the controller once per Client. If the service is absent the group is not rendered at all, and the controller is disposed with the rest of the navigation services.
 
-The extra-tools component in `TeamSettingsSection.tsx` uses the controller in `extra-tool-grants.ts`. `toolCatalog` discovers global and live Agent-scoped registrations and excludes activated Member preset tools; it neither infers plugin origin nor represents a per-Member filtered snapshot. The copy distinguishes selection and Host registration from execution permission.
+The extra-tools component in `TeamSettingsSection.tsx` uses the controller in `extra-tool-grants.ts`. `toolCatalog` discovers global and live Member-scoped registrations, never ordinary Agent scopes, and excludes activated Member preset tools and DSH's tree-local task board; it neither infers plugin origin nor represents a step-admission snapshot. The copy names the feature as an execution grant and states that it neither installs tools nor enables built-in DSH capabilities.
 
 The settings namespace supplies the accepted list and revision. The controller separates committed names, the draft, list and catalog loading/errors, and save outcome; `TeamHumanIdentity` independently owns identity state.
 
 Names stay exact and case-sensitive. Search only narrows discovery. Selected names missing from the catalog stay selected and removable, and a catalog failure keeps the accepted selections available for revocation. An explicit clear writes `[]`; it never removes the field to inherit a lower layer. A failed accepted-list read blocks Save rather than being rendered as an empty list, and the group remains usable when the identity section cannot load. The selected count appears only after the saved list has been read; an unknown list is never stated as zero.
 
-While the catalog is still loading or has failed, the saved names fall back to a neutral list rather than the warning-edged one: the catalog's own loading or failure line already says what happened, and only a name that is no longer registered wears the warning edge.
+While the catalog is still loading or has failed, the saved names fall back to a neutral list. Once the catalog is ready, non-grantable saved names use the same tool list under one tertiary-text explanation, without a warning block or per-row badge.
 
 A version conflict reloads the latest committed list beside the preserved draft. Save waits for explicit review; Cancel and review are disabled until that reload succeeds. Cancel then adopts the latest list, never the stale one. Rejections and transport failures retain the draft and name their class. An unreadable success response cannot become a saved draft; it requires a new list read. A conflict lands focus on the conflict itself, then on the review control once the reload makes it usable; a reader who moved on keeps their place.
 

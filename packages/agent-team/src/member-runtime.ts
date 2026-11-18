@@ -95,9 +95,19 @@ export type MemberToolPolicyReader = () => MemberToolPolicySnapshot
 /** Team-owned tools and the shared directory control are never extra grants. */
 const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([...AGENT_TEAM_TOOL_NAMES, ...MANAGER_TOOL_NAMES, 'working_directory'])
 
+/** DSH's tree-local task board overlaps Team's ledger-owned Tasks and is not a Member grant surface. */
+const DSH_TASK_BOARD_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'team_task_create', 'team_task_get', 'team_task_list', 'team_task_update',
+])
+
 /** Whether one tool name is Team-owned or shared and cannot be reopened by a profile grant. */
 export function isReservedToolName(name: string): boolean {
   return RESERVED_TOOL_NAMES.has(name)
+}
+
+/** Whether the settings catalog may offer this registered name as an extra grant. */
+export function isExtraToolGrantCandidate(name: string): boolean {
+  return !isReservedToolName(name) && !DSH_TASK_BOARD_TOOL_NAMES.has(name)
 }
 
 /** Per-Member runtime state: every map here is keyed by Member and released together with that Member. */

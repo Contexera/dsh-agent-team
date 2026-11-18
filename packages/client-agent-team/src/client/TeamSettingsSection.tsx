@@ -375,9 +375,8 @@ function ExtraToolGrantsSettings(props: { t: TeamSettingsProps['t']; face: Extra
       </div>}
 
     {state.catalogStatus !== 'ready' || state.missing.length === 0 ? null
-      : <div className={`${css.selectionBlock} ${css.missingTools}`} data-extra-tool-missing>
-      <div className={css.missingHeading}>{t('extraToolsMissingTitle')}</div>
-      <p className={css.fieldHint}>{t('extraToolsMissingHint')}</p>
+      : <div className={css.unavailableTools} data-extra-tool-missing>
+      <p className={css.fieldHint}>{t('extraToolsMissingTitle')}</p>
       <ul className={css.toolList}>
         {state.missing.map(name => <li key={name}>
           <label className={css.toolChoice}>
@@ -388,7 +387,6 @@ function ExtraToolGrantsSettings(props: { t: TeamSettingsProps['t']; face: Extra
               onChange={() => { face.toggle(name) }}
             />
             <code className={css.toolName}>{name}</code>
-            <span className={css.missingBadge}>{t('extraToolsMissingBadge')}</span>
           </label>
         </li>)}
       </ul>

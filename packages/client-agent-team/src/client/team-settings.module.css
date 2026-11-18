@@ -519,9 +519,7 @@
   overflow-wrap: anywhere;
 }
 
-/* The fallback list and the unregistered list share one block anatomy; only the
- * unregistered one wears the warning edge, because the fallback is a normal
- * selection view rather than a failure. */
+/* The fallback list is a normal selection view, not a failure. */
 .selectionBlock {
   background: var(--dsw-alias-bg-layer-2);
   border-radius: var(--dsw-radius-md);
@@ -531,8 +529,10 @@
   padding: 10px 12px;
 }
 
-.missingTools {
-  border-inline-start: 3px solid var(--dsw-alias-state-warn-primary, var(--dsw-alias-border-l4));
+.unavailableTools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .missingHeading {
@@ -540,14 +540,6 @@
   font-size: 13px;
   font-weight: 500;
   line-height: 1.5;
-}
-
-.missingBadge {
-  color: var(--dsw-alias-state-warn-primary, var(--dsw-alias-label-tertiary));
-  font-size: 11px;
-  line-height: 1.4;
-  margin-inline-start: auto;
-  white-space: nowrap;
 }
 
 .conflict {
