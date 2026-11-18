@@ -86,9 +86,12 @@ it('drives the human inbox, offline recovery, consecutive messages, and keyboard
   await page.locator(taskEntryLineSelector(1)).locator('[data-team-count-badge]').waitFor()
   const unreadCapsule = await entryUnreadCapsule(page, taskEntryLineSelector(1))
   // Acknowledge Task #1 before measuring the Inbox queue so draining the two discussions empties '需要我'.
-  await activeScaffold.ctx.agentTeam.readThread({
-    requestId: 'm2-09-human-drain-task1' as never, workspaceId: inboxWorkspace.id, taskRef: task1Ref as never,
-  })
+  // Open it as a reader does: a Host read wakes no change subscriber, so only this Client's own read
+  // advances the badge; draining out of band would leave it on whatever total the last wake read.
+  await page.getByRole('button', { name: /^打开 Task #1/ }).click()
+  await page.getByRole('heading', { name: 'Task #1' }).waitFor()
+  await page.getByRole('button', { name: '返回项目' }).click()
+  await page.getByRole('heading', { name: '# delivery' }).waitFor()
   await page.getByRole('tab', { name: '主对话' }).click()
 
   // Human Inbox: a mention, or an Agent's ordinary reply on a followed Thread,
