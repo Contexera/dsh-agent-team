@@ -3,8 +3,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { SettingsDescribeValue, SettingsNamespaceView, SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
-import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
-import * as ToolStrReplaceEditor from '@deepseek-ai/dsh-tool-str-replace-editor'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import type { Page } from 'playwright'
 import {
   EXTRA_TOOL_SHOTS,
@@ -29,6 +28,12 @@ afterEach(async () => { await closeScenario() })
 const NAMESPACE = 'contexera-agent-team-host'
 const FIELD = 'extraToolGrants'
 const GROUP = '[data-extra-tool-grants]'
+const DSH_INTERNAL_TOOLS = [
+  'subagent', 'subagent_fork', 'list_subagent_models', 'list_agents', 'send_message', 'wait_agent',
+  'team_task_create', 'team_task_get', 'team_task_list', 'team_task_update',
+  'get_goal', 'update_goal', 'create_goal',
+  'ask_user_question', 'todo_write', 'plugin_manager', 'present',
+]
 
 type SettingsProvider = {
   describe(): readonly {
@@ -330,13 +335,16 @@ it('grants, revokes, and reconciles profile extra tools in the assembled Web sur
   await chooseMemberModel(page, createAgent)
   await createAgent.getByRole('button', { name: '创建 Agent' }).click()
   await page.getByText('catalog-baseline', { exact: true }).waitFor({ timeout: 20_000 })
-  let catalog = scaffold!.ctx.agentTeam.toolCatalogForClient({}).names
-  if (!catalog.includes('str_replace_editor')) await scaffold!.ctx.plugin(ToolStrReplaceEditor)
-  catalog = scaffold!.ctx.agentTeam.toolCatalogForClient({}).names
-  if (catalog.length < 2) {
-    await scaffold!.ctx.plugin(ToolFs)
-    catalog = scaffold!.ctx.agentTeam.toolCatalogForClient({}).names
+  for (const name of ['e2e_external_alpha', 'e2e_external_beta']) {
+    scaffold!.ctx.tools.register(defineContentToolFixture({
+      name,
+      description: 'external plugin fixture',
+      parameters: {},
+      execute: async () => [{ type: 'text', text: 'ok' }],
+    }))
   }
+  const catalog = scaffold!.ctx.agentTeam.toolCatalogForClient({}).names
+  for (const name of DSH_INTERNAL_TOOLS) expect(catalog).not.toContain(name)
   expect(catalog.length).toBeGreaterThanOrEqual(2)
   const first = catalog[0]!
   const second = catalog[1]!
@@ -348,8 +356,8 @@ it('grants, revokes, and reconciles profile extra tools in the assembled Web sur
   expect(await group.getByRole('checkbox', { name: 'bash', exact: true }).count()).toBe(0)
   expect(await group.getByRole('checkbox', { name: 'read', exact: true }).count()).toBe(0)
   expect(await group.getByRole('checkbox', { name: 'web_fetch', exact: true }).count()).toBe(0)
-  expect(await group.textContent()).toContain('仅注册不等于允许执行')
-  expect(await group.textContent()).toContain('勾选并保存')
+  expect(await group.textContent()).toContain('不安装插件')
+  expect(await group.textContent()).toContain('从下一轮生效')
 
   const search = group.getByLabel('搜索工具名')
   await search.fill(first)
@@ -403,7 +411,7 @@ it('grants, revokes, and reconciles profile extra tools in the assembled Web sur
   expect(scaffold!.ctx.agentTeam.status().operationCount).toBe(operationsBeforeSave)
   expect(scaffold!.ctx.agentTeam.config.worker.get()).toEqual(workerBeforeSave)
   expect((namespaceView().user as Record<string, unknown>)[FIELD]).toEqual([first])
-  await group.getByText('已保存。所选工具从下一轮起允许执行；未保留的选择同时撤销。').waitFor()
+  await group.getByText('已保存，从下一轮生效。').waitFor()
 
   await group.getByLabel('搜索工具名').fill('pr83-no-such-tool')
   await group.getByText('没有匹配的工具名。').waitFor()
@@ -414,7 +422,8 @@ it('grants, revokes, and reconciles profile extra tools in the assembled Web sur
   const missing = await openGrants(page)
   expect(await missing.group.locator('[data-extra-tool-missing]').textContent()).toContain('pr83_unregistered_tool')
   expect(await missing.group.locator('[data-extra-tool-missing]')
-    .evaluate(node => getComputedStyle(node).borderLeftWidth)).not.toBe('0px')
+    .evaluate(node => getComputedStyle(node).borderLeftWidth)).toBe('0px')
+  await page.screenshot({ path: join(EXTRA_TOOL_SHOTS, 'extra-tools-not-grantable.png') })
   await missing.group.getByRole('checkbox', { name: /pr83_unregistered_tool/ }).click()
   await missing.group.getByRole('button', { name: '保存', exact: true }).click()
   await expect.poll(() => grantedNames()).toEqual([first])
@@ -438,7 +447,7 @@ it('grants, revokes, and reconciles profile extra tools in the assembled Web sur
     await degraded.group.getByRole('checkbox', { name: first, exact: true }).click()
     await degraded.group.getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(() => grantedNames()).toEqual([])
-    await degraded.group.getByText('已保存。所选工具从下一轮起允许执行；未保留的选择同时撤销。').waitFor()
+    await degraded.group.getByText('已保存，从下一轮生效。').waitFor()
     await page.screenshot({ path: join(EXTRA_TOOL_SHOTS, 'extra-tools-identity-catalog-failure.png') })
   } finally {
     team.humanProfileForClient = originalProfile
@@ -488,7 +497,7 @@ it('grants, revokes, and reconciles profile extra tools in the assembled Web sur
   }
   await failed.group.getByRole('button', { name: '保存', exact: true }).click()
   await expect.poll(() => grantedNames()).toEqual([])
-  await failed.group.getByText('已保存。所选工具从下一轮起允许执行；未保留的选择同时撤销。').waitFor()
+  await failed.group.getByText('已保存，从下一轮生效。').waitFor()
   expect((namespaceView().user as Record<string, unknown>)[FIELD]).toEqual([])
 
   await page.setViewportSize({ width: 390, height: 844 })

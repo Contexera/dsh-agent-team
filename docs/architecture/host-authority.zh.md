@@ -374,13 +374,13 @@ Human 的显示名与头像引用存放在 Team Host row 自己的 Config。sett
 
 只有 Host row 有这条迁移路径：profile patch 用改名前的 id（`wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}`）覆盖其余五行之一的，会被跳过——没有 loader entry 认这个 id，Team 回落到该行的出厂值。手改过 Team preset 或 preset 注册表 `default` 的，升级后要重新应用一次。
 
-设置页由五个 Agent Team typed Remote 服务。`humanProfile` 提供名字、头像引用与版本脚注 facts，以及绑定本次 Host 实例和设置版本的写入令牌。`putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` 只收图片，与 attachments 共用 10 MB 上限。已删除的条目读取时抛错，Client 回退到首字母。`toolCatalog` 提供跨全局注册与 live Agent scope 注册的工具名发现视图。
+设置页由五个 Agent Team typed Remote 服务。`humanProfile` 提供名字、头像引用与版本脚注 facts，以及绑定本次 Host 实例和设置版本的写入令牌。`putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` 只收图片，与 attachments 共用 10 MB 上限。已删除的条目读取时抛错，Client 回退到首字母。`toolCatalog` 提供 Host 全局与 live Member scope 注册的工具名发现视图，不读取普通 Agent scope。
 
 改名、更换和移除都要求令牌。旧窗口或重连到新 Host 的窗口须先重读。头像读取只接受存储生成的引用，且只读取头像目录内的普通文件。图片与附件共用 10 MB 上传上限。
 
 Host 先保存完整图片，再提交替换引用。移除写入显式空值，防止继承层或旧配置迁移恢复头像。被替换或移除的图片仍供共用存储的其他 profile 读取。只可清理确认从未提交的新文件；设置写入结果不确定时保留图片。
 
-许可编辑器经公开 settings Remote 读写 Team Host row 的 `extraToolGrants`，携带其 revision，并且只写该字段的一条 `set` operation。它从不使用 `unset`，所以显式 `[]` 是真正撤销，而不是回落到下层。名单读取失败时不能按空名单保存。目录与 Human 身份读取互相独立：目录失败仍可移除已读取的名称，身份失败也不会收起许可组。
+许可编辑器经公开 settings Remote 读写 Team Host row 的 `extraToolGrants`，携带其 revision，并且只写该字段的一条 `set` operation。它为外部插件工具解除执行限制，不挂载插件或开启 DSH 内置能力；DSH 树内共享任务板的四个工具不作候选。它从不使用 `unset`，所以显式 `[]` 是真正撤销，而不是回落到下层。名单读取失败时不能按空名单保存。目录与 Human 身份读取互相独立：目录失败仍可移除已读取的名称，身份失败也不会收起许可组。
 
 settings 表单与运行时归一化共用 `member-tool-grants.ts` 的结构 schema：由保持确切拼写的非空字符串组成的数组。Team 不另加名称语法、长度上限或许可数量配额；消费者合并重复名称，目录不列保留名。schema 不含 transform 回调，因此 Host 重建可编辑 schema、再序列化给浏览器后仍保留校验，包括缺省与空名单。
 

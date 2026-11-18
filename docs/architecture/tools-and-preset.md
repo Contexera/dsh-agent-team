@@ -12,7 +12,9 @@ The filesystem row states `applyPatch: false` rather than inheriting the Host de
 
 Every Member starts restricted to the tool definitions contributed by its selected preset, plus the explicitly shared `working_directory` tool. `capabilities.tools.allow` still only narrows this baseline.
 
-A profile-wide `extraToolGrants` list on the Team Host row grants exact, case-sensitive registered Host tool names, including a baseline name omitted by the Member allow-list. It defaults to empty and applies to every Team Member in that profile. Team-owned tools and `working_directory` are reserved; a grant cannot name them. `team_worker` is declared only while the Host Worker switch is on, so a grant cannot turn it on; the nine manager tools are never candidates. A grant is a name, never a plugin origin, definition object, or registration instance.
+A profile-wide `extraToolGrants` list on the Team Host row grants exact, case-sensitive registered Host tool names, including a baseline name omitted by the Member allow-list. It defaults to empty and applies to every Team Member in that profile. This is an execution grant for external plugin tools already reachable by Members: it neither mounts a plugin, changes the Member preset, nor enables built-in DSH capabilities.
+
+Team-owned tools and `working_directory` are reserved; a grant cannot name them. `team_worker` is declared only while the Host Worker switch is on, so a grant cannot turn it on; the nine manager tools are never candidates. A grant is a name, never a plugin origin, definition object, or registration instance.
 
 The Host reads the grants synchronously at each Session `turn/start`, before the first tool resolution, and freezes them for that turn. A later-saved edit reaches the next turn even when consecutive turns never pass through idle, and creation, resume, and generation replacement use the same policy path. The restriction materializes the names known at that boundary.
 
@@ -28,7 +30,9 @@ The same switch also governs the Worker paragraph of the owner guidance section,
 
 The Host captures the preset definitions before Agent publication and guards direct and nested execution. If a grant-bearing policy cannot be installed, the Host tightens to the same Member baseline with no extra grants rather than restoring the previous grant-bearing restriction. If that baseline also cannot be established, the pre-step gate refuses the turn before a model request and the next normal turn retries. Replacing an allowed definition is refused at execution rather than at assembly. These checks apply to the exact Member, not ordinary Agents or delegated child scopes.
 
-The settings catalog discovers tool names from the Host's global registry and every live Agent scope. It does not infer plugin origin, clone a plugin, or claim to be the exact filtered set for a particular Member or turn. Names supplied by activated Member presets, Team-owned names, `working_directory`, and `team_worker` are not offered. An unregistered saved name remains selected and removable. Ordinary Sessions and other profiles receive no grant.
+The settings catalog discovers tool names from the Host's global registry and live Member scopes, never from ordinary Agent scopes. It does not infer plugin origin, clone a plugin, or claim to be the exact step-admission set for a particular Member or turn. Names supplied by activated Member presets, Team-owned names, `working_directory`, and `team_worker` are not offered. DSH's four tree-local shared-task tools are also excluded because that board overlaps Team's ledger-owned Tasks.
+
+A saved name that is no longer grantable remains selected and removable. Ordinary Sessions and other profiles receive no grant.
 
 Team mode does not filter prompts injected by other official or custom plugins. Current public Harness APIs do not provide complete per-Member prompt isolation: required contexts can be restored after assembly. In particular, experimental Team's `team:policy` and required `team:identity` remain visible; they do not block activation or conversation.
 

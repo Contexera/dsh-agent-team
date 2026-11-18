@@ -787,8 +787,8 @@ export interface AgentTeamEnvironmentResult {
 }
 
 /**
- * Discovery read of global and Agent-scoped tool registrations. It names tools
- * the profile could grant; it is not a per-Member filtered snapshot and never
+ * Discovery read of global and live Member-scoped tool registrations. It names
+ * tools the profile could grant; it is not a step-admission snapshot and never
  * claims which plugin registered a name.
  */
 export interface AgentTeamToolCatalogRequest {

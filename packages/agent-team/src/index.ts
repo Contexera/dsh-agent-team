@@ -54,7 +54,7 @@ export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './s
 export { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
 import { carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY, type TeamContextProjectionState } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
-import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, isReservedToolName, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, isExtraToolGrantCandidate, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import {
   EXTRA_TOOL_GRANTS_FIELD, extraToolGrantsFrom, sanitizeExtraToolGrants,
 } from './member-tool-grants.ts'
@@ -2661,20 +2661,20 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Foreign global and Agent-scoped tool names a Human could grant. Activated
-   * preset baselines and Team-owned names are absent; discovery is not a
-   * per-Member admission snapshot and cannot reopen protected controls.
+   * Foreign global and live Member-scoped tool names a Human could grant.
+   * Activated preset baselines and protected names are absent; discovery is
+   * not a step-admission snapshot and cannot reopen protected controls.
    */
   @Remote('toolCatalog')
   toolCatalogForClient(_request: AgentTeamToolCatalogRequest): AgentTeamToolCatalogResult {
-    const scoped = this.ctx.agents.list().flatMap((agent) => {
-      const scope = scopeOf(agent.ctx)
+    const scoped = [...this.handles.values()].flatMap((handle) => {
+      const scope = scopeOf(handle.agent.ctx)
       return scope === undefined ? [] : this.ctx.tools.schemas(scope)
     })
     const baseline = this.memberRuntime.baselineToolNames()
     const names = [...new Set([...this.ctx.tools.schemas(), ...scoped]
       .map(tool => tool.name)
-      .filter(name => !baseline.has(name) && !isReservedToolName(name)
+      .filter(name => !baseline.has(name) && isExtraToolGrantCandidate(name)
         && extraToolGrantsFrom([name]) !== undefined))]
       .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
     return Object.freeze({ names: Object.freeze(names) })

@@ -490,3 +490,29 @@ Typert 产物零 diff；生成的 facades 多吸收一个本 bundle 不 import �
 证据（认证树）：`npm run typecheck`、`npm test`（2683 通过、1 跳过，208 文件）、`npm run lint`（108 warning、0 error）、`npm run build`、`npm pack --dry-run`（458 文件）、`check:artifact`（133 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（28 条旅程）。
 
 本沙箱没有 `corepack`，lint 直接跑脚本钉住的 oxlint `1.76.0`，读数与脚本一致。
+
+### DSH 0.2.2-rc.4
+
+DSH `0.2.2-rc.4` 在同一条 peer 线上认证通过，manifest 不变。候选版本落在 `>=0.2.2-rc.2 <0.2.3` 之内，因此按 §4 就地记录基线、不移动 peer，所有版本点仍写区间的下界。
+
+本轮不涉及 Team 发版：Agent Team `0.2.8` 已经声明这条区间，`next` dist-tag 指的就是它；按 §2.4，在 DSH 自己的 `latest` 还是 `0.2.2-rc.1` 期间我们的 `latest` 停在 `0.2.7`。
+
+tag `3f321d32bf`（2026-11-17）相对 `dsh-v0.2.2-rc.3` 改了 395 个文件、8 笔提交，其中 380 个只是 manifest 的版本行——本 bundle 消费的接口基本没动：
+
+- `LLM_FAILURE_CODES` 新增 `CONTENT_REFUSED`，取代适配器过去对 `refusal` 停止原因抛出的 `MALFORMED_RESPONSE`；`llm-deepseek` 现在会先把已计费的 usage 报出来再抛它。本 bundle 只把 `RATE_LIMIT`、`TRANSPORT`、`TIMEOUT` 与 429/503 归为可恢复，所以新码和旧码一样留在人工处理：内容拒绝绝不会被自动重试。
+- 桌面端 LiveShare 的 tunnel worker 改为在宿主 Electron 的 Node 模式下启动，连同它的凭据时限与 tunnel worker 测试。
+- 其余是这个拒绝码的新升级指南，以及随之新增的 V4 Session 快照 fixture。格式仍是 V4。
+
+§3.6 未被重新触发：`packages/session` 下除 manifest 版本行外无改动，没有新增或改名任何消息来源类型，本 bundle 挂载的每一条 preset 行也未被触碰。
+
+本 bundle 组合的 Client 面一个文件都没变，Typert 产物同样零 diff：生成的 facades 没有多吸收上游包，Harness 映射保持上一轮的 584 条。
+
+证据（认证树 `59ac598`，对候选宿主）：`npm run typecheck`、`npm test`（2905 通过、1 跳过，222 文件）、`npm run lint`（74 warning、0 error）、`npm run build`、`npm pack --dry-run`（499 文件）。
+
+另有 `check:artifact`（144 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（21 条旅程中 20 条通过）。
+
+未通过的那条是 `team-inbox-and-recovery` 的收件箱徽标场景：在已认证的 `0.2.2-rc.2` 宿主上用同一棵树跑，失败完全相同——宿主报未读为零，侧栏仍保留 1。这是 `master` 上既有的 Client 投影缺陷，不是本轮引入的，也不是宿主不兼容；在修好之前它会挡住下一次 Team 发版，但不影响本条基线。
+
+本沙箱没有 `corepack`，lint 直接跑脚本钉住的 oxlint `1.76.0`，读数与脚本一致。
+
+§3.5 只解析出一代 DSH：空目录里从 registry 装已发布的 `0.2.8`，共 285 个包，其中 102 个 `@deepseek-ai/dsh-*` 全部落在 `0.2.2-rc.4`，没有旧线残留，也没有 peer 冲突。
