@@ -9,6 +9,10 @@ Thread passive changes merge into current facts; the durable read pointer advanc
 
 Once an Agent or Project edit commits, the dialog closes. Until the list refresh succeeds, a failed read reports that the edit is already saved and offers to refresh the list. The Project and Member list results can succeed independently, and a superseded read cannot change the list or its error.
 
+The Inbox badge refreshes from exactly two sources: a durable read this Client completed itself, and a shared change wake. A Host-side read advances only the reader's private watermark and wakes nobody — `team/thread-read` carries an empty change scope by design, because no projection another participant can see moves.
+
+That lag is notification-only. An Inbox page reads fresh on open and a Thread reads when it mounts, so either face shows the Host's current picture. Do not poll the badge, and do not broadcast the read wake: every participant's projection would refetch for nothing. The seam for a future fix is one wake scoped to the reading actor, and it stays unbuilt until multi-window reading becomes a real need.
+
 ## Copy and localization
 All visible copy comes from structurally matching zh/en locale keys, whose types derive from zh. Parameter conventions are `{count}`, `{ids}`, `{kind}`, `{number}`, `{actor}`, `{direction}`, and `{message}`. Error copy follows the Host: a refusal with a known remedy renders through locale-key copy (`staleRevision` for a Thread that moved, `extraToolsConflict` for a settings revision conflict).
 
