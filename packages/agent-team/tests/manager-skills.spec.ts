@@ -3,10 +3,11 @@ import { join, sep } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { createUserMessage, type LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { MANAGER_BUNDLED_SKILLS_DIRECTORY, ManagerSessionRuntime } from '../src/manager-session.ts'
 import type { ManagerSessionPointer, ManagerSessionStoreLike } from '../src/manager-session-store.ts'
-import { realHarness, requestId } from './helpers/member-harness.ts'
+import { realHarness, requestId, ScriptedAdapter, textResponse, toolCallResponse, waitFor } from './helpers/member-harness.ts'
 import { skillRegistryFor } from './helpers/team-host-fixture.ts'
 
 
@@ -34,8 +35,8 @@ interface ManagerFixture {
 }
 
 /** One manager Session whose two skill roots are directories the test controls, so precedence and discovery are provable. */
-async function managerFixture(options: { bundledRoot?: string } = {}): Promise<ManagerFixture> {
-  const { ctx, root, workspaceId, checkout } = await realHarness()
+async function managerFixture(options: { bundledRoot?: string; adapter?: LlmAdapter } = {}): Promise<ManagerFixture> {
+  const { ctx, root, workspaceId, checkout } = await realHarness(options.adapter)
   const bundledRoot = options.bundledRoot ?? join(root, 'bundled-manager-skills')
   const privateRoot = join(root, 'manager-private')
   if (options.bundledRoot === undefined) {
@@ -65,6 +66,22 @@ async function catalogNames(ctx: Context, agent: Agent): Promise<readonly string
   return skills.map(skill => skill.name).sort()
 }
 
+function waitForIdle(ctx: Context, agent: Agent): Promise<void> {
+  return new Promise(resolve => {
+    const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
+      if (subject !== agent || status !== 'idle') return
+      dispose()
+      resolve()
+    })
+  })
+}
+
+async function runTurn(ctx: Context, agent: Agent, text: string): Promise<void> {
+  const idle = waitForIdle(ctx, agent)
+  agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
+  await idle
+}
+
 describe('Team manager skill discovery', () => {
   it('resolves the shipped manager skills beside the built module, not the Member core skills', async () => {
     // The production default is what the Host passes; a wrong relative path
@@ -74,13 +91,13 @@ describe('Team manager skill discovery', () => {
     expect(await readdir(MANAGER_BUNDLED_SKILLS_DIRECTORY)).toContain('README.md')
   })
 
-  it('ships the two guide skills in the bundled root and discovers both', async () => {
+  it('ships the six guide skills in the bundled root and discovers all', async () => {
     // The gate reads the same directories statically; this proves the manager's
     // own provider loads them from the root the Host passes, so a rename or a
     // dropped SKILL.md cannot ship as a silent empty catalog.
     const shipped = (await readdir(MANAGER_BUNDLED_SKILLS_DIRECTORY, { withFileTypes: true }))
       .filter(entry => entry.isDirectory()).map(entry => entry.name).sort()
-    expect(shipped).toEqual(['team-management-guide', 'team-operations'])
+    expect(shipped).toEqual(['manager-domain-model', 'manager-memory', 'manager-session-evidence', 'team-event-loops', 'team-management-guide', 'team-operations'])
     for (const name of shipped) {
       // A Windows checkout can hand the file back with CRLF; the Harness
       // frontmatter reader tolerates it, so the shipped shape is asserted on
@@ -89,7 +106,48 @@ describe('Team manager skill discovery', () => {
       expect(text.startsWith(`---\nname: ${name}\n`)).toBe(true)
     }
     const fixture = await managerFixture({ bundledRoot: MANAGER_BUNDLED_SKILLS_DIRECTORY })
-    expect(await catalogNames(fixture.ctx, fixture.agent)).toEqual(['team-management-guide', 'team-operations'])
+    expect(await catalogNames(fixture.ctx, fixture.agent))
+      .toEqual(['manager-domain-model', 'manager-memory', 'manager-session-evidence', 'team-event-loops', 'team-management-guide', 'team-operations'])
+  })
+
+  it('puts the manager catalog and skill tool in the first model request and loads a body later', async () => {
+    // The catalog test above reads the registry; this reads the actual
+    // GenerateOptions the manager's turn sends, so a provider that never
+    // reaches the model prompt cannot pass as a working catalog.
+    const adapter = new ScriptedAdapter()
+    adapter.enqueue(textResponse('Ready.'))
+    // The Host path, not a hand-built runtime: this is the manager Session the
+    // plugin actually registers, with the shipped skill root the Host passes.
+    const { ctx } = await realHarness(adapter)
+    const opened = await ctx.agentTeam.openManagerSession({})
+    if (opened.status !== 'ready') throw new Error(`expected a ready manager Session, received '${opened.status}'`)
+    const agent = ctx.agents.get(opened.sessionId)
+    if (agent === undefined) throw new Error('expected the manager Agent to be registered')
+    await runTurn(ctx, agent, 'What can you do?')
+    expect(adapter.requests).toHaveLength(1)
+    expect(adapter.requests[0]?.tools?.map(tool => tool.name)).toContain('skill')
+    const first = JSON.stringify(adapter.requests[0]?.messages)
+    expect(first).toContain('<available_skills>')
+    for (const name of ['manager-domain-model', 'manager-memory', 'manager-session-evidence', 'team-event-loops', 'team-management-guide', 'team-operations']) {
+      expect(first).toContain(name)
+    }
+    // The Member core skills stay out of the manager's prompt, not merely out
+    // of its registry.
+    for (const name of ['member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model']) {
+      expect(first).not.toContain(name)
+    }
+
+    // The model itself calls `skill`, and the loaded body reaches the request
+    // after the tool result: that is what proves the tool is callable in this
+    // preset rather than merely listed. A `/name` invocation would only prove
+    // the user path, which the Host expands before the model sees it.
+    adapter.enqueue(toolCallResponse('call-manager-skill', 'skill', { name: 'team-management-guide' }))
+    adapter.enqueue(textResponse('Guide loaded.'))
+    await runTurn(ctx, agent, 'Load the management guide.')
+    expect(adapter.requests).toHaveLength(3)
+    const loadedRequest = JSON.stringify(adapter.requests[2]?.messages)
+    expect(loadedRequest).toContain('<skill_content name=\\"team-management-guide\\">')
+    expect(loadedRequest).toContain('## Diagnose before you design')
   })
 
   it('loads the bundled manager skills and its own private directory, and nothing else', async () => {
@@ -148,5 +206,43 @@ describe('Team manager skill discovery', () => {
     expect(memberCatalog).toEqual(['member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
     expect(memberCatalog).not.toContain('manager-only')
     expect(memberCatalog).not.toContain('shared-name')
+  })
+
+  it('keeps the shipped catalog and skill tool callable across restart beside a separate Host preset registry', async () => {
+    const adapter = new ScriptedAdapter()
+    const first = await realHarness(adapter, 'jsonl', undefined, false, undefined, 'sqlite', { isolatedPresetRealm: true })
+    const opened = await first.ctx.agentTeam.openManagerSession({})
+    if (opened.status !== 'ready') throw new Error(`expected a ready manager Session, received '${opened.status}'`)
+
+    const verify = async (ctx: Context, agent: Agent, callId: string): Promise<void> => {
+      const registry = ctx.agentPresets.serviceFor(agent, 'skills')
+      if (registry === undefined) throw new Error('the manager preset has no isolated skill registry')
+      expect(registry).not.toBe(ctx.skills)
+      const names = (await registry.list({ scope: agent as never })).map(skill => skill.name).sort()
+      expect(names).toEqual(['manager-domain-model', 'manager-memory', 'manager-session-evidence', 'team-event-loops', 'team-management-guide', 'team-operations'])
+
+      adapter.enqueue(textResponse('Ready.'))
+      await runTurn(ctx, agent, 'What can you do?')
+      const catalogRequest = JSON.stringify(adapter.requests.at(-1)?.messages)
+      expect(catalogRequest).toContain('<available_skills>')
+      expect(catalogRequest).toContain('team-event-loops')
+
+      adapter.enqueue(toolCallResponse(callId, 'skill', { name: 'team-event-loops' }))
+      adapter.enqueue(textResponse('Loaded.'))
+      await runTurn(ctx, agent, 'Load the event loop guide.')
+      expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain('<skill_content name=\\"team-event-loops\\">')
+    }
+
+    const fresh = first.ctx.agents.get(opened.sessionId)
+    if (fresh === undefined) throw new Error('the fresh manager Session has no live Agent')
+    await verify(first.ctx, fresh, 'call-manager-fresh')
+    await first.teamFiber.dispose()
+
+    const second = await realHarness(adapter, 'jsonl', { root: first.root }, false, undefined, 'sqlite', { isolatedPresetRealm: true })
+    // A boot that returned is not yet a resumed manager: Host startup restores
+    // the manager Session after readiness, so wait for that deferred restore
+    // instead of reading the registry once.
+    const resumed = await waitFor(() => second.ctx.agents.get(opened.sessionId), 20_000)
+    await verify(second.ctx, resumed, 'call-manager-resumed')
   })
 })

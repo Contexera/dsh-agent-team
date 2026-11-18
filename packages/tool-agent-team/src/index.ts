@@ -14,6 +14,9 @@ import type {
   AgentTeamReminderSchedule,
   AgentTeamMemberId,
   AgentTeamModelSelection,
+  AgentTeamManagerSessionEvidenceFailureKind,
+  AgentTeamManagerSessionEvidenceLocator,
+  AgentTeamManagerSessionEvidenceState,
   AgentTeamMemberCapabilities,
   AgentTeamOwnedProject,
   AgentTeamRequestId,
@@ -1629,6 +1632,35 @@ function managerStandingText(member: { readonly availability: string; readonly p
 }
 
 /**
+ * One capability warning in the model's words. The runtime drops a name it does
+ * not know instead of failing the write, so the warning is the only fact that
+ * tells the manager its stored list is narrower than it reads — and the names
+ * the Member can actually hold are the only way to correct it, because no
+ * manager tool enumerates them. Bounded here: the digest is a whole surface.
+ */
+function managerCapabilityWarningText(warning: { readonly name: string; readonly knownNames?: readonly string[] | undefined }): string {
+  const known = warning.knownNames ?? []
+  const digest = known.length === 0 ? '' : ` — names it can hold: ${known.slice(0, 24).join(', ')}${known.length > 24 ? ', …' : ''}`
+  return `'${warning.name}' is not a name this Member can hold, so the runtime ignores it${digest}`
+}
+
+/**
+ * One Member's capability standing as a row renders it: a pending state means
+ * the live surface is behind the stored configuration, and a warning means the
+ * stored list is ahead of what the Member can actually hold. Both are silent
+ * divergences the manager would otherwise read as a clean apply.
+ */
+function managerCapabilityParts(member: {
+  readonly capabilityState: string
+  readonly capabilityWarnings?: readonly { readonly name: string; readonly knownNames?: readonly string[] | undefined }[] | undefined
+}): string[] {
+  const parts: string[] = []
+  if (member.capabilityState !== 'applied') parts.push(`capabilities ${member.capabilityState}`)
+  for (const warning of member.capabilityWarnings ?? []) parts.push(`capability warning: ${managerCapabilityWarningText(warning)}`)
+  return parts
+}
+
+/**
  * The manager overview's structured answer. A Project's `state` is kept as a
  * fact rather than pruned: every entry the Host emits is already active, since
  * an archived Project is invisible to any projection.
@@ -1661,6 +1693,9 @@ const MANAGER_OVERVIEW_SCHEMA = { type: 'object', additionalProperties: false, p
       location: { type: 'object', additionalProperties: false, properties: { kind: { type: 'string', required: true }, path: { type: 'string', required: true } } },
       sessionId: { type: 'string' }, source: { type: 'string' }, occurredAt: { type: 'string' },
     } },
+    model: { type: 'object', additionalProperties: false, properties: {
+      provider: { type: 'string', required: true }, model: { type: 'string', required: true }, reasoningEffort: { type: 'string' },
+    } },
     capabilityState: { type: 'string', required: true },
     capabilityWarnings: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
       name: { type: 'string', required: true }, knownNames: { type: 'array', items: { type: 'string' } },
@@ -1679,14 +1714,57 @@ const MANAGER_OVERVIEW_SCHEMA = { type: 'object', additionalProperties: false, p
   } },
   member: { type: 'object', additionalProperties: false, properties: {
     memberRef: { type: 'string', required: true }, handle: { type: 'string', required: true },
+    description: { type: 'string', required: true },
     privateMemoryPath: { type: 'string', required: true },
     owns: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
       projectRef: { type: 'string', required: true }, name: { type: 'string', required: true },
       description: { type: 'string', required: true }, state: { type: 'string', required: true },
       responsibility: { type: 'string' },
     } } },
+    sessionEvidence: { type: 'object', additionalProperties: false, required: true, properties: {
+      sessionId: { type: 'string', required: true },
+      state: { type: 'string', required: true, enum: ['stored', 'pending', 'missing', 'unreadable'] },
+      location: { type: 'object', additionalProperties: false, properties: {
+        kind: { type: 'string', required: true }, path: { type: 'string', required: true },
+      } },
+      reader: { type: 'object', additionalProperties: false, required: true, properties: {
+        script: { type: 'string', required: true }, anchor: { type: 'string' },
+      } },
+      failure: { type: 'object', additionalProperties: false, properties: {
+        kind: { type: 'string', required: true }, detail: { type: 'string', required: true },
+        location: { type: 'object', additionalProperties: false, properties: {
+          kind: { type: 'string', required: true }, path: { type: 'string', required: true },
+        } },
+      } },
+    } },
   } },
 } } as const
+
+/** The Session locator the member detail renders; mirrors the schema. */
+interface ManagerSessionLocatorView {
+  readonly sessionId: string
+  readonly state: 'stored' | 'pending' | 'missing' | 'unreadable'
+  readonly location?: { readonly kind: string; readonly path: string }
+  readonly reader: { readonly script: string; readonly anchor?: string }
+  readonly failure?: { readonly kind: string; readonly detail: string; readonly location?: { readonly kind: string; readonly path: string } }
+}
+
+/**
+ * The Session locator lines a memberRef read adds. The locator is where the
+ * evidence is, not the evidence: the manager runs the shipped reader for a
+ * bounded index and window, and never opens the log path by hand.
+ */
+function managerSessionLocatorLines(locator: ManagerSessionLocatorView): string[] {
+  const lines = [`Session evidence: session ${locator.sessionId} · ${locator.state}`]
+  if (locator.location !== undefined) lines.push(`Stored log: ${locator.location.kind} · ${locator.location.path} (backend-resolved provenance; never open it directly)`)
+  if (locator.state === 'missing') lines.push('No durable log yet: the Session may be live and not flushed, so this is not evidence that the Member did no work.')
+  if (locator.state === 'pending') lines.push('The Session exists but has no materialized log yet.')
+  if (locator.failure !== undefined) {
+    lines.push(`Unreadable: ${locator.failure.kind} — ${locator.failure.detail}${locator.failure.location === undefined ? '' : ` (${locator.failure.location.kind} · ${locator.failure.location.path})`}`)
+  }
+  lines.push(`Reader: node ${locator.reader.script}${locator.reader.anchor === undefined ? '' : ` --anchor ${locator.reader.anchor}`} — load the manager-session-evidence skill for the bounded index and window commands.`)
+  return lines
+}
 
 /**
  * The Team manager's read of the whole Team. It is not `team_view` for the
@@ -1698,12 +1776,12 @@ const MANAGER_OVERVIEW_SCHEMA = { type: 'object', additionalProperties: false, p
  */
 const teamOverview = defineTool({
   name: 'team_overview',
-  description: "Read the whole Agent Team as the manager: every Workspace in the Host directory with its checkout path, every Project with its shared goal, its owners and what each answers for, its live subscription counts and board summary, and every Member with where it participates, how it runs, and what it owns. Read-only: no message bodies, no Thread facts, no credentials, no private file contents. Narrow with workspaceId, projectRef, or memberRef (a memberRef read adds that Member's actual private directory and nothing beyond it). The same handle in two Workspaces is two Members, so address one by its memberRef. An owner with no recorded responsibility reads `unspecified`, a Project with only the Human as owner is a fact rather than a fault, and a long-standing Member with no owner relation is reported the same way. Each collection is bounded by `limit` and a cut collection says so through `truncated`, so a large Team is paged by scope instead of silently shortened. An empty answer means the Team is empty; a directory that could not be read refuses instead. Full Thread and Task detail stays team_thread read and team_task board; creating a Member, a Project, or an owner grant rides member_create, project_create and project_owner.",
+  description: "Read the whole Agent Team as the manager: every Workspace in the Host directory with its checkout path, every Project with its shared goal, its owners and what each answers for, its live subscription counts and board summary, and every Member with its standing, where it participates, which model route it is configured to run, how it runs, what its capability configuration mounted, and what it owns. Read-only: no message bodies, no Thread facts, no credentials, no private file contents. Narrow with workspaceId, projectRef, or memberRef (a memberRef read adds that Member's full standing, its actual private directory, and the locator for its current Session — the Session id, the backend-resolved stored-log location, and the shipped read-only reader that inspects it — and nothing beyond them). The same handle in two Workspaces is two Members, so address one by its memberRef. An owner with no recorded responsibility reads `unspecified`, a Project with only the Human as owner is a fact rather than a fault, and a long-standing Member with no owner relation is reported the same way. A capability warning means the stored configuration named a tool this Member cannot hold: the write succeeded and the stored entry stays, but the runtime ignores it, so the Member runs narrower than the list reads, and the warning names the tools it can hold. Each collection is bounded by `limit` and a cut collection says so through `truncated`, so a large Team is paged by scope instead of silently shortened. An empty answer means the Team is empty; a directory that could not be read refuses instead. Full Thread and Task detail stays team_thread read and team_task board; creating a Member, a Project, or an owner grant rides member_create, project_create and project_owner.",
   parameters: {
     workspaceId: { type: 'string', description: "Narrow to one Workspace id exactly as listed in the overview. An unknown id is refused rather than answered as empty." },
     projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves; an unknown ref is refused rather than answered as empty." },
-    memberRef: { type: 'string', description: "Full branded Member ref exactly as returned by Team tools, including the 'member:' prefix. Reading one adds its private directory path and its owned Projects." },
-    limit: { type: 'number' },
+    memberRef: { type: 'string', description: "Full branded Member ref exactly as returned by Team tools, including the 'member:' prefix. Reading one adds its full standing, its private directory path, its owned Projects, and the locator for its current Session." },
+    limit: { type: 'number', description: 'Maximum entries per collection — Workspaces, Projects and Members are each bounded separately — as an integer from 1 to 100; the default is 50. A collection the bound cuts is reported in `truncated`, so raise this or narrow the scope instead of assuming the Team is that small.' },
   },
   output: { schema: MANAGER_OVERVIEW_SCHEMA,
     render: (_args, value) => {
@@ -1723,14 +1801,30 @@ const teamOverview = defineTool({
       }))
       lines.push('', 'Members')
       if (value.members.length === 0) lines.push('No Members.')
-      else lines.push(...value.members.map(member => `${member.memberRef} · @${member.handle} · ${managerStandingText(member)} · Workspaces ${member.workspaceIds.join(', ') || 'none'}${member.owns.length === 0 ? '' : ` · owns ${member.owns.map(owned => `${owned.projectRef}${managerResponsibilityText(owned.responsibility)}`).join(', ')}`}`))
+      else lines.push(...value.members.map(member => {
+        // The standing is what the manager wrote when it created or edited the
+        // Member, so it is the one fact that lets the manager check its own
+        // design instead of guessing what each Member is for.
+        const standing = member.description === '' ? '' : ` — ${boundedSubject(member.description)}`
+        const capability = managerCapabilityParts(member)
+        // The route is a design decision the manager made or inherited, so it
+        // reads back beside the runtime state instead of only in the editor. It
+        // is the stored selection: a failed live apply leaves the running route
+        // behind it, which is why the row names it as configured.
+        const model = member.model === undefined
+          ? 'configured model: the deployment default'
+          : `configured model: ${member.model.provider}/${member.model.model}${member.model.reasoningEffort === undefined ? '' : ` · effort ${member.model.reasoningEffort}`}`
+        return `${member.memberRef} · @${member.handle}${standing} · ${managerStandingText(member)} · ${model}${capability.length === 0 ? '' : ` · ${capability.join(' · ')}`} · Workspaces ${member.workspaceIds.join(', ') || 'none'}${member.owns.length === 0 ? '' : ` · owns ${member.owns.map(owned => `${owned.projectRef}${managerResponsibilityText(owned.responsibility)}`).join(', ')}`}`
+      }))
       lines.push('', `Switches — Worker delegation ${value.switches.worker ? 'on' : 'off'}`)
       const cut = [value.truncated.workspaces ? 'Workspaces' : '', value.truncated.projects ? 'Projects' : '', value.truncated.members ? 'Members' : ''].filter(part => part !== '')
       if (cut.length > 0) lines.push(`Truncated: ${cut.join(', ')} — narrow the scope or raise limit; nothing was dropped silently.`)
       if (value.member !== undefined) {
         lines.push('', `Member detail — ${value.member.memberRef} · @${value.member.handle}`,
+          `Standing: ${value.member.description === '' ? '(none recorded)' : value.member.description}`,
           `Private directory: ${value.member.privateMemoryPath} — its path only; contents, credentials and Session bodies are not read.`,
-          value.member.owns.length === 0 ? 'Owns no Project.' : `Owns ${value.member.owns.map(owned => `${owned.projectRef}${managerResponsibilityText(owned.responsibility)}`).join(', ')}.`)
+          value.member.owns.length === 0 ? 'Owns no Project.' : `Owns ${value.member.owns.map(owned => `${owned.projectRef}${managerResponsibilityText(owned.responsibility)}`).join(', ')}.`,
+          ...managerSessionLocatorLines(value.member.sessionEvidence))
       }
       lines.push('', 'Creating a Member, a Project, or an owner grant rides member_create, project_create and project_owner; Thread and Task detail stays team_thread read and team_task board.')
       return [{ type: 'text', text: lines.join('\n') }]
@@ -1747,6 +1841,15 @@ const teamOverview = defineTool({
       ...(args.memberRef === undefined ? {} : { memberRef: args.memberRef as AgentTeamMemberId }),
       ...(args.limit === undefined ? {} : { limit: args.limit }),
     })
+    // The locator is a second read because it is a Session fact, not a ledger
+    // one: the Host resolves the Member's current Session and asks the backend
+    // where its log is. The overview itself stays synchronous and unchanged.
+    const detail = overview.member === undefined ? undefined : {
+      memberRef: overview.member.memberRef, handle: overview.member.handle, description: overview.member.description,
+      privateMemoryPath: overview.member.privateMemoryPath,
+      owns: overview.member.owns.map(owned => managerOwnedProject(owned)),
+      sessionEvidence: managerSessionEvidence(await host.managerSessionLocatorForAgent(agent, overview.member.memberRef)),
+    }
     return {
       workspaces: overview.workspaces.map(workspace => ({ workspaceId: workspace.workspaceId,
         ...(workspace.title === undefined ? {} : { title: workspace.title }),
@@ -1767,6 +1870,10 @@ const teamOverview = defineTool({
           ...(member.diagnostic.source === undefined ? {} : { source: member.diagnostic.source }),
           ...(member.diagnostic.occurredAt === undefined ? {} : { occurredAt: member.diagnostic.occurredAt }),
         } }),
+        ...(member.model === undefined ? {} : { model: {
+          provider: member.model.provider, model: member.model.model,
+          ...(member.model.reasoningEffort === undefined ? {} : { reasoningEffort: member.model.reasoningEffort }),
+        } }),
         capabilityState: member.capabilityState,
         ...(member.capabilityWarnings === undefined ? {} : { capabilityWarnings: member.capabilityWarnings.map(warning => ({
           name: warning.name, knownNames: [...warning.knownNames],
@@ -1774,10 +1881,7 @@ const teamOverview = defineTool({
         owns: member.owns.map(owned => managerOwnedProject(owned)) })),
       switches: { worker: overview.switches.worker },
       truncated: { workspaces: overview.truncated.workspaces, projects: overview.truncated.projects, members: overview.truncated.members },
-      ...(overview.member === undefined ? {} : { member: {
-        memberRef: overview.member.memberRef, handle: overview.member.handle, privateMemoryPath: overview.member.privateMemoryPath,
-        owns: overview.member.owns.map(owned => managerOwnedProject(owned)),
-      } }),
+      ...(detail === undefined ? {} : { member: detail }),
     }
   },
 })
@@ -1788,6 +1892,25 @@ function managerOwnedProject(owned: AgentTeamOwnedProject): { projectRef: string
     projectRef: owned.project.projectRef, name: owned.project.name,
     description: owned.project.description, state: owned.project.state,
     ...(owned.responsibility === undefined ? {} : { responsibility: owned.responsibility }),
+  }
+}
+
+/** One Member's Session locator as the overview result carries it: the id, the state the backend reported, and the reader that can inspect it. */
+function managerSessionEvidence(locator: AgentTeamManagerSessionEvidenceLocator): {
+  sessionId: string
+  state: AgentTeamManagerSessionEvidenceState
+  location?: { kind: string; path: string }
+  reader: { script: string; anchor?: string }
+  failure?: { kind: AgentTeamManagerSessionEvidenceFailureKind; detail: string; location?: { kind: string; path: string } }
+} {
+  return {
+    sessionId: locator.sessionId, state: locator.state,
+    ...(locator.location === undefined ? {} : { location: { kind: locator.location.kind, path: locator.location.path } }),
+    reader: { script: locator.reader.script, ...(locator.reader.anchor === undefined ? {} : { anchor: locator.reader.anchor }) },
+    ...(locator.failure === undefined ? {} : { failure: {
+      kind: locator.failure.kind, detail: locator.failure.detail,
+      ...(locator.failure.location === undefined ? {} : { location: { kind: locator.failure.location.kind, path: locator.failure.location.path } }),
+    } }),
   }
 }
 
@@ -1821,7 +1944,7 @@ const MANAGER_MODELS_SCHEMA = { type: 'object', additionalProperties: false, pro
  */
 const teamModels = defineTool({
   name: 'team_models',
-  description: 'List the model routes a Team Member may run: every provider group with its models, each model\'s reasoning efforts, the deployment default, and the providers whose catalog lookup failed. This is the same catalog the Web member editor offers, so a route named here is selectable there. A failed provider is reported in `failures` and is never read as an empty catalog. `memberPresets` names the one preset a Member may compose; the manager\'s own preset is deliberately not member-selectable and never appears here.',
+  description: 'List the model routes a Team Member may run: every provider group with its models, each model\'s own description and reasoning efforts, the deployment default, and the providers whose catalog lookup failed. This is the same catalog the Web member editor offers, so a route named here is selectable there. A failed provider is reported in `failures` and is never read as an empty catalog. `memberPresets` names the one preset a Member may compose; the manager\'s own preset is deliberately not member-selectable and never appears here.',
   parameters: {},
   output: { schema: MANAGER_MODELS_SCHEMA,
     render: (_args, value) => {
@@ -1831,10 +1954,10 @@ const teamModels = defineTool({
       for (const group of value.groups) {
         lines.push('', `${group.name} (${group.id})`)
         if (group.models.length === 0) lines.push('  no model available')
-        else lines.push(...group.models.map(model => `  ${model.id} · ${model.name}${model.reasoning?.efforts === undefined || model.reasoning.efforts.length === 0 ? '' : ` · efforts ${model.reasoning.efforts.map(effort => effort.id).join(', ')}`}`))
+        else lines.push(...group.models.map(model => `  ${model.id} · ${model.name}${model.description === undefined || model.description === '' ? '' : ` — ${boundedSubject(model.description)}`}${model.reasoning?.efforts === undefined || model.reasoning.efforts.length === 0 ? '' : ` · efforts ${model.reasoning.efforts.map(effort => effort.id).join(', ')}`}`))
       }
       if (value.failures.length > 0) {
-        lines.push('', 'Providers whose catalog could not be read — a failure, not an empty list:')
+        lines.push('', 'Failures — providers whose catalog could not be read; a failure, never an empty list:')
         lines.push(...value.failures.map(failure => `  ${failure.id} · ${failure.name} — ${failure.message}`))
       }
       lines.push('', `Member presets: ${value.memberPresets.join(', ') || 'none'}`)
@@ -1880,7 +2003,37 @@ const MANAGER_MEMBER_STATUS_SCHEMA = { type: 'object', additionalProperties: fal
   diagnostic: { type: 'object', additionalProperties: false, properties: {
     class: { type: 'string', required: true }, detail: { type: 'string', required: true },
   } },
+  capabilityWarnings: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+    name: { type: 'string', required: true }, knownNames: { type: 'array', items: { type: 'string' } },
+  } } },
 } } as const
+
+/**
+ * One Member's live standing as every manager write answers it. The projection
+ * is shared so a write can never answer a narrower standing than its sibling:
+ * the diagnostic and the capability warnings are the two facts a manager acts
+ * on, and dropping either turns a divergence into a clean-looking success.
+ */
+function managerStatusView(status: {
+  readonly availability: string
+  readonly presence: string
+  readonly capabilityState: string
+  readonly diagnostic?: { readonly class: string; readonly detail: string } | undefined
+  readonly capabilityWarnings?: readonly { readonly name: string; readonly knownNames?: readonly string[] | undefined }[] | undefined
+}): {
+  availability: string; presence: string; capabilityState: string
+  diagnostic?: { class: string; detail: string }
+  capabilityWarnings?: { name: string; knownNames?: string[] }[]
+} {
+  return {
+    availability: status.availability, presence: status.presence, capabilityState: status.capabilityState,
+    ...(status.diagnostic === undefined ? {} : { diagnostic: { class: status.diagnostic.class, detail: status.diagnostic.detail } }),
+    ...(status.capabilityWarnings === undefined ? {} : { capabilityWarnings: status.capabilityWarnings.map(warning => ({
+      name: warning.name,
+      ...(warning.knownNames === undefined ? {} : { knownNames: [...warning.knownNames] }),
+    })) }),
+  }
+}
 
 const MEMBER_CREATE_SCHEMA = { type: 'object', additionalProperties: false, properties: {
   requestId: { type: 'string', required: true }, outcome: { type: 'string', required: true },
@@ -1926,6 +2079,10 @@ const memberCreate = defineTool({
         lines.push(`Committed, but the Member is not live: ${diagnostic.class} — ${diagnostic.detail}`,
           'The write stands; continue from this receipt and ref instead of creating it again.')
       }
+      // A name the stored capability list could not hold is dropped rather than
+      // refused, so the warning is the only fact that keeps "created as asked"
+      // from being a false reading.
+      for (const warning of value.status.capabilityWarnings ?? []) lines.push(`Capability warning: ${managerCapabilityWarningText(warning)}`)
       return [{ type: 'text', text: lines.join('\n') }]
     },
   },
@@ -1944,13 +2101,11 @@ const memberCreate = defineTool({
       model: args.model as AgentTeamModelSelection,
       ...(args.capabilities === undefined ? {} : { capabilities: args.capabilities as AgentTeamMemberCapabilities }),
     })
-    const diagnostic = result.status.diagnostic
     return {
       requestId: result.requestId, outcome: result.outcome,
       receipt: { operationId: result.receipt.operationId, requestId: result.receipt.requestId, sequence: result.receipt.sequence, occurredAt: result.receipt.occurredAt },
       memberRef: result.memberRef, workspaceIds: [...result.workspaceIds],
-      status: { availability: result.status.availability, presence: result.status.presence, capabilityState: result.status.capabilityState,
-        ...(diagnostic === undefined ? {} : { diagnostic: { class: diagnostic.class, detail: diagnostic.detail } }) },
+      status: managerStatusView(result.status),
     }
   },
 })
@@ -2105,7 +2260,7 @@ const PROJECT_UPDATE_SCHEMA = { type: 'object', additionalProperties: false, pro
  */
 const projectUpdate = defineTool({
   name: 'project_update',
-  description: "Edit one Project as the Team manager: rename it, restate its shared goal, or archive it. `update` is a partial patch — every field you leave out keeps the value stored at the moment the write runs, so a rename cannot overwrite a goal that landed while it was queued — and it needs at least one of `name` or `description`. `archive` takes the refs alone: the Project disappears from every Team surface with its history kept, its active Claims release, the related Attention clears, and every subscription it owns stops with its private state cleared; open Tasks return to the Human under the ledger's own rules. Archiving is the end state this version offers — there is no permanent-removal tool, and the Project's facts stay readable. A refusal names its reason and wrote nothing, including a repeated archive and an archived Project ref. A cleanup that fails after the archival committed is named in the answer with `cleanupWarning`; the receipt still stands. Only the live Team manager Session holds this tool.",
+  description: "Edit one Project as the Team manager: rename it, restate its shared goal, or archive it. `update` is a partial patch — every field you leave out keeps the value stored at the moment the write runs, so a rename cannot overwrite a goal that landed while it was queued — and it needs at least one of `name` or `description`. `archive` takes the refs alone: the Project disappears from every Team surface with its history kept, its active Claims release, the related Attention clears, and every subscription it owns stops with its private state cleared; open Tasks return to the Human under the ledger's own rules. Archiving is the end state this version offers — there is no permanent-removal tool, and the Project's facts stay readable. A refusal names its reason and wrote nothing, including a repeated archive and an archived Project ref. A cleanup that fails after the archival committed is named in the answer as a cleanup warning, and the receipt still stands. Only the live Team manager Session holds this tool.",
   parameters: {
     action: { type: 'string', required: true, enum: ['update', 'archive'], description: "The change to make: 'update' patches the display facts, 'archive' ends the Project's life without deleting it." },
     workspaceId: { type: 'string', required: true, description: "The Project's Workspace id exactly as team_overview listed it." },
@@ -2131,7 +2286,7 @@ const projectUpdate = defineTool({
         `Receipt ${value.receipt.operationId} (sequence ${value.receipt.sequence})`,
       ]
       if (value.cleanupWarning !== undefined) {
-        lines.push(`The archival is durable, but clearing subscription state failed: ${value.cleanupWarning}`)
+        lines.push(`Cleanup warning: the archival is durable, but clearing subscription state failed — ${value.cleanupWarning}`)
       }
       return [{ type: 'text', text: lines.join('\n') }]
     },
@@ -2206,18 +2361,21 @@ const memberUpdate = defineTool({
     render: (_args, value) => {
       const lines = [`Member updated — ${value.memberRef} · receipt ${value.receipt.operationId} (sequence ${value.receipt.sequence})`]
       const diagnostic = value.status.diagnostic
+      // The literal effect token is part of the contract the description names,
+      // and the render is the only channel a model reads it through.
+      const effect = `Runtime effect: ${value.effect} — ${memberEffectText(value.effect)}.`
       if (value.effect === 'failed:capability-apply') {
         lines.push(`Saved, but the capability restriction could not be applied: ${diagnostic?.detail ?? 'the live runtime refused it'}`,
-          'The stored configuration stands; the next activation retries it.')
+          'The stored configuration stands; the next activation retries it.', effect)
       } else if (value.effect === 'failed:model-apply') {
         lines.push(`Saved, but the model route could not be applied: ${diagnostic?.detail ?? 'the live runtime refused it'}`,
-          'The stored route stands; replaying this request retries it, and the next activation applies it.')
+          'The stored route stands; replaying this request retries it, and the next activation applies it.', effect)
       } else if (diagnostic !== undefined) {
-        lines.push(`Committed, but the Member is not live: ${diagnostic.class} — ${diagnostic.detail}`)
+        lines.push(`Committed, but the Member is not live: ${diagnostic.class} — ${diagnostic.detail}`, effect)
       } else {
-        lines.push(`Availability ${value.status.availability} · presence ${value.status.presence} · capabilities ${value.status.capabilityState}`)
+        lines.push(`Availability ${value.status.availability} · presence ${value.status.presence} · capabilities ${value.status.capabilityState}`, effect)
       }
-      lines.push(`Runtime effect: ${memberEffectText(value.effect)}.`)
+      for (const warning of value.status.capabilityWarnings ?? []) lines.push(`Capability warning: ${managerCapabilityWarningText(warning)}`)
       return [{ type: 'text', text: lines.join('\n') }]
     },
   },
@@ -2238,13 +2396,11 @@ const memberUpdate = defineTool({
       ...(args.model === undefined ? {} : { model: args.model as AgentTeamModelSelection }),
       ...(capabilities === undefined ? {} : { capabilities }),
     })
-    const diagnostic = result.status.diagnostic
     return {
       requestId: result.requestId, outcome: result.outcome,
       receipt: { operationId: result.receipt.operationId, requestId: result.receipt.requestId, sequence: result.receipt.sequence, occurredAt: result.receipt.occurredAt },
       memberRef: result.memberRef, effect: result.effect,
-      status: { availability: result.status.availability, presence: result.status.presence, capabilityState: result.status.capabilityState,
-        ...(diagnostic === undefined ? {} : { diagnostic: { class: diagnostic.class, detail: diagnostic.detail } }) },
+      status: managerStatusView(result.status),
     }
   },
 })
@@ -2308,6 +2464,7 @@ const memberState = defineTool({
       if (value.status.diagnostic !== undefined) {
         lines.push(`Diagnostic: ${value.status.diagnostic.class} — ${value.status.diagnostic.detail}`)
       }
+      for (const warning of value.status.capabilityWarnings ?? []) lines.push(`Capability warning: ${managerCapabilityWarningText(warning)}`)
       return [{ type: 'text', text: lines.join('\n') }]
     },
   },
@@ -2329,13 +2486,11 @@ const memberState = defineTool({
       action,
       ...(args.workspaceId === undefined ? {} : { workspaceId: args.workspaceId as WorkspaceId }),
     })
-    const diagnostic = result.status.diagnostic
     return {
       requestId: result.requestId, action: result.action, outcome: result.outcome,
       ...(result.receipt === undefined ? {} : { receipt: { operationId: result.receipt.operationId, requestId: result.receipt.requestId, sequence: result.receipt.sequence, occurredAt: result.receipt.occurredAt } }),
       memberRef: result.memberRef,
-      status: { availability: result.status.availability, presence: result.status.presence, capabilityState: result.status.capabilityState,
-        ...(diagnostic === undefined ? {} : { diagnostic: { class: diagnostic.class, detail: diagnostic.detail } }) },
+      status: managerStatusView(result.status),
       ...(result.releasedClaims === undefined ? {} : { releasedClaims: result.releasedClaims }),
       ...(result.removedAttention === undefined ? {} : { removedAttention: result.removedAttention }),
     }

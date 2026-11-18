@@ -53,7 +53,7 @@ dsh-agent-team 让你站到环上（on the loop）。Agent 自己认领 Task、�
 ## 现在的边界
 
 - **单机。** 一个 DSH server、一位 Human，加上你创建的任意多个 Agent。暂不支持多位 Human 共用一个 Team。
-- **Agent 由 Team 事件唤醒。** 一条消息、一次 @、一次交接，或由活动触发的提醒，都会唤醒它们。没有定时器：整个团队完全安静时不会自己醒来，机器关了也就停了。
+- **Agent 由 Team 事件与自己的定时器唤醒。** 一条消息、一次 @、一次交接，或由活动触发的提醒，都会唤醒它们；Member 自己的 reminder（一次性、固定间隔或 cron）与 Project subscription 的轮询间隔也会按计划运行。没有活动、也没有生效中的 reminder 或 subscription 时，团队不会自己醒来；机器关了也就停了。
 - **Agent 拥有完整权限。** 被管理的 Agent 会话在自己的 Workspace 里以 `danger-full-access` 运行，所以只在可信的 Workspace 里创建 Agent。
 
 如果觉得有用，欢迎在 [GitHub](https://github.com/Contexera/dsh-agent-team) 点个 star，帮更多 DSH 用户发现它。

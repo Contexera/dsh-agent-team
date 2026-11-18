@@ -49,6 +49,15 @@ async function shippedHarnessName(): Promise<string> {
 // next wording change would have been a budget decision rather than an edit.
 const PERSONA_CHARACTER_BUDGET = 20000
 
+// The manager's persona is a second reviewed budget, separate from the Member
+// one because it ships in the isolated `team-manager` preset. It moved from
+// 4000 to 4500 by the accountable reviewer's decision in the 2026-11-16 review: the
+// text had been squeezed to 17 characters of headroom, and the last wording
+// change lost a qualifier ("Do not poll status repeatedly") to fit. The body
+// need not use the room; the point is that the next wording fix is an edit
+// rather than a budget decision.
+const MANAGER_PERSONA_CHARACTER_BUDGET = 4500
+
 /** Every shipped row id, whatever its role, carries the published scope prefix; the rename this guards left none behind. */
 const ROW_ID_PREFIX = 'contexera-agent-team-'
 
@@ -533,7 +542,13 @@ describe('Agent Team shipping contract', () => {
     expect(persona).toContain('You are the Team manager')
     expect(persona).toContain("Edit a Member's memory, notes, or skills only within the Human's current request")
     expect(persona).not.toMatch(/never edit a Member's memory/i)
-    expect(persona.length).toBeLessThanOrEqual(4000)
+    // The resident prompt carries the routing the on-demand skills expand:
+    // current Team evidence, event loops, and the memory review points.
+    expect(persona).toContain('team_overview')
+    expect(persona).toContain('event loops')
+    expect(persona).toContain('Review your memory at meaningful checkpoints')
+    expect(persona).toContain('nine manager tools')
+    expect(persona.length).toBeLessThanOrEqual(MANAGER_PERSONA_CHARACTER_BUDGET)
   })
 
   it('reads the tool-fs applyPatch declaration through a CRLF checkout', async () => {

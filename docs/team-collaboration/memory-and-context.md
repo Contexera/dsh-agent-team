@@ -21,7 +21,7 @@ Its memory block is the Member block's contract with its own wording: one comple
 
 The one difference is the location sentence. The manager runs inside a Workspace, so the block states where the private root actually sits relative to that cwd instead of asserting it is outside every Workspace.
 
-Upkeep follows the same bounded-index and private-skill rules at the manager's paths. Its own guide skills live in `packages/agent-team/manager-skills/`; the Member core-skill root is not mounted into its catalog.
+Upkeep follows the same bounded-index and private-skill rules at the manager's paths, and the bundled `manager-memory` skill owns the craft: what earns a line, the three tiers, the review points, and what must never be saved. Its six guide skills live in `packages/agent-team/manager-skills/`; the Member core-skill root is not mounted into its catalog.
 
 Skills are file-configured and discovered per turn through the manager preset's isolated registry: its provider scans the bundled manager root first and its writable `manager/skills/` second, so a same-name private skill never shadows a shipped one. Host-global skills do not enter the manager catalog or loader. Adding or removing a private file is visible on the next turn without a new conversation and without touching the preset. Neither manager root is mounted for a Member or an ordinary Session.
 

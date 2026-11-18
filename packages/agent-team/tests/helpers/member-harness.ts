@@ -209,6 +209,8 @@ export interface RealHarnessOptions {
   readonly registerCleanup?: (fn: () => Promise<void>) => void
   /** Parent for the throwaway tree, for a spec that owns the directory it inspects after cleanup. */
   readonly tempParent?: string
+  /** Keep the Host's global preset registry beside the Team registry's isolated realm, as in a real profile. */
+  readonly isolatedPresetRealm?: boolean
 }
 
 export async function realHarness(
@@ -376,6 +378,10 @@ export async function realHarness(
     ctx.provide('jobs', { list: () => jobsState.jobs })
     if (persistenceBackend === 'jsonl') await ctx.plugin(JsonlSessionPersistence, { root: persistence })
     await ctx.plugin(SessionTitle, { fallbackMaxWords: 5, fallbackMaxBytes: 40, maxTitleBytes: 80 })
+    if (options?.isolatedPresetRealm) {
+      await ctx.plugin(AgentPresetRegistry, { default: 'standard' })
+      ctx = ctx.isolate('agentPresets')
+    }
     await ctx.plugin(TestablePresets, { default: 'team-member' })
     await ctx.plugin(AgentPresetPlugin, { id: 'team-member', plugins: teamMemberPlugins })
     await ctx.plugin(AgentPresetPlugin, { id: 'team-manager', plugins: teamManagerPlugins })

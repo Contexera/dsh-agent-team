@@ -142,6 +142,8 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - 名册每行的 `capabilityState`（`applied` | `pending`）比较该 Member 存储的 `capabilities` 与运行时已应用的配置；没有运行时的 Member 报 `pending`。它与 `availability`、`presence` 分开，也不表示某个回合的 profile `extraToolGrants` 是否生效。
 - Team skills 使用各 Team preset 内部隔离的 registry。它唯一注册的 provider 是 Team router，由 router 选择确切 Agent 的 filesystem provider；Host 全局 provider 与 runtime skills 不会进入 Team 的发现、加载、显式 `/skill` 调用或模型目录。shipped Session skill catalog 与 `skill` 工具读取同一个 registry。普通 Session 继续使用 Host registry，以及其中配置的全部全局 skills。
 
+  Host runtime 把自己拥有的 Team registry 显式传给 provider 挂载。两者同时存在时，经普通 `agent.ctx` 查找得到的是 Host registry，找不到 Team 的挂载。
+
   每个 Member provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<memberId>/skills/`。
 
   管理会话由自己的 runtime 提供同构的隔离结构与两处 root：只读的 `packages/agent-team/manager-skills/`（排前，并由同一个 `check:core-skills` 检查）与可写的 `$DSH_HOME/agent-team/manager/skills/`。Member 的 root 与 manager 的 root 互不进入。

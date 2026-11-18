@@ -1,5 +1,6 @@
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller'
 import type { SessionId } from "@deepseek-ai/dsh-session"
+import type { SessionLocation } from "@deepseek-ai/dsh-session-persistence"
 import type { WorkspaceId } from "@deepseek-ai/dsh-workspace"
 import type {
   AgentTeamActivity,
@@ -185,6 +186,8 @@ export interface AgentTeamManagerMemberEntry {
   readonly availability: AgentTeamAgentMemberStatus['availability']
   readonly presence: AgentTeamAgentMemberStatus['presence']
   readonly diagnostic?: AgentTeamMemberDiagnostic
+  /** The route this Member is configured to run — the stored selection, which a failed live apply can leave ahead of the running one; absent means it inherits the deployment default at every activation. */
+  readonly model?: AgentTeamModelSelection | undefined
   readonly capabilityState: AgentTeamAgentMemberStatus['capabilityState']
   readonly capabilityWarnings?: readonly AgentTeamCapabilityWarning[] | undefined
   /** Projects this Member owns, with what it answers for there; empty is a fact, not a fault. */
@@ -195,6 +198,8 @@ export interface AgentTeamManagerMemberEntry {
 export interface AgentTeamManagerMemberDetail {
   readonly memberRef: AgentTeamMemberId
   readonly handle: string
+  /** The Member's global standing, as the manager wrote it: the one fact that makes a single-Member read complete. */
+  readonly description: string
   /** The Member's actual private directory. Never its contents, credentials, or Session bodies. */
   readonly privateMemoryPath: string
   readonly owns: readonly AgentTeamOwnedProject[]
@@ -239,6 +244,46 @@ export interface AgentTeamManagerModels {
   readonly catalog: ModelCatalog
   /** The presets a Member may compose. The manager's own preset is deliberately absent. */
   readonly memberPresets: readonly string[]
+}
+
+/** Why a Session locator could not answer with a stored log. */
+export type AgentTeamManagerSessionEvidenceFailureKind = 'missing' | 'refused' | 'corrupt' | 'io' | 'unknown'
+
+/** The backend's own classification of an unreadable stored Session, with its location when reported. */
+export interface AgentTeamManagerSessionEvidenceFailure {
+  readonly kind: AgentTeamManagerSessionEvidenceFailureKind
+  readonly detail: string
+  readonly location?: SessionLocation
+}
+
+/** Whether a Member's current Session has a durable log yet. */
+export type AgentTeamManagerSessionEvidenceState =
+  | 'stored' // a materialized log exists and the reader can open it
+  | 'pending' // the Session exists but has no materialized artifact yet
+  | 'missing' // no durable log at all; the Session may be live and unflushed, so this is not "no work"
+  | 'unreadable' // the backend refused or could not read the log; `failure` names why
+
+/**
+ * Where one Member's current Session lives, and the shipped read-only reader
+ * that can inspect it. The Host resolves the Session from the ledger, so the
+ * manager never guesses by handle and never enumerates the machine's Sessions.
+ * `reader.script` is the installed reader's absolute path and `reader.anchor`
+ * is the running DSH installation the script resolves the Harness reader from;
+ * neither is a file to open by hand.
+ */
+export interface AgentTeamManagerSessionEvidenceLocator {
+  readonly memberRef: AgentTeamMemberId
+  readonly handle: string
+  readonly sessionId: SessionId
+  readonly state: AgentTeamManagerSessionEvidenceState
+  /** The backend-resolved artifact location; absent unless `state` is `stored`. */
+  readonly location?: SessionLocation
+  readonly reader: {
+    readonly script: string
+    readonly anchor?: string
+  }
+  /** Present when `state` is `unreadable`. */
+  readonly failure?: AgentTeamManagerSessionEvidenceFailure
 }
 
 /**

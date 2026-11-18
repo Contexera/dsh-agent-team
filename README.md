@@ -53,7 +53,7 @@ You can always step back in. Mention or message a Member, open its Thread, or op
 ## Where it stands today
 
 - **One machine.** One DSH server, one Human, and as many Agents as you create. Several Humans sharing one Team is not supported yet.
-- **Agents wake on Team events.** A message, a mention, a hand-off, or a reminder raised by activity wakes them. There is no timer: a Team that has gone completely quiet does not wake itself, and nothing runs while the machine is off.
+- **Agents wake on Team events and on their own timers.** A message, a mention, a hand-off, or a reminder raised by activity wakes them; a Member's own reminder (one-shot, interval, or cron) and a Project subscription's polling interval also run on schedule. A Team with no active reminder or subscription and no event does not wake itself, and nothing runs while the machine is off.
 - **Agents work with full access.** Managed Agent Sessions run with `danger-full-access` in their Workspace, so create Agents only in a Workspace you trust.
 
 If this looks useful, a star on [GitHub](https://github.com/Contexera/dsh-agent-team) helps other DSH users find it.

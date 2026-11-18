@@ -12,6 +12,7 @@ import {
   SessionPersistenceCorruptionError,
   SessionPersistenceNotFoundError,
   type SessionLocation,
+  type SessionPersistenceSnapshot,
 } from '@deepseek-ai/dsh-session-persistence'
 
 /** Why one stored Session could not be read; the policy axis for consumers. */
@@ -129,5 +130,15 @@ export class StoredSessionReader {
 
   async exists(sessionId: SessionId): Promise<boolean> {
     return (await this.ctx.sessionPersistence.stat(sessionId)) !== undefined
+  }
+
+  /**
+   * The backend's own snapshot of one stored Session: header, revision, and the
+   * location it resolved, which is why a caller never builds a log path from a
+   * home directory. `undefined` means no durable log exists — a created Session
+   * may still be live and unflushed, so that is not evidence of no work.
+   */
+  async stat(sessionId: SessionId): Promise<SessionPersistenceSnapshot | undefined> {
+    return this.ctx.sessionPersistence.stat(sessionId)
   }
 }

@@ -493,7 +493,7 @@ export class MemberRuntime {
     agentCtx: Context,
     initialSelection: readonly string[] | undefined,
   ): void {
-    const mount = memberSkills.mountMemberSkillProvider(agentCtx, {
+    const mount = memberSkills.mountMemberSkillProvider(agentCtx, this.deps.ctx.agentPresets, {
       skillsDirectory: join(memberMemoryDirectoryPath(member), 'skills'),
       bundledSkillsDirectory: BUNDLED_SKILLS_DIRECTORY,
       initialSelection,

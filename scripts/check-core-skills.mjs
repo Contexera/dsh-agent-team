@@ -5,7 +5,7 @@
 // Team manager Session alone). It enforces:
 //   1. the front matter names the skill exactly as its directory does;
 //   2. the description is a real index entry, not a stub;
-//   3. the whole skill stays inside a reviewed prompt budget, because a Member pays for the text it reads;
+//   3. the text a skill puts in front of a model stays inside a reviewed prompt budget;
 //   4. every relative link stays inside the skill directory (the installer copies only that directory),
 //      and every file under references/ is reachable from SKILL.md.
 // Runs standalone: `npm run check:core-skills` (also part of `npm test`); `--root <dir>` checks another tree.
@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 // Both roots ship in the package, so both are gated. The manager root ships the
-// two guide skills; it stays optional because its content is a delivery rather
+// six guide skills; it stays optional because its content is a delivery rather
 // than a build dependency. The Member root may never be empty — a Member with no
 // core skills has no catalog at all.
 const SKILL_ROOTS = [
@@ -27,10 +27,14 @@ const SKILL_ROOTS = [
 const SKILL_FILE = 'SKILL.md'
 const REFERENCES_DIRECTORY = 'references'
 
-// The reviewed ceiling for one skill: dsh-developer's 8000-character active-set
-// limit minus its 150-character margin. Raising this number is a deliberate act
-// in the same change that adds the text, not a reaction to a red check.
-// Counted in UTF-16 code units like the other character budgets; nothing slices with it.
+// The reviewed ceiling for the text one skill puts in front of a model:
+// dsh-developer's 8000-character active-set limit minus its 150-character margin.
+// It counts the skill's Markdown — `SKILL.md` plus everything under `references/` —
+// because that is what a model reads and pays for. A shipped script is executed,
+// never prompted, so it is reported in the summary and reviewed, not budgeted here.
+// Raising this number is a deliberate act in the same change that adds the text,
+// not a reaction to a red check. Counted in UTF-16 code units like the other
+// character budgets; nothing slices with it.
 const SKILL_CHARACTER_BUDGET = 7850
 // The description is the skill's only index entry; below this it names no
 // trigger and the catalog cannot route to it.
@@ -101,6 +105,7 @@ const normalizedLength = text => text.replaceAll('\r\n', '\n').length
 let referenceCount = 0
 let linkCount = 0
 const sizes = []
+const scripts = []
 const totals = []
 
 for (const skillsRoot of skillsRoots) {
@@ -152,11 +157,19 @@ for (const skillsRoot of skillsRoots) {
     }
 
     const files = filesUnder(skillDirectory)
-    const characters = files.reduce((total, file) => total + normalizedLength(readFileSync(file, 'utf8')), 0)
+    const promptFiles = files.filter(file => file.endsWith('.md'))
+    const scriptFiles = files.filter(file => !file.endsWith('.md'))
+    const characters = promptFiles.reduce((total, file) => total + normalizedLength(readFileSync(file, 'utf8')), 0)
     sizes.push(`${name} ${characters}/${SKILL_CHARACTER_BUDGET}`)
     if (characters > SKILL_CHARACTER_BUDGET) {
-      fail(skillFile, `the skill is ${characters} characters; the reviewed budget is ${SKILL_CHARACTER_BUDGET}. `
+      fail(skillFile, `the skill is ${characters} characters of prompt text; the reviewed budget is ${SKILL_CHARACTER_BUDGET}. `
         + 'Trim it, or raise SKILL_CHARACTER_BUDGET in scripts/check-core-skills.mjs deliberately.')
+    }
+    if (scriptFiles.length > 0) {
+      // Executable payload is not prompt text, but it still ships inside the
+      // skill directory, so the summary names it for the reviewer.
+      const scriptCharacters = scriptFiles.reduce((total, file) => total + normalizedLength(readFileSync(file, 'utf8')), 0)
+      scripts.push(`${name} ${scriptFiles.length} file(s)/${scriptCharacters} characters`)
     }
 
     // Links are resolved against the file that carries them and must land inside
@@ -204,5 +217,6 @@ if (failures.length > 0) {
 
 console.log(
   `Skill check OK (${totals.join(', ')}): ${sizes.length} skill${sizes.length === 1 ? '' : 's'} `
-  + `(${sizes.join(', ')} characters), ${referenceCount} references linked, ${linkCount} relative links resolved.`,
+  + `(${sizes.join(', ')} prompt characters), ${referenceCount} references linked, ${linkCount} relative links resolved`
+  + `${scripts.length === 0 ? '' : `, shipped scripts: ${scripts.join(', ')}`}.`,
 )

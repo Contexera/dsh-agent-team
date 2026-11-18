@@ -79,13 +79,15 @@ Web Client 是唯一的 Human control surface。它经 typed Remote 把每个 mu
 
 Host 为 [Team manager](../domain-model.zh.md#team-manager) Session 挂载另一个隔离的 `team-manager` preset。它保留通用 coding 工具面——persona、时间与 Workspace instructions、shell、filesystem/search、web、jobs、skill 加载、ask-user 与 basic compaction——但有意省略 Member context、Member time context、Member memory 及其 compaction adapter、Worker 与 rollover policy，以及 profile 的 `extraToolGrants`。当前构建注册计划中的九个 manager 工具，其余不注册。
 
-这个工具面跑在可信的 `danger-full-access` policy 上，所以数据红线由 persona 写成规则而不是期望：在 `$DSH_HOME` 下，manager 只读写自己的 `agent-team/manager/` 目录，加上 `team_overview` 刚按 ref 查实的 Member 私有资产，绝不碰 Host 的 sqlite 文件与会话日志。
+这个工具面跑在可信的 `danger-full-access` policy 上，所以数据红线由 persona 写成规则而不是期望：在 `$DSH_HOME` 下，manager 只读写自己的 `agent-team/manager/` 目录，加上 `team_overview` 刚按 ref 查实的 Member 私有资产；绝不碰 Host 的 sqlite 文件；Member 的 Session 只能经由 locator 给出的只读 reader 读取，绝不自己打开日志文件。
 
 只有 Human 当前请求明确要求时，才能按相应的维护规则整理该 Member 的 memory、notes 或 skills；不得删除成员目录，也不得把私有内容复制进共享材料。它自己的 memory、notes 和一条工具结果只记录过去说过的话，因此它们都不能代替 Human 现在提出请求，来为不可逆或高代价的动作授权。
 
-它挂载的 Team 工具面就是这个确切子集：两个只读工具加七个写操作。`team_overview` 把整个 Team 当目录读：每个 Workspace 及其 checkout 路径、每个 Project 的共享目标、它的 owners 与各自负责什么、活跃与暂停的订阅计数、board 摘要，以及每个 Member 参与哪些 Workspace、以什么方式运行、负责哪些 Project。
+它挂载的 Team 工具面就是这个确切子集：两个只读工具加七个写操作。`team_overview` 把整个 Team 当目录读：每个 Workspace 及其 checkout 路径、每个 Project 的共享目标、它的 owners 与各自负责什么、活跃与暂停的订阅计数、board 摘要，以及每个 Member 的身份描述、参与哪些 Workspace、配置的模型路由、以什么方式运行、capability 配置挂载了什么、负责哪些 Project。
 
-`team_models` 从 Session controller 自己的 catalog 读 Member 可以跑的模型路由，所以 manager 不可能给出一条 Web member 编辑器里没有的路由。两个只读工具都不带消息正文、Thread 事实、凭据或私有文件内容；`memberRef` 读取只补上该 Member 的私有目录路径，不多给。
+`team_models` 从 Session controller 自己的 catalog 读 Member 可以跑的模型路由，所以 manager 不可能给出一条 Web member 编辑器里没有的路由。两个只读工具都不带消息正文、Thread 事实、凭据或私有文件内容；`memberRef` 读取只补上该 Member 的完整身份描述、私有目录路径，以及它当前 Session 的定位信息，不多给。
+
+`team_overview` 里的 capability warning 表示已存配置写了一个该 Member 拿不到的工具名：写入成功且已存列表保留该名字，但运行时忽略它，所以 Member 实际运行面比列表读起来更窄，warning 会列出它能持有的名字。
 
 `member_create`、`project_create`、`project_owner`、`project_update`、`member_update`、`member_state` 与 `member_workspace` 是 manager 仅有的写操作，并且都走 Host 自己的写路径——与 Web Client 相同的串行账本队列、激活与回执——所以写操作答回的记录就是其他所有面读到的记录。
 
@@ -150,6 +152,12 @@ Team 内容仍是不可信输入。persona 按代码里的现状点名工具；�
 
 Worker 开关打开时，它再加一段关于本地 Worker 的简短说明。它从不复述工具参数或单个 Project 的事实，那些属于工具说明与账本；又因为它是 prompt section 而不是消息，compaction 不会把它抹掉。
 
-管理会话从 `packages/agent-team/manager-skills/` 加载自己的只读 skills，排在可写的 `$DSH_HOME/agent-team/manager/skills/` 之前。这个 root 与 Member 的 core skills 刻意分开：管理引导不该出现在 Member 的目录里，Member 的 skill 也不该出现在 manager 的目录里。
+管理会话从 `packages/agent-team/manager-skills/` 加载自己的只读 skills，排在可写的 `$DSH_HOME/agent-team/manager/skills/` 之前。这个 root 与 Member 的 core skills 刻意分开：管理 skill 不该出现在 Member 的目录里，Member 的 skill 也不该出现在 manager 的目录里。
 
-`npm run check:core-skills` 检查两处随包发布的 root（`core-skills/` 与 `manager-skills/`）里每个 skill 的 front matter、description、体积预算与链接。Member 的 root 不允许为空；manager 的 root 随包交付 `team-management-guide` 与 `team-operations`，门禁仍容许它为空，因为内容不是构建依赖。
+随包交付的六份 skill 把常驻方法与按需知识分开：`team-management-guide` 讲 Team 怎么运作、如何基于证据设计；`team-operations` 讲操作顺序与九个工具；`team-event-loops` 把 subscription、reminder 与消息当作让 Team 持续运转的闭环；`manager-domain-model` 把面向 Member 的规则讲给不持有这些工具的 manager；`manager-memory` 讲 manager 自己的有界索引与复查节点；`manager-session-evidence` 讲如何把 Member 的已存 Session 当证据来读。
+
+`team_overview` 是唯一会给出 Session 的工具。带 `memberRef` 的读取会附上 `sessionEvidence`：Session id、持久化后端报告的状态、后端解析出的日志位置，以及读取它的只读 reader。manager 因此不需要猜 Session id，也不会从 home 目录拼出日志路径。
+
+reader 是随 `manager-session-evidence` 一起交付的脚本，它经由 Harness 的 Session 持久化后端读取，而不是自带第二套解码器。它的输出上限按实际打印的 JSON 计算，被截断的事件带分段偏移、可用 `--offset` 续读，与 Session 不再匹配的日志路径在返回任何正文之前就被拒绝。
+
+`npm run check:core-skills` 检查两处随包发布的 root（`core-skills/` 与 `manager-skills/`）里每个 skill 的 front matter、description、prompt 预算与链接。预算只算模型会读的 Markdown；随包脚本由门禁在汇总行里报告，不计入预算。Member 的 root 不允许为空；manager 的 root 随包交付这六份 skill，门禁仍容许它为空，因为内容不是构建依赖。

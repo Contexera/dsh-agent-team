@@ -29,8 +29,9 @@ class RecordingAdapter extends EmptyAdapter {
 }
 
 /** Boots the shared Host fixture with the skills tool row the catalog reads through. */
-function memberSkillsHarness(adapter: LlmAdapter = new EmptyAdapter()) {
+function memberSkillsHarness(adapter: LlmAdapter = new EmptyAdapter(), isolatedPresetRealm = false) {
   return mountTeamMemberHost({
+    isolatedPresetRealm,
     // Catalog-only tests need the route too; prompt tests supply a recording adapter.
     prepare: ctx => {
       provideQuietTokenMeter(ctx)
@@ -294,8 +295,8 @@ describe('Agent Team member-private skills', () => {
     await expect(writeFile(join(skillsDir, 'probe.md'), 'x')).rejects.toThrow()
   })
 
-  it('restores the same catalog across suspend, resume, and Host restart', async () => {
-    const { ctx, workspaceId, teamFiber } = await memberSkillsHarness()
+  it('restores the same catalog across suspend, resume, and Host restart beside a separate Host preset registry', async () => {
+    const { ctx, workspaceId, teamFiber } = await memberSkillsHarness(new EmptyAdapter(), true)
     const member = await addMember(ctx, workspaceId, 'durable')
     await writeFile(join(member.privateMemoryPath, 'skills', 'keeper.md'), SKILL_MD('keeper', 'Keeper', 'Survives restarts.'))
     const agent = liveAgent(ctx, member.sessionId)

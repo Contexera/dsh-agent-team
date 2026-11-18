@@ -153,6 +153,8 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 - Every roster row carries `capabilityState` (`applied` | `pending`). It compares that Member's stored `capabilities` with the capabilities applied to its live runtime; a Member without a live runtime reports `pending`. It is separate from `availability` and `presence` and does not report whether the profile's `extraToolGrants` took effect on a turn.
 - Team skills use an isolated registry inside each Team preset. Its only registered provider is Team's router, which selects the exact Agent's filesystem provider; Host-global providers and runtime skills never enter Team discovery, loading, explicit `/skill` invocation, or the model catalog. The same registry backs the shipped Session skill catalog and the `skill` tool. Ordinary Sessions keep using the Host registry and all their configured global skills.
 
+  The Host runtime passes its Team registry into the provider mount explicitly. An ordinary `agent.ctx` lookup resolves the Host registry when both exist and cannot find the Team mount.
+
   Each Member provider scans exactly two Team-owned roots with default roots excluded: the plugin's bundled read-only core skills (`packages/agent-team/core-skills/`, first — a same-name bundled skill stays stable across upgrades) and the Member's writable `$DSH_HOME/agent-team/members/<memberId>/skills/`.
 
   The Team manager Session gets the same isolated shape from its own runtime, with the two roots swapped for manager ones: the read-only `packages/agent-team/manager-skills/` (first, and checked by the same `check:core-skills` gate) and the writable `$DSH_HOME/agent-team/manager/skills/`. No Member root and no manager root crosses over.

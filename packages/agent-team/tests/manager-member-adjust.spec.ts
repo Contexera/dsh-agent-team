@@ -189,6 +189,45 @@ describe('Team manager Member adjustment', () => {
     if (both.isError) expect(both.error.message).toContain('either capabilities or clearCapabilities')
   })
 
+  it('reads back through team_overview every fact the manager wrote, including a capability name the runtime ignores', async () => {
+    const { ctx, workspaceId } = await realHarness()
+    provideModelCatalog(ctx)
+    const manager = await openManager(ctx)
+    // The write succeeds with a name this Host cannot hold: the runtime ignores
+    // it while the stored allow-list keeps it, so only the warning says the
+    // Member runs narrower than the list reads.
+    const memberRef = await createMember(ctx, manager, workspaceId, 'readback', {
+      description: '独立验收与产品评测',
+      model: { provider: 'mock', model: 'first' },
+      capabilities: { tools: { allow: ['ghost_tool'] } },
+    })
+    const edited = await runTool(ctx, manager, 'member_update', 'readback-description', {
+      memberRef, description: '独立验收：评审、证据与提交检查', requestId: 'readback-description-1',
+    })
+    expect(edited.isError).toBe(false)
+
+    const overview = await runTool(ctx, manager, 'team_overview', 'readback-overview', {})
+    expect(overview.isError).toBe(false)
+    if (overview.isError) return
+    const text = (overview.content[0] as { text: string }).text
+    // Every fact the write path accepts survives Host → tool → render: the
+    // standing it just edited, the configured route, and the divergence.
+    const row = text.split('\n').find(line => line.startsWith(`${memberRef} · @readback`))
+    expect(row).toBeDefined()
+    expect(row).toContain('— 独立验收：评审、证据与提交检查')
+    expect(row).toContain('configured model: mock/first')
+    expect(row).toContain("capability warning: 'ghost_tool' is not a name this Member can hold, so the runtime ignores it")
+
+    const detail = await runTool(ctx, manager, 'team_overview', 'readback-detail', { memberRef })
+    expect(detail.isError).toBe(false)
+    if (detail.isError) return
+    expect((detail.content[0] as { text: string }).text).toContain('Standing: 独立验收：评审、证据与提交检查')
+
+    // The stored entry is still there: the warning is not a cleanup report, and
+    // a later activation re-evaluates the same name.
+    expect(memberOf(ctx, workspaceId, memberRef)?.member.capabilities?.tools?.allow).toEqual(['ghost_tool'])
+  })
+
   it('answers a committed write whose live capability apply failed, then finishes it on a replay', async () => {
     const { ctx, workspaceId } = await realHarness()
     provideModelCatalog(ctx)

@@ -485,7 +485,7 @@ export class ManagerSessionRuntime {
       throw new ManagerSetupError('the manager tool policy was not installed')
     }
     try {
-      const skills = mountMemberSkillProvider(handle.agent.ctx, {
+      const skills = mountMemberSkillProvider(handle.agent.ctx, this.deps.ctx.agentPresets, {
         skillsDirectory: join(this.deps.managerPrivateRoot, 'skills'),
         bundledSkillsDirectory: this.deps.managerBundledSkillsRoot,
         initialSelection: undefined,

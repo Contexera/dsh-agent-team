@@ -61,7 +61,8 @@ import {
 import { PROJECT_OWNER_SECTION, projectOwnerGuidance } from './project-owner-guidance.ts'
 import { TOOL_AVAILABILITY_SECTION, toolAvailabilityGuidance } from './tool-availability-guidance.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
-import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
+import { classifyStoredSessionFailure, StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
+import { dshInstallAnchor, managerSessionEvidenceScriptPath } from './session-evidence.ts'
 import { newestEndedRuns, WorkerRefusal, WorkerRegistry, workerTaskPreview, WORKER_RUN_LIST_LIMIT, type AgentTeamWorkerRun, type WorkerDelegationRequest } from './worker-service.ts'
 import { readWorkerHistory } from './worker-inspection.ts'
 import { coldInboxOf } from './cold-inbox.ts'
@@ -262,6 +263,7 @@ import type {
   AgentTeamManagerSessionResult,
   AgentTeamManagerOverviewRequest,
   AgentTeamManagerOverview,
+  AgentTeamManagerSessionEvidenceLocator,
   AgentTeamManagerModels,
   AgentTeamManagerMemberEntry,
   AgentTeamManagerMemberDetail,
@@ -3417,6 +3419,40 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
+   * Where one Member's current Session lives, for the manager's own read-only
+   * inspection. The Member ref is the only address the caller supplies: the
+   * Host resolves the current Session from the ledger, so a handle, a Workspace
+   * population or a directory listing can never select a different log. The
+   * answer is a locator, not evidence: the backend's own artifact location, the
+   * installed reader script, and the running installation the reader resolves
+   * its Harness packages from. A Session with no durable log is reported as
+   * missing rather than as no work, because a live Session may not be flushed.
+   */
+  async managerSessionLocatorForAgent(agent: Agent, memberRef: AgentTeamMemberId): Promise<AgentTeamManagerSessionEvidenceLocator> {
+    this.requireManagerAgent(agent)
+    const member = this.requireLedger().requireMember(memberRef)
+    const anchor = dshInstallAnchor()
+    const reader = { script: managerSessionEvidenceScriptPath(), ...(anchor === undefined ? {} : { anchor }) }
+    const base = { memberRef: member.memberId, handle: member.handle, sessionId: member.sessionId, reader }
+    try {
+      const snapshot = await this.sessionReader.stat(member.sessionId)
+      if (snapshot === undefined) return Object.freeze({ ...base, state: 'missing' as const })
+      if (snapshot.location === undefined) return Object.freeze({ ...base, state: 'pending' as const })
+      return Object.freeze({ ...base, state: 'stored' as const, location: snapshot.location })
+    } catch (error) {
+      const failure = classifyStoredSessionFailure(error, member.sessionId)
+      return Object.freeze({
+        ...base, state: 'unreadable' as const,
+        failure: Object.freeze({
+          kind: failure.kind,
+          detail: failure.detail,
+          ...(failure.location === undefined ? {} : { location: failure.location }),
+        }),
+      })
+    }
+  }
+
+  /**
    * The model routes a Member may run, in the Session controller's own catalog.
    * Reusing that read instead of restating it is what keeps this list identical
    * to the Web member editor: one provider grouping, one reasoning-effort list,
@@ -3773,6 +3809,7 @@ export default class AgentTeam extends TypertRemoteService {
       availability: status.availability,
       presence: status.presence,
       ...(status.diagnostic === undefined ? {} : { diagnostic: status.diagnostic }),
+      ...(member.model === undefined ? {} : { model: member.model }),
       capabilityState: status.capabilityState,
       ...(status.capabilityWarnings === undefined ? {} : { capabilityWarnings: status.capabilityWarnings }),
       owns: ledger.ownedProjects(memberId),
@@ -3785,6 +3822,7 @@ export default class AgentTeam extends TypertRemoteService {
     return Object.freeze({
       memberRef: member.memberId,
       handle: member.handle,
+      description: member.description,
       privateMemoryPath: member.privateMemoryPath,
       owns: ledger.ownedProjects(memberId),
     })

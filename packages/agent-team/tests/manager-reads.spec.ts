@@ -1,3 +1,5 @@
+import { sep } from 'node:path'
+import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -119,6 +121,55 @@ describe('Team manager read-only Team surface', () => {
     const humanOnly = ctx.agentTeam.managerOverviewForAgent(manager, { projectRef: empty.project.projectRef })
     expect(humanOnly.projects[0]!.owners).toEqual([])
     expect(renderText(teamTools().get('team_overview')!, {}, humanOnly)).toContain('owners: the Human only')
+  })
+
+  it('locates one Member Session for the manager and renders the reader that inspects it', async () => {
+    const { ctx, root, workspaceId } = await realHarness()
+    const manager = await openManager(ctx)
+    const member = await ctx.agentTeam.addMember({
+      requestId: requestId('read-evidence-member'), workspaceId, handle: 'vera', description: '独立验收',
+      presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' },
+    })
+    const memberRef = member.status.member.memberId
+    const sessionId = member.status.member.sessionId
+
+    // A live Session that has not flushed has no durable log yet: the locator
+    // must say so instead of letting the manager read "no work" into it.
+    const pending = await ctx.agentTeam.managerSessionLocatorForAgent(manager, memberRef)
+    expect(pending).toMatchObject({ memberRef, handle: 'vera', sessionId, state: 'pending' })
+    expect(pending.location).toBeUndefined()
+    expect(pending.reader.script.endsWith(`${sep}manager-session-evidence${sep}scripts${sep}session-evidence.mjs`)).toBe(true)
+
+    await ctx.sessionPersistence.flush()
+    const stored = await ctx.agentTeam.managerSessionLocatorForAgent(manager, memberRef)
+    expect(stored).toMatchObject({ sessionId, state: 'stored', location: { kind: 'jsonl' } })
+    expect(stored.location!.path.startsWith(join(root, 'sessions'))).toBe(true)
+
+    // The model-facing contract is the tool result, not the Host method: the
+    // locator has to survive the schema and the render to be usable.
+    const executed = await executeToolFixture(ctx, {
+      signal: new AbortController().signal, agent: manager, name: 'team_overview',
+      callId: ToolCallId('read-evidence-overview'), arguments: { memberRef },
+    })
+    expect(executed.isError).toBe(false)
+    if (executed.isError) throw executed.error
+    const value = executed.value as { member?: { sessionEvidence?: Record<string, unknown> } }
+    expect(value.member?.sessionEvidence).toMatchObject({
+      sessionId, state: 'stored', location: { kind: 'jsonl', path: stored.location!.path },
+      reader: { script: stored.reader.script },
+    })
+    const rendered = renderText(teamTools().get('team_overview')!, { memberRef }, value)
+    expect(rendered).toContain(`Session evidence: session ${sessionId} · stored`)
+    expect(rendered).toContain(stored.location!.path)
+    expect(rendered).toContain('never open it directly')
+    expect(rendered).toContain(`Reader: node ${stored.reader.script}`)
+    expect(rendered).toContain('manager-session-evidence')
+
+    // Only the live manager may ask: a Member's own Session cannot address
+    // another Member's log through this seam.
+    const memberSession = memberAgent(ctx, sessionId)
+    await expect(ctx.agentTeam.managerSessionLocatorForAgent(memberSession, memberRef))
+      .rejects.toThrow(/live Team manager Session/)
   })
 
   it('refuses an unknown Project ref instead of answering empty', async () => {

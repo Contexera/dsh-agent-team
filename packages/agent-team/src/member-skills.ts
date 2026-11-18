@@ -51,11 +51,17 @@ export interface MemberSkillsConfig {
 }
 
 /**
- * Mount one Agent's private roots behind its preset router. No Team preset router
- * means no private catalog; in particular, do not fall back to the Host registry.
+ * Mount one Agent's private roots behind its preset router. The caller supplies
+ * the Team registry explicitly: an Agent's ordinary context resolves the Host
+ * registry when the Team preset registry lives in its own isolation realm.
+ * No Team preset router means no private catalog; never fall back to the Host registry.
  */
-export function mountMemberSkillProvider(agentCtx: Context, config: MemberSkillsConfig): MemberSkillProviderMount | undefined {
-  const registry = agentCtx.get('agentPresets')?.serviceFor({ ctx: agentCtx }, 'skills') as RoutedSkillRegistry | undefined
+export function mountMemberSkillProvider(
+  agentCtx: Context,
+  agentPresets: Context['agentPresets'],
+  config: MemberSkillsConfig,
+): MemberSkillProviderMount | undefined {
+  const registry = agentPresets.serviceFor({ ctx: agentCtx }, 'skills') as RoutedSkillRegistry | undefined
   return registry?.[skillRouterKey]?.mount(agentCtx, config)
 }
 

@@ -17,7 +17,7 @@ ownership 和参与始终给出完整列表，包括 ownership 撤销为空，�
 
 它的记忆块是 Member 记忆块的同一套契约、换一套措辞：完整索引作为基线，文件变化后只给一条「旧副本已过期」的提示，同样 16 KiB 硬顶、同样的框架转义、同样的超限警告——超限时保留文件、不注入正文，绝不自动裁剪。只有 `memory.md` 进入上下文；`notes/` 按块里给出的路径按需读取。唯一的差别是位置那句话：manager 在某个 Workspace 里运行，所以块内按实际 cwd 说明私有 root 的位置，而不是断言它在所有 Workspace 之外。
 
-这个目录遵循同一套有界索引与私有 skill 规则，只是换成 manager 的路径。manager 自己的引导 skills 放在 `packages/agent-team/manager-skills/`；Member 的 core-skill root 不会挂进它的目录。
+这个目录遵循同一套有界索引与私有 skill 规则，只是换成 manager 的路径；具体做法由随包的 `manager-memory` skill 负责：什么值得写、三层结构、复查节点，以及绝不能保存什么。manager 自己的六份引导 skills 放在 `packages/agent-team/manager-skills/`；Member 的 core-skill root 不会挂进它的目录。
 
 skills 用文件配置，经 manager preset 的隔离 registry 按轮次发现：provider 先扫随包发布的 manager root，再扫可写的 `manager/skills/`，所以同名的私有 skill 不会盖住内置的。Host 全局 skills 不会进入 manager 的目录或加载器。在这里增删私有文件，下一轮就能看到，不必换会话、也不必改 preset。这两处 root 都不会挂给 Member 或普通 Session。
 

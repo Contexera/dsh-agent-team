@@ -157,6 +157,8 @@ export interface TeamMemberHostOptions {
   readonly tempParent?: string
   /** Which tool executor the composition selects; the native one is the shipped default. */
   readonly toolExecutor?: 'native' | 'ptc'
+  /** Keep the Host's global preset registry beside the Team registry's isolated realm, as in a real profile. */
+  readonly isolatedPresetRealm?: boolean
 }
 
 /**
@@ -228,6 +230,10 @@ export async function mountTeamMemberHost(options: TeamMemberHostOptions): Promi
     ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
     options.prepare?.(ctx)
     await ctx.plugin(JsonlSessionPersistence, { root: persistence })
+    if (options.isolatedPresetRealm) {
+      await ctx.plugin(AgentPresetRegistry, { default: 'standard' })
+      ctx = ctx.isolate('agentPresets')
+    }
     await ctx.plugin(AgentPresetRegistry, { default: 'team-member' })
     await ctx.plugin(AgentPreset, { id: 'team-member', plugins: options.presetPlugins })
     await ctx.plugin(Storage)
