@@ -91,8 +91,7 @@ export function createProjectsAndMembersDouble(options?: { readonly initialProje
       createdAtSequence: 1,
     }
     projects = [...projects, project]
-    memberships = (request.memberIds ?? []).map(memberId => ({ projectRef: project.projectRef, memberId }))
-    return { ok: true, value: { receipt: {}, project, memberIds: request.memberIds ?? [] } }
+    return { ok: true, value: { receipt: {}, project, memberIds: [] } }
   })
 
   const updateProject = vi.fn(async (request: { requestId: string; workspaceId: string; projectRef: string; name: string; description: string }) => {

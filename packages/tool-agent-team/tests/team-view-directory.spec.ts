@@ -9,7 +9,6 @@ interface ViewResult {
   threads: { subject: string }[]
   tasks: { projectRef: string }[]
   members: { memberId: string }[]
-  directoryOnly: boolean
 }
 
 async function execute<T = Record<string, unknown>>(tool: ToolDefinition, agent: unknown, args: Record<string, unknown>): Promise<T> {
@@ -21,14 +20,14 @@ function rendered(tool: ToolDefinition, args: Record<string, unknown>, value: un
 }
 
 describe('team_view Workspace directory', () => {
-  it('shows every Project without widening Project content, Task board access, or Thread reads', async () => {
+  it('shows every Project and Thread to each Workspace participant, with own and follow as the only relations', async () => {
     const test = await realHarness(new EmptyAdapter())
     const tools = teamTools()
     const viewTool = tools.get('team_view')!
     const first = await test.ctx.agentTeam.createProject({ requestId: requestId('directory-first'), workspaceId: test.workspaceId,
-      name: 'first', description: '', memberIds: [] })
+      name: 'first', description: '' })
     const second = await test.ctx.agentTeam.createProject({ requestId: requestId('directory-second'), workspaceId: test.workspaceId,
-      name: 'second', description: '', memberIds: [] })
+      name: 'second', description: '' })
     const firstRef = first.project.projectRef
     const secondRef = second.project.projectRef
     const owner = await test.ctx.agentTeam.addMember({ requestId: requestId('directory-owner'), workspaceId: test.workspaceId,
@@ -46,42 +45,41 @@ describe('team_view Workspace directory', () => {
 
     const outsideView = await execute<ViewResult>(viewTool, outsiderAgent, {})
     expect(outsideView.projects.map(project => [project.projectRef, project.role, project.subscriptions])).toEqual([
-      [firstRef, 'directory only', { active: 0, paused: 0 }],
-      [secondRef, 'directory only', { active: 0, paused: 0 }],
+      [firstRef, 'none', { active: 0, paused: 0 }],
+      [secondRef, 'none', { active: 0, paused: 0 }],
     ])
-    expect(outsideView.threads).toEqual([])
-    expect(outsideView.tasks).toEqual([])
+    expect(outsideView.threads.map(thread => thread.subject)).toEqual(['first task', 'second task'])
+    expect(outsideView.tasks.map(task => task.projectRef)).toEqual([firstRef, secondRef])
     expect(outsideView.members.map(member => member.memberId)).toEqual(expect.arrayContaining([
       owner.status.member.memberId, outsider.status.member.memberId,
     ]))
 
     const ownerView = await execute<ViewResult>(viewTool, ownerAgent, {})
     expect(ownerView.projects.map(project => [project.projectRef, project.role])).toEqual([
-      [firstRef, 'owner'], [secondRef, 'directory only'],
+      [firstRef, 'owner'], [secondRef, 'none'],
     ])
-    expect(ownerView.threads.map(thread => thread.subject)).toEqual(['first task'])
-    expect(ownerView.tasks.map(task => task.projectRef)).toEqual([firstRef])
+    expect(ownerView.threads.map(thread => thread.subject)).toEqual(['first task', 'second task'])
+    expect(ownerView.tasks.map(task => task.projectRef)).toEqual([firstRef, secondRef])
 
     const filtered = await execute<ViewResult>(viewTool, outsiderAgent, { projectRef: secondRef })
-    expect(filtered.directoryOnly).toBe(true)
     expect(filtered.projects.map(project => project.projectRef)).toEqual([secondRef])
-    expect(filtered.threads).toEqual([])
+    expect(filtered.threads.map(thread => thread.subject)).toEqual(['second task'])
     const text = rendered(viewTool, { projectRef: secondRef }, filtered)
     expect(text).toContain('Projects — Workspace directory')
-    expect(text).toContain('Directory only: Thread rows require Project membership.')
+    expect(text).not.toContain('Directory only')
     expect(text).not.toContain('No top-level Threads')
 
-    await expect(execute(tools.get('team_task')!, outsiderAgent, { action: 'board', projectRef: secondRef })).rejects.toThrow(/not authorized/)
-    await expect(execute(tools.get('team_thread')!, outsiderAgent, {
+    await execute(tools.get('team_task')!, outsiderAgent, { action: 'board', projectRef: secondRef })
+    await execute(tools.get('team_thread')!, outsiderAgent, {
       action: 'history', threadRef: otherTask.thread.threadRef,
-    })).rejects.toThrow(/not_project_member/)
+    })
   })
 
   it('states what owners answer for only once somebody recorded it, and never guesses a value', async () => {
     const test = await realHarness(new EmptyAdapter())
     const viewTool = teamTools().get('team_view')!
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('responsibility-project'), workspaceId: test.workspaceId,
-      name: 'releases', description: '', memberIds: [] })
+      name: 'releases', description: '' })
     const projectRef = project.project.projectRef
     const first = await test.ctx.agentTeam.addMember({ requestId: requestId('responsibility-first'), workspaceId: test.workspaceId,
       handle: 'first', description: '', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})

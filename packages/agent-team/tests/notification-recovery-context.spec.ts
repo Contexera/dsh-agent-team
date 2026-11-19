@@ -90,7 +90,7 @@ describe('recovery notifications retain unread work within the whole-output budg
       const ordinaryNotice = agent.session.deriveMessages().filter(message => message.role === 'user'
         && message.source.kind === '@contexera/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
         .content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
-      expect(ordinaryNotice).toContain('END-20')
+      expect(ordinaryNotice).toContain('END-21')
     }
     const nodes = agent.session.surface.nodes.slice(1)
     agent.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'Summary: package verification remains.' }], source: { kind: 'user' } }), {

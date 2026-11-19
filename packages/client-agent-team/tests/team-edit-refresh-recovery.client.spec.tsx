@@ -165,8 +165,6 @@ describe('Agent and Project edit refresh recovery', () => {
     expect(b.view.getByRole('button', { name: '# engineering' })).toBeTruthy()
 
     fireEvent.click(b.view.getByRole('button', { name: '新建项目' }))
-    fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
-    expect(await within(document.body).findByRole('menuitem', { name: /fresh/ })).toBeTruthy()
   })
 
   it('lands the successful Project half of a refresh when the member read fails, then retries the read', async () => {

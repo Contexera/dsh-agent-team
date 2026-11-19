@@ -26,7 +26,7 @@ Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都�
 
 ## Agent Member
 
-由 Agent Team 创建和管理的 Member。Member 在某个 workspace 中创建。这个 workspace 就是 Member 创建记录所载之处。之后通过 Workspace Participation 加入更多 workspace。本轮 Member 仍只运行一个 live Session。它扎根于创建 workspace。按参与切分 Session 血统（每个 workspace 一条、可切换）是后续工作。普通 session 与 fork 不自动获得成员身份。
+由 Agent Team 创建和管理的 Member。Member 在某个 workspace 中创建。这个 workspace 就是 Member 创建记录所载之处。之后通过 Workspace Participation 加入更多 workspace。本轮 Member 仍只运行一个 live Session。它扎根于创建 workspace。按参与切分 Session 血统（每个 workspace 一条、可切换）是后续工作。普通 session 与 fork 不自动获得参与资格。
 
 ## Worker Execution
 
@@ -46,9 +46,9 @@ steer 是送进同一原生会话的输入。执行运行期间，OAR 可以把�
 
 ## Project
 
-Workspace 内的持久协作场所。Member 通过在 Project 的任一 Thread 里参与（读取、发言、认领或 follow）而参与该 Project，这也正是它在 Project 内一切动作的授权来源；不存在需要另行授予的加入关系。Human Member 可以查看 Workspace 内全部 Project。
+Workspace 内的持久协作场所。规则版本 9 下，Project 只保留两种自己的关系——owner 和 follow——其余都来自 Workspace：参与该 Project 所在 Workspace 的 Member 即可读取其内容，enabled 的即可写入，无论它是否曾在该 Project 出现。不存在需要加入或授予的成员关系。Human Member 可以查看 Workspace 内全部 Project。
 
-Workspace 目录可见性与 Project 参与是两件事。每个 Workspace Member 的 `team_view` 都列出全部 active Project、owners、读者与该 Project 的 `owner` / `member` / `directory only` 关系和订阅计数，以及完整的 Workspace Member roster。`directory only` 不授予 Main stream、Thread、Task、Claim、Attention 或写入权限，也不产生未读投递；内容 catalog 仍由 Project membership 决定。
+每个 Workspace Member 的 `team_view` 都列出全部 active Project、owners、读者与该 Project 的 `owner` / `following` / `none` 关系和订阅计数，以及完整的 Workspace Member roster。`following` 表示读者 follow 了该 Project 的 Main stream；`none` 不剥夺任何东西——同一个 Workspace 参与者照样读取该 Project，enabled 时照样写入；role 只报告读者 own 和 follow 了什么。
 
 ledger 采用规则版本 2 之后，Project 有 owner：Human 恒为每个 Project 的 owner 且不存储；Agent owner 由 Human 增删（`team/project-owner-added` / `team/project-owner-removed`），目标须参与该 Project 所在 Workspace 且为 enabled 或 suspended。离开该 Workspace、归档或删除会结束 Agent 的 owner 身份，暂停不会。
 
@@ -56,9 +56,9 @@ ledger 采用规则版本 2 之后，Project 有 owner：Human 恒为每个 Proj
 
 没有携带该字段的授权，以及版本 8 之前写下的所有授权，都读作未说明。这是授权本身的一项普通事实，不是需要修复的故障，因此没有任何地方把它报成缺失，也没有读者把缺失当作错误。文本的变更走 `team/project-owner-responsibility-updated`，而不是先撤回再重新授权，所以授权的 `since` 和它起始的 Main stream Attention 行都在编辑后保留；同一个 operation 通过 owner Activity 路径通知该 owner，通知未送达不改变已提交的文本。
 
-从版本 2 起，Project membership 还包括 owner 和曾在该 Project 被 mention 的 Member，并排除 archived 与 inactive 的 Member；版本 1 下可见的一切仍然可见。
+规则版本 9 之前，Project 曾有一个派生的成员关系——版本 2 起 owner 和曾在该 Project 被 mention 的 Member 也计入，并排除 archived 与 inactive 的 Member；版本 1 下可见的一切仍然可见。版本 9 移除了这一派生：旧记录里的成员关系、mention 与 Thread 历史照常重放，但在现行规则下不再决定任何事。
 
-规则版本 2 起，每个 Project 还有独立于所有 Thread 的 Main stream。任何 Project member 都可以发言（`team/main-message-posted`）。Main stream Message 带 `scope: 'main'`，没有 Thread 或 Task，回复目标只能是同一 Project 的另一条 Main stream Message。点名某个 Member 或回复其 Message（Human 也算）会给对方一个 Main stream marker；`@all` 只是普通文本。
+规则版本 2 起，每个 Project 还有独立于所有 Thread 的 Main stream。规则版本 9 下，任何 enabled 且参与该 Workspace 的 Member 都可以发言——更早版本为任何 Project member——（`team/main-message-posted`）。Main stream Message 带 `scope: 'main'`，没有 Thread 或 Task，回复目标只能是同一 Project 的另一条 Main stream Message。点名某个 Member 或回复其 Message（Human 也算）会给对方一个 Main stream marker；`@all` 只是普通文本。
 
 读者的 Main stream 普通未读来自它自己的 Main stream Attention——已读 watermark 之后其他 Member 写下的内容——再加上它的 marker。Human 的那一行从 Project 创建起算且不存储；Agent 的在它尚未 follow 时由 owner 授权写入；其他 Member 的由显式 follow 写入。撤回 owner 身份会结束由授权创建的那一行，而该 Member 自己 follow 的行保留；删除和归档 Member 会结束全部行，离开 Workspace 和归档 Project 不会。行的归属见 [Attention 与消息](team-collaboration/attention-and-messaging.zh.md)。
 
@@ -68,7 +68,7 @@ ledger 采用规则版本 2 之后，Project 有 owner：Human 恒为每个 Proj
 
 Thread 在 Main stream 以卡片出现，显示其当前状态：讨论显示 anchor 预览、回复数、发言者和最新活动；Task 显示编号、状态和活 Claim owner。版本 1 的顶层 Thread 按创建顺序显示为卡片，且永不未读。
 
-规则版本 2 起，任何 Project member 都可在任意 Thread 回复。点名或回复指向只产生一个 direct marker，不开始也不恢复 Attention，Human 邀请确认流程不再存在。
+规则版本 2 起，任何 Project member 都可在任意 Thread 回复——规则版本 9 下为任何 enabled 且参与该 Workspace 的 Member。点名或回复指向只产生一个 direct marker，不开始也不恢复 Attention，Human 邀请确认流程不再存在。
 
 ## 订阅（Subscription）
 
@@ -86,11 +86,13 @@ Member 在 Project 或已有 Thread 中显式发出的不可变内容。Thread �
 
 贴在既有 Thread 上的一层可选 work-tracking overlay——Thread 不靠它存在。它可由顶层 Message 的显式「作为任务」意图创建，或由 Human promotion 追加。promotion 同时追加一条公开说明 Message。Task 的工作状态从 Claims 派生，验收与关闭是显式事实。面向 Human 的 `Task #N` 是 Task 在 home Project 内的 durable 创建序号；taskful 顶层发送和后续 promotion 均参与排序，taskless anchor 的原始位置不参与。它不是稳定身份；跨 Project 导航和持久引用必须使用 branded `taskRef`。
 
-每个 Task 有一个 accountable Member 负责推进。Task 起步时归 Project owner：Agent owner 创建时默认成为 accountable，Human 也可在 enabled Project owners 与 Human 之间指定；此后 transfer 可以把责任交给任意 enabled Project member。执行由 Claim 承担，accountable 不等于执行者。`sourceThreadRefs` 不可变地指向同一 Project 的无 Task 来源讨论；有来源的 Task 在讨论中显示当前状态的只读卡片，不进入 Main stream。
+每个 Task 有一个 accountable Member 负责推进。Task 起步时归 Project owner：Agent owner 创建时默认成为 accountable，Human 也可在 enabled Project owners 与 Human 之间指定；此后 transfer 可以把责任交给任意 enabled 且参与该 Workspace 的 Member——规则版本 9 之前为任意 enabled Project member。执行由 Claim 承担，accountable 不等于执行者。`sourceThreadRefs` 不可变地指向同一 Project 的无 Task 来源讨论；有来源的 Task 在讨论中显示当前状态的只读卡片，不进入 Main stream。
 
 常规验收要全部 Claim 完成（`in_review`）。Human 也可在 `in_progress` 时提前验收。accept 把当时仍 active 的 Claims 投影为 done，并在 activity 里记下 `completedClaimRefs`，通知各 owner，但不伪造他们的 claim-done 事件。从未被 claim 的 `todo` Task 可直接验收，activity 不携带 claim 列表。
 
-Agent 只有在 Task 处于 `in_review`、自身是 Project owner 或该 Task 的 accountable，且从未持有该 Task 的任何 Claim（包括 released）时才能验收。执行过的 accountable 应请未参与执行的 owner 或 Human 验收，或转交责任。close、reopen、transfer 属于 Human 或当前 accountable；已结束 Task 只能由 Human 转交。转交目标是任意 enabled Project member 或 Human，不要求 follow 该 Thread，新 accountable 会自动 follow，Claims 仍归执行者。被撤销 owner 授权时，只有该授权是该成员最后的 Project 参与资格才把 Task 转回 Human；归档、移除或退出 Workspace 时其负责的 open Task 在同一 operation 中转回 Human；suspend 不触发转交。
+Agent 只有在 Task 处于 `in_review`、自身是 Project owner 或该 Task 的 accountable，且从未持有该 Task 的任何 Claim（包括 released）时才能验收。执行过的 accountable 应请未参与执行的 owner 或 Human 验收，或转交责任。close、reopen、transfer 属于 Human 或当前 accountable；已结束 Task 只能由 Human 转交。转交目标是任意 enabled 且参与该 Workspace 的 Member 或 Human——规则版本 9 之前为任意 enabled Project member——不要求 follow 该 Thread，新 accountable 会自动 follow，Claims 仍归执行者。转交同时只结束该责任创建的那一份 follow：前任 accountable 的 `accountable` 来源 follow 结束，而 `self` 自选的 follow 或由 active Claim 持有的 follow 保留。
+
+规则版本 9 下，被撤销 owner 授权不会把 Task 转回——该 Member 仍参与 Workspace；更早版本仅在该授权是该成员最后的 Project 参与资格时才转回。归档、移除或退出 Workspace 时其负责的 open Task 在同一 operation 中转回 Human；suspend 不触发转交。
 
 ## Thread
 
@@ -192,11 +194,11 @@ presence/availability 行不正常时，背后的结构化原因（绝不持久�
 
 ## Withdraw
 
-从一个 workspace 离开：`team/member-workspace-left` 结束 Member 在该 workspace 的参与。退出其在该 workspace 的所有 project 成员关系。释放该 workspace 的 active claims 并清除其 Thread Attention。其余一切——Member 身份、其他参与、live session 及其 cwd、私有 memory——都不受影响。创建 Workspace 不可撤回，应改用全量归档。UI 把它放在非创建 workspace 的行上，当破坏性动作。
+从一个 workspace 离开：`team/member-workspace-left` 结束 Member 在该 workspace 的参与——随之结束参与所承载的一切 Project 权利。释放该 workspace 的 active claims 并清除其 Thread Attention。其余一切——Member 身份、其他参与、live session 及其 cwd、私有 memory——都不受影响。创建 Workspace 不可撤回，应改用全量归档。UI 把它放在非创建 workspace 的行上，当破坏性动作。
 
 ## Archive
 
-藏在 Suspend 和 Remove 之间的第三态，Member 和 Project 都适用。设计上它可逆。事实完整留在 ledger 里，供重放和未来恢复。但本轮刻意不提供 restore 入口，与 dsh 的 archived session 对齐。`archiveMember` 放掉 live session。私有 memory 和 Session log 留在磁盘。它同时以一条公开 `claims_released` Activity，放掉全部参与 workspace 里的 active Claims。`archiveProject` 让 Project 上所有 Thread 的 owner 走同样的释放。Membership 在归档后保留（隐藏态，非退出）。Archived 实体从所有 Team API surface 消失。projection、mention 候选、ref 解析、ref-addressed read，一律以明确的 archived 错误拒绝。从 archived 状态 Remove 仍可以当数据清理用。
+藏在 Suspend 和 Remove 之间的第三态，Member 和 Project 都适用。设计上它可逆。事实完整留在 ledger 里，供重放和未来恢复。但本轮刻意不提供 restore 入口，与 dsh 的 archived session 对齐。`archiveMember` 放掉 live session。私有 memory 和 Session log 留在磁盘。它同时以一条公开 `claims_released` Activity，放掉全部参与 workspace 里的 active Claims。`archiveProject` 让 Project 上所有 Thread 的 owner 走同样的释放。规则版本 9 之前派生的 Project 成员关系作为已存事实在归档后保留（隐藏态，非退出）。Archived 实体从所有 Team API surface 消失。projection、mention 候选、ref 解析、ref-addressed read，一律以明确的 archived 错误拒绝。从 archived 状态 Remove 仍可以当数据清理用。
 
 ## Remove
 

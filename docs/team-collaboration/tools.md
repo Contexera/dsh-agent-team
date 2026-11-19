@@ -12,13 +12,15 @@ The [optional-slot matrix](../../packages/tool-agent-team/tests/optional-slot-ma
 
 ## `team_view`
 
-`team_view` is the address book: every active Project in the Workspace, top-level Threads from the reader's Project memberships, and the complete Workspace Member roster — current addresses, not a work queue; unread work lives in `team_inbox`.
+`team_view` is the address book: every active Project in the Workspace, its top-level Threads, and the complete Workspace Member roster — current addresses, not a work queue; unread work lives in `team_inbox`.
 
-Each Project row carries the reader's `owner` / `member` / `directory only` relation and active/paused subscription counts. Once the ledger has Project owners (rules version 2), it also names them, `@human` first.
+Each Project row carries the reader's `owner` / `following` / `none` role — under rules versions below 9, its `owner` / `member` / `directory only` relation — and active/paused subscription counts. Once the ledger has Project owners (rules version 2), it also names them, `@human` first.
 
-From rules version 8 a Project row also states what its Agent owners answer for — the same text the ownership context and the Client show. An owner whose grant recorded none reads `unspecified`: a fact about the grant, not a gap to fill first. A Project where no owner recorded one adds nothing, so a pre-version-8 ledger answers as it did. Directory-only discovery grants no Project content, write, Attention, or unread delivery. Subscription details remain with `team_subscription list` rather than expanding the directory into a dashboard.
+From rules version 8 a Project row also states what its Agent owners answer for — the same text the ownership context and the Client show. An owner whose grant recorded none reads `unspecified`: a fact about the grant, not a gap to fill first. A Project where no owner recorded one adds nothing, so a pre-version-8 ledger answers as it did.
 
-Threads are the sole paginated catalog. Rows are newest-first and carry threadRef, Project ref, a bounded anchor subject, and Task standing inline on taskful Threads (Task ref, number, status/resolution) — never a second Task index, and never revision or message count, because neither changes the next legal action. Their section is explicitly scoped to the reader's Project memberships. A `projectRef` filter naming a directory-only Project returns its directory row but says Thread rows require membership instead of falsely reporting an empty Project.
+Under version 9 a role of `none` grants nothing and withholds nothing: the Workspace participant reads the same catalog either way; on earlier versions `directory only` granted no Project content, write, Attention, or unread delivery. Subscription details remain with `team_subscription list` rather than expanding the directory into a dashboard.
+
+Threads are the sole paginated catalog. Rows are newest-first and carry threadRef, Project ref, a bounded anchor subject, and Task standing inline on taskful Threads (Task ref, number, status/resolution) — never a second Task index, and never revision or message count, because neither changes the next legal action. Their section covers the Projects the reader may read — every Project of a participating Workspace under version 9, the reader's Project memberships before it.
 
 Work in flight is not part of the address book: the first page ends by pointing to `team_task board` and subscription details to `team_subscription list`.
 
@@ -107,7 +109,7 @@ The split from `team_thread` is what makes the read path carry no Attention logi
 
 Behind rules version 2 `team_message` also has `post`, which speaks in a Project's Main stream (`projectRef`, `body`, optional `replyToMessageRef` of a Main stream Message of the same Project). It needs no write token. A writer holding unread Main stream entries must instead hold every one of them complete in the current context — as a Team notice or a tool result that binds the actual rendered Message or Activity — or explicitly read with `projectRef`; otherwise it gets `main_unread_required`.
 
-`start` takes `kind: 'discussion' | 'task'` (the removed `asTask` spelling is refused with the parameter route to `kind`, never dropped), and only a Project owner may start: others get `project_owner_required`, which names `post`. A non-member gets `not_project_member`. A Task start also takes `accountable` and `sourceThreadRefs`; both are refused on a discussion start and on `post`/`reply` rather than dropped, and the committed start reports the accountable owner it recorded.
+`start` takes `kind: 'discussion' | 'task'` (the removed `asTask` spelling is refused with the parameter route to `kind`, never dropped), and only a Project owner may start: others get `project_owner_required`, which names `post`. A Member that does not participate in the Workspace — or is not enabled for a write — gets `not_project_member`. A Task start also takes `accountable` and `sourceThreadRefs`; both are refused on a discussion start and on `post`/`reply` rather than dropped, and the committed start reports the accountable owner it recorded.
 
 `team_thread` `read`, `history` and `message` address one scope: a Thread through `threadRef` (or `taskRef`, its compatibility alias for a taskful Thread) or a Project's Main stream through `projectRef`; both scopes at once are refused. `message` must carry `threadRef` or `projectRef` — a `taskRef` alone does not read a Message back. The Main stream behavior and its acknowledgement rules are described under `team_thread` above.
 

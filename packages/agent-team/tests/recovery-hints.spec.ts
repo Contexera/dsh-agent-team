@@ -19,6 +19,7 @@ const PRODUCED_KINDS: readonly string[] = Object.freeze([
   'accountable_target_invalid',
   'accept_requires_in_review',
   'not_project_member',
+  'notify_recipient_invalid',
   'main_stream_addressing',
   'post_requires_project',
   'unread_remaining',

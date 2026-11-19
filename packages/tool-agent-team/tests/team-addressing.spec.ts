@@ -22,7 +22,7 @@ async function addMember(ctx: Harness['ctx'], workspaceId: Harness['workspaceId'
 
 async function boot() {
   const { ctx, workspaceId } = await realHarness()
-  const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId, name: 'alpha', description: '', memberIds: [] })
+  const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId, name: 'alpha', description: '' })
   const projectRef = project.project.projectRef
   const peer = await addMember(ctx, workspaceId, 'peer', projectRef)
   const other = await addMember(ctx, workspaceId, 'other', projectRef)
