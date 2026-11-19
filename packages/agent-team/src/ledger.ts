@@ -5362,6 +5362,94 @@ export class AgentTeamLedger {
       const workerVersionProblem = workerVersion7Problem(operation.data.execution, projection.rulesVersion)
       if (workerVersionProblem !== undefined) throw new Error(workerVersionProblem)
     }
+    switch (operation.kind) {
+      case 'team/project-created':
+      case 'team/project-owner-added':
+      case 'team/project-owner-removed':
+      case 'team/project-owner-responsibility-updated':
+      case 'team/project-updated':
+      case 'team/project-member-added':
+      case 'team/project-member-removed':
+      case 'team/project-archived':
+        return this.validateProjectOperation(operation, projection, refs, assertHuman, actorMemberId)
+      case 'team/member-added':
+      case 'team/member-suspended':
+      case 'team/member-resumed':
+      case 'team/member-session-restarted':
+      case 'team/member-context-cleared':
+      case 'team/member-session-renewed':
+      case 'team/member-session-recycled':
+      case 'team/member-session-rolled-over':
+      case 'team/member-updated':
+      case 'team/member-workspace-joined':
+      case 'team/member-workspace-left':
+      case 'team/member-removed':
+      case 'team/member-archived':
+        return this.validateMemberOperation(operation, projection, refs, assertHuman, assertMember)
+      case 'team/rules-version-adopted':
+        return this.validateRulesVersionOperation(operation, projection)
+      case 'team/thread-attention-changed':
+      case 'team/thread-read':
+      case 'team/thread-promoted':
+      case 'team/thread-started':
+      case 'team/message-sent':
+      case 'team/thread-replied':
+        return this.validateThreadOperation(operation, projection, refs, assertHuman, actorMemberId, assertMember)
+      case 'team/main-attention-changed':
+      case 'team/main-message-posted':
+      case 'team/main-stream-read':
+        return this.validateMainOperation(operation, projection, refs, assertHuman, actorMemberId, assertMember)
+      case 'team/claim-created':
+      case 'team/claim-done':
+      case 'team/claim-released':
+        return this.validateClaimOperation(operation, projection, refs, assertHuman, actorMemberId, assertMember)
+      case 'team/task-accountable-changed':
+      case 'team/task-changed':
+        return this.validateTaskOperation(operation, projection, refs, assertHuman, actorMemberId, assertMember)
+      case 'team/reminder-raised':
+      case 'team/member-reminder-created':
+      case 'team/member-reminder-raised':
+      case 'team/member-reminder-consumed':
+      case 'team/member-reminder-cancelled':
+        return this.validateReminderOperation(operation, projection, refs, assertHuman, actorMemberId, assertMember, humanMemberId)
+      case 'team/subscription-created':
+      case 'team/subscription-updated':
+      case 'team/subscription-paused':
+      case 'team/subscription-resumed':
+      case 'team/subscription-deleted':
+      case 'team/subscription-webhook-reset':
+      case 'team/subscription-baseline':
+      case 'team/subscription-events-accepted':
+      case 'team/subscription-event-published':
+        return this.validateSubscriptionOperation(operation, projection, refs)
+      case 'team/worker-started':
+      case 'team/worker-settled':
+      case 'team/worker-steer-admitted':
+      case 'team/worker-steer-recorded':
+        return this.validateWorkerOperation(operation, projection, refs, assertMember)
+      case 'team/dm-sent':
+        return this.validateDirectMessageOperation(operation, projection, assertMember)
+      default:
+        assertUnhandledKind(operation)
+    }
+  }
+
+  private validateProjectOperation(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/project-created'
+      | 'team/project-owner-added'
+      | 'team/project-owner-removed'
+      | 'team/project-owner-responsibility-updated'
+      | 'team/project-updated'
+      | 'team/project-member-added'
+      | 'team/project-member-removed'
+      | 'team/project-archived'
+    }>,
+    projection: Projection,
+    refs: Set<string>,
+    assertHuman: () => void,
+    actorMemberId: () => AgentTeamMemberId,
+  ): void {
     if (operation.kind === 'team/project-created') {
       assertHuman()
       const { project, memberIds } = operation.data
@@ -5373,50 +5461,6 @@ export class AgentTeamLedger {
         const member = projection.members.get(memberId)
         if (member === undefined || !this.participatesInFrom(projection, member.memberId, project.workspaceId) || member.state !== 'enabled') throw new Error('invalid initial Project Member')
       }
-      return
-    }
-    if (operation.kind === 'team/member-added') {
-      assertHuman()
-      const { member, projectRefs } = operation.data
-      if (projection.members.has(member.memberId) || new Set(projectRefs).size !== projectRefs.length) throw new Error('invalid Member creation')
-      this.addRef(refs, member.memberId)
-      for (const projectRef of projectRefs) {
-        const project = projection.projects.get(projectRef)
-        if (project === undefined || project.workspaceId !== member.workspaceId) throw new Error('invalid initial Member Project')
-      }
-      return
-    }
-    if (operation.kind === 'team/member-suspended' || operation.kind === 'team/member-resumed') {
-      assertHuman()
-      const prior = projection.members.get(operation.data.member.memberId)
-      const expected = operation.kind === 'team/member-suspended' ? 'enabled' : 'suspended'
-      const next = operation.kind === 'team/member-suspended' ? 'suspended' : 'enabled'
-      if (prior === undefined || prior.state !== expected || operation.data.member.state !== next || !this.sameMemberIdentity(prior, operation.data.member)) throw new Error('invalid Member lifecycle transition')
-      return
-    }
-    if (operation.kind === 'team/member-session-restarted') {
-      assertHuman()
-      const prior = projection.members.get(operation.data.member.memberId)
-      // The restart records the unchanged Member: same identity, still enabled.
-      if (prior === undefined || prior.state !== 'enabled' || !this.sameMemberIdentity(prior, operation.data.member)) throw new Error('invalid Member restart')
-      return
-    }
-    if (operation.kind === 'team/member-context-cleared') {
-      assertHuman()
-      const prior = projection.members.get(operation.data.member.memberId)
-      if (prior === undefined || prior.state !== 'enabled' || !this.sameMemberIdentity(prior, operation.data.member)) throw new Error('invalid Member context clear')
-      return
-    }
-    if (operation.kind === 'team/member-session-renewed') {
-      assertHuman()
-      const prior = projection.members.get(operation.data.member.memberId)
-      // The renewal moves exactly the sessionId: the prior Member must be
-      // enabled on the recorded previous Session, and every other fact must
-      // carry over unchanged.
-      if (prior === undefined || prior.state !== 'enabled'
-        || prior.sessionId !== operation.data.previousSessionId
-        || operation.data.member.sessionId === operation.data.previousSessionId
-        || !this.sameMemberFacts(prior, operation.data.member)) throw new Error('invalid Member session renewal')
       return
     }
     if (operation.kind === 'team/project-owner-added' || operation.kind === 'team/project-owner-removed') {
@@ -5481,13 +5525,109 @@ export class AgentTeamLedger {
       this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [], [], [activity])
       return
     }
-    if (operation.kind === 'team/rules-version-adopted') {
-      if (operation.actor.kind !== 'host' || operation.actor.handle !== 'agent-team') throw new Error('invalid rules version authority')
-      const { version } = operation.data
-      if (version <= projection.rulesVersion) throw new Error(`agent-team operation ${operation.sequence} adopts rules version ${version} after version ${projection.rulesVersion}`)
-      if (version > this.rulesVersion) {
-        throw new Error(`agent-team ledger adopted rules version ${version}, but this build implements up to ${this.rulesVersion}; open it with a newer release`)
+    if (operation.kind === 'team/project-updated') {
+      assertHuman()
+      const prior = projection.projects.get(operation.data.project.projectRef)
+      if (prior === undefined || prior.workspaceId !== operation.data.workspaceId
+        || operation.data.project.workspaceId !== prior.workspaceId || operation.data.project.createdAtSequence !== prior.createdAtSequence
+        || operation.data.project.state !== prior.state) {
+        throw new Error('invalid Project update')
       }
+      return
+    }
+    if (operation.kind === 'team/project-member-added') {
+      assertHuman()
+      const project = projection.projects.get(operation.data.projectRef)
+      const member = projection.members.get(operation.data.memberId)
+      if (project === undefined || member === undefined || !this.participatesInFrom(projection, member.memberId, project.workspaceId) || operation.data.workspaceId !== project.workspaceId || projection.memberships.get(project.projectRef)?.has(member.memberId)) throw new Error('invalid Project membership')
+      return
+    }
+    if (operation.kind === 'team/project-member-removed') {
+      assertHuman()
+      const project = projection.projects.get(operation.data.projectRef)
+      const member = projection.members.get(operation.data.memberId)
+      if (project === undefined || member === undefined || operation.data.workspaceId !== project.workspaceId
+        || !this.participatesInFrom(projection, member.memberId, project.workspaceId) || !projection.memberships.get(project.projectRef)?.has(member.memberId)) throw new Error('invalid Project membership removal')
+      const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.projectRefForThreadFrom(projection, threadRef) === project.projectRef))
+      this.validateReleaseCleanup(operation.data, projection, member.memberId, threadRefs, operation.sequence, refs, new Set([project.projectRef]))
+      return
+    }
+    if (operation.kind === 'team/project-archived') {
+      assertHuman()
+      const prior = projection.projects.get(operation.data.project.projectRef)
+      if (prior === undefined || prior.state !== 'active' || operation.data.project.state !== 'archived'
+        || operation.data.project.workspaceId !== prior.workspaceId || operation.data.workspaceId !== prior.workspaceId
+        || operation.data.project.name !== prior.name || operation.data.project.description !== prior.description
+        || operation.data.project.createdAtSequence !== prior.createdAtSequence) throw new Error('invalid Project archival')
+      const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.projectRefForThreadFrom(projection, threadRef) === prior.projectRef))
+      this.validateReleaseCleanup(operation.data, projection, undefined, threadRefs, operation.sequence, refs, new Set([prior.projectRef]))
+      return
+    }
+  }
+
+  private validateMemberOperation(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/member-added'
+      | 'team/member-suspended'
+      | 'team/member-resumed'
+      | 'team/member-session-restarted'
+      | 'team/member-context-cleared'
+      | 'team/member-session-renewed'
+      | 'team/member-session-recycled'
+      | 'team/member-session-rolled-over'
+      | 'team/member-updated'
+      | 'team/member-workspace-joined'
+      | 'team/member-workspace-left'
+      | 'team/member-removed'
+      | 'team/member-archived'
+    }>,
+    projection: Projection,
+    refs: Set<string>,
+    assertHuman: () => void,
+    assertMember: () => AgentTeamAgentMember,
+  ): void {
+    if (operation.kind === 'team/member-added') {
+      assertHuman()
+      const { member, projectRefs } = operation.data
+      if (projection.members.has(member.memberId) || new Set(projectRefs).size !== projectRefs.length) throw new Error('invalid Member creation')
+      this.addRef(refs, member.memberId)
+      for (const projectRef of projectRefs) {
+        const project = projection.projects.get(projectRef)
+        if (project === undefined || project.workspaceId !== member.workspaceId) throw new Error('invalid initial Member Project')
+      }
+      return
+    }
+    if (operation.kind === 'team/member-suspended' || operation.kind === 'team/member-resumed') {
+      assertHuman()
+      const prior = projection.members.get(operation.data.member.memberId)
+      const expected = operation.kind === 'team/member-suspended' ? 'enabled' : 'suspended'
+      const next = operation.kind === 'team/member-suspended' ? 'suspended' : 'enabled'
+      if (prior === undefined || prior.state !== expected || operation.data.member.state !== next || !this.sameMemberIdentity(prior, operation.data.member)) throw new Error('invalid Member lifecycle transition')
+      return
+    }
+    if (operation.kind === 'team/member-session-restarted') {
+      assertHuman()
+      const prior = projection.members.get(operation.data.member.memberId)
+      // The restart records the unchanged Member: same identity, still enabled.
+      if (prior === undefined || prior.state !== 'enabled' || !this.sameMemberIdentity(prior, operation.data.member)) throw new Error('invalid Member restart')
+      return
+    }
+    if (operation.kind === 'team/member-context-cleared') {
+      assertHuman()
+      const prior = projection.members.get(operation.data.member.memberId)
+      if (prior === undefined || prior.state !== 'enabled' || !this.sameMemberIdentity(prior, operation.data.member)) throw new Error('invalid Member context clear')
+      return
+    }
+    if (operation.kind === 'team/member-session-renewed') {
+      assertHuman()
+      const prior = projection.members.get(operation.data.member.memberId)
+      // The renewal moves exactly the sessionId: the prior Member must be
+      // enabled on the recorded previous Session, and every other fact must
+      // carry over unchanged.
+      if (prior === undefined || prior.state !== 'enabled'
+        || prior.sessionId !== operation.data.previousSessionId
+        || operation.data.member.sessionId === operation.data.previousSessionId
+        || !this.sameMemberFacts(prior, operation.data.member)) throw new Error('invalid Member session renewal')
       return
     }
     if (operation.kind === 'team/member-session-recycled') {
@@ -5518,16 +5658,6 @@ export class AgentTeamLedger {
       if ((operation.data.checkpointRef !== undefined) !== (operation.data.sourceSessionId !== undefined)) throw new Error('rolled-over checkpoint fields must appear together')
       return
     }
-    if (operation.kind === 'team/project-updated') {
-      assertHuman()
-      const prior = projection.projects.get(operation.data.project.projectRef)
-      if (prior === undefined || prior.workspaceId !== operation.data.workspaceId
-        || operation.data.project.workspaceId !== prior.workspaceId || operation.data.project.createdAtSequence !== prior.createdAtSequence
-        || operation.data.project.state !== prior.state) {
-        throw new Error('invalid Project update')
-      }
-      return
-    }
     if (operation.kind === 'team/member-updated') {
       assertHuman()
       const prior = projection.members.get(operation.data.member.memberId)
@@ -5542,23 +5672,6 @@ export class AgentTeamLedger {
           && other.handle.normalize('NFKC').trim().toLowerCase() === normalized) throw new Error('invalid Member update handle')
       }
       if (normalized === this.humanHandle.normalize('NFKC').trim().toLowerCase()) throw new Error('invalid Member update handle')
-      return
-    }
-    if (operation.kind === 'team/project-member-added') {
-      assertHuman()
-      const project = projection.projects.get(operation.data.projectRef)
-      const member = projection.members.get(operation.data.memberId)
-      if (project === undefined || member === undefined || !this.participatesInFrom(projection, member.memberId, project.workspaceId) || operation.data.workspaceId !== project.workspaceId || projection.memberships.get(project.projectRef)?.has(member.memberId)) throw new Error('invalid Project membership')
-      return
-    }
-    if (operation.kind === 'team/project-member-removed') {
-      assertHuman()
-      const project = projection.projects.get(operation.data.projectRef)
-      const member = projection.members.get(operation.data.memberId)
-      if (project === undefined || member === undefined || operation.data.workspaceId !== project.workspaceId
-        || !this.participatesInFrom(projection, member.memberId, project.workspaceId) || !projection.memberships.get(project.projectRef)?.has(member.memberId)) throw new Error('invalid Project membership removal')
-      const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.projectRefForThreadFrom(projection, threadRef) === project.projectRef))
-      this.validateReleaseCleanup(operation.data, projection, member.memberId, threadRefs, operation.sequence, refs, new Set([project.projectRef]))
       return
     }
     if (operation.kind === 'team/member-workspace-joined') {
@@ -5579,17 +5692,6 @@ export class AgentTeamLedger {
       this.validateReleaseCleanup(operation.data, projection, member.memberId, threadRefs, operation.sequence, refs, this.workspaceProjectRefsFrom(projection, operation.data.workspaceId))
       return
     }
-    if (operation.kind === 'team/project-archived') {
-      assertHuman()
-      const prior = projection.projects.get(operation.data.project.projectRef)
-      if (prior === undefined || prior.state !== 'active' || operation.data.project.state !== 'archived'
-        || operation.data.project.workspaceId !== prior.workspaceId || operation.data.workspaceId !== prior.workspaceId
-        || operation.data.project.name !== prior.name || operation.data.project.description !== prior.description
-        || operation.data.project.createdAtSequence !== prior.createdAtSequence) throw new Error('invalid Project archival')
-      const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.projectRefForThreadFrom(projection, threadRef) === prior.projectRef))
-      this.validateReleaseCleanup(operation.data, projection, undefined, threadRefs, operation.sequence, refs, new Set([prior.projectRef]))
-      return
-    }
     if (operation.kind === 'team/member-removed') {
       assertHuman()
       const prior = projection.members.get(operation.data.member.memberId)
@@ -5606,6 +5708,38 @@ export class AgentTeamLedger {
       this.validateReleaseCleanup(operation.data, projection, prior.memberId, threadRefs, operation.sequence, refs, undefined)
       return
     }
+  }
+
+  private validateRulesVersionOperation(
+    operation: Extract<AgentTeamOperation, { kind: 'team/rules-version-adopted' }>,
+    projection: Projection,
+  ): void {
+    if (operation.kind === 'team/rules-version-adopted') {
+      if (operation.actor.kind !== 'host' || operation.actor.handle !== 'agent-team') throw new Error('invalid rules version authority')
+      const { version } = operation.data
+      if (version <= projection.rulesVersion) throw new Error(`agent-team operation ${operation.sequence} adopts rules version ${version} after version ${projection.rulesVersion}`)
+      if (version > this.rulesVersion) {
+        throw new Error(`agent-team ledger adopted rules version ${version}, but this build implements up to ${this.rulesVersion}; open it with a newer release`)
+      }
+      return
+    }
+  }
+
+  private validateThreadOperation(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/thread-attention-changed'
+      | 'team/thread-read'
+      | 'team/thread-promoted'
+      | 'team/thread-started'
+      | 'team/message-sent'
+      | 'team/thread-replied'
+    }>,
+    projection: Projection,
+    refs: Set<string>,
+    assertHuman: () => void,
+    actorMemberId: () => AgentTeamMemberId,
+    assertMember: () => AgentTeamAgentMember,
+  ): void {
     if (operation.kind === 'team/thread-attention-changed') {
       const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
       if (operation.actor.kind === 'host' || operation.data.memberId !== operation.actor.memberId) throw new Error('Attention operation has wrong actor')
@@ -5625,32 +5759,6 @@ export class AgentTeamLedger {
         ? this.inboxDelta([this.followAttentionFrom(projection, operation.data.memberId, thread.threadRef, 'self')])
         : this.inboxDelta([], [{ memberId: operation.data.memberId, threadRef: thread.threadRef }], [], this.frozenMarkerSnapshot(projection, operation.data.memberId, thread.threadRef))
       if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Attention projection')
-      this.validateInboxDelta(operation.data.inbox, projection, refs)
-      return
-    }
-    if (operation.kind === 'team/main-attention-changed') {
-      const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
-      if (operation.actor.kind === 'host' || operation.data.memberId !== operation.actor.memberId) throw new Error('Main stream Attention operation has wrong actor')
-      const project = projection.projects.get(operation.data.project.projectRef)
-      if (project === undefined || project.workspaceId !== operation.data.project.workspaceId || project.name !== operation.data.project.name
-        || project.state !== operation.data.project.state
-        || (actor !== undefined && !this.participatesInProjectWorkspaceFrom(projection, project.projectRef, actor.memberId))) {
-        throw new Error('invalid Main stream Attention operation')
-      }
-      const current = this.mainAttentionForFrom(projection, operation.data.memberId, project.projectRef)
-      if ((operation.data.action === 'follow' && current !== undefined)
-        || (operation.data.action === 'unfollow' && current === undefined)) throw new Error('invalid Main stream Attention transition')
-      // The Human's row is derived from owning the Project, so it can never end
-      // and an unfollow naming it is a shape this build refuses to write. A
-      // ledger holding one from an earlier build replays as the no-op it was,
-      // because the derived row still stands and the delta removed nothing.
-      if (operation.data.action === 'unfollow' && operation.data.memberId === AGENT_TEAM_HUMAN_MEMBER_ID
-        && (operation.data.inbox.mainAttention?.removed.length ?? 0) > 0) throw new Error('invalid Main stream Attention projection')
-      const stored = projection.mainAttention.get(mainAttentionKey(operation.data.memberId, project.projectRef))
-      const expected = operation.data.action === 'follow'
-        ? this.inboxDelta([], [], [], [], [], [], [], [], [], [], [this.startMainAttention(operation.data.memberId, project.projectRef, (this.mainSourcesFrom(projection, project.projectRef).at(-1)?.sequence ?? 0) + 1, 'self')], [])
-        : this.inboxDelta([], [], [], [], [], [], [], [], [], [], [], stored === undefined ? [] : [{ memberId: operation.data.memberId, projectRef: project.projectRef }])
-      if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Main stream Attention projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs)
       return
     }
@@ -5738,37 +5846,6 @@ export class AgentTeamLedger {
       this.validateInboxDelta(operation.data.inbox, projection, refs, [thread.threadRef], [anchor], taskActivity === undefined ? [] : [taskActivity])
       return
     }
-    if (operation.kind === 'team/main-message-posted') {
-      const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
-      const { message, mentions } = operation.data
-      const project = projection.projects.get(message.projectRef)
-      if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
-        || message.sender !== actorMemberId() || message.sequence !== operation.sequence || message.occurredAt !== operation.occurredAt
-        || (actor !== undefined && !this.isProjectMemberFrom(projection, project.projectRef, actor.memberId))) throw new Error('invalid Main stream Message')
-      const parentSource = message.replyToMessageRef === undefined ? undefined : projection.mainSourceByRef.get(message.replyToMessageRef)
-      if (message.replyToMessageRef !== undefined && (parentSource?.kind !== 'message' || parentSource.message.projectRef !== project.projectRef
-        || (parentSource.message.sender !== message.sender && !mentions.includes(parentSource.message.sender)))) throw new Error('invalid Main stream reply target')
-      this.addRef(refs, message.messageRef)
-      this.validateMentions(mentions, message, projection)
-      if (!isDeepStrictEqual(operation.data.inbox, this.mainMessageInboxDelta(message, mentions))) throw new Error('invalid Main stream inbox projection')
-      this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [], [message])
-      return
-    }
-    if (operation.kind === 'team/main-stream-read') {
-      const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
-      const { projectRef, memberId, readThroughSequence } = operation.data
-      const project = projection.projects.get(projectRef)
-      if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
-        || memberId !== actorMemberId() || readThroughSequence > this.mainHeadFrom(projection, projectRef)
-        || (actor !== undefined && !this.isProjectMemberFrom(projection, projectRef, actor.memberId))) throw new Error('invalid Main stream read')
-      const expected = this.prepareMainReadFrom(projection, memberId, projectRef, readThroughSequence)
-      if (!isDeepStrictEqual(operation.data.inbox, expected.inbox)
-        && !this.isLegacySubscriptionEventReadAdvance(projection, memberId, projectRef, readThroughSequence, operation.data.inbox, expected)) {
-        throw new Error('invalid Main stream read receipt')
-      }
-      this.validateInboxDelta(operation.data.inbox, projection, refs)
-      return
-    }
     if (operation.kind === 'team/message-sent' || operation.kind === 'team/thread-replied') {
       const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
       const { message, task, thread } = operation.data
@@ -5803,6 +5880,83 @@ export class AgentTeamLedger {
       this.validateMessageInbox(operation, projection)
       return
     }
+  }
+
+  private validateMainOperation(
+    operation: Extract<AgentTeamOperation, { kind: 'team/main-attention-changed' | 'team/main-message-posted' | 'team/main-stream-read' }>,
+    projection: Projection,
+    refs: Set<string>,
+    assertHuman: () => void,
+    actorMemberId: () => AgentTeamMemberId,
+    assertMember: () => AgentTeamAgentMember,
+  ): void {
+    if (operation.kind === 'team/main-attention-changed') {
+      const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
+      if (operation.actor.kind === 'host' || operation.data.memberId !== operation.actor.memberId) throw new Error('Main stream Attention operation has wrong actor')
+      const project = projection.projects.get(operation.data.project.projectRef)
+      if (project === undefined || project.workspaceId !== operation.data.project.workspaceId || project.name !== operation.data.project.name
+        || project.state !== operation.data.project.state
+        || (actor !== undefined && !this.participatesInProjectWorkspaceFrom(projection, project.projectRef, actor.memberId))) {
+        throw new Error('invalid Main stream Attention operation')
+      }
+      const current = this.mainAttentionForFrom(projection, operation.data.memberId, project.projectRef)
+      if ((operation.data.action === 'follow' && current !== undefined)
+        || (operation.data.action === 'unfollow' && current === undefined)) throw new Error('invalid Main stream Attention transition')
+      // The Human's row is derived from owning the Project, so it can never end
+      // and an unfollow naming it is a shape this build refuses to write. A
+      // ledger holding one from an earlier build replays as the no-op it was,
+      // because the derived row still stands and the delta removed nothing.
+      if (operation.data.action === 'unfollow' && operation.data.memberId === AGENT_TEAM_HUMAN_MEMBER_ID
+        && (operation.data.inbox.mainAttention?.removed.length ?? 0) > 0) throw new Error('invalid Main stream Attention projection')
+      const stored = projection.mainAttention.get(mainAttentionKey(operation.data.memberId, project.projectRef))
+      const expected = operation.data.action === 'follow'
+        ? this.inboxDelta([], [], [], [], [], [], [], [], [], [], [this.startMainAttention(operation.data.memberId, project.projectRef, (this.mainSourcesFrom(projection, project.projectRef).at(-1)?.sequence ?? 0) + 1, 'self')], [])
+        : this.inboxDelta([], [], [], [], [], [], [], [], [], [], [], stored === undefined ? [] : [{ memberId: operation.data.memberId, projectRef: project.projectRef }])
+      if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Main stream Attention projection')
+      this.validateInboxDelta(operation.data.inbox, projection, refs)
+      return
+    }
+    if (operation.kind === 'team/main-message-posted') {
+      const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
+      const { message, mentions } = operation.data
+      const project = projection.projects.get(message.projectRef)
+      if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
+        || message.sender !== actorMemberId() || message.sequence !== operation.sequence || message.occurredAt !== operation.occurredAt
+        || (actor !== undefined && !this.isProjectMemberFrom(projection, project.projectRef, actor.memberId))) throw new Error('invalid Main stream Message')
+      const parentSource = message.replyToMessageRef === undefined ? undefined : projection.mainSourceByRef.get(message.replyToMessageRef)
+      if (message.replyToMessageRef !== undefined && (parentSource?.kind !== 'message' || parentSource.message.projectRef !== project.projectRef
+        || (parentSource.message.sender !== message.sender && !mentions.includes(parentSource.message.sender)))) throw new Error('invalid Main stream reply target')
+      this.addRef(refs, message.messageRef)
+      this.validateMentions(mentions, message, projection)
+      if (!isDeepStrictEqual(operation.data.inbox, this.mainMessageInboxDelta(message, mentions))) throw new Error('invalid Main stream inbox projection')
+      this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [], [message])
+      return
+    }
+    if (operation.kind === 'team/main-stream-read') {
+      const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
+      const { projectRef, memberId, readThroughSequence } = operation.data
+      const project = projection.projects.get(projectRef)
+      if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
+        || memberId !== actorMemberId() || readThroughSequence > this.mainHeadFrom(projection, projectRef)
+        || (actor !== undefined && !this.isProjectMemberFrom(projection, projectRef, actor.memberId))) throw new Error('invalid Main stream read')
+      const expected = this.prepareMainReadFrom(projection, memberId, projectRef, readThroughSequence)
+      if (!isDeepStrictEqual(operation.data.inbox, expected.inbox)
+        && !this.isLegacySubscriptionEventReadAdvance(projection, memberId, projectRef, readThroughSequence, operation.data.inbox, expected)) {
+        throw new Error('invalid Main stream read receipt')
+      }
+      this.validateInboxDelta(operation.data.inbox, projection, refs)
+      return
+    }
+  }
+
+  private validateClaimOperation(
+    operation: Extract<AgentTeamOperation, { kind: 'team/claim-created' | 'team/claim-done' | 'team/claim-released' }>,
+    projection: Projection,
+    refs: Set<string>,
+    assertHuman: () => void,
+    actorMemberId: () => AgentTeamMemberId,
+    assertMember: () => AgentTeamAgentMember,
+  ): void {
     if (operation.kind === 'team/claim-created' || operation.kind === 'team/claim-done' || operation.kind === 'team/claim-released') {
       const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
       const { task, thread, claim, activity } = operation.data
@@ -5844,6 +5998,16 @@ export class AgentTeamLedger {
       this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [activity])
       return
     }
+  }
+
+  private validateTaskOperation(
+    operation: Extract<AgentTeamOperation, { kind: 'team/task-accountable-changed' | 'team/task-changed' }>,
+    projection: Projection,
+    refs: Set<string>,
+    assertHuman: () => void,
+    actorMemberId: () => AgentTeamMemberId,
+    assertMember: () => AgentTeamAgentMember,
+  ): void {
     if (operation.kind === 'team/task-accountable-changed') {
       const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
       const { task, thread, activity } = operation.data
@@ -5934,6 +6098,23 @@ export class AgentTeamLedger {
       this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [activity])
       return
     }
+  }
+
+  private validateReminderOperation(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/reminder-raised'
+      | 'team/member-reminder-created'
+      | 'team/member-reminder-raised'
+      | 'team/member-reminder-consumed'
+      | 'team/member-reminder-cancelled'
+    }>,
+    projection: Projection,
+    refs: Set<string>,
+    assertHuman: () => void,
+    actorMemberId: () => AgentTeamMemberId,
+    assertMember: () => AgentTeamAgentMember,
+    humanMemberId: AgentTeamMemberId,
+  ): void {
     if (operation.kind === 'team/reminder-raised') {
       if (operation.actor.kind !== 'host') throw new Error('invalid Task reminder authority')
       const { taskRef, kind, recipient, baselineSequence, inbox } = operation.data
@@ -5958,14 +6139,6 @@ export class AgentTeamLedger {
         throw new Error('invalid Task reminder projection')
       }
       this.validateInboxDelta(inbox, projection, refs)
-      return
-    }
-    if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
-      || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
-      || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-webhook-reset'
-      || operation.kind === 'team/subscription-baseline'
-      || operation.kind === 'team/subscription-events-accepted' || operation.kind === 'team/subscription-event-published') {
-      this.validateSubscriptionOperation(operation, projection, refs)
       return
     }
     if (operation.kind === 'team/member-reminder-created') {
@@ -6043,6 +6216,19 @@ export class AgentTeamLedger {
       this.validateInboxDelta(inbox, projection, refs)
       return
     }
+  }
+
+  private validateWorkerOperation(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/worker-started'
+      | 'team/worker-settled'
+      | 'team/worker-steer-admitted'
+      | 'team/worker-steer-recorded'
+    }>,
+    projection: Projection,
+    refs: Set<string>,
+    assertMember: () => AgentTeamAgentMember,
+  ): void {
     if (operation.kind === 'team/worker-started') {
       const actor = assertMember()
       const { execution, activity } = operation.data
@@ -6135,6 +6321,13 @@ export class AgentTeamLedger {
       this.assertWorkerSteerOutcome(admission, operation.data.outcome, projection)
       return
     }
+  }
+
+  private validateDirectMessageOperation(
+    operation: Extract<AgentTeamOperation, { kind: 'team/dm-sent' }>,
+    projection: Projection,
+    assertMember: () => AgentTeamAgentMember,
+  ): void {
     if (operation.kind === 'team/dm-sent') {
       const sender = assertMember()
       const recipient = projection.members.get(operation.data.recipientMemberId)
@@ -6147,7 +6340,6 @@ export class AgentTeamLedger {
       }
       return
     }
-    assertUnhandledKind(operation)
   }
 
   /**
