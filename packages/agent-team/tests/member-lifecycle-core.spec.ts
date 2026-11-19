@@ -76,7 +76,7 @@ describe('Agent Team Member lifecycle', () => {
       expect(omitted.error.message).toContain(otherId)
     }
     const project = await ctx.agentTeam.createProject({ requestId: requestId('global-project'), workspaceId: otherId,
-      name: 'work', description: '', memberIds: [memberId] })
+      name: 'work', description: '' })
     await ctx.agentTeam.addProjectOwner({ requestId: requestId('global-owner'), workspaceId: otherId, projectRef: project.project.projectRef, memberId })
     const result = await executeToolFixture(ctx, { signal: new AbortController().signal, callId: ToolCallId('global-start'),
       name: 'team_message', arguments: { action: 'start', workspace: otherId, projectRef: project.project.projectRef, body: 'Working in joined checkout' }, agent })
@@ -879,7 +879,7 @@ describe('Agent Team Member lifecycle', () => {
     }
 
     const discovered = await call('team_view', {})
-    expect(discovered.projects).toEqual([{ projectRef: project.project.projectRef, name: 'engineering', role: 'member', owners: ['human'], subscriptions: { active: 0, paused: 0 } }])
+    expect(discovered.projects).toEqual([{ projectRef: project.project.projectRef, name: 'engineering', role: 'none', owners: ['human'], subscriptions: { active: 0, paused: 0 } }])
     expect(discovered.members).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'human' }),
       expect.objectContaining({ memberId: builder.status.member.memberId, handle: 'builder' }),
@@ -919,15 +919,16 @@ describe('Agent Team Member lifecycle', () => {
       return result.value as Record<string, any>
     })
     expect(lateJoinerView.threads.map((thread: { threadRef: string }) => thread.threadRef)).toEqual(expect.arrayContaining([plainStart.threadRef, taskfulStart.threadRef]))
-    // Threads in a Project the Member has not joined stay invisible.
+    // A Project the Member neither owns nor follows is listed too: at rules
+    // version 9 every Workspace participant reads every active Project.
     const privateProject = await ctx.agentTeam.createProject({ requestId: requestId('protocol-private'), workspaceId, name: 'private', description: 'Unjoined' })
     const privateStart = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('protocol-private-start'), workspaceId, projectRef: privateProject.project.projectRef, body: 'Taskless discussion outside membership' })
     expect(privateStart).toMatchObject({ kind: 'committed' })
     const privateThreadRef = (privateStart as { thread: { threadRef: string } }).thread.threadRef
     const afterPrivate = await call('team_view', {})
-    expect(afterPrivate.threads.some((thread: { threadRef: string }) => thread.threadRef === privateThreadRef)).toBe(false)
+    expect(afterPrivate.threads.some((thread: { threadRef: string }) => thread.threadRef === privateThreadRef)).toBe(true)
     expect(afterPrivate.projects).toEqual(expect.arrayContaining([
-      expect.objectContaining({ projectRef: privateProject.project.projectRef, role: 'directory only' }),
+      expect.objectContaining({ projectRef: privateProject.project.projectRef, role: 'none' }),
     ]))
 
     // team_message attachments: the tool passes absolute paths, the Host

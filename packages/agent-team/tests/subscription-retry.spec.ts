@@ -34,7 +34,7 @@ describe('subscription request retries', () => {
     }
     test.ctx.provide('shell', shell as never)
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('retry-project'), workspaceId: test.workspaceId,
-      name: 'retry', description: '', memberIds: [] })
+      name: 'retry', description: '' })
     const projectRef = project.project.projectRef
     const added = await test.ctx.agentTeam.addMember({ requestId: requestId('retry-member'), workspaceId: test.workspaceId,
       handle: 'builder', description: '', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})

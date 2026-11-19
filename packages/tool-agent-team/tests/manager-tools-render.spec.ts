@@ -197,15 +197,10 @@ describe('member_create renders the standing a retry continues from', () => {
 })
 
 describe('project_create renders the ref a later grant addresses', () => {
-  it('names the Project and the Members admitted at creation', () => {
-    const text = render('project_create', { requestId: 'request:1', outcome: 'committed', receipt: RECEIPT, projectRef: PROJECT, memberIds: [MEMBER] })
+  it('names the Project and the receipt', () => {
+    const text = render('project_create', { requestId: 'request:1', outcome: 'committed', receipt: RECEIPT, projectRef: PROJECT })
     expect(text).toContain(`Project created — ${PROJECT}`)
-    expect(text).toContain(`Members ${MEMBER} · receipt operation:1 (sequence 42)`)
-  })
-
-  it('reads an empty Project as a fact rather than a missing answer', () => {
-    const text = render('project_create', { requestId: 'request:1', outcome: 'committed', receipt: RECEIPT, projectRef: PROJECT, memberIds: [] })
-    expect(text).toContain('Members none yet · receipt operation:1 (sequence 42)')
+    expect(text).toContain('receipt operation:1 (sequence 42)')
   })
 })
 

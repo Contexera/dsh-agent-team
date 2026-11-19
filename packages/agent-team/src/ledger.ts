@@ -293,8 +293,12 @@ export const TASK_BOARD_FINISHED_PER_PROJECT = 5
  * delegated-Worker records: a build that implements them declares it, so an older build refuses such a ledger by name
  * instead of failing on an unknown operation kind mid-replay. Version 7 adds continuation links and the native turn /
  * input arrays settled with a Worker; version-6 Worker records stay valid without those fields.
+ * Version 9 retires Project membership as an authority: read and write ask only whether the Member participates in
+ * the Project's Workspace, responsibility targets any enabled Workspace Member, ordinary Main stream wakes reach
+ * followers alone, and a responsibility's end retires only the follow that responsibility established. Every
+ * membership-derived rule stays in force for the segments that ran under it.
  */
-export const AGENT_TEAM_RULES_VERSION = 8
+export const AGENT_TEAM_RULES_VERSION = 9
 
 /**
  * The bounded, single-line reason a finished run gives its Thread. It is derived
@@ -362,6 +366,12 @@ export interface AgentTeamInitializeRequest {
 
 export interface AgentTeamAuthorizedCreateProjectRequest extends AgentTeamCreateProjectRequest {
   readonly actor: AgentTeamHumanActor
+  /**
+   * Internal callers may still seed initial memberships on a ledger running
+   * rules below version 9; the field left the public request shape, and a
+   * version-9 record always stores `[]`.
+   */
+  readonly memberIds?: readonly AgentTeamMemberId[]
 }
 
 export interface AgentTeamAuthorizedAddMemberRequest extends AgentTeamAddMemberRequest {
@@ -1263,7 +1273,7 @@ export class AgentTeamLedger {
       const activity = this.workerSettledActivityFor(prior, execution, base.sequence)
       // A departed initiator keeps the Thread fact but gets no wake: their Inbox
       // can no longer reach a Project they left.
-      const marker = activity === undefined || !this.isProjectMemberFrom(this.state, prior.projectRef, prior.initiatedBy)
+      const marker = activity === undefined || !this.canReadProjectFrom(this.state, prior.projectRef, prior.initiatedBy)
         ? undefined
         : Object.freeze({ memberId: prior.initiatedBy, threadRef: activity.threadRef, activityRef: activity.activityRef, sequence: base.sequence })
       const operation: AgentTeamWorkerSettledOperation = Object.freeze({
@@ -2800,9 +2810,10 @@ export class AgentTeamLedger {
     options?: { readonly authorize?: () => void },
   ): Promise<AgentTeamLedgerResult<AgentTeamCreateProjectResult>> {
     return this.enqueue(async () => {
+      const initialMemberIds = this.initialProjectMemberIds(request)
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
-        this.assertSameProjectCreation(existing, request, this.normalizeUnique(request.memberIds, 'initial Project members'))
+        this.assertSameProjectCreation(existing, request, initialMemberIds)
         return this.resolved(this.projectResult(existing))
       }
       // A caller-scoped authorization re-checked at the top of the serialized
@@ -2814,7 +2825,7 @@ export class AgentTeamLedger {
       const name = request.name.trim()
       const description = request.description.trim()
       if (name === '') throw new Error('project name must not be empty')
-      const memberIds = this.normalizeUnique(request.memberIds, 'initial Project members')
+      const memberIds = initialMemberIds
       for (const memberId of memberIds) this.assertJoinableMember(request.workspaceId, memberId)
       const sequence = this.nextSequence()
       const project: AgentTeamProject = Object.freeze({
@@ -3360,7 +3371,7 @@ export class AgentTeamLedger {
         return this.resolved(this.mainPostResult(existing))
       }
       this.requireRulesVersion2('the Main stream')
-      this.requireProjectMemberActor(actor, project.projectRef)
+      this.requireProjectWriteActor(actor, project.projectRef)
       this.assertMentionTargets(project, recipients)
       const unread = this.mainUnreadFrom(this.state, actor.memberId, project.projectRef)
       if (unread.length > 0 && !this.areMainEntriesVisible?.(actor.memberId,
@@ -3399,7 +3410,7 @@ export class AgentTeamLedger {
         return this.resolved(this.mainReadResult(actor.memberId, project.projectRef, existing.data.readThroughSequence, [], this.receipt(existing)))
       }
       this.requireRulesVersion2('the Main stream')
-      this.requireProjectMemberActor(actor, project.projectRef)
+      this.requireProjectReadActor(actor, project.projectRef)
       // Selection runs inside the queue against the state this write will
       // actually see, so an entry queued ahead of it is never skipped. The
       // preview derives the same bound without writing anything.
@@ -3431,7 +3442,7 @@ export class AgentTeamLedger {
     const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
     const project = this.requireActiveProject(request.workspaceId, request.projectRef)
     this.requireRulesVersion2('the Main stream')
-    this.requireProjectMemberActor(actor, project.projectRef)
+    this.requireProjectReadActor(actor, project.projectRef)
     const { readThrough, noOp, consumed } = this.planMainRead(actor.memberId, project.projectRef, request.readThroughSequence)
     const unread = this.mainUnreadFrom(this.state, actor.memberId, project.projectRef)
     const entries = new Map(this.mainReadPage(actor.memberId, project.projectRef, consumed, readThrough).map(entry => [entry.sequence, entry]))
@@ -3477,7 +3488,7 @@ export class AgentTeamLedger {
         return this.resolved(this.startThreadResult(existing))
       }
       this.requireRulesVersion2('starting a Thread')
-      this.requireProjectMemberActor(actor, project.projectRef)
+      this.requireProjectWriteActor(actor, project.projectRef)
       this.requireProjectOwnerActor(actor, project.projectRef)
       this.assertMentionTargets(project, recipients)
       const sequence = this.nextSequence()
@@ -3520,7 +3531,7 @@ export class AgentTeamLedger {
     this.requireRulesVersion2('the Main stream')
     const authorized = this.assertActorForWorkspace(actor, request.workspaceId)
     const project = this.requireActiveProject(request.workspaceId, request.projectRef)
-    this.requireProjectMemberActor(authorized, project.projectRef)
+    this.requireProjectReadActor(authorized, project.projectRef)
     const limit = request.limit ?? 20
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('history limit must be an integer between 1 and 100')
     const sources = this.mainSourcesFrom(this.state, project.projectRef).filter(source => source.kind !== 'thread' || source.hidden !== true)
@@ -3539,10 +3550,10 @@ export class AgentTeamLedger {
     const result: { project: AgentTeamProject; entries: readonly AgentTeamMainTimelineEntry[] }[] = []
     for (const project of this.state.projects.values()) {
       if (this.visibleProject(project) === undefined || !this.participatesIn(memberId, project.workspaceId)) continue
-      // The Main stream is read and written only by Project members, so an
-      // Attention row left behind by a departed Member delivers nothing. The
-      // Human owns every Project, so membership never has to be asked of it.
-      if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID && !this.isProjectMemberFrom(this.state, project.projectRef, memberId)) continue
+      // An Attention row left behind by a Member that can no longer read the
+      // Project delivers nothing. The Human owns every Project, so the gate
+      // never has to be asked of it.
+      if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID && !this.canReadProjectFrom(this.state, project.projectRef, memberId)) continue
       const unread = this.mainUnreadForNotification(memberId, project.projectRef)
       if (unread.length > 0) result.push({ project, entries: this.mainEntries(unread.map(item => item.source), unread) })
     }
@@ -3683,7 +3694,8 @@ export class AgentTeamLedger {
         threadRef: thread.threadRef, actor: actor.memberId, from: task.accountable, to: target, sequence })
       const attention = target === actor.memberId || this.isFollowing(thread.threadRef, target) ? []
         : [this.followAttention(target, thread.threadRef, 'accountable')]
-      const inbox = this.inboxDelta(attention, [], [], [], [{ memberId: target, threadRef: thread.threadRef, activityRef: activity.activityRef, sequence }])
+      const ended = this.accountableFollowEndsFrom(this.state, task.accountable, task.taskRef, thread.threadRef)
+      const inbox = this.inboxDelta(attention, ended, [], [], [{ memberId: target, threadRef: thread.threadRef, activityRef: activity.activityRef, sequence }])
       const operation: AgentTeamTaskAccountableChangedOperation = Object.freeze({ ...this.operationBase(request, sequence), kind: 'team/task-accountable-changed',
         data: Object.freeze({ workspaceId: request.workspaceId, baseRevision: request.baseRevision, activity, task: nextTask, thread: nextThread, inbox }) })
       await this.table.put(operation.operationId, operation)
@@ -3914,7 +3926,7 @@ export class AgentTeamLedger {
     const project = this.requireActiveProject(request.workspaceId, request.projectRef!)
     // Reading and writing the Main stream both require Project membership, so
     // following one cannot be the door that gets a Member in.
-    this.requireProjectMemberActor(actor, project.projectRef)
+    this.requireProjectWriteActor(actor, project.projectRef)
     const projectRef = project.projectRef
     const current = this.mainAttentionForFrom(this.state, actor.memberId, projectRef)
     if (request.action === 'follow') {
@@ -4015,7 +4027,7 @@ export class AgentTeamLedger {
     taskRef?: AgentTeamTaskRef | undefined
   }): AgentTeamThreadAttentionStatus {
     const authorized = this.assertActorForWorkspace(actor, request.workspaceId)
-    const { task, thread } = this.threadContextForActor(authorized, request.workspaceId, request)
+    const { task, thread } = this.threadContextForActor(authorized, request.workspaceId, request, 'read')
     const attention = this.attentionFor(authorized.memberId, thread.threadRef)
     return Object.freeze({ ...(task === undefined ? {} : { task }), thread, ...(attention === undefined ? {} : { attention }) })
   }
@@ -4027,7 +4039,7 @@ export class AgentTeamLedger {
   }): AgentTeamMainAttentionStatus {
     const authorized = this.assertActorForWorkspace(actor, request.workspaceId)
     const project = this.requireActiveProject(request.workspaceId, request.projectRef)
-    this.requireProjectMemberActor(authorized, project.projectRef)
+    this.requireProjectReadActor(authorized, project.projectRef)
     const attention = this.mainAttentionForFrom(this.state, authorized.memberId, project.projectRef)
     return Object.freeze({ project, ...(attention === undefined ? {} : { attention }) })
   }
@@ -4067,7 +4079,7 @@ export class AgentTeamLedger {
       if (project === undefined || !workspaceIds.includes(project.workspaceId)) continue
       if (this.visibleProject(project) === undefined) continue
       const workspaceId = project.workspaceId
-      if (authorized.kind === 'member' && !this.isProjectMember(projectRef, authorized.memberId)) continue
+      if (authorized.kind === 'member' && !this.canReadProjectFrom(this.state, projectRef, authorized.memberId)) continue
       const unread = this.unreadFor(authorized.memberId, thread.threadRef)
       const reminders = this.remindersFor(authorized.memberId, thread.threadRef)
       if (unread.length === 0 && reminders.length === 0) continue
@@ -4127,7 +4139,7 @@ export class AgentTeamLedger {
       const project = this.state.projects.get(request.projectRef)
       if (project === undefined || !workspaceIds.includes(project.workspaceId)) throw new Error(`unknown Project ref '${request.projectRef}'`)
       this.requireActiveProject(project.workspaceId, request.projectRef)
-      if (authorized.kind === 'member' && !this.isProjectMember(request.projectRef, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${request.projectRef}'`)
+      if (authorized.kind === 'member' && !this.canReadProjectFrom(this.state, request.projectRef, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${request.projectRef}'`)
     }
     const taskNumbers = new Map(workspaceIds.flatMap(workspaceId => [...this.taskNumbers(workspaceId)]))
     const open: AgentTeamTaskBoardItem[] = []
@@ -4136,7 +4148,7 @@ export class AgentTeamLedger {
       if (request.projectRef !== undefined && task.projectRef !== request.projectRef) continue
       const project = this.visibleProject(this.state.projects.get(task.projectRef))
       if (project === undefined || !workspaceIds.includes(project.workspaceId)) continue
-      if (authorized.kind === 'member' && !this.isProjectMember(task.projectRef, memberId)) continue
+      if (authorized.kind === 'member' && !this.canReadProjectFrom(this.state, task.projectRef, memberId)) continue
       const executor = this.hasActiveClaim(memberId, task.taskRef)
       const accountable = task.accountable === memberId
       if (request.mine === true && !executor && !accountable) continue
@@ -4175,7 +4187,7 @@ export class AgentTeamLedger {
     const rows: AgentTeamMainInboxItem[] = []
     for (const project of this.state.projects.values()) {
       if (!workspaceIds.includes(project.workspaceId) || this.visibleProject(project) === undefined) continue
-      if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID && !this.isProjectMemberFrom(this.state, project.projectRef, memberId)) continue
+      if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID && !this.canReadProjectFrom(this.state, project.projectRef, memberId)) continue
       const unread = this.mainUnreadForNotification(memberId, project.projectRef)
       if (unread.length === 0) continue
       const newest = unread.at(-1)!
@@ -4397,7 +4409,7 @@ export class AgentTeamLedger {
 
   threadObservations(actor: AgentTeamHumanActor, request: AgentTeamThreadObservationsRequest): AgentTeamThreadObservations {
     this.assertHumanActor(actor)
-    const { task, thread } = this.threadContextForActor(actor, request.workspaceId, request)
+    const { task, thread } = this.threadContextForActor(actor, request.workspaceId, request, 'read')
     const limit = request.limit ?? 50
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('observation limit must be an integer between 1 and 100')
     const threadRef = thread.threadRef
@@ -4433,7 +4445,7 @@ export class AgentTeamLedger {
 
   threadHistory(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamThreadHistoryRequest): AgentTeamThreadHistory {
     const authorized = this.assertActorForWorkspace(actor, request.workspaceId)
-    const { task, thread } = this.threadContextForActor(authorized, request.workspaceId, request)
+    const { task, thread } = this.threadContextForActor(authorized, request.workspaceId, request, 'read')
     const limit = request.limit ?? 20
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('history limit must be an integer between 1 and 100')
     const before = request.beforeSequence ?? this.currentTail(thread.threadRef) + 1
@@ -4468,7 +4480,7 @@ export class AgentTeamLedger {
 
   listClaims(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: { workspaceId: WorkspaceId; taskRef: AgentTeamTaskRef }): AgentTeamClaimList {
     const authorized = this.assertActorForWorkspace(actor, request.workspaceId)
-    const { task, thread } = this.threadForActor(authorized, request.workspaceId, request.taskRef)
+    const { task, thread } = this.threadForActor(authorized, request.workspaceId, request.taskRef, 'read')
     return Object.freeze({ task, thread, claims: this.claimsForTask(task.taskRef) })
   }
 
@@ -4552,7 +4564,7 @@ export class AgentTeamLedger {
     if (request.projectRef !== undefined) return this.readMainMessage(actor, request.workspaceId, request.projectRef, request.messageRef)
     // Addressing the Thread is the authorization: unknown, foreign, and
     // archived all refuse here, and refuse distinguishably.
-    const context = this.threadContextForActor(actor, request.workspaceId, { threadRef: request.threadRef! })
+    const context = this.threadContextForActor(actor, request.workspaceId, { threadRef: request.threadRef! }, 'read')
     const message = this.state.messagesByRef.get(request.messageRef)
     if (message === undefined) throw new Error(`Message '${request.messageRef}' is not a recorded Message${this.unknownRefHint(request.messageRef, 'message', 'Message')} — ${recoveryFor('message_read_unknown').sentence({ refused: `'${request.messageRef}'` })}`)
     if (message.threadRef !== context.thread.threadRef) throw new Error(`Message '${request.messageRef}' belongs to another Thread — ${recoveryFor('message_read_foreign').sentence({ refused: `'${request.messageRef}'` })}`)
@@ -4572,7 +4584,7 @@ export class AgentTeamLedger {
     this.requireRulesVersion2('the Main stream')
     const authorized = this.assertActorForWorkspace(actor, workspaceId)
     const project = this.requireActiveProject(workspaceId, projectRef)
-    this.requireProjectMemberActor(authorized, project.projectRef)
+    this.requireProjectReadActor(authorized, project.projectRef)
     const source = this.state.mainSourceByRef.get(messageRef)
     if (source?.kind !== 'message') throw new Error(`Message '${messageRef}' is not a recorded Main stream Message${this.unknownRefHint(messageRef, 'message', 'Message')} — ${recoveryFor('message_read_unknown').sentence({ refused: `'${messageRef}'` })}`)
     if (source.message.projectRef !== project.projectRef) throw new Error(`Message '${messageRef}' belongs to another Project — ${recoveryFor('message_read_foreign_project').sentence({ refused: `'${messageRef}'` })}`)
@@ -4610,7 +4622,7 @@ export class AgentTeamLedger {
       : this.requireActiveProject(request.workspaceId, request.projectRef).projectRef
     const directoryRequested = memberId !== undefined && request.includeWorkspaceDirectory === true
     if (projectRefFilter !== undefined) {
-      if (memberId !== undefined && !directoryRequested && !this.isProjectMember(projectRefFilter, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${request.projectRef}'`)
+      if (memberId !== undefined && !directoryRequested && !this.canReadProjectFrom(this.state, projectRefFilter, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${request.projectRef}'`)
     }
     let threadRefFilter: AgentTeamThreadRef | undefined
     if (request.threadRef !== undefined) {
@@ -4621,11 +4633,11 @@ export class AgentTeamLedger {
       if (this.state.projects.get(projectRef)?.workspaceId !== request.workspaceId) throw new Error(`Thread '${request.threadRef}' does not belong to Workspace '${request.workspaceId}'`)
       this.assertThreadProjectActive(projectRef)
       if (projectRefFilter !== undefined && projectRef !== projectRefFilter) throw new Error(`Thread '${request.threadRef}' does not belong to Project '${request.projectRef}'`)
-      if (memberId !== undefined && !this.isProjectMember(projectRef, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${projectRef}'`)
+      if (memberId !== undefined && !this.canReadProjectFrom(this.state, projectRef, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${projectRef}'`)
     }
     const projects = [...this.state.projects.values()].filter(project => project.workspaceId === request.workspaceId
       && this.visibleProject(project) !== undefined
-      && (memberId === undefined || this.isProjectMember(project.projectRef, memberId)))
+      && (memberId === undefined || this.canReadProjectFrom(this.state, project.projectRef, memberId)))
     const projectRefs = new Set(projects.map(project => project.projectRef))
     const before = request.cursor ?? this.state.ordered.length + 1
     const matches = (fact: AgentTeamThreadFact): boolean => {
@@ -4732,7 +4744,8 @@ export class AgentTeamLedger {
         return Object.freeze({
           project,
           ownerIds: this.projectOwnerIds(project.projectRef),
-          participating: this.isProjectMember(project.projectRef, memberId!),
+          participating: this.canReadProjectFrom(this.state, project.projectRef, memberId!),
+          ...(this.state.rulesVersion < 9 ? {} : { followingMain: this.isFollowingMainFrom(this.state, project.projectRef, memberId!) }),
           subscriptions: Object.freeze({
             active: subscriptions.filter(subscription => subscription.state === 'active').length,
             paused: subscriptions.filter(subscription => subscription.state === 'paused').length,
@@ -4757,7 +4770,7 @@ export class AgentTeamLedger {
         .filter(memberId => {
           const state = this.state.members.get(memberId)?.state
           return state !== undefined && state !== 'inactive' && state !== 'archived'
-            && this.isProjectMemberFrom(this.state, projectRef, memberId)
+            && this.canReadProjectFrom(this.state, projectRef, memberId)
         }).sort().map(memberId => Object.freeze({ projectRef, memberId })))),
       owners: Object.freeze([...projectRefs].flatMap(projectRef => this.projectOwnersOf(projectRef))),
       rulesVersion: this.state.rulesVersion,
@@ -4816,7 +4829,7 @@ export class AgentTeamLedger {
       throw new Error(`Project '${projectRef}' is not in Workspace '${workspaceId}'`)
     }
     if (actor.kind === 'host') throw new Error('reading subscriptions needs a Human or Agent Member actor')
-    this.requireProjectMemberActor(actor, projectRef)
+    this.requireProjectReadActor(actor, projectRef)
   }
 
   /** Whether one Project exists at all; a delegation may not guess one from a directory or a page. */
@@ -4886,7 +4899,7 @@ export class AgentTeamLedger {
     const memberIds = [...this.state.members.values()].filter(member => member.state !== 'inactive' && member.state !== 'archived'
       && (projectRef === undefined
         ? this.participatesIn(member.memberId, workspaceId)
-        : this.participatesIn(member.memberId, workspaceId) && this.isProjectMember(projectRef, member.memberId))).map(member => member.memberId).sort()
+        : this.participatesIn(member.memberId, workspaceId) && this.canReadProjectFrom(this.state, projectRef, member.memberId))).map(member => member.memberId).sort()
     return Object.freeze({ projects: Object.freeze(projects), memberIds: Object.freeze(memberIds) })
   }
 
@@ -4908,8 +4921,13 @@ export class AgentTeamLedger {
    */
   subscriptionNotifyProblem(projectRef: AgentTeamProjectRef, notify: readonly AgentTeamMemberId[] | undefined): string | undefined {
     const foreign = [...new Set(notify ?? [])].filter(memberId => !this.notifyRecipientIsLive(projectRef, memberId))
-    return foreign.length === 0 ? undefined
-      : `event recipient ${foreign.map(memberId => `'${memberId}'`).join(', ')} is not a member of Project '${projectRef}' (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`
+    if (foreign.length === 0) return undefined
+    const named = foreign.map(memberId => `'${memberId}'`).join(', ')
+    // Version 9 addresses an event to any enabled Workspace Member; the
+    // membership refusal remains the answer for the segments that gated on it.
+    return this.state.rulesVersion >= 9
+      ? `event recipient ${named} is not an enabled Member of this Workspace (notify_recipient_invalid) — ${recoveryFor('notify_recipient_invalid').sentence({})}`
+      : `event recipient ${named} is not a member of Project '${projectRef}' (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`
   }
 
   /** Whether one addressed recipient can still receive: the Human always, a Member only while it belongs to the Project. */
@@ -4919,7 +4937,15 @@ export class AgentTeamLedger {
 
   /** The same predicate over a replay projection, so validation judges each segment at its own point in the ledger. */
   private notifyRecipientLiveFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
-    return memberId === AGENT_TEAM_HUMAN_MEMBER_ID || this.isProjectMemberFrom(projection, projectRef, memberId)
+    if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return true
+    // Version 9 addresses an event to any enabled Member of the Workspace;
+    // earlier segments keep the Project-membership rule they were written under.
+    if (projection.rulesVersion >= 9) {
+      const project = projection.projects.get(projectRef)
+      return project !== undefined && projection.members.get(memberId)?.state === 'enabled'
+        && this.participatesInFrom(projection, memberId, project.workspaceId)
+    }
+    return this.isProjectMemberFrom(projection, projectRef, memberId)
   }
 
   /**
@@ -5870,7 +5896,7 @@ export class AgentTeamLedger {
           || (task === undefined ? priorTask !== undefined : priorTask === undefined || !this.sameTask(priorTask, task))) {
           throw new Error('invalid Thread reply')
         }
-        if (projection.rulesVersion >= 2 && actor !== undefined && !this.isProjectMemberFrom(projection, project.projectRef, actor.memberId)) {
+        if (projection.rulesVersion >= 2 && actor !== undefined && !this.canWriteProjectFrom(projection, project.projectRef, actor.memberId)) {
           throw new Error('invalid Thread reply: not a Project member')
         }
       }
@@ -5922,7 +5948,7 @@ export class AgentTeamLedger {
       const project = projection.projects.get(message.projectRef)
       if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
         || message.sender !== actorMemberId() || message.sequence !== operation.sequence || message.occurredAt !== operation.occurredAt
-        || (actor !== undefined && !this.isProjectMemberFrom(projection, project.projectRef, actor.memberId))) throw new Error('invalid Main stream Message')
+        || (actor !== undefined && !this.canWriteProjectFrom(projection, project.projectRef, actor.memberId))) throw new Error('invalid Main stream Message')
       const parentSource = message.replyToMessageRef === undefined ? undefined : projection.mainSourceByRef.get(message.replyToMessageRef)
       if (message.replyToMessageRef !== undefined && (parentSource?.kind !== 'message' || parentSource.message.projectRef !== project.projectRef
         || (parentSource.message.sender !== message.sender && !mentions.includes(parentSource.message.sender)))) throw new Error('invalid Main stream reply target')
@@ -5938,7 +5964,7 @@ export class AgentTeamLedger {
       const project = projection.projects.get(projectRef)
       if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
         || memberId !== actorMemberId() || readThroughSequence > this.mainHeadFrom(projection, projectRef)
-        || (actor !== undefined && !this.isProjectMemberFrom(projection, projectRef, actor.memberId))) throw new Error('invalid Main stream read')
+        || (actor !== undefined && !this.canReadProjectFrom(projection, projectRef, actor.memberId))) throw new Error('invalid Main stream read')
       const expected = this.prepareMainReadFrom(projection, memberId, projectRef, readThroughSequence)
       if (!isDeepStrictEqual(operation.data.inbox, expected.inbox)
         && !this.isLegacySubscriptionEventReadAdvance(projection, memberId, projectRef, readThroughSequence, operation.data.inbox, expected)) {
@@ -5973,7 +5999,7 @@ export class AgentTeamLedger {
       if (operation.actor.kind !== 'member') throw new Error('invalid Claim authority')
       if ((creates && projection.claims.has(claim.claimRef))
         || (creates && claim.owner !== actorMemberId()) || (creates && claim.state !== 'active')) throw new Error('invalid Claim creation')
-      if (creates && projection.rulesVersion >= 2 && !this.isProjectMemberFrom(projection, task.projectRef, actorMemberId())) throw new Error('invalid Claim creation: not a Project member')
+      if (creates && projection.rulesVersion >= 2 && !this.canWriteProjectFrom(projection, task.projectRef, actorMemberId())) throw new Error('invalid Claim creation: not a Project member')
       const previousClaim = projection.claims.get(claim.claimRef)
       if (!creates && (previousClaim === undefined || previousClaim.state !== 'active' || !this.sameClaimIdentity(previousClaim, claim)
         || (operation.actor.kind === 'member' && previousClaim.owner !== operation.actor.memberId)
@@ -6025,7 +6051,8 @@ export class AgentTeamLedger {
       this.addRef(refs, activity.activityRef)
       const attention = task.accountable === actorMemberId() || this.isFollowingFrom(projection, thread.threadRef, task.accountable) ? []
         : [this.followAttentionFrom(projection, task.accountable, thread.threadRef, 'accountable')]
-      const expected = this.inboxDelta(attention, [], [], [], [{ memberId: task.accountable, threadRef: thread.threadRef, activityRef: activity.activityRef, sequence: operation.sequence }])
+      const ended = this.accountableFollowEndsFrom(projection, priorTask.accountable, task.taskRef, thread.threadRef)
+      const expected = this.inboxDelta(attention, ended, [], [], [{ memberId: task.accountable, threadRef: thread.threadRef, activityRef: activity.activityRef, sequence: operation.sequence }])
       if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Task transfer inbox')
       this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [activity])
       return
@@ -6278,7 +6305,7 @@ export class AgentTeamLedger {
           || activity.actor !== prior.initiatedBy || activity.taskRef !== prior.taskRef || activity.sequence !== operation.sequence
           || activity.state !== settlement.state || activity.reason !== reason) throw new Error('invalid Worker settlement activity')
         this.addRef(refs, activity.activityRef)
-        const marker = this.isProjectMemberFrom(projection, prior.projectRef, prior.initiatedBy)
+        const marker = this.canReadProjectFrom(projection, prior.projectRef, prior.initiatedBy)
           ? Object.freeze({ memberId: prior.initiatedBy, threadRef: activity.threadRef, activityRef: activity.activityRef, sequence: operation.sequence })
           : undefined
         const expected = this.inboxDelta([], [], [], [], marker === undefined ? [] : [marker], [])
@@ -7793,7 +7820,7 @@ export class AgentTeamLedger {
         throw new Error(`Agent Member '${memberId}' is not authorized for Project '${projectRef}'`)
       }
       // Version-1 read receipts predate Project membership as a read gate.
-      if (projection.rulesVersion >= 2) this.requireProjectMemberActorFrom(projection, { kind: 'member', memberId, handle: member.handle }, projectRef)
+      if (projection.rulesVersion >= 2) this.requireProjectReadActorFrom(projection, { kind: 'member', memberId, handle: member.handle }, projectRef)
     }
     const selectedThroughSequence = this.threadReadSelection(this.threadHeadFrom(projection, thread.threadRef), request.selectedThroughSequence)
     const attention = this.attentionForFrom(projection, memberId, thread.threadRef)
@@ -8267,6 +8294,26 @@ export class AgentTeamLedger {
     return this.mainAttentionForFrom(projection, memberId, projectRef) !== undefined
   }
 
+  /** Whether one Member's Main stream Attention covers this Project — the standing a notice or a view states. */
+  isFollowingMain(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef): boolean {
+    return this.isFollowingMainFrom(this.state, projectRef, memberId)
+  }
+
+  /**
+   * Whether a transfer away retires the previous accountable's own Thread
+   * follow. Version 9 ends only the follow the responsibility itself
+   * established — an `accountable` row — so a `self` follow, and any row held
+   * while the Member still owns an active Claim on the Task, stays. The
+   * Human's Attention is never a stored row, and earlier segments end nothing.
+   */
+  private accountableFollowEndsFrom(projection: Projection, priorAccountable: AgentTeamMemberId, taskRef: AgentTeamTaskRef,
+    threadRef: AgentTeamThreadRef): readonly AgentTeamThreadAttentionKey[] {
+    if (projection.rulesVersion < 9 || priorAccountable === AGENT_TEAM_HUMAN_MEMBER_ID) return []
+    const stored = projection.attention.get(this.attentionKey(priorAccountable, threadRef))
+    if (stored?.source !== 'accountable' || this.hasActiveClaimFrom(projection, priorAccountable, taskRef)) return []
+    return [Object.freeze({ memberId: priorAccountable, threadRef })]
+  }
+
   /**
    * Everyone whose Main stream Attention covers one Project: the stored rows
    * plus the Human, whose row is derived from owning the Project. Membership is
@@ -8278,7 +8325,7 @@ export class AgentTeamLedger {
     const found = new Set<AgentTeamMemberId>([AGENT_TEAM_HUMAN_MEMBER_ID])
     for (const attention of projection.mainAttention.values()) {
       if (attention.projectRef !== projectRef) continue
-      if (!this.isProjectMemberFrom(projection, projectRef, attention.memberId)) continue
+      if (!this.canReadProjectFrom(projection, projectRef, attention.memberId)) continue
       found.add(attention.memberId)
     }
     return [...found]
@@ -8359,14 +8406,36 @@ export class AgentTeamLedger {
     if (this.state.rulesVersion < 2) throw new Error(`${what} needs rules version 2; this ledger runs version ${this.state.rulesVersion}`)
   }
 
-  private requireProjectMemberActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
-    this.requireProjectMemberActorFrom(this.state, actor, projectRef)
+  private requireProjectReadActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
+    this.requireProjectReadActorFrom(this.state, actor, projectRef)
   }
 
-  private requireProjectMemberActorFrom(projection: Projection, actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
-    if (actor.kind === 'member' && !this.isProjectMemberFrom(projection, projectRef, actor.memberId)) {
-      throw new Error(`Agent Member '${actor.handle}' is not a member of Project '${projectRef}' (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`)
+  private requireProjectReadActorFrom(projection: Projection, actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
+    if (actor.kind === 'member' && !this.canReadProjectFrom(projection, projectRef, actor.memberId)) {
+      throw new Error(this.projectAccessProblem(projection, actor, projectRef, 'read'))
     }
+  }
+
+  private requireProjectWriteActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
+    this.requireProjectWriteActorFrom(this.state, actor, projectRef)
+  }
+
+  private requireProjectWriteActorFrom(projection: Projection, actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
+    if (actor.kind === 'member' && !this.canWriteProjectFrom(projection, projectRef, actor.memberId)) {
+      throw new Error(this.projectAccessProblem(projection, actor, projectRef, 'write'))
+    }
+  }
+
+  /** The refusal a failed Project access gate states: membership for the segments that gated on it, participation and standing from version 9 on. */
+  private projectAccessProblem(projection: Projection, actor: AgentTeamMemberActor, projectRef: AgentTeamProjectRef, access: 'read' | 'write'): string {
+    if (projection.rulesVersion < 9) {
+      return `Agent Member '${actor.handle}' is not a member of Project '${projectRef}' (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`
+    }
+    const member = projection.members.get(actor.memberId)
+    const reason = member === undefined || !this.participatesInFrom(projection, actor.memberId, projection.projects.get(projectRef)?.workspaceId ?? ('' as WorkspaceId))
+      ? `does not participate in the Workspace of Project '${projectRef}'`
+      : `is ${member.state}, and only an enabled Member may ${access === 'read' ? 'read' : 'write'} here`
+    return `Agent Member '${actor.handle}' ${reason} (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`
   }
 
   private resolveAccountable(projectRef: AgentTeamProjectRef, actor: AgentTeamHumanActor | AgentTeamMemberActor, requested?: AgentTeamMemberId): AgentTeamMemberId {
@@ -8387,7 +8456,7 @@ export class AgentTeamLedger {
    */
   private resolveTransferTarget(projectRef: AgentTeamProjectRef, requested: AgentTeamMemberId): AgentTeamMemberId {
     const member = this.requireMember(requested)
-    if (member.state !== 'enabled' || !this.isProjectMemberFrom(this.state, projectRef, requested)) {
+    if (member.state !== 'enabled' || !this.takesPartInProjectFrom(this.state, projectRef, requested)) {
       throw new Error(`Task accountable '${member.handle}' must be an enabled Project member or the Human (accountable_target_invalid) — ${recoveryFor('accountable_target_invalid').sentence({})}`)
     }
     return requested
@@ -8418,7 +8487,7 @@ export class AgentTeamLedger {
     if (task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID) return true
     if (projection.rulesVersion < 3) return this.isProjectOwnerFrom(projection, task.projectRef, task.accountable)
     return projection.members.get(task.accountable)?.state === 'enabled'
-      && this.isProjectMemberFrom(projection, task.projectRef, task.accountable)
+      && this.takesPartInProjectFrom(projection, task.projectRef, task.accountable)
   }
 
   /**
@@ -8436,7 +8505,7 @@ export class AgentTeamLedger {
     if (task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID) return true
     if (projection.members.get(task.accountable)?.state !== 'enabled') return false
     return projection.rulesVersion >= 3
-      ? this.isProjectMemberFrom(projection, task.projectRef, task.accountable)
+      ? this.takesPartInProjectFrom(projection, task.projectRef, task.accountable)
       : this.isProjectOwnerFrom(projection, task.projectRef, task.accountable)
   }
 
@@ -8495,7 +8564,7 @@ export class AgentTeamLedger {
     const markers: AgentTeamActivityMarker[] = []
     for (const task of projection.tasks.values()) {
       if (task.accountable !== memberId || task.resolution !== 'open' || (projectRefs !== undefined && !projectRefs.has(task.projectRef))) continue
-      if (keepWhenStillMember && this.isProjectMemberFrom(projection, task.projectRef, memberId, true)) continue
+      if (keepWhenStillMember && this.takesPartInProjectFrom(projection, task.projectRef, memberId, true)) continue
       const activity: AgentTeamTaskActivity = Object.freeze({ activityRef: this.ref('activity'), kind: 'transfer', taskRef: task.taskRef,
         threadRef: task.threadRef, actor: AGENT_TEAM_HUMAN_MEMBER_ID, from: memberId, to: AGENT_TEAM_HUMAN_MEMBER_ID, sequence })
       transfers.push(activity)
@@ -8944,12 +9013,15 @@ export class AgentTeamLedger {
   }
 
   /** Resolve one Task's Thread for a workspace-authorized actor; Member actors must belong to the Task's Project. */
-  private threadForActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, workspaceId: WorkspaceId, taskRef: AgentTeamTaskRef): { readonly task: AgentTeamTask; readonly thread: AgentTeamThread } {
+  private threadForActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, workspaceId: WorkspaceId, taskRef: AgentTeamTaskRef,
+    access: 'read' | 'write' = 'write'): { readonly task: AgentTeamTask; readonly thread: AgentTeamThread } {
     const task = this.requireTask(workspaceId, taskRef)
     const thread = this.requireThread(task.threadRef)
     this.assertThreadProjectActive(task.projectRef)
-    if (this.state.rulesVersion >= 2) this.requireProjectMemberActor(actor, task.projectRef)
-    else if (actor.kind === 'member') this.requireMemberProject(this.requireMember(actor.memberId), task.projectRef)
+    if (this.state.rulesVersion >= 2) {
+      if (access === 'read') this.requireProjectReadActor(actor, task.projectRef)
+      else this.requireProjectWriteActor(actor, task.projectRef)
+    } else if (actor.kind === 'member') this.requireMemberProject(this.requireMember(actor.memberId), task.projectRef)
     return { task, thread }
   }
 
@@ -9175,11 +9247,14 @@ export class AgentTeamLedger {
     actor: AgentTeamHumanActor | AgentTeamMemberActor,
     workspaceId: WorkspaceId,
     request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined },
+    access: 'read' | 'write' = 'write',
   ): { readonly task?: AgentTeamTask; readonly thread: AgentTeamThread; readonly projectRef: AgentTeamProjectRef } {
     const resolved = this.threadContextFrom(this.state, workspaceId, request)
     if (actor.kind === 'member') {
-      if (this.state.rulesVersion >= 2) this.requireProjectMemberActor(actor, resolved.projectRef)
-      else this.requireMemberProject(this.requireMember(actor.memberId), resolved.projectRef)
+      if (this.state.rulesVersion >= 2) {
+        if (access === 'read') this.requireProjectReadActor(actor, resolved.projectRef)
+        else this.requireProjectWriteActor(actor, resolved.projectRef)
+      } else this.requireMemberProject(this.requireMember(actor.memberId), resolved.projectRef)
     }
     return resolved
   }
@@ -9274,18 +9349,13 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Whether a Member takes part in a Project (the visibility question),
-   * derived from taking part in any Thread of the Project, or from an
-   * explicit membership a historical ledger still carries. The explicit half
-   * keeps old ledgers reproducible (a Member added by `project-member-joined`
-   * who never wrote a word must still see the Project); nothing new is
-   * enrolled. Deriving from Threads is what makes a Member mentioned into a
-   * Thread see the Project that Thread belongs to.
+   * Whether a Member took part in a Project under the rules a replayed segment
+   * ran with — the visibility question version 9 retired, kept verbatim so a
+   * historical ledger still replays under it. It derives from taking part in
+   * any Thread of the Project, or from an explicit membership the record
+   * carries; `canReadProjectFrom` and `canWriteProjectFrom` reach it only for
+   * a segment running rules below version 9.
    */
-  private isProjectMember(projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
-    return this.isProjectMemberFrom(this.state, projectRef, memberId)
-  }
-
   private isProjectMemberFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId,
     withoutOwnerGrant: boolean = false): boolean {
     // Deriving stays inside the Workspace boundary: a Member who has left the
@@ -9311,6 +9381,55 @@ export class AgentTeamLedger {
       if (this.everParticipatedFrom(projection, threadRef, memberId)) return true
     }
     return false
+  }
+
+  /**
+   * The read gate one segment runs under. Before version 9 that is Project
+   * membership in all its derived forms; from version 9 on it is only
+   * participation in the Project's Workspace while the Member is not inactive
+   * or archived — Project membership, mentions and Thread history no longer
+   * decide who may look. The Human reads every Project through ownership, as
+   * before, so this predicate answers for Agent Members alone and callers keep
+   * exempting the Human explicitly.
+   */
+  private canReadProjectFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
+    if (projection.rulesVersion < 9) return this.isProjectMemberFrom(projection, projectRef, memberId)
+    if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return false
+    const project = projection.projects.get(projectRef)
+    if (project === undefined) return false
+    const state = projection.members.get(memberId)?.state
+    if (state === 'inactive' || state === 'archived') return false
+    return this.participatesInFrom(projection, memberId, project.workspaceId)
+  }
+
+  /**
+   * The write gate one segment runs under: a Main stream post, a Thread reply,
+   * a Claim, a follow or an unfollow. Before version 9 it is Project
+   * membership; from version 9 on it is participation in the Project's
+   * Workspace while the Member is enabled — a suspended Member still reads but
+   * no longer writes.
+   */
+  private canWriteProjectFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
+    if (projection.rulesVersion < 9) return this.isProjectMemberFrom(projection, projectRef, memberId)
+    if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return false
+    const project = projection.projects.get(projectRef)
+    if (project === undefined) return false
+    return projection.members.get(memberId)?.state === 'enabled'
+      && this.participatesInFrom(projection, memberId, project.workspaceId)
+  }
+
+  /**
+   * Whether a Member's standing lets a Task responsibility land or stay on them:
+   * version 9 asks only that an enabled Member still participates in the
+   * Project's Workspace; earlier segments keep the membership question.
+   */
+  private takesPartInProjectFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId,
+    withoutOwnerGrant: boolean = false): boolean {
+    if (projection.rulesVersion >= 9) {
+      const project = projection.projects.get(projectRef)
+      return project !== undefined && this.participatesInFrom(projection, memberId, project.workspaceId)
+    }
+    return this.isProjectMemberFrom(projection, projectRef, memberId, withoutOwnerGrant)
   }
 
   /** Every Thread of the Project, taskful or taskless — the scope both cleanup validators replay against. */
@@ -9382,6 +9501,16 @@ export class AgentTeamLedger {
   }
 
   /**
+   * The membership list one new Project records: version 9 stores none, since
+   * membership no longer gates anything; earlier segments keep honoring the
+   * caller's list so a pre-9 ledger still creates the members it always could.
+   */
+  private initialProjectMemberIds(request: AgentTeamAuthorizedCreateProjectRequest): readonly AgentTeamMemberId[] {
+    if (this.state.rulesVersion >= 9) return Object.freeze([])
+    return this.normalizeUnique(request.memberIds, 'initial Project members')
+  }
+
+  /**
    * Names a Message body may address in one Project: every live Member who
    * participates in the Project's Workspace plus the Human. A name outside this
    * set stays prose, which is what keeps an incidental name-drop from reaching
@@ -9420,7 +9549,7 @@ export class AgentTeamLedger {
     const memberIds: AgentTeamMemberId[] = [AGENT_TEAM_HUMAN_MEMBER_ID]
     for (const member of this.state.members.values()) {
       if (member.state === 'inactive' || member.state === 'archived') continue
-      if (!this.isProjectMember(projectRef, member.memberId)) continue
+      if (!this.canReadProjectFrom(this.state, projectRef, member.memberId)) continue
       memberIds.push(member.memberId)
     }
     return Object.freeze(memberIds.sort())
@@ -9577,7 +9706,8 @@ export class AgentTeamLedger {
   private assertSameProjectCreation(operation: AgentTeamOperation, request: AgentTeamAuthorizedCreateProjectRequest, memberIds: readonly AgentTeamMemberId[]): asserts operation is AgentTeamProjectCreatedOperation {
     if (operation.kind !== 'team/project-created' || !this.sameActor(operation.actor, request.actor)
       || operation.data.workspaceId !== request.workspaceId || operation.data.project.name !== request.name.trim()
-      || operation.data.project.description !== request.description.trim() || !this.sameList(operation.data.memberIds, memberIds)) this.throwRequestCollision(request.requestId)
+      || operation.data.project.description !== request.description.trim()
+      || (this.state.rulesVersion < 9 && !this.sameList(operation.data.memberIds, memberIds))) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameMemberAdd(operation: AgentTeamOperation, request: AgentTeamAuthorizedAddMemberRequest): asserts operation is AgentTeamMemberAddedOperation {

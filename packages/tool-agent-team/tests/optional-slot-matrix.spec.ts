@@ -47,7 +47,7 @@ const MANAGER_OVERVIEW_STATE = {
 const ANCHOR = { messageRef: 'message:anchor', sender: MEMBER, body: 'subject', sequence: 1, occurredAt: '2026-10-29T00:00:00.000Z' }
 const MEMBER_CREATE_STATE = { memberRef: 'member:created', workspaceIds: [WORKSPACE],
   status: { availability: 'active', presence: 'available', capabilityState: 'applied' } }
-const PROJECT_CREATE_STATE = { projectRef: 'project:created', memberIds: [MEMBER] }
+const PROJECT_CREATE_STATE = { projectRef: 'project:created' }
 const OWNER_GRANT_STATE = { projectRef: PROJECT, memberRef: MEMBER, responsibility: 'owns the parser' }
 const MANAGER_WRITE_STATE = { requestId: 'agent-team:tool:agent:matrix:call:1', outcome: 'committed' }
 const MEMBER_STATUS_STATE = { availability: 'active', presence: 'available', capabilityState: 'applied' }
@@ -67,6 +67,7 @@ function matrixHost(): Record<string, unknown> {
     memberForAgent: () => ({ memberId: MEMBER }),
     resolveTaskRefs: () => ({ resolved: [] }),
     attentionStatusForAgent: vi.fn(() => ({ attention: undefined })),
+    mainAttentionStatusForAgent: vi.fn(() => ({ attention: undefined })),
     changeAttentionForAgent: vi.fn(async () => ({ thread: THREAD_STATE, attention: undefined })),
     readThreadForAgent: vi.fn(async () => ({ thread: THREAD_STATE, anchor: ANCHOR, anchorMentions: [], claims: [], facts: [],
       readThroughSequence: 1, remainingUnreadCount: 0, consumedDirectMarkers: [], reminders: [] })),
@@ -207,7 +208,7 @@ const CASES: readonly MatrixCase[] = [
   // The manager write surface: every optional slot is optional presence, so a
   // model that fills all of them must reach the same Host request as a clean
   // call. A blank `capabilities` names no capability intent and a blank
-  // `requestId` names no retry key, so both drop exactly as `memberIds` does.
+  // `requestId` names no retry key, so both drop from the forwarded request.
   { tool: 'member_create', action: 'create', baseline: { workspaceId: WORKSPACE, handle: 'Iris', description: 'global standing',
     model: { provider: 'provider:a', model: 'model:a' } }, hostMethod: 'managerCreateMemberForAgent' },
   { tool: 'project_create', action: 'create', baseline: { workspaceId: WORKSPACE, name: 'Parser', description: 'shared goal' },

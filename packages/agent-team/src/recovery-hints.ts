@@ -61,7 +61,7 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'accountable_target_invalid',
-    sentence: ({ taskRef }: RecoveryContext) => `The accountable must be an enabled Project member here or the Human${taskRef === undefined ? '' : ` (${taskRef})`} — a Task starts with a Project owner, while team_task transfer may hand it to any member who takes part; pick one from team_view and retry, and only the Human may transfer a finished Task.`,
+    sentence: ({ taskRef }: RecoveryContext) => `The accountable must be the Human or an enabled Member who participates in this Workspace${taskRef === undefined ? '' : ` (${taskRef})`} — a Task starts with a Project owner, while team_task transfer may hand it to any member who takes part; pick one from team_view and retry, and only the Human may transfer a finished Task.`,
   },
   {
     kind: 'accept_requires_in_review',
@@ -69,7 +69,11 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'not_project_member',
-    sentence: ({ projectRef }: RecoveryContext) => `Only Project members take part in ${projectRef === undefined ? 'a Project' : projectRef} — choose a Project listed by team_view, or ask the Human or a Project owner to mention you there.`,
+    sentence: ({ projectRef }: RecoveryContext) => `Only a Member that participates in this Workspace takes part in ${projectRef === undefined ? 'a Project' : projectRef}, and only an enabled one writes there — choose a Project listed by team_view in a Workspace you participate in.`,
+  },
+  {
+    kind: 'notify_recipient_invalid',
+    sentence: () => 'A subscription event reaches the Human or an enabled Member that participates in this Workspace — pick recipients from team_view and retry.',
   },
   {
     kind: 'main_stream_addressing',

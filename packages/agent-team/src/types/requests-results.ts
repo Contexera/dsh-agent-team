@@ -332,8 +332,6 @@ export interface AgentTeamManagerProjectCreateRequest {
   readonly name: string
   /** The shared goal; the manager layer refuses an empty one. */
   readonly description: string
-  /** Members to bring in at creation; each must already be active in this Workspace. */
-  readonly memberIds?: readonly AgentTeamMemberId[]
 }
 
 /** A created Project with the Members it brought in. */
@@ -467,14 +465,13 @@ export interface AgentTeamManagerMemberWorkspaceResult extends AgentTeamManagerW
   readonly removedAttention?: number
 }
 
-/** Human intent to create a Workspace Project with its initial Members. */
+/** Human intent to create a Workspace Project; ownership is granted afterwards through `project_owner`. */
 export interface AgentTeamCreateProjectRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
   readonly name: string
   /** Display purpose text; may be empty and filled in later through an edit. */
   readonly description: string
-  readonly memberIds?: readonly AgentTeamMemberId[]
 }
 
 /** Result of creating or idempotently resolving a Project and its initial Members. */
@@ -1907,8 +1904,10 @@ export interface AgentTeamViewRequest {
 export interface AgentTeamProjectDirectoryEntry {
   readonly project: AgentTeamProject
   readonly ownerIds: readonly AgentTeamMemberId[]
-  /** Whether the viewing Member participates in this Project's content and writes. */
+  /** Whether the viewing Member may read this Project under its rules version. */
   readonly participating: boolean
+  /** Whether the viewing Member follows this Project's Main stream; present on a rules-version-9 ledger. */
+  readonly followingMain?: boolean
   readonly subscriptions: { readonly active: number; readonly paused: number }
 }
 
