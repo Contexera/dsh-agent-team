@@ -372,9 +372,6 @@ export function subscriptionRunEnvironment(input: SubscriptionRunEnvironmentInpu
   }
 }
 
-/** The test envelope a webhook-only subscription runs under while it is validated. */
-export const SUBSCRIPTION_TEST_TRIGGER = 'test'
-
 /**
  * The trial envelope's stdin. A webhook-only subscription has no live input to
  * replay at creation, so the contract supplies a sample the script can reject
