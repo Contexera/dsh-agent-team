@@ -383,11 +383,6 @@
   padding: 0 16px;
 }
 
-/* The mention that also changes Project membership: same quiet voice, joined to the notify line. */
-.notifyJoin {
-  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-tertiary));
-}
-
 .error {
   align-self: stretch;
   color: var(--dsw-alias-state-error-primary);

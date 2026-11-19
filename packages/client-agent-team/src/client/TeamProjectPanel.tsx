@@ -86,8 +86,6 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
   const rootRef = useRef<HTMLElement | null>(null)
 
-  const projectMembers = members.filter(status => projectMemberIds.size === 0 || projectMemberIds.has(status.member.memberId))
-
   const memberName = (memberId: AgentTeamMemberId): string => {
     if (memberId === humanMemberId) return humanName
     const status = members.find(candidate => candidate.member.memberId === memberId)
@@ -103,7 +101,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
 
   const controller = useTeamThreadController({
     workspaceId, threadRef, readThread, loadThreadHistory, threadObservations, subscribeChanges, resolveMessageRefs, reply, drafts, putAttachment,
-    projectMembers: () => projectMembers,
+    workspaceMembers: () => members,
     memberName, t,
     onRead: () => { onRead(threadRef) },
     openingTarget,

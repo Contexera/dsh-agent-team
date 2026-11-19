@@ -48,8 +48,8 @@ export interface TeamThreadControllerOptions {
   readonly reply: TeamConversationProps['reply']
   readonly drafts: TeamDraftStore
   readonly putAttachment: TeamConversationProps['putAttachment']
-  /** The Project's roster at send time, for the optimistic mention chips a committed reply merges before the Host's own facts land. */
-  readonly projectMembers: () => readonly AgentTeamClientMemberStatus[]
+  /** The Workspace roster at send time, for the optimistic mention chips a committed reply merges before the Host's own facts land — under rules version 9 a mention can land on any enabled Workspace Member. */
+  readonly workspaceMembers: () => readonly AgentTeamClientMemberStatus[]
   /** One Member's display name, for the composer's quote banner. */
   readonly memberName: (memberId: AgentTeamMemberId) => string
   readonly t: TeamConversationProps['t']
@@ -591,7 +591,7 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
       if (result.value.kind === 'committed') {
         const committed = result.value
         // Hand-typed `@Handle` delivers directly; committed facts replace this row on arrival.
-        const optimisticMentions = mentionedMemberIds(draft, options.projectMembers())
+        const optimisticMentions = mentionedMemberIds(draft, options.workspaceMembers())
         setCurrentFacts(current => {
           const merged = mergeFacts(current, [{ kind: 'message', sequence: committed.message.sequence, message: committed.message, mentions: optimisticMentions, occurredAt: committed.receipt.occurredAt }])
           currentFactsRef.current = merged

@@ -82,12 +82,23 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
     expect(await b.view.findByText('human thread reply')).toBeTruthy()
     expect(b.reply.mock.calls[0]![0].requestId).toBe(b.reply.mock.calls[1]![0].requestId)
+    // A hand-typed @ lands on any enabled Workspace Member under rules v9, so
+    // the optimistic row chipifies it even when the name never joined this
+    // Project's historical membership list.
+    fireEvent.change(b.view.getByRole('textbox', { name: '消息内容' }), { target: { value: '看一下 @builder' } })
+    fireEvent.click(b.view.getByRole('button', { name: '发送' }))
+    const optimisticRow = await waitFor(() => {
+      const row = [...b.view.container.querySelectorAll('[class*="message"]')].find(el => el.textContent?.includes('看一下'))
+      expect(row).toBeTruthy()
+      return row!
+    })
+    expect(optimisticRow.querySelector('[class*="mention"]')?.textContent).toContain('builder')
     fireEvent.click(b.view.getByRole('button', { name: '关闭任务' }))
     // The closed Thread swaps the composer for an explanatory notice with the reopen action.
     expect(await b.view.findByRole('button', { name: '重新打开' })).toBeTruthy()
     expect(b.view.getByText('任务已关闭，重新打开后可继续讨论')).toBeTruthy()
     expect(b.view.queryByRole('textbox', { name: '消息内容' })).toBeNull()
-    expect(b.reply).toHaveBeenCalledTimes(2)
+    expect(b.reply).toHaveBeenCalledTimes(3)
     fireEvent.click(b.view.getByRole('button', { name: '重新打开' }))
     await waitFor(() => expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).disabled).toBe(false))
     fireEvent.click(b.view.getByRole('button', { name: '返回项目' }))

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
-import { buildMentionGroups, enrollmentIds, mentionCandidatesFor, type MentionGroup } from '../src/client/mention-presentation.ts'
+import { buildMentionGroups, mentionCandidatesFor, type MentionGroup } from '../src/client/mention-presentation.ts'
 
 function member(handle: string, opts: { presence?: 'available' | 'working' | 'error' | 'unavailable', state?: 'enabled' | 'suspended' | 'inactive' | 'archived', description?: string } = {}): AgentTeamClientMemberStatus {
   return {
@@ -62,11 +62,5 @@ describe('mention roster grouping', () => {
     const rows = [member('builder', { description: '后端接口' }), member('reviewer')]
     expect(mentionCandidatesFor(rows, 'uild').map(status => status.member.handle)).toEqual(['builder'])
     expect(mentionCandidatesFor(rows, '后端').map(status => status.member.handle)).toEqual(['builder'])
-  })
-
-  it('names only the notified Members the Project does not already carry as enrollments', () => {
-    expect(enrollmentIds(['member:peer' as never, 'member:stranger' as never], ids('peer'))).toEqual(['member:stranger'])
-    // An unknown roster (empty set) is not the same as "everyone is new".
-    expect(enrollmentIds(['member:stranger' as never], new Set())).toEqual([])
   })
 })

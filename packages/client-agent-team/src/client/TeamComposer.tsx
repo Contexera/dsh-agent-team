@@ -7,7 +7,7 @@ import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import type { ReplyTarget } from './composer-sends.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
-import { buildMentionGroups, enrollmentIds, mentionSurfaceOf, type MentionGroupKey } from './mention-presentation.ts'
+import { buildMentionGroups, mentionSurfaceOf, type MentionGroupKey } from './mention-presentation.ts'
 import { HUMAN_MEMBER_ID, mentionedMemberIds, plainGist } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
@@ -152,8 +152,6 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
   const memberHandles = new Map(members.map(status => [status.member.memberId, status.member.handle]))
 
   const notifiedIds = deliverableRecipients(draft, members, replyTo)
-  // A name typed outside the Project's roster makes that Member a Project member on send; say so before the send.
-  const enrollment = enrollmentIds(notifiedIds, projectMemberIds)
 
   const groupLabel = (key: MentionGroupKey): string =>
     key === 'owner' ? t('mentionGroupOwner')
@@ -352,7 +350,7 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
           onCompositionEnd={() => { setTimeout(() => { composingRef.current = false }, 10) }}
         />
       </div>
-      {notifiedIds.length > 0 && <p className={css.notifyRow} data-team-notify>{t('composerNotify', { ids: notifiedIds.map(memberId => `@${memberHandles.get(memberId) ?? memberId}`).join(', ') })}{enrollment.length > 0 && <span className={css.notifyJoin}>{' '}{t('composerNotifyJoin', { ids: enrollment.map(memberId => `@${memberHandles.get(memberId) ?? memberId}`).join(', ') })}</span>}</p>}
+      {notifiedIds.length > 0 && <p className={css.notifyRow} data-team-notify>{t('composerNotify', { ids: notifiedIds.map(memberId => `@${memberHandles.get(memberId) ?? memberId}`).join(', ') })}</p>}
       {onFilesChange !== undefined && pendingFiles !== undefined && pendingFiles.length > 0 && (
         <ul className={css.fileChips} aria-label={t('attachFiles')}>
           {pendingFiles.map((file, index) => {

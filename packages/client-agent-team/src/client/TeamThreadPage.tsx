@@ -102,7 +102,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const controller = useTeamThreadController({
     workspaceId, threadRef, ...(taskRef === undefined ? {} : { taskRef }), readThread, loadThreadHistory, threadObservations, subscribeChanges,
     resolveMessageRefs, reply, drafts, putAttachment,
-    projectMembers: () => projectMembers,
+    workspaceMembers: () => members,
     memberName, t,
     openingTarget: facts => firstUnreadMention(facts, humanName),
     afterWrite: () => refreshSupplemental(),
@@ -199,7 +199,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const effectiveProjectRef = task?.projectRef ?? projectRef
   const projectMemberIds = useMemo(() => new Set(projectView?.members.filter(item => item.projectRef === effectiveProjectRef).map(item => item.memberId) ?? []), [projectView, effectiveProjectRef])
   const projectOwnerIds = useMemo(() => new Set((projectView?.owners ?? []).filter(item => item.projectRef === effectiveProjectRef).map(item => item.memberId)), [projectView, effectiveProjectRef])
-  const projectMembers = members.filter(status => projectMemberIds.size === 0 || projectMemberIds.has(status.member.memberId))
   const mentionHandlesMap = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
   const humanIdentity: TeamAvatarHuman | undefined = projectView?.humanMemberId === undefined
     ? undefined
