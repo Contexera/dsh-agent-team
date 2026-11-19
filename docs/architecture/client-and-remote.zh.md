@@ -32,6 +32,7 @@ Client remote service
 - 需要 Client 独立分支的预期跨 Remote 失败以 `RemoteError` 抛出。owner 通过向 `RemoteErrorDetailsMap` merge 声明自己的 code。Team 把 codes merge 进两个 face 共同编译的公开 types 入口。Team 的第一个 code 是 `team/attachment-not-found`，只用于确认整个 cache entry 已不存在。非法 UUID、cache 外路径、缺失 metadata 或 payload、非法 metadata、I/O 与 payload 读取失败都保持为通用 Host 错误。
 - Client 按 `code` 分支，绝不解析 message 文本。message 只是人类诊断，不是契约。未知 code 与未分类的 Host 异常以 `gateway/internal` 到达，因此每个分支都保留通用 fallback。
 - attachment preview 缓存成功读取的图片字节。确认缺失只在当前渲染显示过期状态，不写负缓存，后续挂载仍可重读同一 id。其它读取失败与浏览器解码失败保留文件名，提供显式重试，并且不会打开空预览。
+- `openAttachment` 与 `attachmentApplications` 从同一个已验证的 cache entry 解析 payload 路径，再交给 serving desktop 自己的 opener 或 handler 列表。两者都不接受 Client 传入的路径，因此 attachment 动作无法打开任意 Host 文件；headless Host 返回 `opened: false` 与空 handler 列表，而不是让无法打开任何东西的 Client 失败。
 
 ## Client plugin 和 slot composition
 Team browser plugin 是 external Client plugin。Shipped Shell 继续拥有 outer layout。Team 增加一个 additive footer action，并动态 shadow 三个 seats：

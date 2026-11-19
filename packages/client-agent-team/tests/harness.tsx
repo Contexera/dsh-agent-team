@@ -165,6 +165,8 @@ export async function createClientBench(options?: ClientTestBenchOptions) {
         threadObservations: threadsAndTasks.threadObservations,
         putAttachment: projectsAndMembers.putAttachment,
         getAttachment: projectsAndMembers.getAttachment,
+        openAttachment: projectsAndMembers.openAttachment,
+        attachmentApplications: projectsAndMembers.attachmentApplications,
         createProject: projectsAndMembers.createProject,
         updateProject: projectsAndMembers.updateProject,
         archiveProject: projectsAndMembers.archiveProject,

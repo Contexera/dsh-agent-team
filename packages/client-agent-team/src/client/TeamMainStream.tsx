@@ -43,6 +43,8 @@ interface TeamMainStreamProps {
   readonly startThread: TeamConversationProps['startThread']
   readonly putAttachment: TeamConversationProps['putAttachment']
   readonly getAttachment: TeamConversationProps['getAttachment']
+  readonly openAttachment?: TeamConversationProps['openAttachment']
+  readonly loadAttachmentApplications?: TeamConversationProps['loadAttachmentApplications']
   readonly subscribeChanges: TeamConversationProps['subscribeChanges']
   readonly openRef: (ref: string) => void
   readonly onResolveTaskRefs: MessageProps['onResolveTaskRefs']
@@ -62,7 +64,7 @@ type MessageEntry = Extract<AgentTeamMainTimelineEntry, { readonly kind: 'messag
 /** Rules version 2 Project reading: the Main stream timeline and its composer. Message, activity and card entries arrive from the Host already ordered. */
 export function TeamMainStream({
   workspaceId, projectRef, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, projectOwnerIds, drafts,
-  mainStreamHistory, readMainStream, postMainMessage, startThread, putAttachment, getAttachment, subscribeChanges,
+  mainStreamHistory, readMainStream, postMainMessage, startThread, putAttachment, getAttachment, openAttachment, loadAttachmentApplications, subscribeChanges,
   openRef, onResolveTaskRefs, onResolveThreadRefs, projectNameOf, memberOf, openMemberSession, onOpenDiscussion, onOpenTask, onTaskStarted, t,
 }: TeamMainStreamProps) {
   const stream = useMainStream({ workspaceId, projectRef, mainStreamHistory, readMainStream, subscribeChanges })
@@ -323,6 +325,8 @@ export function TeamMainStream({
           body={message.body}
           attachments={message.attachments}
           loadAttachment={getAttachment}
+          {...(openAttachment === undefined ? {} : { openAttachment })}
+          {...(loadAttachmentApplications === undefined ? {} : { loadAttachmentApplications })}
           t={t}
           occurredAt={message.occurredAt}
           mentionNames={mentionNamesOf(entry.mentions, handleByMember, humanName)}

@@ -724,6 +724,37 @@ export interface AgentTeamGetAttachmentResult {
   readonly bytesBase64: string
 }
 
+/** Native desktop action for one cached attachment; both use the Host's own file associations. */
+export type AgentTeamAttachmentAction = 'open' | 'reveal'
+
+/** Open or reveal one cached attachment in the serving desktop's default application or file manager. */
+export interface AgentTeamOpenAttachmentRequest {
+  readonly attachmentId: AgentTeamAttachmentId
+  /** Defaults to `open`; `reveal` shows the file in the file manager instead. */
+  readonly action?: AgentTeamAttachmentAction | undefined
+  /** A handler id previously returned by `attachmentApplications`; omitted uses the OS default handler. */
+  readonly application?: string | undefined
+}
+
+export interface AgentTeamOpenAttachmentResult {
+  /** False when the Host has no desktop opener (for example a headless Linux server); failed opens reject instead. */
+  readonly opened: boolean
+}
+
+/** List the OS handlers currently registered for one cached attachment. */
+export interface AgentTeamAttachmentApplicationsRequest {
+  readonly attachmentId: AgentTeamAttachmentId
+}
+
+/** One OS-registered handler for a cached attachment, mirroring the Host file-association metadata. */
+export interface AgentTeamAttachmentApplication {
+  readonly id: string
+  readonly name: string
+  readonly default: boolean
+  /** PNG or SVG data URL, or null when the desktop supplies no icon. */
+  readonly icon: string | null
+}
+
 /** Human profile read: name + avatar reference + version footnote facts. */
 export interface AgentTeamHumanProfileRequest {
 }

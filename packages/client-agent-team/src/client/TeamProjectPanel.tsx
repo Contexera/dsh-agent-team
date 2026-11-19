@@ -49,6 +49,8 @@ interface TeamProjectPanelProps {
   readonly projectOwnerIds: ReadonlySet<AgentTeamMemberId>
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
+  readonly openAttachment?: TeamConversationProps['openAttachment']
+  readonly loadAttachmentApplications?: TeamConversationProps['loadAttachmentApplications']
   readonly putAttachment: TeamConversationProps['putAttachment']
   readonly readThread: TeamConversationProps['readThread']
   readonly loadThreadHistory: TeamConversationProps['loadThreadHistory']
@@ -80,7 +82,7 @@ const factSender = (fact: AgentTeamThreadFact): AgentTeamMemberId | undefined =>
 const factOccurredAt = (fact: AgentTeamThreadFact): string | undefined => fact.kind === 'message' ? fact.message.occurredAt : undefined
 
 /** A taskless Thread's whole face beside its feed. Claims and acceptance stay on the Thread page. */
-export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, anchor, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, projectOwnerIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, subscribeChanges, selectThread, selectDiscussion, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
+export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, anchor, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, projectOwnerIds, drafts, getAttachment, openAttachment, loadAttachmentApplications, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, subscribeChanges, selectThread, selectDiscussion, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
   const rootRef = useRef<HTMLElement | null>(null)
 
@@ -180,6 +182,8 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
         body={fact.message.body}
         attachments={fact.message.attachments}
         loadAttachment={getAttachment}
+        {...(openAttachment === undefined ? {} : { openAttachment })}
+        {...(loadAttachmentApplications === undefined ? {} : { loadAttachmentApplications })}
         t={t}
         occurredAt={fact.message.occurredAt}
         mentionNames={stableMentionNames(fact.mentions, mentionHandlesMap, humanName)}
