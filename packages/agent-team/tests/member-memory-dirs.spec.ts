@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, readdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
@@ -11,6 +13,8 @@ import { access, mkdir, readFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
 
 import { realHarness } from './helpers/member-harness.ts'
+import { addLedgerMember, harness, ledgerAtBoot } from './helpers/host-harness.ts'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
 
 describe('Agent Team Member private memory directory sanitization (issue #7)', () => {
   it('derives a Windows-safe directory segment without touching the member ref', async () => {
@@ -215,5 +219,32 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
       await expect(readFile(join(sanitized, 'memory.md'), 'utf8')).resolves.toContain('live root fact')
       await expect(access(join(sanitized, 'notes'))).resolves.toBeUndefined()
     }
+  })
+
+  it('never provisions a ledger-harness Member under the caller\u2019s own DSH_HOME', async () => {
+    // Boot-restore activation writes each enabled Member's private memory
+    // scaffold into DSH_HOME. The ledger harnesses that seeded member:agent-*
+    // and member:bench-* records did not isolate it, and their activations
+    // left real directories under the live home. Seed, reopen, and the
+    // caller's home must stay clean throughout.
+    const home = await mkdtemp(join(tmpdir(), 'dsh-agent-team-outer-home-'))
+    const pool = new MemoryMediaPool()
+    const first = await harness(pool)
+    await addLedgerMember(ledgerAtBoot(first), undefined, 'member:agent-probe', 'probe')
+    await first.close()
+
+    const previous = process.env.DSH_HOME
+    process.env.DSH_HOME = home
+    try {
+      const second = await harness(pool)
+      // Boot restore runs asynchronously; give the lifecycle queue its slot,
+      // then close and check nothing escaped into the caller's home.
+      await new Promise(resolve => setTimeout(resolve, 500))
+      await second.close()
+    } finally {
+      if (previous === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previous
+    }
+    await expect(readdir(join(home, 'agent-team', 'members'))).rejects.toThrow()
   })
 })

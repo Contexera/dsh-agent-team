@@ -62,6 +62,7 @@ async function bootHost(options: BootOptions = {}) {
   let fiber: Fiber | undefined
   const { ctx, fiber: bootedFiber } = await harness({
     workspaceIds: [],
+    ...(process.env.DSH_HOME === undefined ? {} : { dshHome: process.env.DSH_HOME }),
     config: options.user === undefined ? undefined : options.user as never,
     prepare: c => {
       c.provide('settings', {

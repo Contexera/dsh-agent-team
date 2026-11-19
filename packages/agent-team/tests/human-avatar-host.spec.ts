@@ -29,6 +29,7 @@ async function bootHost(home: string, stored: Record<string, unknown> = {}) {
   let host: AgentTeam | undefined
   const { ctx, close } = await harness({
     workspaceIds: [],
+    dshHome: home,
     config: stored as never,
     prepare: c => {
       c.provide('settings', {

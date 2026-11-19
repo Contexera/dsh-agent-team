@@ -55,7 +55,7 @@ export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './s
 export { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
 import { carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY, type TeamContextProjectionState } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
-import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, isExtraToolGrantCandidate, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, isExtraToolGrantCandidate, memberMemoryDirectoryName, memberMemoryDirectoryPath, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import {
   EXTRA_TOOL_GRANTS_FIELD, extraToolGrantsFrom, sanitizeExtraToolGrants,
 } from './member-tool-grants.ts'
@@ -3880,7 +3880,9 @@ export default class AgentTeam extends TypertRemoteService {
       memberRef: member.memberId,
       handle: member.handle,
       description: member.description,
-      privateMemoryPath: member.privateMemoryPath,
+      // The recorded path may carry a legacy colon segment; the live directory
+      // is always the sanitized spelling member-context also answers with.
+      privateMemoryPath: memberMemoryDirectoryPath(member),
       owns: ledger.ownedProjects(memberId),
     })
   }

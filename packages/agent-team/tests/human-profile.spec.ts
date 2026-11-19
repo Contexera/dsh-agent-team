@@ -327,6 +327,7 @@ describe('host row migration on boot', () => {
     const mutations: Mutation[] = []
     await bootHostHarness({
       workspaceIds: [],
+      dshHome: home,
       prepare: ctx => {
         ctx.provide('settings', {
           configure: () => () => {},

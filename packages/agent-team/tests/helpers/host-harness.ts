@@ -7,6 +7,9 @@
  * are deliberately not a fixture registry — a spec that needs a different
  * arrangement builds it locally and keeps it local.
  */
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -16,7 +19,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { TestHuman } from './domain-handles.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './memory-backend.ts'
-import { provideQuietTokenMeter, registerAutoCleanup, runCleanupSteps } from './team-host-fixture.ts'
+import { provideQuietTokenMeter, pushDshHome, registerAutoCleanup, runCleanupSteps } from './team-host-fixture.ts'
 import { SqliteStorageBackend } from '../../src/vendor/storage-sqlite/index.ts'
 import AgentTeam from '../../src/index.ts'
 import { agentTeamDomainSpec } from '../../src/spec.ts'
@@ -31,6 +34,8 @@ export interface HostHarnessOptions {
   readonly prepare?: (ctx: Context) => void | Promise<void>
   readonly validateLedger?: boolean
   readonly registerCleanup?: (fn: () => Promise<void>) => void
+  /** The DSH home the boot resolves. Omitted: a fresh throwaway home, so Member private-memory provisioning never lands in the caller's real home. */
+  readonly dshHome?: string
 }
 
 export interface TeamHarness {
@@ -81,6 +86,7 @@ export async function harness(
   let fiber: Awaited<ReturnType<Context['plugin']>> | undefined
   let facility: DomainFacility | undefined
   let closed = false
+  let restoreDshHome: (() => void) | undefined
 
   const close = async (): Promise<void> => {
     if (closed) return
@@ -93,12 +99,18 @@ export async function harness(
       },
       () => ctx?.fiber.dispose(),
       () => facility?.closeAll(),
+      () => { restoreDshHome?.() },
     ])
   }
 
   registerAutoCleanup(close, options?.registerCleanup)
 
   try {
+    // The Host provisions Member private memory under DSH_HOME at activation;
+    // an unisolated boot writes Member scaffolds into the real home (the
+    // member-bench-*/member-agent-* directories that appeared under the live
+    // members root came from exactly this leak).
+    restoreDshHome = pushDshHome(options?.dshHome ?? await mkdtemp(join(tmpdir(), 'dsh-agent-team-ledger-home-')))
     ctx = new Context()
     await ctx.plugin(Storage)
     ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
@@ -140,6 +152,7 @@ export async function sqliteHarness(path: string, options?: HostHarnessOptions):
   let facility: DomainFacility | undefined
   let backend: SqliteStorageBackend | undefined
   let closed = false
+  let restoreDshHome: (() => void) | undefined
 
   const close = async (): Promise<void> => {
     if (closed) return
@@ -153,12 +166,14 @@ export async function sqliteHarness(path: string, options?: HostHarnessOptions):
       () => ctx?.fiber.dispose(),
       () => facility?.closeAll(),
       () => backend?.close(),
+      () => { restoreDshHome?.() },
     ])
   }
 
   registerAutoCleanup(close, options?.registerCleanup)
 
   try {
+    restoreDshHome = pushDshHome(options?.dshHome ?? await mkdtemp(join(tmpdir(), 'dsh-agent-team-ledger-home-')))
     ctx = new Context()
     await ctx.plugin(Storage)
     backend = new SqliteStorageBackend({ path, journalMode: 'delete' })

@@ -1,15 +1,19 @@
-import { sep } from 'node:path'
+import { basename, sep } from 'node:path'
 import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import type { AgentTeamProjectRef } from '../src/types/entities.ts'
+import { agentTeamDomainSpec } from '../src/spec.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID, agentTeamHumanActor } from '../src/ledger.ts'
+import type { AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId } from '../src/types.ts'
 import { renderText, teamTools } from '../../tool-agent-team/tests/render-text.ts'
-import { realHarness, requestId } from './helpers/member-harness.ts'
+import { EmptyAdapter, realHarness, requestId } from './helpers/member-harness.ts'
 
 /** The live manager Agent for one Host. */
 async function openManager(ctx: Context): Promise<Agent> {
@@ -170,6 +174,43 @@ describe('Team manager read-only Team surface', () => {
     const memberSession = memberAgent(ctx, sessionId)
     await expect(ctx.agentTeam.managerSessionLocatorForAgent(memberSession, memberRef))
       .rejects.toThrow(/live Team manager Session/)
+  })
+
+  it('answers a Member whose ledger path predates sanitization with the directory it actually lives in', async () => {
+    // Early Members recorded a colon-form privateMemoryPath; activation
+    // provisions and migrates the sanitized spelling instead. The manager's
+    // memberRef read must name that directory — not the dead recorded one.
+    const memberId = `member:agent-${crypto.randomUUID()}` as AgentTeamMemberId
+    const { ctx, workspaceId } = await realHarness(new EmptyAdapter(), 'jsonl', undefined, false, async (seeded, seededWorkspaceId) => {
+      const domain = await seeded.storageDomain.open(agentTeamDomainSpec)
+      const table = domain.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
+      const initialized = `operation:${crypto.randomUUID()}` as AgentTeamOperationId
+      await table.put(initialized, {
+        sequence: 1, operationId: initialized, requestId: requestId('agent-team:initialize:v1'),
+        occurredAt: '2026-01-01T00:00:00.000Z', actor: agentTeamHumanActor(), previousOperationId: null,
+        kind: 'team/initialized', data: { humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID },
+      })
+      const added = `operation:${crypto.randomUUID()}` as AgentTeamOperationId
+      await table.put(added, {
+        sequence: 2, operationId: added, requestId: requestId('legacy:add-member'),
+        occurredAt: '2026-01-01T00:00:01.000Z', actor: agentTeamHumanActor(), previousOperationId: initialized,
+        kind: 'team/member-added',
+        data: {
+          member: {
+            memberId, sessionId: SessionId(`agent-team-legacy-${crypto.randomUUID()}`),
+            workspaceId: seededWorkspaceId, handle: 'legacy', description: '', presetId: 'team-member',
+            privateMemoryPath: join(process.env.DSH_HOME!, 'agent-team', 'members', memberId), state: 'enabled',
+          },
+          projectRefs: [],
+        },
+      })
+      await domain.close()
+    })
+    const manager = await openManager(ctx)
+    const overview = ctx.agentTeam.managerOverviewForAgent(manager, { memberRef: memberId })
+    const expected = join(process.env.DSH_HOME!, 'agent-team', 'members', memberId.replaceAll(':', '-'))
+    expect(overview.member?.privateMemoryPath).toBe(expected)
+    expect(basename(overview.member!.privateMemoryPath)).not.toContain(':')
   })
 
   it('refuses an unknown Project ref instead of answering empty', async () => {
