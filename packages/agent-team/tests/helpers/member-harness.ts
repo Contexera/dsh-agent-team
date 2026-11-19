@@ -211,6 +211,8 @@ export interface RealHarnessOptions {
   readonly tempParent?: string
   /** Keep the Host's global preset registry beside the Team registry's isolated realm, as in a real profile. */
   readonly isolatedPresetRealm?: boolean
+  /** Add a stub `bash` tool to the `team-member` preset, for a Member whose surface must hold a shell. */
+  readonly memberShellTool?: boolean
 }
 
 export async function realHarness(
@@ -309,6 +311,25 @@ export async function realHarness(
       '}',
       '',
     ].join('\n'))
+    // A stand-in for the shipped preset's shell row: only its name matters to
+    // the Host, which gates subscription scripts on the Member holding a shell.
+    const shellToolStub = join(root, 'shell-tool-stub.mjs')
+    if (options?.memberShellTool) {
+      await writeFile(shellToolStub, [
+        "export const name = 'test-shell-tool'",
+        "export const inject = ['tools']",
+        'export function apply(scope) {',
+        '  scope.tools.register({',
+        "    name: 'bash',",
+        "    description: 'Shell fixture',",
+        "    parameters: { type: 'object', properties: {}, additionalProperties: false },",
+        "    output: { schema: { type: 'object' }, render: () => [{ type: 'text', text: 'shell fixture' }] },",
+        "    execute: async () => ({ ok: true }),",
+        '  })',
+        '}',
+        '',
+      ].join('\n'))
+    }
     // The team-member definition as one declarative row, the same shape the
     // shipped cordis.patch.yml declares; bare internal loader names resolve
     // through the self-linked node_modules.
@@ -319,6 +340,7 @@ export async function realHarness(
       // `team_worker` stays declared and is withdrawn by the Host Worker switch,
       // exactly as in production.
       { id: 'team-tools', name: '@contexera/dsh-agent-team/tools', config: { only: MEMBER_TEAM_TOOLS } },
+      ...options?.memberShellTool ? [{ id: 'shell-tool', name: pathToFileURL(shellToolStub).href }] : [],
       TEAM_SKILLS_PRESET_ROW,
       { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
         { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },

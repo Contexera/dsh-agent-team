@@ -47,6 +47,9 @@ export const AGENT_TEAM_TOOL_NAMES = Object.freeze([
   'team_worker',
 ] as const)
 
+/** The DSH tool names that hand a Member an arbitrary shell on the Host. */
+export const SHELL_TOOL_NAMES = Object.freeze(['bash', 'pwsh'] as const)
+
 /** Copy a Remote-supplied capability overlay into owned frozen storage. */
 export function deepCopyCapabilities(capabilities: AgentTeamMemberCapabilities): AgentTeamMemberCapabilities {
   const copyAllow = (allow: readonly string[] | undefined): { allow?: readonly string[] } =>
@@ -139,6 +142,12 @@ export class MemberRuntime {
       for (const name of bindings.keys()) names.add(name)
     }
     return names
+  }
+
+  /** Whether the restriction enforced for this Member admits a shell tool; a Member with no installed restriction has none. */
+  enforcesShellTool(memberId: AgentTeamMemberId): boolean {
+    const allow = this.enforcedToolAllow.get(memberId)
+    return allow !== undefined && SHELL_TOOL_NAMES.some(name => allow.has(name))
   }
 
   /** Own-scope registrations can stay visible despite the execution guard. */

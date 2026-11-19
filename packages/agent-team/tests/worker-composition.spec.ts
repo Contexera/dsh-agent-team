@@ -142,7 +142,7 @@ const workerChunks = (calls: ReadonlyArray<{ readonly callId: string; readonly a
 
 it('wakes an owner from a subscription, lets it delegate through team_worker, and stops one on reply', async () => {
   const adapter = new ScriptedAdapter()
-  const harness = await realHarness(adapter)
+  const harness = await realHarness(adapter, 'jsonl', undefined, false, undefined, 'memory', { memberShellTool: true })
   const { ctx, workspaceId, root } = harness
   await ctx.plugin(SubagentRuntime)
 

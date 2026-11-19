@@ -131,6 +131,8 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 
   A profile-wide `extraToolGrants` list in the Host row is a separate permit by exact registered tool name: it may reopen an inherited baseline name the Member allow-list omitted or admit an Agent-scoped registration, but cannot reopen Team tools, `working_directory`, or the Worker switch. The Host reads it synchronously at `turn/start`, freezes it for that turn, and gives later turns the latest saved list.
 
+  Team tools survive every allow-list, so a Team tool that would make the Host run code checks the enforced surface itself: an Agent's subscription create, update, test, resume, or replay is refused unless the restriction currently installed for that Member admits `bash` or `pwsh`, and a Member with no installed restriction counts as having none. See [`team_subscription`](../team-collaboration/tools.md#team_subscription).
+
   Editing the allow-list on a live Member swaps the restriction at a turn boundary in the same Session: idle Members apply immediately, and a running Member's edit waits for that Member's turn to end. Each Member owns one lifecycle chain, so the wait holds only that Member's later operations, still in submission order, while managing another Member never queues behind it and the ledger keeps its single ordered writer.
 
   After each awaited boundary, capability and Worker-exposure edits synchronously recheck the live handle and true idle. A new turn delays the swap again rather than replacing its frozen grants. Shutdown releases the wait without allowing another observer or restriction to be installed on the retired context.

@@ -16,7 +16,7 @@ process.once('exit', removeSpillRoot)
 
 describe('subscription request retries', () => {
   it('resolves an Agent script-path create after the file is gone, while still checking current ownership', async () => {
-    const test = await realHarness(new EmptyAdapter())
+    const test = await realHarness(new EmptyAdapter(), 'jsonl', undefined, false, undefined, 'memory', { memberShellTool: true })
     let scriptRuns = 0
     const shell = {
       resolve: (request: ShellExecSpec) => request,

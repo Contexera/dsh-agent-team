@@ -165,6 +165,10 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 
 只有该 Project 的 owner 可以修改、试运行或重放投递（否则返回 `project_owner_required`）。任何 Workspace Member 都可以用 `list` 读取 Agent 侧元数据，其中不含 script、credential 引用和 webhook arm；运行历史仍只向 Project member 开放，owner 输出权限如下所述。
 
+`create`、`update`、`test`、`resume` 与 `replay` 会让 Host 在自己的 shell 上运行脚本并把输出交回调用方，因此 Agent owner 自身实际生效的工具范围里还必须有 shell 工具（`bash` 或 `pwsh`）；没有时调用会在读取或运行任何脚本之前以 `subscription_shell_required` 被拒绝。
+
+`scriptPath` 必须留在调用方的工作目录之内：相对路径以它为基准解析，指向目录之外的绝对路径、`..` 越界或目标在目录外的符号链接都会被拒绝。Human 路径不受影响，始终粘贴脚本内容。
+
 空的 `workspace`、`scriptPath` 与 `scriptContent` 视为未传；两个非空脚本来源仍然冲突，没有脚本仍是错误。`intervalMinutes` 或 `limit` 为零时按省略处理。这绝不丢弃 `notify: []`、`credentials: []`、`webhook: false` 或 `expectedRevision`：清空接收者、移除凭据引用、卸下 webhook 与版本校验仍是实际指令。
 
 `create` 与 `update` 用 `intervalMinutes` 指定定时、用 `webhook: true` 指定地址，也可以两者都要，两者都不给会被拒绝。`update` 里两者的省略语义不同：不给 `intervalMinutes` 就是去掉定时，而不给 `webhook` 表示地址照旧，只有显式 `false` 才会卸下它——不认识 webhook 的调用方不该把正在用的提供方连接切断。启用触发需要部署已配置公网地址（Host 行的 `webhook.publicOrigin`）。
