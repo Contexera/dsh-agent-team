@@ -1263,7 +1263,7 @@ const teamTask = defineTool({
     direction: { type: 'string', description: 'claim only: your one-sentence direction statement on the Task — the angle you are taking, so others can spot collisions and track progress. Put multi-paragraph plans, step order, file lists, and acceptance criteria in Thread messages, not the Claim.' },
     claimRef: { type: 'string', description: "Full branded Claim ref exactly as returned by team_task, including the 'claim:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     accountable: { type: 'string', description: "promote only: the Member who becomes accountable for the new Task — a current Project owner's memberRef or @Handle, or 'human'. Omit it and the promoting owner is accountable, or the Human when the Human promotes." },
-    target: { type: 'string', description: "transfer only: the Member who becomes accountable — any enabled member of this Task's Project, as a memberRef, @Handle, or a unique 6+ hex prefix, or 'human' to return responsibility to the Human. Following the Thread is not required." },
+    target: { type: 'string', description: "transfer only: the Member who becomes accountable — any enabled Member of this Task's Workspace, as a memberRef, @Handle, or a unique 6+ hex prefix, or 'human' to return responsibility to the Human. Following the Thread is not required." },
     workspace: workspaceParam,
   },
   output: {

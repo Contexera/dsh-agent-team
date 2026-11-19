@@ -4,7 +4,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool } from './helpers/memory-backend.ts'
 import { openTestTable } from './helpers/ledger-harness.ts'
-import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from '../src/ledger.ts'
 import { snapshotScript } from '../src/subscriptions.ts'
 import type {
   AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId,
@@ -192,17 +192,55 @@ describe('rules version 9: a Project keeps only own and follow', () => {
     expect(threadStanding(team, team.member.actor, task.thread.threadRef)).toBeDefined()
   })
 
-  it('accepts a never-before-seen Workspace Member as a notify recipient and refuses a suspended one with the new code', async () => {
+  it('accepts a never-before-seen Workspace Member as a notify recipient and refuses an archived one with the new code', async () => {
     const team = await seed()
     const accepted = await team.ledger.createSubscription({ requestId: requestId('sub'), actor: human, workspaceId: alpha,
       projectRef: team.projectRef, name: 'watch', triggers: { interval: { minutes: 15 } },
       script, credentials: [], notify: [team.stranger.memberId], baselineIds: [] })
     expect(accepted.value.subscription).toBeDefined()
 
-    await team.ledger.suspendMember({ requestId: requestId('suspend'), actor: human, memberId: team.stranger.memberId })
+    await team.ledger.archiveMember({ requestId: requestId('archive'), actor: human, memberId: team.stranger.memberId })
     await expect(team.ledger.createSubscription({ requestId: requestId('sub-2'), actor: human, workspaceId: alpha,
       projectRef: team.projectRef, name: 'watch2', triggers: { interval: { minutes: 15 } },
       script, credentials: [], notify: [team.stranger.memberId], baselineIds: [] })).rejects.toThrow(/notify_recipient_invalid/)
+  })
+
+  it('keeps a suspended recipient through subscription lifecycle writes and delivers to it again after resume', async () => {
+    const team = await seed()
+    const created = await team.ledger.createSubscription({ requestId: requestId('sub'), actor: human, workspaceId: alpha,
+      projectRef: team.projectRef, name: 'watch', triggers: { interval: { minutes: 15 } },
+      script, credentials: [], notify: [team.member.memberId], baselineIds: [] })
+    const subscriptionRef = created.value.subscription.subscriptionRef
+
+    await team.ledger.suspendMember({ requestId: requestId('suspend'), actor: human, memberId: team.member.memberId })
+    // A suspended Member still reads the Project, so it may still be named, and
+    // the automatic pause — a lifecycle write that copies the subscription
+    // forward — must not drop it from the stored set.
+    await expect(team.ledger.createSubscription({ requestId: requestId('sub-2'), actor: human, workspaceId: alpha,
+      projectRef: team.projectRef, name: 'watch2', triggers: { interval: { minutes: 15 } },
+      script, credentials: [], notify: [team.member.memberId], baselineIds: [] })).resolves.toBeDefined()
+    await team.ledger.pauseSubscription({ requestId: requestId('pause'), actor: agentTeamHostActor(), workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, reason: 'failures' })
+    expect(team.ledger.subscription(subscriptionRef)?.notify).toEqual([team.member.memberId])
+
+    await team.ledger.resumeMember({ requestId: requestId('resume-member'), actor: human, memberId: team.member.memberId })
+    await team.ledger.resumeSubscription({ requestId: requestId('resume'), actor: human, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1 })
+    expect(team.ledger.subscription(subscriptionRef)?.notify).toEqual([team.member.memberId])
+    await team.ledger.acceptSubscriptionEvents({ requestId: requestId('accept'), actor: agentTeamHostActor(), workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, subscriptionRevision: 1, scriptHash: script.sha256, events: [{ id: 'e1', title: 'E1' }] })
+    const pending = team.ledger.pendingSubscriptionEvents(subscriptionRef)
+    const published = await team.ledger.publishSubscriptionEvent({ requestId: requestId('publish'), actor: agentTeamHostActor(), workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, acceptedSequence: pending[0]!.acceptedSequence, eventId: 'e1' })
+    if (!published.committed) throw new Error('expected a committed publish')
+    expect(team.ledger.mainNotificationFacts(team.member.memberId).some(fact => JSON.stringify(fact).includes(published.value.published.eventRef))).toBe(true)
+    // Archival still ends the address: the next lifecycle write drops it.
+    await team.ledger.archiveMember({ requestId: requestId('archive'), actor: human, memberId: team.member.memberId })
+    await team.ledger.pauseSubscription({ requestId: requestId('pause-2'), actor: human, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, reason: 'manual' })
+    expect(team.ledger.subscription(subscriptionRef)?.notify).toEqual([])
+    // Replay accepts every stored set the writes above produced.
+    await expect(new AgentTeamLedger(team.table, { rulesVersion: 9 }).initialize()).resolves.not.toThrow()
   })
 
   it('replays a version-8 segment unchanged and keeps its membership refusals', async () => {

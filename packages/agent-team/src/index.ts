@@ -3074,7 +3074,7 @@ export default class AgentTeam extends TypertRemoteService {
     return result.value
   }
 
-  /** Agent-only accountability transfer to another enabled Project member or the Human. */
+  /** Agent-only accountability transfer to another enabled Member of the Project's Workspace or the Human. */
   async transferTaskForAgent(agent: Agent, request: AgentTeamTransferTaskRequest): Promise<AgentTeamTransferTaskResult> {
     const actor = this.memberCall(agent, request.workspaceId)
     const result = await this.requireLedger().transferTask({ ...request, actor })

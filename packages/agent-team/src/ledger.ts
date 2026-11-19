@@ -4947,28 +4947,28 @@ export class AgentTeamLedger {
     const foreign = [...new Set(notify ?? [])].filter(memberId => !this.notifyRecipientIsLive(projectRef, memberId))
     if (foreign.length === 0) return undefined
     const named = foreign.map(memberId => `'${memberId}'`).join(', ')
-    // Version 9 addresses an event to any enabled Workspace Member; the
-    // membership refusal remains the answer for the segments that gated on it.
+    // Version 9 addresses an event to any live (enabled or suspended) Workspace
+    // Member; the membership refusal remains the answer for the segments that gated on it.
     return this.state.rulesVersion >= 9
-      ? `event recipient ${named} is not an enabled Member of this Workspace (notify_recipient_invalid) — ${recoveryFor('notify_recipient_invalid').sentence({})}`
+      ? `event recipient ${named} is not a live Member of this Workspace (notify_recipient_invalid) — ${recoveryFor('notify_recipient_invalid').sentence({})}`
       : `event recipient ${named} is not a member of Project '${projectRef}' (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`
   }
 
-  /** Whether one addressed recipient can still receive: the Human always, a Member only while it belongs to the Project. */
+  /** Whether one addressed recipient can still receive: the Human always, a Member only while it can read the Project. */
   private notifyRecipientIsLive(projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
     return this.notifyRecipientLiveFrom(this.state, projectRef, memberId)
   }
 
-  /** The same predicate over a replay projection, so validation judges each segment at its own point in the ledger. */
+  /**
+   * The same predicate over a replay projection, so validation judges each
+   * segment at its own point in the ledger. Version 9 asks the read gate, so a
+   * suspended Member stays addressed: every lifecycle write carries the stored
+   * set forward through this predicate, and an enabled-only rule would drop a
+   * suspended recipient permanently on the first automatic pause.
+   */
   private notifyRecipientLiveFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
     if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return true
-    // Version 9 addresses an event to any enabled Member of the Workspace;
-    // earlier segments keep the Project-membership rule they were written under.
-    if (projection.rulesVersion >= 9) {
-      const project = projection.projects.get(projectRef)
-      return project !== undefined && projection.members.get(memberId)?.state === 'enabled'
-        && this.participatesInFrom(projection, memberId, project.workspaceId)
-    }
+    if (projection.rulesVersion >= 9) return this.canReadProjectFrom(projection, projectRef, memberId)
     return this.isProjectMemberFrom(projection, projectRef, memberId)
   }
 
@@ -8189,7 +8189,7 @@ export class AgentTeamLedger {
   private resolveTransferTarget(projectRef: AgentTeamProjectRef, requested: AgentTeamMemberId): AgentTeamMemberId {
     const member = this.requireMember(requested)
     if (member.state !== 'enabled' || !this.takesPartInProjectFrom(this.state, projectRef, requested)) {
-      throw new Error(`Task accountable '${member.handle}' must be an enabled Project member or the Human (accountable_target_invalid) — ${recoveryFor('accountable_target_invalid').sentence({})}`)
+      throw new Error(`Task accountable '${member.handle}' must be an enabled Member of this Workspace or the Human (accountable_target_invalid) — ${recoveryFor('accountable_target_invalid').sentence({})}`)
     }
     return requested
   }

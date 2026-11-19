@@ -106,9 +106,9 @@ Team 工具返回的 branded ref（`task:`、`thread:`、`project:`、`member:`�
 
 已发布的订阅事件是 Main stream 中一种独立记录类型，不是 Message：它写出 Project、订阅，以及脚本打印的内容。它没有发送者、不属于任何 Thread，因此不产生 Attention 行，也不是 Thread fact；它出现在 Main stream 时间线与 `team_thread` 渲染的 Main stream 页里。
 
-送达是定向的。订阅在 `notify` 里写明收件人，发布提交时冻结该集合——即其中仍属于该 Project 的 Member；集合为空时事件照常发布，但不写任何 marker。owner 身份不能替代收件人：拥有该 Project 不会让事件路由给他，Human 只有在订阅点名时才收到。收件人字段出现之前写下的记录，一律按创建者本人读取。
+送达是定向的。订阅在 `notify` 里写明收件人，发布提交时冻结该集合——即其中仍能读取该 Project 的 Member；集合为空时事件照常发布，但不写任何 marker。owner 身份不能替代收件人：拥有该 Project 不会让事件路由给他，Human 只有在订阅点名时才收到。收件人字段出现之前写下的记录，一律按创建者本人读取。
 
-离开该 Project 的成员不再是收件人：下一次把订阅记录整条写入的操作会把他丢掉，因此不会有记录带着无人可投的地址。取消关注 Main stream 的收件人依然会收到；处于暂停状态的也会，marker 会等他。
+已不能读取该 Project 的成员（已归档或已不在其 Workspace）不再是收件人：下一次把订阅记录整条写入的操作会把他丢掉，因此不会有记录带着无人可投的地址。取消关注 Main stream 的收件人依然会收到；处于暂停状态的也会，marker 会等他。
 
 其他人不会被打断。事件对所有读者都留在 Main stream 时间线上，记录因此仍可审计；但它不为任何人产生普通 unread——没被点名的读者只能在那里读到它，不会因此进 Inbox，也不会被唤醒。
 

@@ -73,7 +73,7 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'notify_recipient_invalid',
-    sentence: () => 'A subscription event reaches the Human or an enabled Member that participates in this Workspace — pick recipients from team_view and retry.',
+    sentence: () => 'A subscription event reaches the Human or a Member of this Workspace that is enabled or suspended, not archived — pick recipients from team_view and retry.',
   },
   {
     kind: 'main_stream_addressing',

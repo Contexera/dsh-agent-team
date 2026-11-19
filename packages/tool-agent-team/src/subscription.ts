@@ -243,7 +243,7 @@ export const teamSubscription = defineTool({
     credentials: { type: 'array', items: { type: 'string' },
       description: 'Credential references to inject on every run, at most 8, each written REF or REF=ENV_NAME. Values are never stored here; the Host resolves them at each run.' },
     notify: { type: 'array', items: { type: 'string' },
-      description: 'For create or update: the Members whose Inbox this subscription event reaches — each as a memberRef, an @Handle, or the Human (any current Project Member, owner or not). Omitted on create means the Creating Member alone; omitted on update keeps the stored set; an empty array means the timeline alone, with nobody woken. Non-recipients still see the event on the Main stream.' },
+      description: 'For create or update: the Members whose Inbox this subscription event reaches — each as a memberRef, an @Handle, or the Human (any enabled or suspended Member of the Project\'s Workspace, owner or not). Omitted on create means the Creating Member alone; omitted on update keeps the stored set; an empty array means the timeline alone, with nobody woken. Non-recipients still see the event on the Main stream.' },
     baseline: { type: 'string', enum: ['current-output', 'ignore-history'], description: 'Which history a brand-new subscription ignores. Default current-output.' },
     expectedRevision: { type: 'number', description: 'The revision an update, pause, resume, reset_webhook, or delete must still be at. Read it from list; a concurrent change makes this call fail instead of overwriting.' },
     ids: { type: 'array', items: { type: 'string' }, description: 'For baseline: ids to ignore from now on. They append; nothing earlier is cleared.' },
