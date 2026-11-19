@@ -222,40 +222,26 @@ describe('Team Human Attention and Task transfer controls', () => {
     expect((b.view.getByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
   })
 
-  it('refreshes the page follower set from the confirmed write without waiting for a subscription', async () => {
+  it('offers the rest of the enabled Workspace roster after a transfer, not only the followers', async () => {
     const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     const first = await openTransferDialog(b)
     fireEvent.click(within(first).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
 
-    let followers = ['member:builder']
-    b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers } }))
-    b.changeAttention.mockImplementationOnce(async () => {
-      followers = ['member:builder', 'member:human']
-      return {
-        ok: true as const,
-        value: {
-          receipt: {},
-          thread: { threadRef: 'thread:1', taskRef: 'task:1', revision: 2 },
-          attention: { threadRef: 'thread:1', taskRef: 'task:1', memberId: 'member:human', action: 'follow' },
-        },
-      } as never
-    })
-    b.publishProjectUpdate()
-    fireEvent.click(await b.view.findByRole('button', { name: '关注此 Thread' }))
-    await waitFor(() => expect(b.changeAttention).toHaveBeenCalled())
-
+    // The new accountable is the one candidate the dialog never offers; every
+    // other enabled Member of the Workspace — follower or not — stays on it.
     const dialog = await openTransferDialog(b)
-    await waitFor(() => expect(candidateLabels(b.view.getByRole('dialog', { name: '转交负责人' }))).toEqual(['转交给你自己']))
+    await waitFor(() => expect(candidateLabels(b.view.getByRole('dialog', { name: '转交负责人' })))
+      .toEqual(['转交给 @failed', '转交给 @offline', '转交给 @worker', '转交给你自己']))
     expect(dialog).toBeTruthy()
   })
 
-  it('offers this Thread\'s followers and hands the Task to the one the Human picks', async () => {
+  it('offers every enabled Workspace Member and hands the Task to the one the Human picks', async () => {
     const b = await seedThreadPage({ seedFollowers: ['member:builder', 'member:human'] })
     const dialog = await openTransferDialog(b)
-    // The follower set is the whole offer: the Human is this Task's current accountable, so the one
-    // candidate left is the Agent that follows this Thread — not every Project owner the Host knows.
-    expect(candidateLabels(dialog)).toEqual(['转交给 @builder'])
+    // The roster is the whole offer: the Human is this Task's current accountable, so the candidates
+    // are every other enabled Member of the Workspace, follower or not.
+    expect(candidateLabels(dialog)).toEqual(['转交给 @builder', '转交给 @failed', '转交给 @offline', '转交给 @worker'])
     fireEvent.click(within(dialog).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', target: 'member:builder' })))
     // The Host's own transfer row lands in the feed, exactly as an accept or close lands its own, and
@@ -264,13 +250,12 @@ describe('Team Human Attention and Task transfer controls', () => {
     await waitFor(() => expect(b.view.queryByRole('dialog', { name: '转交负责人' })).toBeNull())
   })
 
-  it('explains an empty candidate list instead of offering nobody', async () => {
+  it('offers the roster even when nobody follows this Thread', async () => {
     const b = await seedThreadPage({ seedFollowers: [] })
     const dialog = await openTransferDialog(b)
-    expect(candidateLabels(dialog)).toEqual([])
-    // Nobody follows this Thread, so there is no one the dialog may offer; the empty state is the only
-    // place that says why, which is why the control stays pressable instead of vanishing.
-    expect(within(dialog).getByRole('status').textContent).toContain('没有关注者')
+    // Following no longer decides the offer: with zero followers the enabled
+    // Workspace Members are still the candidates.
+    expect(candidateLabels(dialog)).toEqual(['转交给 @builder', '转交给 @failed', '转交给 @offline', '转交给 @worker'])
     expect(b.view.getByRole('button', { name: '转交负责人' })).toBeTruthy()
   })
 
@@ -286,54 +271,38 @@ describe('Team Human Attention and Task transfer controls', () => {
     expect(b.view.queryByRole('dialog', { name: '转交负责人' })).toBeNull()
   })
 
-  it('keeps the transfer control on a closed Task, where a follow is what puts a target back in the offer', async () => {
+  it('keeps the transfer control on a closed Task and still offers the roster', async () => {
     const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
     // Hand the Task to somebody else first: on a closed Task the accountable is usually not the Human, and a
     // transfer never offers the current accountable back to itself.
     const first = await openTransferDialog(b)
     fireEvent.click(within(first).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
-    // Closing ends every Attention row on its Thread, so the set the dialog offers is empty even though a
-    // Member followed it before: the follower read is the Host's answer, never a remembered list.
-    let followers: string[] = []
-    b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers } }))
     fireEvent.click(await b.view.findByRole('button', { name: '关闭任务' }))
     await waitFor(() => expect(b.changeTask).toHaveBeenCalledWith(expect.objectContaining({ action: 'close' })))
     await waitFor(() => expect(b.view.getByText('任务已关闭，重新打开后可继续讨论')).toBeTruthy())
     b.publishProjectUpdate()
-    const empty = await openTransferDialog(b)
-    expect(candidateLabels(empty)).toEqual([])
-    expect(within(empty).getByRole('status').textContent).toContain('没有关注者')
+    const dialog = await openTransferDialog(b)
+    // Closing ends every Attention row on its Thread, but the candidates are
+    // the Workspace roster, not the followers — so the offer stands.
+    expect(candidateLabels(dialog)).toEqual(['转交给 @failed', '转交给 @offline', '转交给 @worker', '转交给你自己'])
     // Escape is the dialog's own dismissal: the layer listener, not a control, closes it.
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(b.view.queryByRole('dialog', { name: '转交负责人' })).toBeNull())
-    // Following the closed Thread is the one write it still takes; the Host's follower set then holds the
-    // Human, and the dialog offers it for a Task nothing else can reopen or accept any more.
-    fireEvent.click(await b.view.findByRole('button', { name: '关注此 Thread' }))
-    await waitFor(() => expect(b.changeAttention).toHaveBeenCalledWith(expect.objectContaining({ action: 'follow', taskRef: 'task:1' })))
-    followers = ['member:human']
-    b.publishProjectUpdate()
     await openTransferDialog(b)
-    // Re-queried per poll: the dialog re-renders when the follower read lands, so a held node may be stale.
-    await waitFor(() => expect(candidateLabels(b.view.getByRole('dialog', { name: '转交负责人' }))).toEqual(['转交给你自己']))
     fireEvent.click(within(b.view.getByRole('dialog', { name: '转交负责人' })).getByRole('button', { name: '转交给你自己' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', target: 'member:human' })))
   })
 
-  it('offers the Human only while the Human follows this Thread, which is how a broken Task is mended', async () => {
+  it('offers the Human alongside the roster, which is how a broken Task is mended', async () => {
     const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
-    // The Human does not follow this Thread yet, so the Human is not a candidate: the offer is the
-    // follower set, and the Host's own `humanMemberId` adds no entry to it.
     const first = await openTransferDialog(b)
-    expect(candidateLabels(first)).toEqual(['转交给 @builder'])
     fireEvent.click(within(first).getByRole('button', { name: '转交给 @builder' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
-    // The Human follows: the Host's observation now carries its own id, so the dialog offers it back —
-    // which is what mends a Task whose Agent accountable left the Project.
-    b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers: ['member:builder', 'member:human'] } }))
-    b.publishProjectUpdate()
+    // The Human is always a legal target, follower or not — which is what mends
+    // a Task whose Agent accountable can no longer take it.
     const second = await openTransferDialog(b)
-    await waitFor(() => expect(candidateLabels(second)).toEqual(['转交给你自己']))
+    await waitFor(() => expect(candidateLabels(second)).toEqual(['转交给 @failed', '转交给 @offline', '转交给 @worker', '转交给你自己']))
     fireEvent.click(within(second).getByRole('button', { name: '转交给你自己' }))
     await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:human' })))
   })

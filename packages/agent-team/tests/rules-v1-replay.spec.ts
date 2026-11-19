@@ -81,7 +81,8 @@ describe('replaying a rules version 1 ledger', () => {
     expect(following('carol')).toEqual([true, false, true, false])
     expect(following('dave')).toEqual([false, false, false, true])
     expect(standing(v2, 'dave', threadRefs).projects).toEqual([projectRef])
-    expect(v2.view({ workspaceId: alpha }, bystander.memberId).projects).toEqual([])
+    // Adopted version 9 rules: any Workspace participant sees the Workspace's Projects, so the bystander does too.
+    expect(v2.view({ workspaceId: alpha }, bystander.memberId).projects.map(project => project.projectRef)).toEqual([projectRef])
   })
 
   it('replays the invitation and the undelivered mention captured under version 1', async () => {

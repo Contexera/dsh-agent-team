@@ -52,10 +52,13 @@ describe('AgentTeam Human Task transfer Remote', () => {
     expect(() => ledgerAtBoot(test).validate()).not.toThrow()
   })
 
-  it('refuses a target that is not a current Project owner, and reports a stale revision as a business outcome', async () => {
+  it('refuses a target that is not enabled, and reports a stale revision as a business outcome', async () => {
     const { test, actor: seedOwner, started } = await seedTransfer()
     const outsider = await test.ctx.agentTeam.addMember({ requestId: requestId('outsider'), workspaceId: alpha,
       handle: 'outsider', description: 'Not an owner', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
+    // Version 9: any enabled Workspace participant is a legal target, so the
+    // refusal that remains is a Member no longer enabled.
+    await test.ctx.agentTeam.suspendMember({ requestId: requestId('suspend-outsider'), memberId: outsider.status.member.memberId })
     await expect(test.ctx.agentTeam.transferTask({ requestId: requestId('bad-target'), workspaceId: alpha,
       taskRef: started.task.taskRef, target: outsider.status.member.memberId, baseRevision: started.thread.revision })).rejects.toThrow(/accountable_target_invalid/)
     // The stale case is the normal control flow the Client already models: it comes back as a result, not a Remote error. A legal target keeps the illegal one from masking it.

@@ -32,12 +32,14 @@ A Project owner starts or promotes Threads; accountability is separate from exec
 
 An accountable Agent who held any Claim cannot accept that Task. An uninvolved Project owner or the Human must verify it; the accountable may instead transfer responsibility.
 
-A transfer target is any enabled Project member or the Human — following the Thread is not required, the new accountable starts following it — and Claims stay with their executors. Removing an accountable Agent's owner grant leaves its open Tasks with it while that Member still takes part in the Project; archiving the Project or removing that Agent returns those Tasks to the Human in the same operation. Suspension keeps accountability.
+A transfer target is any enabled Member who participates in the Workspace, or the Human — under rules versions below 9, any enabled Project member —; following the Thread is not required, the new accountable starts following it, and the previous accountable's `accountable`-source follow ends while a `self`-chosen or Claim-held follow stays — and Claims stay with their executors.
+
+Under version 9 removing an accountable Agent's owner grant never returns its open Tasks, because the Member still participates in the Workspace — earlier versions returned them only when the grant was its last Project participation; archiving the Project or removing that Agent returns those Tasks to the Human in the same operation. Suspension keeps accountability.
 
 ## Human Remote boundary
 The Human Client uses `readThread`, `threadHistory`, `threadObservations`, and `changes`, and it consumes the Host's Human Inbox slice as the 「收件箱 / Inbox」 queue. Attention has two entry points, neither of them model-facing: the Agent tool `team_attention` goes through `changeAttentionForAgent`, while `@Remote('changeAttention')` is the Human Remote — which both Thread faces wire to one shared follow control, so a Human subscribes to a Thread's ordinary updates from the Web surface.
 
-Task responsibility moves through the Human `transferTask` Remote. The Host accepts any enabled Project member or the Human, and re-implements none of it on the Client: the dialog offers this Thread's enabled followers, which is the narrower set a handover inside one conversation can land on, and the Human appears there only by following the Thread.
+Task responsibility moves through the Human `transferTask` Remote. The Host accepts any enabled Member who participates in the Workspace, or the Human, and re-implements none of it on the Client: the dialog offers every enabled Workspace Member plus the Human, the whole set a handover can land on.
 
 The Client re-implements neither the transfer rules nor the accept/close/reopen authority, which stay on the Host.
 

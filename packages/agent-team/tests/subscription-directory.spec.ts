@@ -35,7 +35,7 @@ describe('Workspace subscription discovery', () => {
     } as never)
 
     const createdProject = await test.ctx.agentTeam.createProject({ requestId: requestId('metadata-project'),
-      workspaceId: test.workspaceId, name: 'metadata', description: '', memberIds: [] })
+      workspaceId: test.workspaceId, name: 'metadata', description: '' })
     const projectRef = createdProject.project.projectRef
     const owner = await test.ctx.agentTeam.addMember({ requestId: requestId('metadata-owner'), workspaceId: test.workspaceId,
       handle: 'owner', description: '', presetId: 'team-member', projectRefs: [projectRef], model: { provider: 'mock', model: 'mock' }})
@@ -66,8 +66,10 @@ describe('Workspace subscription discovery', () => {
     const clientList = test.ctx.agentTeam.subscriptionsForClient({ workspaceId: test.workspaceId, projectRef })
     expect(clientList.entries[0]!.subscription.script.content).toBe('printf events\n')
     expect(clientList.entries[0]!.subscription.credentials).toEqual([{ ref: 'GH_TOKEN', env: 'GH_TOKEN' }])
+    // Rules version 9: a Workspace participant reads the Project, so the logs
+    // answer rather than refusing.
     expect(() => test.ctx.agentTeam.subscriptionLogsForAgent(outsiderAgent, {
       workspaceId: test.workspaceId, projectRef, subscriptionRef: created.subscription.subscriptionRef,
-    })).toThrow(/not_project_member/)
+    })).not.toThrow()
   })
 })

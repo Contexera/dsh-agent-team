@@ -28,7 +28,7 @@ The special Member corresponding to the current Harness user. It participates in
 
 ## Agent Member
 
-A Member created and managed by Team. Created inside one Workspace (its creation record), it joins further Workspaces through Workspace Participation. It runs one explicit team-enabled preset Session at a time, rooted in its creation Workspace; ordinary Sessions and forks do not gain membership automatically.
+A Member created and managed by Team. Created inside one Workspace (its creation record), it joins further Workspaces through Workspace Participation. It runs one explicit team-enabled preset Session at a time, rooted in its creation Workspace; ordinary Sessions and forks do not gain participation automatically.
 
 ## Worker Execution
 
@@ -48,9 +48,9 @@ A shared working directory and authorization domain. An Agent Member's Session h
 
 ## Project
 
-A persistent collaboration place in a Workspace. A Member takes part in a Project by taking part in one of its Threads — reading, speaking, claiming, or following — and that is what authorizes it everywhere in the Project; there is no separate enrolment to grant. Human Members can view every Workspace Project.
+A persistent collaboration place in a Workspace. Under rules version 9 a Project keeps only two relations of its own — ownership and follow — and everything else comes from the Workspace: a Member who participates in the Project's Workspace reads its content, and an enabled one writes, whether or not it ever appeared in the Project. There is no membership to enroll in or grant. Human Members can view every Workspace Project.
 
-Workspace directory visibility is separate from Project participation. Every Workspace Member's `team_view` lists every active Project, its owners, the reader's `owner` / `member` / `directory only` relation, and subscription counts, plus the complete Workspace Member roster. Directory-only access grants no Main stream, Thread, Task, Claim, Attention, or write access and creates no unread delivery; the content catalog still comes from Project membership.
+Every Workspace Member's `team_view` lists every active Project, its owners, the reader's `owner` / `following` / `none` role, and subscription counts, plus the complete Workspace Member roster. `following` means the reader follows that Project's Main stream and `none` withholds nothing — the same Workspace participant reads the Project and, when enabled, writes it; the role only reports what the reader owns and follows.
 
 Once the ledger adopts rules version 2, a Project has owners: the Human owns every Project without being recorded, and the Human grants or withdraws Agent owners (`team/project-owner-added` / `team/project-owner-removed`) among Agents that participate in the Project's Workspace and are enabled or suspended. Leaving that Workspace, archival, or removal ends an Agent's ownership; suspension does not.
 
@@ -58,9 +58,9 @@ From rules version 8 an Agent owner's grant also carries a `responsibility`: one
 
 A grant recorded without one, and every grant written before version 8, reads as unspecified. That is an ordinary fact about the grant rather than a fault to repair, so nothing reports it as missing and no reader treats absence as an error. The text changes through `team/project-owner-responsibility-updated` instead of a withdrawal and re-grant, so the grant's `since` and the Main stream Attention row it started survive the edit; the same operation notifies the owner through the owner Activity path, and a notification that never arrives does not change the committed text.
 
-From version 2, Project membership also counts owners and every Member ever mentioned in the Project, and drops archived and inactive Members; everything visible under version 1 stays visible.
+Rules versions below 9 derived a Project membership instead — from version 2 owners and every Member ever mentioned in the Project counted too, and archived and inactive Members dropped out; everything visible under version 1 stayed visible. Version 9 removed the derivation: the memberships, mentions and Thread history in old records replay unchanged but decide nothing under the current rules.
 
-Behind rules version 2 a Project also has a Main stream: a conversation of its own, outside every Thread. Any Project member may post to it (`team/main-message-posted`). A Main stream Message carries `scope: 'main'`, no Thread or Task, and may only answer another Main stream Message of the same Project. Mentioning a Member, or answering their Message (the Human included), gives them one Main stream marker; `@all` is plain text.
+Behind rules version 2 a Project also has a Main stream: a conversation of its own, outside every Thread. Under version 9 any enabled Member who participates in the Workspace may post to it — under earlier versions any Project member — (`team/main-message-posted`). A Main stream Message carries `scope: 'main'`, no Thread or Task, and may only answer another Main stream Message of the same Project. Mentioning a Member, or answering their Message (the Human included), gives them one Main stream marker; `@all` is plain text.
 
 A reader's ordinary Main stream unread comes from its own Main stream Attention — what other Members wrote after that row's read watermark — plus its markers. The Human's row is derived from the Project's creation and never stored; an Agent's is written by its ownership grant when it was not already following, and any other Member's by an explicit follow. Withdrawing ownership ends the row the grant started, while a row the Member started on its own stands; removal and archival end every row, while leaving the Workspace and archiving the Project do not.
 
@@ -72,7 +72,7 @@ Behind rules version 2 only a Project owner starts a Thread (`team/thread-starte
 
 A Thread appears in the Main stream as a card showing its current state: anchor preview, reply count, writers and newest activity for a discussion; Task number, status and live Claim owners for a Task. Version-1 top-level Threads appear as cards in creation order and are never unread.
 
-Behind rules version 2 any Project member may reply in any Thread. A mention or an answer is one direct marker and never starts or resumes Attention, and the Human invitation confirmation no longer exists.
+Behind rules version 2 any member of the Project may reply in any Thread — under version 9 any enabled Member who participates in the Workspace. A mention or an answer is one direct marker and never starts or resumes Attention, and the Human invitation confirmation no longer exists.
 
 ## Subscription
 
@@ -90,13 +90,15 @@ Immutable content explicitly sent in a Project or existing Thread. A Thread is c
 
 An optional work-tracking overlay attached to an existing Thread, not a prerequisite for a Thread. It can be created by explicit top-level task intent or added by Human promotion. Promotion also appends a public explanation Message. Task status is derived from Claims; acceptance and close are explicit facts. Human-facing `Task #N` is the durable Task creation ordinal within its home Project: taskful starts and promotions participate, while a taskless anchor's original position does not. It is not identity; stable cross-project references use branded `taskRef`.
 
-One accountable Member carries responsibility for the Task. A Task starts with a Project owner: the Agent owner creating it is accountable by default, and the Human chooses among enabled Project owners or itself. A transfer may then hand it to any enabled Project member. Execution stays in Claims, so accountability is not ownership of the work. `sourceThreadRefs` immutably names the same Project's taskless source discussions; sourced Tasks appear as read-only current-state cards there rather than in the Main stream.
+One accountable Member carries responsibility for the Task. A Task starts with a Project owner: the Agent owner creating it is accountable by default, and the Human chooses among enabled Project owners or itself. A transfer may then hand it to any enabled Workspace participant — before version 9, any enabled Project member. Execution stays in Claims, so accountability is not ownership of the work. `sourceThreadRefs` immutably names the same Project's taskless source discussions; sourced Tasks appear as read-only current-state cards there rather than in the Main stream.
 
 Acceptance normally waits for every Claim to be done (`in_review`). The Human may also accept early from `in_progress`: the accept operation projects the Claims still active at that moment to done and records them in the activity as `completedClaimRefs`, notifying each owner without fabricating owner claim-done events. A `todo` Task that was never claimed is accepted directly, and its activity carries no claim list.
 
 An Agent can accept only in `in_review`, as a Project owner or as the Task's own accountable, and never when it held any Claim on that Task, including a released Claim. Otherwise an accountable that executed asks an uninvolved owner or the Human to verify, or transfers accountability. Close, reopen, and transfer belong to the Human or the current accountable; only the Human transfers a finished Task.
 
-A transfer target is any enabled Project member or the Human, following the Thread is not required, the new accountable starts following it, and Claims stay with their executors. Losing an owner grant returns a Task to the Human only when that grant was the Member's last Project participation; archiving, removing, or withdrawing the Workspace of an accountable Agent returns each open Task to the Human atomically, and suspension does not transfer it.
+A transfer target is any enabled Member who participates in the Workspace, or the Human — under versions below 9, any enabled Project member —; following the Thread is not required, the new accountable starts following it, and Claims stay with their executors. The transfer also ends only the follow the responsibility created: the previous accountable's `accountable`-source follow ends, while a `self`-chosen follow or one an active Claim holds stays.
+
+Under version 9 losing an owner grant never returns a Task — the Member still participates in the Workspace — and earlier versions returned it only when that grant was the Member's last Project participation; archiving, removing, or withdrawing the Workspace of an accountable Agent returns each open Task to the Human atomically, and suspension does not transfer it.
 
 ## Thread
 
@@ -188,13 +190,13 @@ Temporarily stop a Member's live Agent while retaining identity, Session, Claims
 
 ## Withdraw
 
-Leaving one Workspace: `team/member-workspace-left` ends the Member's participation there, exits its Project memberships in that Workspace, releases that Workspace's active Claims, and clears its Attention there. Everything else — the Member identity, other participations, the live Session and its cwd, private memory — is untouched; the creation Workspace cannot be left — use global archival instead. The UI presents this as the destructive row action on a non-creation Workspace.
+Leaving one Workspace: `team/member-workspace-left` ends the Member's participation there — ending every Project right participation carried — releases that Workspace's active Claims, and clears its Attention there. Everything else — the Member identity, other participations, the live Session and its cwd, private memory — is untouched; the creation Workspace cannot be left — use global archival instead. The UI presents this as the destructive row action on a non-creation Workspace.
 
 ## Archive
 
 The hidden third state between Suspend and Remove, for Members and Projects. It is reversible in design — the facts stay complete in the ledger for replay and a future restore — but there is deliberately no restore entry point this round, mirroring archived dsh sessions. `archiveMember` disposes the live session (private memory and the Session log stay on disk) and releases active Claims across every participated Workspace with public `claims_released` Activities; `archiveProject` applies the same release shape across every owner on the Project's Threads.
 
-Memberships survive archival (hidden state, not departure). Archived entities are gone from every Team API surface — projections, mention candidates, ref resolution, and ref-addressed reads reject with an explicit archived error. Removal from archived remains available as the data-hygiene path.
+Derived Project memberships from rules versions below 9 survive archival as stored facts (hidden state, not departure). Archived entities are gone from every Team API surface — projections, mention candidates, ref resolution, and ref-addressed reads reject with an explicit archived error. Removal from archived remains available as the data-hygiene path.
 
 ## Remove
 

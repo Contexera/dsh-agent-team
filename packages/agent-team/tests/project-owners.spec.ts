@@ -177,7 +177,10 @@ describe('Project owners', () => {
       const project = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'alpha', description: '', memberIds: [enrolledId] })).value.project
       await ledger.archiveMember({ requestId: requestId('archive'), memberId: enrolledId, actor: human })
       // No public read distinguishes an archived Member's membership, so the probe reaches the private helper.
-      return (ledger as unknown as { isProjectMember(projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean }).isProjectMember(project.projectRef, enrolledId)
+      return (ledger as unknown as {
+        state: { rulesVersion: number }
+        isProjectMemberFrom(projection: { rulesVersion: number }, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean
+      }).isProjectMemberFrom((ledger as unknown as { state: { rulesVersion: number } }).state, project.projectRef, enrolledId)
     }
     expect(await enrolled(1)).toBe(true)
     expect(await enrolled(2)).toBe(false)

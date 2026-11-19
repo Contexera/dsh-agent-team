@@ -331,9 +331,9 @@ The transfer control opens a dialog rather than a menu, because the offer is a l
 
 Before it offers anyone, the dialog states what taking the Task on means: a transfer moves responsibility only, and responsibility includes accepting the Task as a party that did not do the work. A reader handing work away decides who will verify it, so that meaning belongs in the dialog rather than in the hover hint — the hint states the consequence of the verb, the dialog the consequence of the choice.
 
-The candidates are this Thread's enabled followers and nothing else: a handover is a move inside a conversation, so the readers already in it are the people it can land on, while the Host's wider permission of any enabled Project member is an authority rather than an offer.
+The candidates are every enabled Member of the Workspace plus the Human — under rules version 9 the Host's transfer authority reaches any of them, and the dialog mirrors it rather than narrowing to this Thread's followers.
 
-The Human joins that list only by following this Thread, because the follower set is every Member's Attention. The current accountable is never offered to itself, a departed or disabled member is filtered out, and with no candidate left the body states that in place of the list instead of drawing buttons that would fail. Focus enters the dialog, Tab walks the candidates, Escape closes it, and at 390×844 the list scrolls inside the card rather than pushing the footer out of reach.
+The current accountable is never offered to itself, a departed or disabled member is filtered out, and with no candidate left the body states that in place of the list instead of drawing buttons that would fail. Focus enters the dialog, Tab walks the candidates, Escape closes it, and at 390×844 the list scrolls inside the card rather than pushing the footer out of reach.
 
 A candidate is the ghost row the mention picker already draws for the same job: one borderless row per person, at the call radius, with the interactive fill under the pointer. Drawn as outlined buttons the list stood level with the dialog's own Cancel and read as five controls instead of one list.
 

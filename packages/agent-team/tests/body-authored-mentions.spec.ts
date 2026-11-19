@@ -121,7 +121,7 @@ describe('body-authored mentions', () => {
     expect(again.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
   })
 
-  it('shows a Member the Project of a Thread they took part in', async () => {
+  it('shows every Workspace Project to a participant and still delivers the mention', async () => {
     const test = await harness()
     const { ledger, projectRef } = await projectOf(test)
     await enroll(ledger, projectRef, 'insider')
@@ -129,16 +129,13 @@ describe('body-authored mentions', () => {
     const elsewhere = (await ledger.createProject({ requestId: requestId('project-elsewhere'), workspaceId: alpha,
       name: 'elsewhere', description: '', memberIds: [], actor: agentTeamHumanActor() })).value.project
 
-    // Project participation is derived now: no enrolment happens, and taking
-    // part in one Thread of the Project is what makes it visible.
-    expect(ledger.view({ workspaceId: alpha }, outsider.member.memberId).projects.map(project => project.projectRef)).toEqual([])
-    await start(ledger, projectRef, '@outsider, please look')
-
-    const seen = ledger.view({ workspaceId: alpha }, outsider.member.memberId).projects.map(project => project.projectRef)
-    expect(seen).toEqual([projectRef as never])
-    // The derived rule does not widen to the Workspace: a Project this Member
-    // never took part in stays out of reach.
-    expect(seen).not.toContain(elsewhere.projectRef)
+    // Version 9: Workspace participation opens every Project — taking part in
+    // a Thread no longer decides visibility, so both are already in reach.
+    const projectsOf = () => ledger.view({ workspaceId: alpha }, outsider.member.memberId).projects.map(project => project.projectRef).sort()
+    expect(projectsOf()).toEqual([projectRef, elsewhere.projectRef].sort() as never)
+    const sent = await start(ledger, projectRef, '@outsider, please look')
+    expect(projectsOf()).toEqual([projectRef, elsewhere.projectRef].sort() as never)
+    expect(sent.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
   })
 
   it('keeps a Project visible for an explicit Member who never wrote, across a reload', async () => {

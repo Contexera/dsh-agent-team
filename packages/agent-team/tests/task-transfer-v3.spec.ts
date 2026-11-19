@@ -93,16 +93,18 @@ describe('Task responsibility under rules version 3', () => {
     expect(() => new AgentTeamLedger(team.table).validate()).not.toThrow()
   })
 
-  it('refuses a transfer target that takes no part in the Project or is no longer enabled', async () => {
+  it('accepts a Workspace Member with no Project history, and refuses a Member no longer enabled', async () => {
     const team = await seed()
     const outsider = await team.add('outsider', { projectRefs: [] })
     const retired = await team.add('retired')
     await team.ledger.archiveMember({ requestId: requestId('archive-retired'), actor: human, memberId: retired.memberId })
     const started = await startTask(team, human)
-    await expect(handOver(team, started.task, human, outsider.memberId)).rejects.toThrow(/accountable_target_invalid/)
+    // Version 9: the Project keeps no membership, so the enabled Workspace
+    // participant is a legal target even without any Project history.
+    const moved = await handOver(team, started.task, human, outsider.memberId)
+    expect(moved.kind === 'committed' && moved.task.accountable).toBe(outsider.memberId)
     await expect(handOver(team, started.task, human, retired.memberId)).rejects.toThrow(/accountable_target_invalid/)
-    // Neither refusal moved the Task.
-    expect(team.ledger.getTask(started.task.taskRef)?.accountable).toBe(AGENT_TEAM_HUMAN_MEMBER_ID)
+    expect(team.ledger.getTask(started.task.taskRef)?.accountable).toBe(outsider.memberId)
   })
 
   it('lets the transferred accountable verify the Task, and still bars it once it ever held a Claim', async () => {

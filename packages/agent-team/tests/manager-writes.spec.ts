@@ -69,13 +69,13 @@ describe('Team manager write path', () => {
     expect(listed.some(member => member.memberId === memberResult.memberRef && member.handle === 'tome')).toBe(true)
 
     const project = await runTool(ctx, manager, 'project_create', 'write-project', {
-      workspaceId, name: 'Delivery', description: '长期交付质量与节奏', memberIds: [memberResult.memberRef],
+      workspaceId, name: 'Delivery', description: '长期交付质量与节奏',
       requestId: 'write-project-1',
     })
     expect(project.isError).toBe(false)
     if (project.isError) return
-    const projectResult = project.value as { projectRef: string; memberIds: string[] }
-    expect(projectResult.memberIds).toEqual([memberResult.memberRef])
+    const projectResult = project.value as { projectRef: string }
+    expect(projectResult.projectRef.startsWith('project:')).toBe(true)
 
     const granted = await runTool(ctx, manager, 'project_owner', 'write-owner', {
       action: 'add', workspaceId, projectRef: projectResult.projectRef, memberRef: memberResult.memberRef,
@@ -183,24 +183,17 @@ describe('Team manager write path', () => {
     if (member.isError) return
     const memberRef = (member.value as { memberRef: string }).memberRef
 
-    // Creation admits only active Members — the Host's own rule, stricter than
-    // the ledger's — so a suspended one cannot join at creation.
-    await ctx.agentTeam.suspendMember({ requestId: requestId('write-admit-suspend'), memberId: memberRef as never })
-    const suspendedJoin = await runTool(ctx, manager, 'project_create', 'write-admit-suspended-join', {
-      workspaceId, name: 'Suspended join', description: '暂停成员随建', memberIds: [memberRef],
-    })
-    expect(suspendedJoin.isError).toBe(true)
-    if (suspendedJoin.isError) expect(suspendedJoin.error.message).toContain('is not available for Project membership')
-
-    // The same suspended Member still owns Projects: the ledger's own rule.
-    await ctx.agentTeam.resumeMember({ requestId: requestId('write-admit-resume'), memberId: memberRef as never })
+    // A new Project enrolls nobody — version 9 removed creation-time
+    // membership — so admission rules live on the owner grant, not on create.
     const project = await runTool(ctx, manager, 'project_create', 'write-admit-project', {
-      workspaceId, name: 'Admitted', description: '准入后的共同目标', memberIds: [memberRef],
+      workspaceId, name: 'Admitted', description: '准入后的共同目标',
     })
     expect(project.isError).toBe(false)
     if (project.isError) return
     const projectRef = (project.value as { projectRef: string }).projectRef
-    await ctx.agentTeam.suspendMember({ requestId: requestId('write-admit-suspend-again'), memberId: memberRef as never })
+
+    // A suspended Member still owns Projects: the ledger's own rule.
+    await ctx.agentTeam.suspendMember({ requestId: requestId('write-admit-suspend'), memberId: memberRef as never })
 
     const granted = await runTool(ctx, manager, 'project_owner', 'write-admit-owner', {
       action: 'add', workspaceId, projectRef, memberRef, responsibility: '暂停期间仍负责准入',
