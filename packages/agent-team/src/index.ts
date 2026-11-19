@@ -1714,7 +1714,6 @@ export default class AgentTeam extends TypertRemoteService {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
     const ledger = this.requireLedger()
-    if (!ledger.hasCommitted(request.requestId)) this.assertProjectMembersAvailable(request.memberIds)
     const result = await ledger.createProject({ ...request, actor: agentTeamHumanActor() },
       options.authorize === undefined ? {} : { authorize: options.authorize })
     if (result.committed) this.emitCommitted(result.value.receipt)
@@ -3522,7 +3521,6 @@ export default class AgentTeam extends TypertRemoteService {
       workspaceId: request.workspaceId,
       name: request.name,
       description,
-      ...(request.memberIds === undefined ? {} : { memberIds: request.memberIds }),
     }, { authorize }))
     return Object.freeze({
       requestId: written.requestId,
@@ -3935,14 +3933,6 @@ export default class AgentTeam extends TypertRemoteService {
     result: { readonly committed: boolean; readonly value: T },
   ): void {
     if (result.committed && result.value.kind === 'committed' && result.value.receipt !== undefined) this.emitCommitted(result.value.receipt)
-  }
-
-  private assertProjectMembersAvailable(memberIds: readonly AgentTeamMemberId[] | undefined): void {
-    for (const memberId of memberIds ?? []) {
-      const member = this.requireLedger().getMember(memberId)
-      if (member === undefined) throw new Error(`unknown Agent Member '${memberId}'`)
-      if (this.memberStatus(member).availability !== 'active') throw new Error(`Agent Member '${memberId}' is not available for Project membership`)
-    }
   }
 
   /**
@@ -7163,6 +7153,7 @@ export default class AgentTeam extends TypertRemoteService {
       surface: visibleTeamSurface(agent), lookup: {
         printableSender: memberId => this.printableSender(memberId),
         isProjectOwner: (reader, projectRef) => this.requireLedger().projectOwnerIds(projectRef).includes(reader),
+        isFollowingMain: (reader, projectRef) => this.requireLedger().isFollowingMain(reader, projectRef),
         repliesToLine: (message, workspaceId) => this.repliesToLine(message, workspaceId),
         claimOwner: claimRef => this.requireLedger().getClaim(claimRef)?.owner,
       } })

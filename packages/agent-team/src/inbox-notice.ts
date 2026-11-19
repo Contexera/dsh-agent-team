@@ -30,6 +30,7 @@ import type {
 export interface InboxNoticeLookup {
   readonly printableSender: (memberId: AgentTeamMemberId) => string
   readonly isProjectOwner: (readerId: AgentTeamMemberId, projectRef: AgentTeamProjectRef) => boolean
+  readonly isFollowingMain?: (readerId: AgentTeamMemberId, projectRef: AgentTeamProjectRef) => boolean
   readonly repliesToLine: (message: AgentTeamMessage, workspaceId: WorkspaceId) => string | undefined
   readonly claimOwner: (claimRef: AgentTeamClaimRef) => AgentTeamMemberId | undefined
 }
@@ -115,7 +116,7 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
   // occurrence the detail cap or the character budget dropped is not here, so
   // the delivery that follows consumes only what the Member can read.
   const deliveredReminders: InboxMemberReminder[] = []
-  const roleText = { follower: 'follower of this Thread', member: 'Project member named here' } as const
+  const roleText = { follower: 'follower of this Thread', member: 'mentioned here, not following' } as const
   const candidates: NoticeCandidate[] = []
   let order = 0
   let omittedDirectCount = 0
@@ -135,7 +136,10 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
     const scopeText = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef} (Thread ${item.thread.threadRef})`
     // The role states why this Thread is in scope at all; with one delivery
     // class it no longer says anything about how fast the notice arrived.
-    const deliveryText = scoped === undefined ? [] : [`Your role: ${roleText[scoped.role]}`]
+    const deliveryText = scoped === undefined ? [] : [`Your role: ${roleText[scoped.role]}`,
+      // A mention or a reply wakes a non-follower once; the hint says how to
+      // keep hearing the Thread it arrived from.
+      ...(scoped.role === 'member' ? [`You do not follow this Thread: later ordinary updates will not wake you; to keep participating, team_attention follow with threadRef ${item.thread.threadRef}`] : [])]
     const scope: NoticeScope = { key: item.thread.threadRef, threadRef: item.thread.threadRef,
       header: [`Workspace: ${item.workspaceId}`, `Project: ${item.projectRef}`, `Scope: ${scopeText}`, ...deliveryText,
         `Read: team_thread read with workspace ${item.workspaceId} and threadRef ${item.thread.threadRef}`].join('\n') }
@@ -198,9 +202,12 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
   }
   for (const { project, entries } of main) {
     const owner = readerId !== undefined && lookup.isProjectOwner(readerId, project.projectRef)
+    const followingMain = readerId !== undefined && (owner || lookup.isFollowingMain?.(readerId, project.projectRef) === true)
+    const mainRole = owner ? 'owner of this Project' : followingMain ? 'follower of this Main stream' : 'mentioned here, not following'
     const scope: NoticeScope = { key: project.projectRef,
       header: [`Workspace: ${project.workspaceId}`, `Project: ${project.projectRef} — Main stream`, 'Scope: Main stream',
-        ...(readerId === undefined ? [] : [`Your role: ${owner ? 'owner of this Project' : 'Project member named here'}`]),
+        ...(readerId === undefined ? [] : [`Your role: ${mainRole}`]),
+        ...(readerId === undefined || owner || followingMain ? [] : [`You do not follow this Main stream: later ordinary updates will not wake you; to keep participating, team_attention follow with projectRef ${project.projectRef}`]),
         `Read: team_thread read with workspace ${project.workspaceId} and projectRef ${project.projectRef}`].join('\n') }
     for (const entry of entries) {
       if (entry.kind === 'message' && entry.direct) {
