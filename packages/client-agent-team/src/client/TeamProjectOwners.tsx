@@ -19,6 +19,10 @@ import createCss from './create.module.css'
 import rowCss from './member-row.module.css'
 import sidebarCss from './sidebar.module.css'
 
+/** A responsibility long enough to dominate the roster folds to a three-line preview, the same
+ *  threshold the Member editor's reminder notes use. */
+const OWNER_RESPONSIBILITY_EXPAND_CHARS = 120
+
 type OwnerWrite = (request: AgentTeamProjectOwnerRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
 type OwnerUpdate = (request: AgentTeamProjectOwnerUpdateRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
 
@@ -49,6 +53,9 @@ export function TeamProjectOwners({ project, members, ownerIds, responsibilities
   // What the next grant will record. Blank is allowed here and means unspecified,
   // which is why the management tool asks for it and this entry point does not.
   const [addDraft, setAddDraft] = useState('')
+  // Which owner's long responsibility text is unfolded; one seat at a time, cleared
+  // when that seat opens its edit form because the form replaces the text block.
+  const [expandedResponsibility, setExpandedResponsibility] = useState<AgentTeamMemberId>()
   // The form replaces the control that opened it, so it owns the focus move in both directions: the field
   // takes focus as it mounts, and closing the form returns it to that row's own Edit control once the row
   // is interactive again — a committed save keeps the row disabled until its refresh lands.
@@ -154,13 +161,15 @@ export function TeamProjectOwners({ project, members, ownerIds, responsibilities
           const memberId = status.member.memberId
           const responsibility = responsibilities.get(memberId)
           const handle = status.member.handle.replace(/^@/, '')
+          const clampable = responsibility !== undefined && responsibility.length > OWNER_RESPONSIBILITY_EXPAND_CHARS
+          const expanded = expandedResponsibility === memberId
           return (
-            <div key={memberId} data-team-project-owner={memberId}>
+            <div key={memberId} className={createCss.ownerEntry} data-team-project-owner={memberId}>
               <TeamMemberRow status={status} t={t} action={action('Remove', status)} />
               {editing === memberId
-                ? <form className={createCss.field} onSubmit={event => { void submitResponsibility(event, status) }}>
+                ? <form className={`${createCss.field} ${createCss.ownerEditForm}`} onSubmit={event => { void submitResponsibility(event, status) }}>
                   <label className={createCss.sectionLabel} htmlFor={`owner-responsibility-${memberId}`}>{t('projectOwnerResponsibilityLabel', { handle })}</label>
-                  <textarea autoFocus id={`owner-responsibility-${memberId}`} className={createCss.textarea} rows={2} value={draft}
+                  <textarea autoFocus id={`owner-responsibility-${memberId}`} className={createCss.textarea} rows={3} value={draft}
                     disabled={pending !== undefined} placeholder={t('projectOwnerResponsibilityPlaceholder')}
                     onChange={event => { setDraft(event.target.value) }} />
                   <div className={createCss.responsibilityActions}>
@@ -169,12 +178,23 @@ export function TeamProjectOwners({ project, members, ownerIds, responsibilities
                     <Button type="submit" size="sm" variant="primary" disabled={pending !== undefined}>{t('projectOwnerResponsibilitySave')}</Button>
                   </div>
                 </form>
-                : <p className={`${createCss.state} ${createCss.ownerResponsibility}`} data-team-project-owner-responsibility={memberId}>
-                  <span className={createCss.ownerResponsibilityText}>{responsibility ?? t('projectOwnerResponsibilityUnspecified')}</span>
-                  <Button type="button" size="sm" variant="outline" disabled={pending !== undefined} aria-label={t('projectOwnerResponsibilityEditLabel', { handle })}
-                    ref={node => { if (node === null) editButtons.current.delete(memberId); else editButtons.current.set(memberId, node) }}
-                    onClick={() => { setEditing(memberId); setDraft(responsibility ?? '') }}>{t('projectOwnerResponsibilityEdit')}</Button>
-                </p>}
+                : <div className={createCss.ownerBlock} data-team-project-owner-responsibility={memberId}>
+                  {/* The recorded text takes the whole line it was written on; a text long enough to
+                      dominate the roster folds to a three-line preview behind the same alpha-mask fade
+                      the reminder note uses, and never shares a row with a control again — the last
+                      wrap fight is what broke this seat in the first place. */}
+                  <p className={`${createCss.ownerText}${responsibility === undefined ? ` ${createCss.ownerTextUnspecified}` : ''}` +
+                    `${clampable && !expanded ? ` ${createCss.ownerTextClamped}` : ''}`}>{responsibility ?? t('projectOwnerResponsibilityUnspecified')}</p>
+                  <div className={createCss.ownerFoot}>
+                    {clampable && <button type="button" className={createCss.reminderExpand} aria-expanded={expanded}
+                      onClick={() => { setExpandedResponsibility(expanded ? undefined : memberId) }}>
+                      {expanded ? t('collapseMessage') : t('expandMessage')}
+                    </button>}
+                    <Button type="button" size="sm" variant="ghost" disabled={pending !== undefined} aria-label={t('projectOwnerResponsibilityEditLabel', { handle })}
+                      ref={node => { if (node === null) editButtons.current.delete(memberId); else editButtons.current.set(memberId, node) }}
+                      onClick={() => { setEditing(memberId); setDraft(responsibility ?? ''); setExpandedResponsibility(undefined) }}>{t('projectOwnerResponsibilityEdit')}</Button>
+                  </div>
+                </div>}
             </div>
           )
         })}

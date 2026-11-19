@@ -34,9 +34,13 @@ An edit replaces the route without clearing it back to the Host default. Changin
 
 The Project editor's Owners section renders the Human first as a fixed owner with no remove control, then Agent owners with a remove button each, then the Workspace's enabled or suspended Agents not yet owners, each with an add button. Writes go through `addProjectOwner` / `removeProjectOwner`, non-optimistically; a Host error stays in the section's alert.
 
-Each Agent owner also carries its responsibility: one line of the recorded text, or `未说明` / `Unspecified` when the grant records none, with a small outline Edit control at the row's end.
+Each Agent owner also carries its responsibility as a block indented to the row's copy column: the recorded text at 12px/18px secondary, or `未说明` / `Unspecified` at tertiary when the grant records none. A text longer than 120 characters folds to a three-line preview behind the same alpha-mask fade the reminder note uses.
 
-Editing opens a two-row textarea seeded with the recorded text on the dialog's own field surface — the Input's 14px/22px text, md radius, l4 stroke, layer-1 fill and dimmed placeholder, with focus moving the stroke instead of drawing a ring — and an outline Cancel beside a primary Save at the row's end. Blank is a real instruction — clear the text — so it submits an empty value instead of acting as a no-op, and a refused write leaves the form open on the draft with the Host's message while the projection keeps the old text.
+The block's foot line holds the two controls: the `展开全文`/`收起` toggle at its left and a ghost `编辑` at its right, so the text never shares a row with a control it could squeeze into wrapping. Entries are separated by a hairline so several owners do not read as one run of text.
+
+Editing replaces that block with a form in the same indented column: a textarea seeded with the recorded text on the dialog's own field surface, then an outline Cancel beside a primary Save at the row's end. The field is the Input's tier — 14px/22px text, md radius, l4 stroke, layer-1 fill and dimmed placeholder — with focus moving the stroke instead of drawing a ring.
+
+Blank is a real instruction — clear the text — so it submits an empty value rather than acting as a no-op. A refused write leaves the form open on the draft with the Host's message while the projection keeps the old text.
 
 Above the addable list, one optional field states the responsibility the next grant will record; a committed grant consumes it and the field starts blank again. The text is the projection's, never the draft's: a row shows what the Host stored only after the refresh returns it.
 

@@ -164,17 +164,68 @@
   gap: 2px;
 }
 
-/* The recorded responsibility and its edit control share one row: the text is the authority and
-   takes the slack, while the control stays a small secondary action at the row's end. */
-.ownerResponsibility {
-  align-items: baseline;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
+/* One Agent owner = identity row + indented responsibility block. The block aligns with the
+   row's copy column (10px padding + 34px avatar + 10px gap), so attribution reads in the same
+   column the name sits in; a hairline closes each entry so several owners do not read as one
+   run of text. */
+.ownerEntry {
+  display: grid;
 }
 
-.ownerResponsibilityText {
+.ownerBlock {
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  display: grid;
+  gap: 4px;
+  margin: 2px 10px 0 54px;
+  padding-bottom: 10px;
+}
+
+.ownerEntry:last-child .ownerBlock {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+
+/* The recorded text is the authority and takes the whole line: 12px/18px secondary (one step
+   under the reminder note's 13/20, matching the `.state` captions around it), wraps anywhere,
+   and never shares a row with a control. */
+.ownerText {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
   overflow-wrap: anywhere;
+}
+
+/* An unwritten grant is stated, not failure-painted: the same tertiary as every other state line. */
+.ownerTextUnspecified {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The fold uses the reminder note's own alpha-mask fade so the cutoff reads as "there is more". */
+.ownerTextClamped {
+  -webkit-mask-image: linear-gradient(#000 68%, transparent 100%);
+  mask-image: linear-gradient(#000 68%, transparent 100%);
+  max-height: 54px;
+  overflow: hidden;
+}
+
+/* The expand toggle sits left, the edit control claims the right — the same left-facts /
+   right-action foot the reminder row uses, so a long text never squeezes its own control again. */
+.ownerFoot {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.ownerFoot > :last-child {
+  margin-left: auto;
+}
+
+/* The edit form replaces the block in the same indented column, so the field does not jump out
+   from under the row it belongs to. */
+.ownerEditForm {
+  margin: 2px 10px 0 54px;
 }
 
 /* The edit form's actions sit at the row's end in the dialog footer's own order and gap: the outline
