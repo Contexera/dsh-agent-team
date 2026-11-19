@@ -41,6 +41,8 @@ interface TeamProjectPageProps {
   readonly deleteSubscription: TeamConversationProps['deleteSubscription']
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
+  readonly openAttachment?: TeamConversationProps['openAttachment']
+  readonly loadAttachmentApplications?: TeamConversationProps['loadAttachmentApplications']
   readonly putAttachment: TeamConversationProps['putAttachment']
   readonly postMainMessage: TeamConversationProps['postMainMessage']
   readonly startThread: TeamConversationProps['startThread']
@@ -95,7 +97,7 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, loadSubscriptions, loadSubscriptionLogs, pauseSubscription, resumeSubscription, deleteSubscription, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectDiscussion, closeDiscussion, selectProject, discussionRef, discussionAnchor, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, loadSubscriptions, loadSubscriptionLogs, pauseSubscription, resumeSubscription, deleteSubscription, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, openAttachment, loadAttachmentApplications, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectDiscussion, closeDiscussion, selectProject, discussionRef, discussionAnchor, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [taskBoard, setTaskBoard] = useState<AgentTeamTaskBoard>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
@@ -480,6 +482,8 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
         startThread={startThread}
         putAttachment={putAttachment}
         getAttachment={getAttachment}
+        {...(openAttachment === undefined ? {} : { openAttachment })}
+        {...(loadAttachmentApplications === undefined ? {} : { loadAttachmentApplications })}
         subscribeChanges={subscribeChanges}
         openRef={openRef}
         onResolveTaskRefs={lookupTaskRefs}
@@ -516,6 +520,8 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       projectOwnerIds={projectOwnerIds}
       drafts={drafts}
       getAttachment={getAttachment}
+      {...(openAttachment === undefined ? {} : { openAttachment })}
+      {...(loadAttachmentApplications === undefined ? {} : { loadAttachmentApplications })}
       putAttachment={putAttachment}
       readThread={readThread}
       loadThreadHistory={loadThreadHistory}

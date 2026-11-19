@@ -222,6 +222,7 @@
     "@deepseek-ai/dsh-home-paths": ">=0.2.2-rc.2 <0.2.3",
     "@deepseek-ai/dsh-host-webserver": ">=0.2.2-rc.2 <0.2.3",
     "@deepseek-ai/dsh-llm": ">=0.2.2-rc.2 <0.2.3",
+    "@deepseek-ai/dsh-native-command": ">=0.2.2-rc.2 <0.2.3",
     "@deepseek-ai/dsh-credentials": ">=0.2.2-rc.2 <0.2.3",
     "@deepseek-ai/dsh-sandbox-policy": ">=0.2.2-rc.2 <0.2.3",
     "@deepseek-ai/dsh-scope": ">=0.2.2-rc.2 <0.2.3",

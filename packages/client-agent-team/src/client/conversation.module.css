@@ -887,6 +887,34 @@
   white-space: nowrap;
 }
 
+/* A document chip is the open target, so it keeps the chip surface but takes button reset and an underline affordance. */
+.attachmentChipInteractive {
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+@media (hover: hover) {
+  .attachmentChipInteractive:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}
+
+.attachmentChipInteractive:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
+
+.attachmentStatus {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 17px;
+  margin-top: 2px;
+}
+
 .attachmentDecodeProbe {
   height: 1px;
   opacity: 0;

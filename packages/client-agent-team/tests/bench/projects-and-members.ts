@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   AgentTeamAddMemberRequest,
+  AgentTeamAttachmentApplication,
   AgentTeamCreateProjectRequest,
   AgentTeamMemberDiagnostic,
 } from '@contexera/dsh-agent-team/types'
@@ -196,6 +197,19 @@ export function createProjectsAndMembersDouble(options?: { readonly initialProje
     return { ok: true as const, value: { name: 'x', mediaType: 'image/png', byteSize: 8, bytesBase64: 'aGVsbG8=' } }
   })
 
+  const openAttachment = vi.fn(async (_request: { attachmentId: string; action?: 'open' | 'reveal'; application?: string }) => ({
+    ok: true as const,
+    value: { opened: true },
+  }))
+
+  const attachmentApplications = vi.fn(async (_request: { attachmentId: string }): Promise<{
+    ok: true
+    value: readonly AgentTeamAttachmentApplication[]
+  }> => ({
+    ok: true,
+    value: [],
+  }))
+
   const seedProject = (project: Record<string, unknown>) => { projects = [...projects, project] }
 
   return {
@@ -217,6 +231,8 @@ export function createProjectsAndMembersDouble(options?: { readonly initialProje
     modelCatalog,
     putAttachment,
     getAttachment,
+    openAttachment,
+    attachmentApplications,
     seedProject,
     getProjects: () => projects,
     getMemberships: () => memberships,

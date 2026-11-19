@@ -22,6 +22,7 @@ import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-app-boot'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import { canOpenNativePath, nativeFileApplications, openNativeFileApplication, openNativePath, revealNativePath } from '@deepseek-ai/dsh-native-command'
 import { scopeOf, scopeParentOf } from '@deepseek-ai/dsh-scope'
 import { Session, SessionId, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
@@ -115,6 +116,8 @@ import type {
   AgentTeamClaimResult,
   AgentTeamClientMemberStatus,
   AgentTeamActor,
+  AgentTeamAttachmentApplication,
+  AgentTeamAttachmentApplicationsRequest,
   AgentTeamAttachmentId,
   AgentTeamBaselineSubscriptionRequest,
   AgentTeamCreateSubscriptionRequest,
@@ -128,6 +131,8 @@ import type {
   AgentTeamToolCatalogResult,
   AgentTeamGetAttachmentRequest,
   AgentTeamGetAttachmentResult,
+  AgentTeamOpenAttachmentRequest,
+  AgentTeamOpenAttachmentResult,
   AgentTeamGetHumanAvatarRequest,
   AgentTeamGetHumanAvatarResult,
   AgentTeamHumanProfileRequest,
@@ -2646,6 +2651,47 @@ export default class AgentTeam extends TypertRemoteService {
     if (outcome.kind === 'missing') throw new RemoteError('team/attachment-not-found', `attachment '${request.attachmentId}' is no longer cached`, { attachmentId: request.attachmentId })
     const stored = outcome.attachment
     return Object.freeze({ name: stored.name, mediaType: stored.mediaType, byteSize: stored.byteSize, bytesBase64: stored.bytes.toString('base64') })
+  }
+
+  /**
+   * Resolve one cached attachment's absolute payload path without exposing the cache root to the Client.
+   * @param attachmentId - cached attachment identity.
+   * @returns the verified payload path.
+   * @throws RemoteError when the entry is absent.
+   */
+  private async attachmentPayloadForRead(attachmentId: AgentTeamAttachmentId): Promise<string> {
+    const outcome = await readAttachment(attachmentsRoot(), attachmentId)
+    if (outcome.kind === 'missing') throw new RemoteError('team/attachment-not-found', `attachment '${attachmentId}' is no longer cached`, { attachmentId })
+    return attachmentPayloadPath(attachmentId, outcome.attachment.name)
+  }
+
+  /**
+   * Open or reveal one cached attachment through the serving desktop's own file associations.
+   * The path comes from the verified cache entry, never from the caller, so this cannot open an arbitrary Host file.
+   * @param request - attachment identity plus the native action and optional handler id.
+   * @returns whether a desktop opener was available; a failed open rejects.
+   */
+  @Remote('openAttachment')
+  async openAttachment(request: AgentTeamOpenAttachmentRequest): Promise<AgentTeamOpenAttachmentResult> {
+    const path = await this.attachmentPayloadForRead(request.attachmentId)
+    if (!canOpenNativePath()) return { opened: false }
+    const signal = AbortSignal.timeout(30_000)
+    if (request.action === 'reveal') await revealNativePath(path, signal)
+    else if (request.application === undefined) await openNativePath(path, signal)
+    else await openNativeFileApplication(path, request.application, signal)
+    return { opened: true }
+  }
+
+  /**
+   * List the handlers the serving desktop currently registers for one cached attachment.
+   * @param request - attachment identity.
+   * @returns handler metadata in OS preference order; empty when no desktop is reachable.
+   */
+  @Remote('attachmentApplications')
+  async attachmentApplications(request: AgentTeamAttachmentApplicationsRequest): Promise<readonly AgentTeamAttachmentApplication[]> {
+    const path = await this.attachmentPayloadForRead(request.attachmentId)
+    if (!canOpenNativePath()) return []
+    return await nativeFileApplications(path, AbortSignal.timeout(30_000))
   }
 
   /**

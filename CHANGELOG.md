@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Added**
 
+- Cached attachment chips now open the payload in the serving desktop's default application: a document chip is the open target, an inline-code mention of the attachment name resolves to the same file, and the context menu offers **Open with** from the Host's registered handlers and **Show in folder**. The Host resolves the path from the verified cache entry, so the Client still never names a Host file.
 - Team mode adds a **Team manager** destination: a Host-owned, dedicated DSH Session composed from the separate `team-manager` preset and shown through the shipped Conversation and composer. It is not a Member or ledger entity; replacing it stops and automatically archives the previous Session while retaining its history.
 - The manager's current Session and replaced-Session lineage are a private Host pointer outside the ledger. Startup pre-restores it, creation and replacement are serialized, and only an archived or positively missing Session is replaced; refused, corrupt, I/O, unknown, and pointer failures stay retryable without losing the pointer.
 - For the manager destination, the browser persists only its token. The shipped session header carries **New conversation** for the current manager, and leaving restores the ordinary Session captured before the manager took the main seat. Its fixed preset and permission controls are hidden without changing Host authorization, and shipped controls return on other Sessions.
