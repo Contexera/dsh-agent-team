@@ -1,8 +1,8 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react'
-import { MarkdownText, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { MarkdownFileMentions, MarkdownLabels, MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { AgentTeamProjectRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamMessageRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamAttachmentApplication, AgentTeamProjectRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamMessageRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import type { TeamConversationProps } from './slots.ts'
 import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, invalidateAttachmentDataUrl, loadAttachmentPreview } from './attachment-preview.ts'
@@ -63,6 +63,10 @@ export interface TeamMessageProps {
   readonly avatarUrl?: string | undefined
   /** Cache readback for thumbnails; absent on surfaces without the remotes. */
   readonly loadAttachment?: TeamConversationProps['getAttachment'] | undefined
+  /** Native open/reveal of one cached attachment; absent keeps chips and inline-code mentions inert. */
+  readonly openAttachment?: TeamConversationProps['openAttachment']
+  /** Current OS handlers for the attachment menu; absent omits "Open with". */
+  readonly loadAttachmentApplications?: TeamConversationProps['loadAttachmentApplications']
   readonly t?: TeamConversationProps['t'] | undefined
   /** Resolve a branded ref found in the body; absent surfaces render refs as plain text. */
   readonly onOpenRef?: ((ref: string) => void) | undefined
@@ -83,7 +87,7 @@ export interface TeamMessageProps {
  * One chat message row. Memoized: the Task-ref subscription lives inside this component, so a skipped render never
  * detaches it. Callers must keep per-render props (mention names, ref callbacks) identity-stable.
  */
-export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, readerName, replyTo, onReply, onOpenReplyTo, rowActions, messageRef, replyTarget, replyFlash, showGroupedTime, cardOpen, onToggleCard, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, projectNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
+export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, readerName, replyTo, onReply, onOpenReplyTo, rowActions, messageRef, replyTarget, replyFlash, showGroupedTime, cardOpen, onToggleCard, attachments, loadAttachment, openAttachment, loadAttachmentApplications, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, projectNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
   const avatarStyle = human ? undefined : { '--team-avatar-hue': memberHue(memberId) } as CSSProperties
   const identityImage = useAvatarImage(human ? avatarUrl : undefined)
   // The stored body carries machine-facing `[attachment] <path>` prompt lines; the attachment strip renders from message metadata instead.
@@ -95,6 +99,65 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   const quoteAuthor = replyTo === undefined ? undefined : replyTo.senderName.replace(/^@/, '')
   const fallbackNames = unshownMentionNames(plan.fallbackNames, readerName, quoteAuthor)
   const displayBody = plan.displayBody
+  const [attachmentMenu, setAttachmentMenu] = useState<{ readonly attachment: AgentTeamMessageAttachment; readonly x: number; readonly y: number }>()
+  const [attachmentStatus, setAttachmentStatus] = useState<string>()
+  const runAttachmentAction = useCallback(async (attachment: AgentTeamMessageAttachment, action: 'open' | 'reveal', application?: string): Promise<void> => {
+    if (openAttachment === undefined) return
+    setAttachmentStatus(t?.('openingFile', { name: attachment.name }) ?? `Opening ${attachment.name}`)
+    try {
+      const result = await openAttachment({
+        attachmentId: attachment.attachmentId,
+        action,
+        ...(application === undefined ? {} : { application }),
+      })
+      if (!result.ok) {
+        setAttachmentStatus(t?.('openFileFailed', { name: attachment.name }) ?? 'Could not open the file')
+      } else if (!result.value.opened) {
+        setAttachmentStatus(t?.('openFileUnavailable', { name: attachment.name }) ?? 'The Host has no desktop file opener')
+      } else {
+        setAttachmentStatus(undefined)
+      }
+    } catch {
+      setAttachmentStatus(t?.('openFileFailed', { name: attachment.name }) ?? 'Could not open the file')
+    }
+  }, [openAttachment, t])
+  const openAttachmentNow = useCallback((attachment: AgentTeamMessageAttachment): void => {
+    void runAttachmentAction(attachment, 'open')
+  }, [runAttachmentAction])
+  const revealAttachment = useCallback((attachment: AgentTeamMessageAttachment): void => {
+    void runAttachmentAction(attachment, 'reveal')
+  }, [runAttachmentAction])
+  const openAttachmentWith = useCallback((attachment: AgentTeamMessageAttachment, application: string): void => {
+    void runAttachmentAction(attachment, 'open', application)
+  }, [runAttachmentAction])
+  const openAttachmentMenu = useCallback((attachment: AgentTeamMessageAttachment, x: number, y: number): void => {
+    setAttachmentMenu({ attachment, x, y })
+  }, [])
+  const fileMentions = useMemo<MarkdownFileMentions | undefined>(() => {
+    if (attachments === undefined || attachments.length === 0 || openAttachment === undefined) return undefined
+    return {
+      resolve(value) {
+        const token = value.trim()
+        if (token === '') return undefined
+        const base = token.slice(Math.max(token.lastIndexOf('/'), token.lastIndexOf('\\')) + 1)
+        const matches = attachments.filter(item => item.name === token || item.name === base)
+        if (matches.length !== 1) return undefined
+        const attachment = matches[0]!
+        return {
+          open: () => { openAttachmentNow(attachment) },
+          label: t?.('openFileLabel', { name: attachment.name }) ?? `Open ${attachment.name}`,
+          title: token,
+          contextMenuProps: {
+            onContextMenu: (event) => {
+              event.preventDefault()
+              const rect = event.currentTarget.getBoundingClientRect()
+              openAttachmentMenu(attachment, event.clientX || rect.left + rect.width / 2, event.clientY || rect.top + rect.height / 2)
+            },
+          },
+        }
+      },
+    }
+  }, [attachments, openAttachment, openAttachmentNow, openAttachmentMenu, t])
   const quoteExcerpt = replyTo === undefined ? undefined : plainGist(replyTo.excerpt)
   const { markdownRef, markdownLabels, taskLabel, renderRefs } = useResolvedBodyRefs({
     plan,
@@ -136,7 +199,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
       </div>
     : plan.render === 'literal'
       ? <div className={css.messageText}>{onOpenRef === undefined ? displayBody : renderRefs(displayBody)}</div>
-      : <div ref={markdownRef} className={css.messageMarkdown}><MarkdownText key={`${displayBody}:${onOpenRef === undefined ? 'literal' : 'refs'}`} text={displayBody} labels={markdownLabels} /></div>
+      : <div ref={markdownRef} className={css.messageMarkdown}><MarkdownText key={`${displayBody}:${onOpenRef === undefined ? 'literal' : 'refs'}`} text={displayBody} labels={markdownLabels} fileMentions={fileMentions} /></div>
   // The action's own word is the outcome: copied, refused, or still offering the copy.
   const copyLabel = copyState === 'copied'
     ? (t?.('copiedMessage') ?? 'Copied')
@@ -193,6 +256,18 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
         {attachments !== undefined && attachments.length > 0 && <TeamAttachmentStrip
           attachments={attachments}
           {...(loadAttachment === undefined ? {} : { loadAttachment })}
+          {...(openAttachment === undefined ? {} : { onOpen: openAttachmentNow, onMenu: openAttachmentMenu })}
+          {...(t === undefined ? {} : { t })}
+        />}
+        {attachmentStatus !== undefined && <div className={css.attachmentStatus} role="status">{attachmentStatus}</div>}
+        {attachmentMenu !== undefined && openAttachment !== undefined && <TeamAttachmentMenu
+          attachment={attachmentMenu.attachment}
+          point={{ x: attachmentMenu.x, y: attachmentMenu.y }}
+          loadApplications={loadAttachmentApplications}
+          onOpen={openAttachmentNow}
+          onOpenWith={openAttachmentWith}
+          onReveal={revealAttachment}
+          onClose={() => { setAttachmentMenu(undefined) }}
           {...(t === undefined ? {} : { t })}
         />}
         {/* A feed's entry line is the row's own chrome, outside any per-message surface. */}
@@ -509,9 +584,13 @@ function renderRefsFromText(text: string, onOpenRef: ((ref: string) => void) | u
   })
 }
 
-function TeamAttachmentStrip({ attachments, loadAttachment, t }: {
+function TeamAttachmentStrip({ attachments, loadAttachment, onOpen, onMenu, t }: {
   readonly attachments: readonly AgentTeamMessageAttachment[]
   readonly loadAttachment?: TeamConversationProps['getAttachment'] | undefined
+  /** Left click / Enter opens the cached payload in the Host's default application. */
+  readonly onOpen?: ((attachment: AgentTeamMessageAttachment) => void) | undefined
+  /** Right click / keyboard context gesture asks the owning Message to seat the menu at this point. */
+  readonly onMenu?: ((attachment: AgentTeamMessageAttachment, x: number, y: number) => void) | undefined
   readonly t?: TeamConversationProps['t'] | undefined
 }) {
   const [zoomed, setZoomed] = useState<{ readonly attachment: AgentTeamMessageAttachment; readonly dataUrl: string }>()
@@ -520,6 +599,8 @@ function TeamAttachmentStrip({ attachments, loadAttachment, t }: {
       key={attachment.attachmentId}
       attachment={attachment}
       {...(loadAttachment === undefined ? {} : { loadAttachment })}
+      {...(onOpen === undefined ? {} : { onOpen })}
+      {...(onMenu === undefined ? {} : { onMenu })}
       {...(t === undefined ? {} : { t })}
       onZoom={(dataUrl) => { setZoomed({ attachment, dataUrl }) }}
     />)}
@@ -529,6 +610,57 @@ function TeamAttachmentStrip({ attachments, loadAttachment, t }: {
   </div>
 }
 
+/** One cursor-seated menu for a cached attachment: default open, the Host's handlers, and file-manager reveal. */
+function TeamAttachmentMenu({ attachment, point, loadApplications, onOpen, onOpenWith, onReveal, onClose, t }: {
+  readonly attachment: AgentTeamMessageAttachment
+  readonly point: { readonly x: number; readonly y: number }
+  readonly loadApplications?: TeamConversationProps['loadAttachmentApplications']
+  readonly onOpen: (attachment: AgentTeamMessageAttachment) => void
+  readonly onOpenWith: (attachment: AgentTeamMessageAttachment, application: string) => void
+  readonly onReveal: (attachment: AgentTeamMessageAttachment) => void
+  readonly onClose: () => void
+  readonly t?: TeamConversationProps['t'] | undefined
+}) {
+  const [applications, setApplications] = useState<readonly AgentTeamAttachmentApplication[]>()
+  useEffect(() => {
+    if (loadApplications === undefined) {
+      setApplications([])
+      return
+    }
+    let mounted = true
+    void loadApplications({ attachmentId: attachment.attachmentId }).then(result => {
+      if (mounted) setApplications(result.ok ? result.value : [])
+    }).catch(() => {
+      if (mounted) setApplications([])
+    })
+    return () => { mounted = false }
+  }, [attachment.attachmentId, loadApplications])
+  const items: MenuEntry[] = [{ id: 'open', label: t?.('openFile') ?? 'Open' }]
+  if (applications !== undefined && applications.length > 0) {
+    items.push({
+      id: 'open-with',
+      label: t?.('openFileWith') ?? 'Open with',
+      submenu: applications.map(application => ({ id: `application:${application.id}`, label: application.name })),
+    })
+  }
+  items.push({ type: 'separator', id: 'separator' }, { id: 'reveal', label: t?.('revealFile') ?? 'Show in folder' })
+  return <Menu
+    open
+    contextual
+    portal
+    anchorPoint={point}
+    anchor={<span />}
+    items={items}
+    onClose={onClose}
+    onSelect={id => {
+      onClose()
+      if (id === 'open') onOpen(attachment)
+      else if (id === 'reveal') onReveal(attachment)
+      else if (id.startsWith('application:')) onOpenWith(attachment, id.slice('application:'.length))
+    }}
+  />
+}
+
 type AttachmentPreviewState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'decoding'; readonly dataUrl: string }
@@ -536,16 +668,18 @@ type AttachmentPreviewState =
   | { readonly kind: 'missing' }
   | { readonly kind: 'failed' }
 
-function TeamAttachment({ attachment, loadAttachment, t, onZoom }: {
+function TeamAttachment({ attachment, loadAttachment, onOpen, onMenu, t, onZoom }: {
   readonly attachment: AgentTeamMessageAttachment
   readonly loadAttachment?: TeamConversationProps['getAttachment'] | undefined
+  readonly onOpen?: ((attachment: AgentTeamMessageAttachment) => void) | undefined
+  readonly onMenu?: ((attachment: AgentTeamMessageAttachment, x: number, y: number) => void) | undefined
   readonly t?: TeamConversationProps['t'] | undefined
   readonly onZoom: (dataUrl: string) => void
 }) {
   const wantsPreview = loadAttachment !== undefined && attachment.mediaType.startsWith('image/')
   const cached = wantsPreview ? cachedAttachmentDataUrl(attachment.attachmentId) : undefined
   const [preview, setPreview] = useState<AttachmentPreviewState>(() => cached === undefined ? { kind: 'loading' } : { kind: 'decoding', dataUrl: cached })
-  const chipRef = useRef<HTMLSpanElement>(null)
+  const chipRef = useRef<HTMLElement | null>(null)
   const thumbRef = useRef<HTMLButtonElement>(null)
   const retryRef = useRef<HTMLButtonElement>(null)
   const retryPending = useRef(false)
@@ -573,9 +707,15 @@ function TeamAttachment({ attachment, loadAttachment, t, onZoom }: {
       chipRef.current?.focus()
     }
   }, [preview.kind])
+  const openMenu = (event: MouseEvent<HTMLElement>): void => {
+    if (onMenu === undefined) return
+    event.preventDefault()
+    const rect = event.currentTarget.getBoundingClientRect()
+    onMenu(attachment, event.clientX || rect.left + rect.width / 2, event.clientY || rect.top + rect.height / 2)
+  }
   const expired = t?.('attachmentExpired') ?? 'File no longer cached'
   if (wantsPreview && preview.kind === 'ready') {
-    return <button ref={thumbRef} type="button" className={css.attachmentThumb} aria-label={t?.('viewImage', { name: attachment.name }) ?? attachment.name} title={attachment.name} onClick={() => { onZoom(preview.dataUrl) }}>
+    return <button ref={thumbRef} type="button" className={css.attachmentThumb} aria-label={t?.('viewImage', { name: attachment.name }) ?? attachment.name} title={attachment.name} onClick={() => { onZoom(preview.dataUrl) }} onContextMenu={openMenu}>
       <img src={preview.dataUrl} alt={attachment.name} onError={() => {
         invalidateAttachmentDataUrl(attachment.attachmentId)
         retryPending.current = true
@@ -588,7 +728,8 @@ function TeamAttachment({ attachment, loadAttachment, t, onZoom }: {
     : preview.kind === 'failed'
       ? t?.('attachmentUnavailable') ?? 'Image unavailable'
       : t?.('attachmentLoading') ?? 'Loading image'
-  return <span ref={chipRef} tabIndex={wantsPreview ? -1 : undefined} aria-live={wantsPreview ? 'polite' : undefined} className={css.attachmentChip} title={wantsPreview ? `${attachment.name} · ${imageStatus}` : `${attachment.name} · ${formatByteSize(attachment.byteSize)}`}>
+  const chipTitle = wantsPreview ? `${attachment.name} · ${imageStatus}` : `${attachment.name} · ${formatByteSize(attachment.byteSize)}`
+  const contents = <>
     <span className={css.attachmentChipName}>{attachment.name}</span>
     <span className={css.attachmentChipSize}>{wantsPreview ? imageStatus : formatByteSize(attachment.byteSize)}</span>
     {preview.kind === 'decoding' && <img className={css.attachmentDecodeProbe} src={preview.dataUrl} alt="" aria-hidden onLoad={() => { setPreview({ kind: 'ready', dataUrl: preview.dataUrl }) }} onError={() => {
@@ -600,5 +741,20 @@ function TeamAttachment({ attachment, loadAttachment, t, onZoom }: {
       retryPending.current = true
       setPreview({ kind: 'loading' })
     }}>{t?.('attachmentRetry') ?? 'Retry reading'}</button>}
+  </>
+  // A document chip is the open target itself; an image chip stays a thumbnail and only offers open through its menu.
+  if (onOpen !== undefined && !wantsPreview) {
+    return <button
+      ref={(node) => { chipRef.current = node }}
+      type="button"
+      className={`${css.attachmentChip} ${css.attachmentChipInteractive}`}
+      aria-label={t?.('openFileLabel', { name: attachment.name }) ?? `Open ${attachment.name}`}
+      title={chipTitle}
+      onClick={() => { onOpen(attachment) }}
+      onContextMenu={openMenu}
+    >{contents}</button>
+  }
+  return <span ref={(node) => { chipRef.current = node }} tabIndex={wantsPreview ? -1 : undefined} aria-live={wantsPreview ? 'polite' : undefined} className={css.attachmentChip} title={chipTitle} onContextMenu={openMenu}>
+    {contents}
   </span>
 }

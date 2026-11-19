@@ -12,6 +12,10 @@ import { standardDecoratorPlugin } from './scripts/standard-decorators.ts'
 // imports back to harness source. paths must win over package exports so a
 // second module-singleton copy can never load.
 const pathsPlugin = (): ReturnType<typeof tsconfigPaths> => tsconfigPaths({
+  // Generated Remote clients are `.js`, and the default importer filter only
+  // applies the facade to `.ts`/`.tsx`; without `loose`, their value imports
+  // such as `@deepseek-ai/dsh-typert-protocol/remote-info` never resolve here.
+  loose: true,
   // scripts/harness-dir.mjs owns the checkout pointer for every consumer:
   // env override for certification runs, the daily sibling default otherwise,
   // fail-fast when the resolved checkout is missing.

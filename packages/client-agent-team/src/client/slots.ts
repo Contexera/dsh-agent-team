@@ -20,8 +20,12 @@ import type {
   AgentTeamJoinWorkspaceResult,
   AgentTeamLeaveWorkspaceRequest,
   AgentTeamLeaveWorkspaceResult,
+  AgentTeamAttachmentApplication,
+  AgentTeamAttachmentApplicationsRequest,
   AgentTeamGetAttachmentRequest,
   AgentTeamGetAttachmentResult,
+  AgentTeamOpenAttachmentRequest,
+  AgentTeamOpenAttachmentResult,
   AgentTeamPutAttachmentRequest,
   AgentTeamPutAttachmentResult,
   AgentTeamMemberResult,
@@ -204,6 +208,10 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   subscribeChanges: SubscribeTeamChanges
   putAttachment: (request: AgentTeamPutAttachmentRequest) => Promise<RemoteResult<AgentTeamPutAttachmentResult>>
   getAttachment: (request: AgentTeamGetAttachmentRequest) => Promise<RemoteResult<AgentTeamGetAttachmentResult>>
+  /** Native open/reveal of one cached attachment; absent leaves attachment chips and file mentions inert. */
+  openAttachment?: ((request: AgentTeamOpenAttachmentRequest) => Promise<RemoteResult<AgentTeamOpenAttachmentResult>>) | undefined
+  /** Current OS handlers for one cached attachment; absent omits the "Open with" menu. */
+  loadAttachmentApplications?: ((request: AgentTeamAttachmentApplicationsRequest) => Promise<RemoteResult<readonly AgentTeamAttachmentApplication[]>>) | undefined
   /** Main stream: post, read, page, and start Threads (owners only). */
   postMainMessage: (request: AgentTeamPostMainMessageRequest) => Promise<RemoteResult<AgentTeamPostMainMessageResult>>
   startThread: (request: AgentTeamStartThreadRequest) => Promise<RemoteResult<AgentTeamStartThreadResult>>

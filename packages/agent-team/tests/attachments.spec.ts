@@ -1,8 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
+import { nativeFileApplications, openNativeFileApplication, openNativePath, revealNativePath } from '@deepseek-ai/dsh-native-command'
+
+vi.mock('@deepseek-ai/dsh-native-command', () => ({
+  canOpenNativePath: () => true,
+  nativeFileApplications: vi.fn(async () => []),
+  openNativeFileApplication: vi.fn(async () => {}),
+  openNativePath: vi.fn(async () => {}),
+  revealNativePath: vi.fn(async () => {}),
+}))
 
 /** Escape a literal string for embedding in a RegExp (path separators differ per platform). */
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -527,6 +536,34 @@ describe('Agent Team attachment remotes', () => {
     expect(cold.referencedAttachmentIds().has(uploaded.attachmentId)).toBe(true)
     const history = ctx.agentTeam.threadHistory({ workspaceId: alpha, taskRef: started.task!.taskRef })
     expect(history.facts.some(fact => fact.kind === 'message' && fact.message.attachments?.[0]?.name === 'reply.png')).toBe(true)
+  })
+})
+
+describe('attachment native open', () => {
+  it('opens, reveals, and lists handlers for the verified cache path', async () => {
+    const { ctx } = await harness()
+    const id = newAttachmentId()
+    const stored = await writeAttachment(attachmentsRoot(), id, 'spec.pdf', 'application/pdf', Buffer.from('pdf'))
+    vi.mocked(openNativePath).mockClear()
+    vi.mocked(revealNativePath).mockClear()
+    vi.mocked(openNativeFileApplication).mockClear()
+    vi.mocked(nativeFileApplications).mockResolvedValue([{ id: 'app:preview', name: 'Preview', default: true, icon: null }])
+
+    await expect(ctx.agentTeam.openAttachment({ attachmentId: id })).resolves.toEqual({ opened: true })
+    expect(openNativePath).toHaveBeenCalledWith(stored.path, expect.any(AbortSignal))
+    await expect(ctx.agentTeam.openAttachment({ attachmentId: id, action: 'reveal' })).resolves.toEqual({ opened: true })
+    expect(revealNativePath).toHaveBeenCalledWith(stored.path, expect.any(AbortSignal))
+    await expect(ctx.agentTeam.openAttachment({ attachmentId: id, application: 'app:preview' })).resolves.toEqual({ opened: true })
+    expect(openNativeFileApplication).toHaveBeenCalledWith(stored.path, 'app:preview', expect.any(AbortSignal))
+    await expect(ctx.agentTeam.attachmentApplications({ attachmentId: id })).resolves.toEqual([{ id: 'app:preview', name: 'Preview', default: true, icon: null }])
+    expect(nativeFileApplications).toHaveBeenCalledWith(stored.path, expect.any(AbortSignal))
+  })
+
+  it('reports a swept entry as not found and never resolves a path', async () => {
+    const { ctx } = await harness()
+    vi.mocked(openNativePath).mockClear()
+    await expect(ctx.agentTeam.openAttachment({ attachmentId: newAttachmentId() })).rejects.toMatchObject({ code: 'team/attachment-not-found' })
+    expect(openNativePath).not.toHaveBeenCalled()
   })
 })
 
