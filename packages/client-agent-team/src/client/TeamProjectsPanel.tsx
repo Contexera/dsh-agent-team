@@ -12,7 +12,6 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/clie
 import { Button, IconArchiveOutlineRegular, IconEditOutlineRegular, IconPlusOutlineRegular, Input, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamSidebarProps } from './slots.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
-import { MultiMenuField } from './multi-menu-field.tsx'
 import { SortableRow, useSidebarRowDrag } from './sidebar-drag.tsx'
 import { moveSidebarItem, useSidebarOrder } from './sidebar-order.ts'
 import { useSidebarSectionOpen, setSidebarSectionOpen } from './sidebar-sections.ts'
@@ -54,7 +53,6 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
   const [formOpen, setFormOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [selected, setSelected] = useState<ReadonlySet<AgentTeamMemberId>>(new Set())
   const [mutating, setMutating] = useState(false)
   const [pendingCreate, setPendingCreate] = useState<AgentTeamCreateProjectRequest>()
   const previousCreatingKey = useRef(creatingAgents.map(request => request.requestId).join(','))
@@ -97,9 +95,6 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
     if (memberResult?.ok === true) {
       const visibleMembers = memberResult.value.filter(status => status.member.state !== 'inactive' && status.member.state !== 'archived')
       setMembers(visibleMembers)
-      const selectable = new Set(visibleMembers.filter(status => status.presence !== 'unavailable')
-        .map(status => status.member.memberId))
-      setSelected(current => new Set([...current].filter(memberId => selectable.has(memberId))))
     }
     const failure = (read: PromiseSettledResult<unknown>, result: { readonly ok: boolean; readonly error?: { readonly message: string } } | undefined): string | undefined => {
       if (read.status === 'rejected') return read.reason instanceof Error ? read.reason.message : String(read.reason)
@@ -185,10 +180,9 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (mutating || name.trim() === '') return
-    const payload = { workspaceId, name: name.trim(), description: description.trim(), memberIds: [...selected] }
+    const payload = { workspaceId, name: name.trim(), description: description.trim() }
     const samePending = pendingCreate !== undefined && pendingCreate.workspaceId === payload.workspaceId
       && pendingCreate.name === payload.name && pendingCreate.description === payload.description
-      && JSON.stringify(pendingCreate.memberIds) === JSON.stringify(payload.memberIds)
     const request: AgentTeamCreateProjectRequest = samePending ? pendingCreate : {
       requestId: mintRequestId(), ...payload,
     }
@@ -202,7 +196,6 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
         setPendingCreate(undefined)
         setName('')
         setDescription('')
-        setSelected(new Set())
         setFormOpen(false)
         await refresh()
         queueMicrotask(() => { triggerRef.current?.focus() })
@@ -229,27 +222,6 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
         <form id="team-project-create-form" className={createCss.form} onSubmit={event => { void submit(event) }}>
           <label className={createCss.field}><span>{t('projectName')}</span><Input className={createCss.input!} value={name} disabled={mutating} autoFocus onChange={event => { setName(event.target.value); setPendingCreate(undefined) }} /></label>
           <label className={createCss.field}><span>{t('projectDescription')}{t('optionalSuffix')}</span><Input className={createCss.input!} value={description} placeholder={t('agentDescriptionPlaceholder')} disabled={mutating} onChange={event => { setDescription(event.target.value); setPendingCreate(undefined) }} /></label>
-          <MultiMenuField label={t('initialMembers')} disabled={mutating}
-            options={[
-              ...creatingAgents.map(request => ({ id: request.requestId, label: request.handle, disabled: true, hint: t('memberCreatingReason') })),
-              ...members.map(status => ({
-                id: status.member.memberId,
-                label: status.member.handle,
-                ...(status.presence === 'unavailable' ? { disabled: true, hint: t('memberUnavailableReason') } : {}),
-                icon: <TeamPresenceDot status={status} t={t} />,
-              })),
-            ]}
-            selected={[...selected]}
-            onToggle={id => {
-              setSelected(current => {
-                const next = new Set(current)
-                if (next.has(id)) next.delete(id); else next.add(id)
-                return next
-              })
-              setPendingCreate(undefined)
-            }}
-            triggerEmptyLabel={t('membersPickerEmpty')}
-            formatCount={count => t('membersPickerCount', { count })} />
           {error !== undefined && <p className={createCss.error} role="alert">{error}</p>}
         </form>
       </Modal>

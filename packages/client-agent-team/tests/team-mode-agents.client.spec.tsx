@@ -202,17 +202,13 @@ describe('Team agent surfaces', () => {
     }))
   })
 
-  it('creates a Project atomically with selected available Members and manages committed membership', async () => {
+  it('creates a Project atomically without a member picker and keeps no membership controls', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     expect(await b.view.findByText('还没有项目')).toBeTruthy()
     fireEvent.click(b.view.getByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API implementation' } })
-    fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
-    const unavailable = await within(document.body).findByRole('menuitem', { name: /offline/ }) as HTMLButtonElement
-    expect(unavailable.disabled).toBe(true)
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
     b.createProject.mockResolvedValueOnce({ ok: false, error: { message: 'connection lost' } } as never)
     fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     expect((await b.view.findByRole('alert')).textContent).toContain('connection lost')
@@ -220,7 +216,7 @@ describe('Team agent surfaces', () => {
 
     expect(await b.view.findByText('# backend')).toBeTruthy()
     expect(b.createProject).toHaveBeenLastCalledWith(expect.objectContaining({
-      workspaceId: 'w1', name: 'backend', description: 'API implementation', memberIds: ['member:builder'],
+      workspaceId: 'w1', name: 'backend', description: 'API implementation',
     }))
     expect(b.createProject.mock.calls[0]![0].requestId).toBe(b.createProject.mock.calls[1]![0].requestId)
     // Membership is derived from participation now, so a created Project has

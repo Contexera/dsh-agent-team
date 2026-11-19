@@ -37,21 +37,14 @@ describe('team_view renders one address book', () => {
     expect(text).not.toContain('project:aaaa1111-0000-4000-8000-000000000002 · ops · owners @human, @Tars · you: member · responsibility')
   })
 
-  it('distinguishes a directory-only Project from a Project with no Threads', () => {
+  it('reports an empty Workspace Thread page without inventing a membership reason', () => {
     const text = renderText(teamTools().get('team_view')!, {}, {
       workspaces: WORKSPACES,
-      projects: [{ projectRef: PROJECT, name: 'releases', owners: ['human'], role: 'directory only', subscriptions: { active: 0, paused: 0 } }],
-      directoryOnly: true, members: [], threads: [], tasks: [], cursor: 1, hasMore: false,
-    })
-    expect(text).toContain('subscriptions 0')
-    expect(text).toContain('Directory only: Thread rows require Project membership.')
-    expect(text).not.toContain('No top-level Threads')
-
-    const emptyMemberships = renderText(teamTools().get('team_view')!, {}, {
-      workspaces: WORKSPACES, projects: [{ projectRef: PROJECT, name: 'releases', role: 'directory only' }],
+      projects: [{ projectRef: PROJECT, name: 'releases', owners: ['human'], role: 'none', subscriptions: { active: 0, paused: 0 } }],
       members: [], threads: [], tasks: [], cursor: 1, hasMore: false,
     })
-    expect(emptyMemberships).toContain('No top-level Threads in your Project memberships at this cursor.')
+    expect(text).toContain('subscriptions 0')
+    expect(text).toContain('No top-level Threads in this Workspace at this cursor.')
   })
 
   it('first page: labelled sections, newest-first subjects, Task inline — no Task index, message count, or revision label', () => {
