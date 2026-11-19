@@ -12,13 +12,13 @@ Team schema 接受省略可选字段。对于会填满未使用槽位的模型�
 
 ## `team_view`
 
-`team_view` 是 address book：Workspace 内全部 active Project、读者参与的 Projects 中的顶层 Threads，以及完整 Workspace Member roster。这是当前的地址簿，不是工作队列；unread work 归 `team_inbox`。
+`team_view` 是 address book：Workspace 内全部 active Project、它们的顶层 Threads，以及完整 Workspace Member roster。这是当前的地址簿，不是工作队列；unread work 归 `team_inbox`。
 
-每个 Project 行携带读者的 `owner` / `member` / `directory only` 关系和 active/paused 订阅计数；ledger 有 Project owner 之后（规则版本 2），还列出 owners（`@human` 在前）。
+每个 Project 行携带读者的 `owner` / `following` / `none` 关系——规则版本 9 之前为 `owner` / `member` / `directory only`——和 active/paused 订阅计数；ledger 有 Project owner 之后（规则版本 2），还列出 owners（`@human` 在前）。
 
-规则版本 8 起，Project 行还写明它的 Agent owners 各自负责什么——与 ownership context 和 Client 显示的是同一份文本——授权里没有记录的写作 `unspecified`（Client 中显示为「未说明」），这是授权本身的事实，不是非得补齐才能使用这一行的缺口。若该 Project 没有任何 owner 记录过，这一行不增加内容，因此版本 8 之前写下的 ledger 回答与从前完全一致。`directory only` 不授予 Project 内容、写入、Attention 或未读投递。订阅详情仍由 `team_subscription list` 回答，不把目录展开成 dashboard。
+规则版本 8 起，Project 行还写明它的 Agent owners 各自负责什么——与 ownership context 和 Client 显示的是同一份文本——授权里没有记录的写作 `unspecified`（Client 中显示为「未说明」），这是授权本身的事实，不是非得补齐才能使用这一行的缺口。若该 Project 没有任何 owner 记录过，这一行不增加内容，因此版本 8 之前写下的 ledger 回答与从前完全一致。规则版本 9 下 `none` 不授予也不剥夺任何东西：Workspace 参与者看到同样的 catalog；更早版本中 `directory only` 不授予 Project 内容、写入、Attention 或未读投递。订阅详情仍由 `team_subscription list` 回答，不把目录展开成 dashboard。
 
-Threads 是唯一分页目录。行按 newest-first 排列，携带 threadRef、Project ref、bounded anchor subject。taskful Threads 在行内呈现 Task standing：Task ref、编号、status/resolution。绝无第二个 Task 索引，也不渲染 revision 或消息数，因为两者都不改变下一个合法动作。该区域明确只覆盖读者的 Project memberships。用 `projectRef` 过滤一个 `directory only` Project 时，结果返回它的目录行，但说明 Thread 行需要 membership，而不是谎称这个 Project 没有 Thread。
+Threads 是唯一分页目录。行按 newest-first 排列，携带 threadRef、Project ref、bounded anchor subject。taskful Threads 在行内呈现 Task standing：Task ref、编号、status/resolution。绝无第二个 Task 索引，也不渲染 revision 或消息数，因为两者都不改变下一个合法动作。该区域覆盖读者可读的 Project——规则版本 9 下为参与 Workspace 的全部 Project，更早版本为读者的 Project 成员关系。
 
 在途工作不属于地址簿：首页末尾指向 `team_task board`，订阅详情指向 `team_subscription list`。
 
@@ -99,7 +99,7 @@ Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读
 
 规则版本 2 起，`team_message` 还有 `post`，在 Project 的 Main stream 发言（`projectRef`、`body`，可选 `replyToMessageRef`，须为同一 Project 的 Main stream Message）。它不需要写入 token。持有未读 Main stream 条目的写入者，必须在当前上下文中完整持有每一条——Team 通知或绑定实际渲染 Message/Activity 的工具结果——或者带 `projectRef` 显式 read；否则得到 `main_unread_required`。
 
-`start` 带 `kind: 'discussion' | 'task'`（已移除的 `asTask` 写法会被拒绝并指回 `kind`，绝不静默丢弃），只有 Project owner 能开：其他人得到 `project_owner_required`，提示改用 `post`；非 member 得到 `not_project_member`。Task start 另接受 `accountable` 与 `sourceThreadRefs`；两者在讨论 start 与 `post`/`reply` 上都被拒绝而非丢弃，commit 的 start 回报实际记录的负责人。
+`start` 带 `kind: 'discussion' | 'task'`（已移除的 `asTask` 写法会被拒绝并指回 `kind`，绝不静默丢弃），只有 Project owner 能开：其他人得到 `project_owner_required`，提示改用 `post`；不参与该 Workspace 的 Member——或写操作中未 enabled 的 Member——得到 `not_project_member`。Task start 另接受 `accountable` 与 `sourceThreadRefs`；两者在讨论 start 与 `post`/`reply` 上都被拒绝而非丢弃，commit 的 start 回报实际记录的负责人。
 
 `team_thread` 的 `read`、`history`、`message` 只寻址一个 scope：Thread 用 `threadRef`（该 Thread 有 Task 时也可用别名 `taskRef`），Main stream 用 `projectRef`；同时给两个 scope 会被拒绝。`message` 必须带 `threadRef` 或 `projectRef`，只有 `taskRef` 不能读回一条 Message。Main stream 的行为与确认规则见上文 `team_thread` 一节。
 
