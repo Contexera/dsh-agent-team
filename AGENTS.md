@@ -43,6 +43,7 @@ When deleting comments in bulk, a green test suite proves nothing about the chan
 - Follow [`docs/AGENTS.md`](docs/AGENTS.md) when editing or adding maintained documents — routing branches and the maintenance discipline live there.
 - For visible UI changes, run the applicable component checks and `npm run test:browser`, inspect the new `artifacts/browser/` screenshots at desktop and 390×844, and verify keyboard/focus, dialog/menu accessibility, loading/error/empty states, and ordinary DSH restoration. Keep only a small, human-approved milestone set under `.scratch/archive/.../validation/`; routine screenshots stay ignored.
 - Write each commit message as one Conventional Commits subject line: `type: lowercase imperative summary` (`feat`, `fix`, `chore`, `refactor`, `test`, `perf`, `docs`), with no body. Match the existing `git log` style.
+- Land each work item as one commit: fix the original commit by amending it while the range is unpushed rather than adding a fixup, and squash a work item's several commits before pushing. Never rewrite history that is already pushed or merged.
 - Do not commit credentials, temporary profiles, browser overlays, generated test files, browser artifacts, or build residue.
 
 ## Checks
