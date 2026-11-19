@@ -1825,6 +1825,35 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     entries.mockRestore()
   })
 
+  it('validates only the records appended since the last check', async () => {
+    const test = await harness()
+    const ledger = ledgerAtBoot(test)
+    const validateOperation = vi.spyOn(ledger as unknown as { validateRecord: (cursor: unknown, key: unknown, operation: unknown) => unknown }, 'validateRecord')
+    ledger.validate()
+    // The constructor's replay already positioned the validation cursor, so a
+    // check with nothing new must not re-derive a single record.
+    expect(validateOperation.mock.calls.length).toBe(0)
+    await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    ledger.validate()
+    // The commit-driven check replays only what it has not seen: a full
+    // re-derivation would make every later validation O(ledger history) on the
+    // Host's event loop, which is what stalled webhook intake.
+    expect(validateOperation.mock.calls.length).toBe(1)
+    validateOperation.mockRestore()
+  })
+
+  it('falls back to a full replay when a validated record is rewritten', async () => {
+    const test = await harness()
+    const ledger = ledgerAtBoot(test)
+    ledger.validate()
+    const table = test.facility.get('agent_team')!.table('operations')
+    const [id, operation] = [...table.entries()][0]!
+    await table.put(id, { ...(operation as AgentTeamOperation), sequence: 9 })
+    expect(() => ledger.validate()).toThrow(/expected sequence 1|broken previous-operation link/)
+    await table.put(id, operation)
+    expect(() => ledger.validate()).not.toThrow()
+  })
+
   it('releases the deferred failure once a replay comes back clean', async () => {
     const settle = (): Promise<void> => new Promise(resolve => setImmediate(resolve))
     const test = await harness()

@@ -909,6 +909,23 @@ function isAuditOnlyOperation(operation: AgentTeamOperation): operation is Extra
   return (AUDIT_ONLY_KINDS as readonly string[]).includes(operation.kind)
 }
 
+/**
+ * The state one scratch replay needs so an incremental `validate()` continues
+ * where the last check ended: the projection as the durable records shaped it,
+ * the identity sets uniqueness checks accumulate, the repair maps a
+ * normalization reads, and the records already validated — kept so a later
+ * rewrite inside the processed range is seen by identity instead of trusted.
+ */
+interface AgentTeamValidationCursor {
+  readonly projection: Projection
+  readonly operationIds: Set<AgentTeamOperationId>
+  readonly requestIds: Set<AgentTeamRequestId>
+  readonly refs: Set<string>
+  readonly occurrences: Map<AgentTeamMessageRef, string>
+  readonly instants: Map<number, string>
+  readonly processed: Array<readonly [AgentTeamOperationId, AgentTeamOperation]>
+}
+
 function emptyProjection(): Projection {
   return { byRequest: new Map(), byOperation: new Map(), ordered: [], occurredAtBySequence: new Map(), projects: new Map(), members: new Map(), participations: new Map(), memberships: new Map(),
     claims: new Map(), tasks: new Map(), threads: new Map(), attention: new Map(), directMarkers: new Map(), activityMarkers: new Map(),
@@ -1089,6 +1106,13 @@ export class AgentTeamLedger {
    * validated, adoptable once by the invariant mount. See `validateAtMount`.
    */
   private bootValidation: { readonly records: number; readonly lastSequence: number; readonly lastOperationId: AgentTeamOperationId | null } | undefined
+  /**
+   * The scratch replay `validate()` carries forward: a full independent
+   * projection plus the lookup state a record check needs, positioned at
+   * `processedCount` records. Seeded by the constructor's replay so the first
+   * post-boot check costs only the commits since startup.
+   */
+  private validationCursor: AgentTeamValidationCursor | undefined
   /**
    * Sequence of the newest committed record that invalidated the shared
    * projection — the durable position the Client's change cursors compare
@@ -4943,8 +4967,38 @@ export class AgentTeamLedger {
     }))
   }
 
+  /**
+   * Prove the durable records still replay onto one consistent projection.
+   * The commit-driven caller runs this after nearly every write, so it cannot
+   * afford the O(history) replay a cold check costs: the cursor carries the
+   * scratch projection and the lookup state forward, and each call validates
+   * only the records appended since it last ran. The processed prefix is
+   * compared by object identity — a `put` replacing an already validated
+   * record changes the reference — so a rewrite anywhere in it still falls
+   * back to a full replay and reports the divergence it finds there.
+   */
   validate(): void {
-    this.validateRecords(this.sortedRecords())
+    const records = this.rawSortedRecords()
+    let cursor = this.validationCursor ?? this.newValidationCursor()
+    let intact = cursor.processed.length <= records.length
+    if (intact) {
+      for (let index = 0; index < cursor.processed.length; index += 1) {
+        const [key, operation] = cursor.processed[index]!
+        if (records[index]![0] !== key || records[index]![1] !== operation) { intact = false; break }
+      }
+    }
+    if (!intact) {
+      cursor = this.replayValidation(records).cursor
+      this.validationCursor = cursor
+      return
+    }
+    const from = cursor.processed.length
+    this.extendValidationMaps(cursor, records.slice(from))
+    for (let index = from; index < records.length; index += 1) {
+      const [key, operation] = records[index]!
+      this.validateRecord(cursor, key, operation)
+    }
+    this.validationCursor = cursor
   }
 
   validateAtMount(): void {
@@ -5281,31 +5335,75 @@ export class AgentTeamLedger {
   }
 
   private replay(): void {
-    const records = this.sortedRecords()
-    this.validateRecords(records)
-    for (const [, operation] of records) this.applyAndAdvanceProjectionVersion(operation)
+    const replayed = this.replayValidation(this.rawSortedRecords())
+    this.validationCursor = replayed.cursor
+    for (const operation of replayed.normalized) this.applyAndAdvanceProjectionVersion(operation)
   }
 
-  private validateRecords(records: readonly [AgentTeamOperationId, AgentTeamOperation][]): void {
-    const projection = emptyProjection()
-    const operationIds = new Set<AgentTeamOperationId>()
-    const requestIds = new Set<AgentTeamRequestId>()
-    const refs = new Set<string>()
-    let previous: AgentTeamOperationId | null = null
-    for (const [index, [key, operation]] of records.entries()) {
-      const sequence = index + 1
-      if (key !== operation.operationId) throw new Error(`agent-team operation key '${key}' differs from record id '${operation.operationId}'`)
-      if (operation.sequence !== sequence) throw new Error(`agent-team ledger expected sequence ${sequence}, found ${operation.sequence}`)
-      if (operation.previousOperationId !== previous) throw new Error(`agent-team operation ${sequence} has a broken previous-operation link`)
-      if (operationIds.has(operation.operationId)) throw new Error(`agent-team ledger repeats operation id '${operation.operationId}'`)
-      if (requestIds.has(operation.requestId)) throw new Error(`agent-team ledger repeats request id '${operation.requestId}'`)
-      if (sequence === 1) this.assertInitializationRecord(operation)
-      else this.validateOperation(operation, projection, refs)
-      this.applyTo(projection, operation)
-      operationIds.add(operation.operationId)
-      requestIds.add(operation.requestId)
-      previous = operation.operationId
+  private newValidationCursor(): AgentTeamValidationCursor {
+    return {
+      projection: emptyProjection(), operationIds: new Set(), requestIds: new Set(), refs: new Set(),
+      occurrences: new Map(), instants: new Map(), processed: [],
     }
+  }
+
+  /**
+   * Extend the repair maps over records the cursor has not seen. A
+   * normalizing record may stamp a fact's time from a Message that lands later
+   * in the same batch, so the maps always cover the whole range being checked
+   * before the first record in it is normalized.
+   */
+  private extendValidationMaps(cursor: AgentTeamValidationCursor, records: readonly [AgentTeamOperationId, AgentTeamOperation][]): void {
+    for (const [, operation] of records) {
+      cursor.instants.set(operation.sequence, operation.occurredAt)
+      if (operation.kind === 'team/message-sent' || operation.kind === 'team/thread-replied') {
+        cursor.occurrences.set(operation.data.message.messageRef, operation.data.message.occurredAt ?? operation.occurredAt)
+      }
+    }
+  }
+
+  /**
+   * Normalize one durable record the way `sortedRecords` did: repair legacy
+   * shapes against the scratch projection as it stands before this record, so
+   * a cleanup repair sees the same state its validator will.
+   */
+  private normalizeReplayRecord(cursor: AgentTeamValidationCursor, operation: AgentTeamOperation): AgentTeamOperation {
+    const projection = cursor.projection
+    return this.repairLegacyProjectCleanup(this.repairLegacyMainStreamRead(this.repairLegacyMainAttentionGrantOverwrite(this.repairLegacyMainAttentionGrant(this.repairLegacyAttentionSource(this.normalizeOperation(operation, cursor.occurrences, cursor.instants), projection), projection), projection), projection), projection)
+  }
+
+  /**
+   * Validate and apply one record against the cursor's scratch projection. The
+   * record must be the one immediately after the cursor's processed prefix:
+   * its sequence, its chain link, and both id sets are judged against it. On
+   * success the cursor advances past this record and the normalized form is
+   * returned.
+   */
+  private validateRecord(cursor: AgentTeamValidationCursor, key: AgentTeamOperationId, operation: AgentTeamOperation): AgentTeamOperation {
+    const normalized = this.normalizeReplayRecord(cursor, operation)
+    const sequence = cursor.processed.length + 1
+    if (key !== normalized.operationId) throw new Error(`agent-team operation key '${key}' differs from record id '${normalized.operationId}'`)
+    if (normalized.sequence !== sequence) throw new Error(`agent-team ledger expected sequence ${sequence}, found ${normalized.sequence}`)
+    if (normalized.previousOperationId !== (cursor.processed.at(-1)?.[0] ?? null)) throw new Error(`agent-team operation ${sequence} has a broken previous-operation link`)
+    if (cursor.operationIds.has(normalized.operationId)) throw new Error(`agent-team ledger repeats operation id '${normalized.operationId}'`)
+    if (cursor.requestIds.has(normalized.requestId)) throw new Error(`agent-team ledger repeats request id '${normalized.requestId}'`)
+    if (sequence === 1) this.assertInitializationRecord(normalized)
+    else this.validateOperation(normalized, cursor.projection, cursor.refs)
+    this.applyTo(cursor.projection, normalized)
+    cursor.operationIds.add(normalized.operationId)
+    cursor.requestIds.add(normalized.requestId)
+    cursor.processed.push([key, operation])
+    return normalized
+  }
+
+  /** Run the whole record range through one fresh cursor; the caller keeps it for the next incremental pass. */
+  private replayValidation(records: readonly [AgentTeamOperationId, AgentTeamOperation][]): {
+    readonly cursor: AgentTeamValidationCursor
+    readonly normalized: AgentTeamOperation[]
+  } {
+    const cursor = this.newValidationCursor()
+    this.extendValidationMaps(cursor, records)
+    return { cursor, normalized: records.map(([key, operation]) => this.validateRecord(cursor, key, operation)) }
   }
 
   private validateOperation(operation: AgentTeamOperation, projection: Projection, refs: Set<string>): void {
@@ -7415,7 +7513,7 @@ export class AgentTeamLedger {
    * Derive the durable receipt of one Thread read from a prior projection: the
    * Thread it targeted, the watermark it reaches, the Attention row it writes
    * and the Inbox delta it consumes. This is the whole durable content of a
-   * receipt-shaped read and the only thing `validateRecords` re-derives for
+   * receipt-shaped read and the only thing `validateRecord` re-derives for
    * one; the picture derivation below builds on the same result, so the two can
    * never drift.
    */
@@ -9578,24 +9676,9 @@ export class AgentTeamLedger {
   private committed<T>(value: T): AgentTeamLedgerResult<T> { return Object.freeze({ value, committed: true }) }
   private resolved<T>(value: T): AgentTeamLedgerResult<T> { return Object.freeze({ value, committed: false }) }
 
-  private sortedRecords(): Array<[AgentTeamOperationId, AgentTeamOperation]> {
-    const records = [...this.table.entries()].sort((left, right) => left[1].sequence - right[1].sequence)
-    const occurrences = new Map<AgentTeamMessageRef, string>()
-    const instants = new Map<number, string>()
-    for (const [, operation] of records) {
-      instants.set(operation.sequence, operation.occurredAt)
-      if (operation.kind === 'team/message-sent' || operation.kind === 'team/thread-replied') {
-        occurrences.set(operation.data.message.messageRef, operation.data.message.occurredAt ?? operation.occurredAt)
-      }
-    }
-    // Replay against a scratch projection while normalizing, so a legacy
-    // cleanup repair sees the same state its validator will.
-    const projection = emptyProjection()
-    return records.map(([id, operation]) => {
-      const normalized = this.repairLegacyProjectCleanup(this.repairLegacyMainStreamRead(this.repairLegacyMainAttentionGrantOverwrite(this.repairLegacyMainAttentionGrant(this.repairLegacyAttentionSource(this.normalizeOperation(operation, occurrences, instants), projection), projection), projection), projection), projection)
-      this.applyTo(projection, normalized)
-      return [id, normalized]
-    })
+  /** Durable records in ledger order, unnormalized: normalization is replay work, done record by record against the scratch projection. */
+  private rawSortedRecords(): Array<[AgentTeamOperationId, AgentTeamOperation]> {
+    return [...this.table.entries()].sort((left, right) => left[1].sequence - right[1].sequence)
   }
 
   /**
