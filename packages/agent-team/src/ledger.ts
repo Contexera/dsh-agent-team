@@ -6929,30 +6929,90 @@ export class AgentTeamLedger {
     target.byOperation.set(operation.operationId, operation)
     if (operation.kind === 'team/initialized') return
     if (isAuditOnlyOperation(operation)) return
+    switch (operation.kind) {
+      case 'team/project-created':
+      case 'team/project-owner-added':
+      case 'team/project-owner-responsibility-updated':
+      case 'team/project-owner-removed':
+      case 'team/project-updated':
+      case 'team/project-member-added':
+      case 'team/project-member-removed':
+      case 'team/project-archived':
+        return this.applyProjectOperation(target, operation)
+      case 'team/member-added':
+      case 'team/member-suspended':
+      case 'team/member-resumed':
+      case 'team/member-session-renewed':
+      case 'team/member-session-recycled':
+      case 'team/member-session-rolled-over':
+      case 'team/member-updated':
+      case 'team/member-workspace-joined':
+      case 'team/member-workspace-left':
+      case 'team/member-removed':
+      case 'team/member-archived':
+        return this.applyMemberOperation(target, operation)
+      case 'team/rules-version-adopted':
+        return this.applyRulesVersionOperation(target, operation)
+      case 'team/thread-promoted':
+      case 'team/message-sent':
+      case 'team/thread-replied':
+      case 'team/thread-started':
+      case 'team/thread-attention-changed':
+      case 'team/thread-read':
+        return this.applyThreadOperation(target, operation)
+      case 'team/main-message-posted':
+      case 'team/main-stream-read':
+      case 'team/main-attention-changed':
+        return this.applyMainOperation(target, operation)
+      case 'team/claim-created':
+      case 'team/claim-done':
+      case 'team/claim-released':
+        return this.applyClaimOperation(target, operation)
+      case 'team/task-changed':
+      case 'team/task-accountable-changed':
+        return this.applyTaskOperation(target, operation)
+      case 'team/reminder-raised':
+      case 'team/member-reminder-created':
+      case 'team/member-reminder-cancelled':
+      case 'team/member-reminder-raised':
+      case 'team/member-reminder-consumed':
+        return this.applyReminderOperation(target, operation)
+      case 'team/subscription-created':
+      case 'team/subscription-updated':
+      case 'team/subscription-paused':
+      case 'team/subscription-resumed':
+      case 'team/subscription-deleted':
+      case 'team/subscription-webhook-reset':
+      case 'team/subscription-baseline':
+      case 'team/subscription-events-accepted':
+      case 'team/subscription-event-published':
+        return this.applySubscriptionOperation(target, operation)
+      case 'team/worker-started':
+      case 'team/worker-steer-admitted':
+      case 'team/worker-steer-recorded':
+      case 'team/worker-settled':
+        return this.applyWorkerOperation(target, operation)
+      default:
+        assertUnhandledKind(operation)
+    }
+  }
+
+  private applyProjectOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/project-created'
+      | 'team/project-owner-added'
+      | 'team/project-owner-responsibility-updated'
+      | 'team/project-owner-removed'
+      | 'team/project-updated'
+      | 'team/project-member-added'
+      | 'team/project-member-removed'
+      | 'team/project-archived'
+    }>,
+  ): void {
     if (operation.kind === 'team/project-created') {
       target.projects.set(operation.data.project.projectRef, operation.data.project)
       target.memberships.set(operation.data.project.projectRef, new Set(operation.data.memberIds))
-      return
-    }
-    if (operation.kind === 'team/member-added') {
-      target.members.set(operation.data.member.memberId, operation.data.member)
-      // Creation seeds the first Workspace participation; member.workspaceId
-      // stays the default Workspace the Session roots in, immutable after add.
-      target.participations.set(operation.data.member.memberId, new Set([operation.data.member.workspaceId]))
-      for (const projectRef of operation.data.projectRefs) this.addMembership(target, projectRef, operation.data.member.memberId)
-      return
-    }
-    if (operation.kind === 'team/member-suspended' || operation.kind === 'team/member-resumed') {
-      target.members.set(operation.data.member.memberId, operation.data.member)
-      return
-    }
-    if (operation.kind === 'team/member-session-renewed') {
-      target.members.set(operation.data.member.memberId, operation.data.member)
-      target.sessionTransitions.set(operation.data.member.memberId, { previousSessionId: operation.data.previousSessionId })
-      return
-    }
-    if (operation.kind === 'team/rules-version-adopted') {
-      target.rulesVersion = operation.data.version
       return
     }
     if (operation.kind === 'team/project-owner-added') {
@@ -6988,6 +7048,62 @@ export class AgentTeamLedger {
       this.applyReleaseSnapshot(target, operation, { ...operation.data, claims: [], activities: [] }, operation.occurredAt)
       return
     }
+    if (operation.kind === 'team/project-updated') {
+      target.projects.set(operation.data.project.projectRef, operation.data.project)
+      return
+    }
+    if (operation.kind === 'team/project-member-added') {
+      this.addMembership(target, operation.data.projectRef, operation.data.memberId)
+      return
+    }
+    if (operation.kind === 'team/project-member-removed') {
+      target.memberships.get(operation.data.projectRef)?.delete(operation.data.memberId)
+      this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
+      return
+    }
+    if (operation.kind === 'team/project-archived') {
+      // Archival keeps Memberships: hidden state, not departure — a future
+      // restore returns every Member to the Project. Visibility filters by
+      // project state instead.
+      target.projects.set(operation.data.project.projectRef, operation.data.project)
+      this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
+      return
+    }
+  }
+
+  private applyMemberOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/member-added'
+      | 'team/member-suspended'
+      | 'team/member-resumed'
+      | 'team/member-session-renewed'
+      | 'team/member-session-recycled'
+      | 'team/member-session-rolled-over'
+      | 'team/member-updated'
+      | 'team/member-workspace-joined'
+      | 'team/member-workspace-left'
+      | 'team/member-removed'
+      | 'team/member-archived'
+    }>,
+  ): void {
+    if (operation.kind === 'team/member-added') {
+      target.members.set(operation.data.member.memberId, operation.data.member)
+      // Creation seeds the first Workspace participation; member.workspaceId
+      // stays the default Workspace the Session roots in, immutable after add.
+      target.participations.set(operation.data.member.memberId, new Set([operation.data.member.workspaceId]))
+      for (const projectRef of operation.data.projectRefs) this.addMembership(target, projectRef, operation.data.member.memberId)
+      return
+    }
+    if (operation.kind === 'team/member-suspended' || operation.kind === 'team/member-resumed') {
+      target.members.set(operation.data.member.memberId, operation.data.member)
+      return
+    }
+    if (operation.kind === 'team/member-session-renewed') {
+      target.members.set(operation.data.member.memberId, operation.data.member)
+      target.sessionTransitions.set(operation.data.member.memberId, { previousSessionId: operation.data.previousSessionId })
+      return
+    }
     if (operation.kind === 'team/member-session-recycled') {
       target.members.set(operation.data.member.memberId, operation.data.member)
       target.sessionTransitions.set(operation.data.member.memberId, {
@@ -7001,21 +7117,8 @@ export class AgentTeamLedger {
       target.sessionTransitions.set(operation.data.member.memberId, { previousSessionId: operation.data.previousSessionId })
       return
     }
-    if (operation.kind === 'team/project-updated') {
-      target.projects.set(operation.data.project.projectRef, operation.data.project)
-      return
-    }
     if (operation.kind === 'team/member-updated') {
       target.members.set(operation.data.member.memberId, operation.data.member)
-      return
-    }
-    if (operation.kind === 'team/project-member-added') {
-      this.addMembership(target, operation.data.projectRef, operation.data.memberId)
-      return
-    }
-    if (operation.kind === 'team/project-member-removed') {
-      target.memberships.get(operation.data.projectRef)?.delete(operation.data.memberId)
-      this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
     if (operation.kind === 'team/member-workspace-joined') {
@@ -7033,14 +7136,6 @@ export class AgentTeamLedger {
         target.memberships.get(project.projectRef)?.delete(operation.data.memberId)
         target.owners.get(project.projectRef)?.delete(operation.data.memberId)
       }
-      this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
-      return
-    }
-    if (operation.kind === 'team/project-archived') {
-      // Archival keeps Memberships: hidden state, not departure — a future
-      // restore returns every Member to the Project. Visibility filters by
-      // project state instead.
-      target.projects.set(operation.data.project.projectRef, operation.data.project)
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
@@ -7062,6 +7157,29 @@ export class AgentTeamLedger {
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
+  }
+
+  private applyRulesVersionOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind: 'team/rules-version-adopted' }>,
+  ): void {
+    if (operation.kind === 'team/rules-version-adopted') {
+      target.rulesVersion = operation.data.version
+      return
+    }
+  }
+
+  private applyThreadOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/thread-promoted'
+      | 'team/message-sent'
+      | 'team/thread-replied'
+      | 'team/thread-started'
+      | 'team/thread-attention-changed'
+      | 'team/thread-read'
+    }>,
+  ): void {
     if (operation.kind === 'team/thread-promoted') {
       this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
       this.recordTaskSnapshot(target, operation.data.task.taskRef, operation.data.task, operation.sequence)
@@ -7109,6 +7227,17 @@ export class AgentTeamLedger {
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
+    if (operation.kind === 'team/thread-attention-changed' || operation.kind === 'team/thread-read') {
+      this.recordAttentionObservations(target, operation, operation.data.inbox)
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+  }
+
+  private applyMainOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind: 'team/main-message-posted' | 'team/main-stream-read' | 'team/main-attention-changed' }>,
+  ): void {
     if (operation.kind === 'team/main-message-posted') {
       const { message, mentions } = operation.data
       this.recordMentions(target, message.messageRef, message.projectRef, mentions)
@@ -7128,6 +7257,18 @@ export class AgentTeamLedger {
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
+    if (operation.kind === 'team/main-attention-changed') {
+      // A Main stream Attention row is private state, not an observation log:
+      // only the delta moves, so replay re-derives the same standing.
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+  }
+
+  private applyClaimOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind: 'team/claim-created' | 'team/claim-done' | 'team/claim-released' }>,
+  ): void {
     if (operation.kind === 'team/claim-created' || operation.kind === 'team/claim-done' || operation.kind === 'team/claim-released') {
       if (operation.kind === 'team/claim-created') target.claimCreatedSequenceByRef.set(operation.data.claim.claimRef, operation.sequence)
       this.upsertClaimKeepingPosition(target, operation.data.claim)
@@ -7138,6 +7279,12 @@ export class AgentTeamLedger {
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
+  }
+
+  private applyTaskOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind: 'team/task-changed' | 'team/task-accountable-changed' }>,
+  ): void {
     if (operation.kind === 'team/task-changed' || operation.kind === 'team/task-accountable-changed') {
       if (operation.kind === 'team/task-changed') for (const claim of operation.data.claims) this.upsertClaimKeepingPosition(target, claim)
       this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
@@ -7147,6 +7294,18 @@ export class AgentTeamLedger {
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
+  }
+
+  private applyReminderOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/reminder-raised'
+      | 'team/member-reminder-created'
+      | 'team/member-reminder-cancelled'
+      | 'team/member-reminder-raised'
+      | 'team/member-reminder-consumed'
+    }>,
+  ): void {
     if (operation.kind === 'team/reminder-raised') {
       const key = reminderEpisodeKey(operation.data.taskRef, operation.data.kind, operation.data.recipient, operation.data.baselineSequence)
       target.reminderEpisodes.set(key, operation)
@@ -7182,17 +7341,22 @@ export class AgentTeamLedger {
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
-    if (operation.kind === 'team/thread-attention-changed' || operation.kind === 'team/thread-read') {
-      this.recordAttentionObservations(target, operation, operation.data.inbox)
-      this.applyInboxDelta(target, operation.data.inbox)
-      return
-    }
-    if (operation.kind === 'team/main-attention-changed') {
-      // A Main stream Attention row is private state, not an observation log:
-      // only the delta moves, so replay re-derives the same standing.
-      this.applyInboxDelta(target, operation.data.inbox)
-      return
-    }
+  }
+
+  private applySubscriptionOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/subscription-created'
+      | 'team/subscription-updated'
+      | 'team/subscription-paused'
+      | 'team/subscription-resumed'
+      | 'team/subscription-deleted'
+      | 'team/subscription-webhook-reset'
+      | 'team/subscription-baseline'
+      | 'team/subscription-events-accepted'
+      | 'team/subscription-event-published'
+    }>,
+  ): void {
     if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
       || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
       || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-webhook-reset') {
@@ -7238,6 +7402,32 @@ export class AgentTeamLedger {
       target.subscriptionEvents.set(operation.data.subscriptionRef, accepted)
       return
     }
+    if (operation.kind === 'team/subscription-event-published') {
+      const accepted = target.subscriptionEvents.get(operation.data.subscriptionRef) ?? []
+      const position = accepted.findIndex(entry => entry.acceptedSequence === operation.data.acceptedSequence && entry.event.id === operation.data.eventId)
+      if (position !== -1) accepted[position] = Object.freeze({ ...accepted[position]!, publishedSequence: operation.sequence })
+      const event = accepted[position]?.event
+      if (event === undefined) throw new Error('agent-team replay published an event it never accepted')
+      const published: AgentTeamSubscriptionEventPublished = Object.freeze({
+        eventRef: `event:${operation.sequence}` as AgentTeamSubscriptionEventRef,
+        projectRef: operation.data.projectRef, subscriptionRef: operation.data.subscriptionRef,
+        subscriptionName: operation.data.subscriptionName, event,
+        acceptedSequence: operation.data.acceptedSequence, sequence: operation.sequence, occurredAt: operation.occurredAt })
+      this.appendMainSource(target, operation.data.projectRef, { kind: 'subscription-event', sequence: operation.sequence, published })
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+  }
+
+  private applyWorkerOperation(
+    target: Projection,
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/worker-started'
+      | 'team/worker-steer-admitted'
+      | 'team/worker-steer-recorded'
+      | 'team/worker-settled'
+    }>,
+  ): void {
     if (operation.kind === 'team/worker-started') {
       target.workerExecutions.set(operation.data.execution.workerRef,
         Object.freeze({ ...operation.data.execution, state: 'running' }))
@@ -7272,22 +7462,6 @@ export class AgentTeamLedger {
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
-    if (operation.kind === 'team/subscription-event-published') {
-      const accepted = target.subscriptionEvents.get(operation.data.subscriptionRef) ?? []
-      const position = accepted.findIndex(entry => entry.acceptedSequence === operation.data.acceptedSequence && entry.event.id === operation.data.eventId)
-      if (position !== -1) accepted[position] = Object.freeze({ ...accepted[position]!, publishedSequence: operation.sequence })
-      const event = accepted[position]?.event
-      if (event === undefined) throw new Error('agent-team replay published an event it never accepted')
-      const published: AgentTeamSubscriptionEventPublished = Object.freeze({
-        eventRef: `event:${operation.sequence}` as AgentTeamSubscriptionEventRef,
-        projectRef: operation.data.projectRef, subscriptionRef: operation.data.subscriptionRef,
-        subscriptionName: operation.data.subscriptionName, event,
-        acceptedSequence: operation.data.acceptedSequence, sequence: operation.sequence, occurredAt: operation.occurredAt })
-      this.appendMainSource(target, operation.data.projectRef, { kind: 'subscription-event', sequence: operation.sequence, published })
-      this.applyInboxDelta(target, operation.data.inbox)
-      return
-    }
-    assertUnhandledKind(operation)
   }
 
   /**
