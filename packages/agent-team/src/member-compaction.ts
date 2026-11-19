@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createSystemMessage, LlmError, type LlmCallConfig, type LlmResolvedModelInfo, type Message, type ToolSchema, type UserMessage } from '@deepseek-ai/dsh-llm'
+import { CONTEXT_WINDOW_EXCEEDED_CODE, createSystemMessage, LlmError, type LlmCallConfig, type LlmFailure, type LlmResolvedModelInfo, type Message, type ToolSchema, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionSeq, type EpochHeader } from '@deepseek-ai/dsh-session'
 import { estimateToolsTokens } from '@deepseek-ai/dsh-token-meter/estimate'
 import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
@@ -14,6 +14,8 @@ export interface MemberCompactionConfig {
 }
 
 export const MEMBER_COMPACT_TOKENS = 256_000
+/** Consecutive provider-overflow refusals while the route's summaries are paused that the Host escalates to the operator. */
+export const MEMBER_UNREACHABLE_OVERFLOW_LIMIT = 3
 const MEMBER_WINDOW_RATIO = 0.8
 const MEMBER_CONTEXT_RESERVE = 16_384
 const MEMBER_OUTPUT_RESERVE = 4_096
@@ -98,12 +100,19 @@ export function measureMemberInput(ctx: Context, agent: Agent, config: LlmCallCo
   return inputTokens
 }
 
+/** How the Host learns an unreachable-compaction episode opened or closed; `clear` is idempotent. */
+export interface MemberUnreachableCompaction {
+  readonly escalate: (failure: LlmFailure) => void
+  readonly clear: () => void
+}
+
 export function installMemberCompaction(
   ctx: Context,
   agent: Agent,
   config: () => MemberCompactionConfig,
   engineFor: () => CompactionEngine | undefined,
   retiring: () => boolean,
+  unreachableCompaction?: MemberUnreachableCompaction,
 ): void {
   let pending: readonly Message[] = []
   let claimed: readonly UserMessage[] = []
@@ -113,20 +122,48 @@ export function installMemberCompaction(
   let loggedClamp: OutputClamp | undefined
   let preparedClamp: OutputClamp | undefined
   let stepRoute: MemberStepRoute | undefined
+  // `stepRoute` clears at every step end, so it cannot witness a route change:
+  // the last route a step actually bound survives across steps for the compare.
+  let lastBoundStepRoute: MemberStepRoute | undefined
+  /** Provider overflows in a row while the route's summaries are paused, and whether the operator was already told. */
+  const unreachable = { overflows: 0, reported: false }
 
   const memberEngine = (): MemberCompactionEngine | undefined => {
-    const engine = engineFor()
-    return engine instanceof MemberCompactionEngine ? engine : undefined
+    // Structural, not instanceof: a preset isolate loads the engine module with
+    // its own identity, so the shipped composition fails a class test while the
+    // object is still the Member engine.
+    const engine = engineFor() as MemberCompactionEngine | undefined
+    return engine !== undefined && typeof engine.degraded === 'function' ? engine : undefined
   }
   const bindStepRoute = (route: MemberStepRoute | undefined): void => {
     stepRoute = route
     memberEngine()?.useStepRoute(agent, route)
+    if (route === undefined) return
+    // The step's route changing is the same moment the circuit forgets a paused
+    // route: an escalation pinned to it no longer names this generation.
+    if (lastBoundStepRoute !== undefined
+      && (lastBoundStepRoute.provider !== route.provider || lastBoundStepRoute.model !== route.model)) {
+      unreachable.overflows = 0
+      unreachable.reported = false
+      unreachableCompaction?.clear()
+    }
+    lastBoundStepRoute = route
   }
 
   ctx.on('session/event', (session, event) => {
     if (session !== agent.session) return
     if (event.type === 'step/end') {
       bindStepRoute(undefined)
+      return
+    }
+    // A response that landed proves the route still fits; the unreachable-overflow
+    // count tracks only the sequence since the last one, and a settled reply also
+    // retires an open escalation so the Member does not stay in error after the
+    // outage that caused it ended.
+    if (event.type === 'assistant/message') {
+      unreachable.overflows = 0
+      if (unreachable.reported) unreachableCompaction?.clear()
+      unreachable.reported = false
       return
     }
     if (event.type !== 'request/header') return
@@ -236,6 +273,29 @@ export function installMemberCompaction(
     }
     return request
   }
+
+  // Count provider overflows on a route whose summaries are paused: each real
+  // 413 is proof the dead zone is not self-healing, and the third in a row hands
+  // the Member to the operator instead of spending turns on retries that cannot
+  // write a checkpoint. A route the circuit no longer names — a switch, a cleared
+  // failure — starts over, matching the circuit's own reset. This observes only;
+  // the waterfall's action stays with the compaction engine.
+  ctx.on('agent/request-error', ({ failure }, next) => {
+    if (failure.code !== CONTEXT_WINDOW_EXCEEDED_CODE) return next()
+    const route = agent.session.requestHeader()?.config
+    const member = memberEngine()
+    if (route === undefined || member === undefined || !member.degraded(agent, route)) {
+      unreachable.overflows = 0
+      unreachable.reported = false
+      return next()
+    }
+    unreachable.overflows += 1
+    if (unreachable.overflows >= MEMBER_UNREACHABLE_OVERFLOW_LIMIT && !unreachable.reported) {
+      unreachable.reported = true
+      unreachableCompaction?.escalate(failure)
+    }
+    return next()
+  })
 
   ctx.on('agent/request', async ({ signal }, next) => {
     const proposed = await next()

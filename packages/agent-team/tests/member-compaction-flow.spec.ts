@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type Agent } from '@deepseek-ai/dsh-agent'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { CONTEXT_WINDOW_EXCEEDED_CODE, createUserMessage, LlmAdapter, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { CONTEXT_WINDOW_EXCEEDED_CODE, createUserMessage, LlmAdapter, type GenerateOptions, type LlmFailure, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import { estimateToolsTokens } from '@deepseek-ai/dsh-token-meter/estimate'
@@ -15,6 +15,8 @@ class BudgetAdapter extends LlmAdapter {
   readonly summaries: GenerateOptions[] = []
   outputLimit = 128_000
   overflowAtRequest: number | undefined
+  /** Request positions (1-based across `requests`) that answer with a context overflow. */
+  readonly overflowRequests = new Set<number>()
   failRequestAt: number | undefined
   summary = 'Durable checkpoint: continue the requested work.'
   /** Routes whose summary spends the whole cap on reasoning and returns no text. */
@@ -45,7 +47,7 @@ class BudgetAdapter extends LlmAdapter {
       yield { type: 'finish', reason: { kind: 'error', failure: { code: 'ADAPTER_FAILURE', message: 'fixture provider failure' } } }
       return
     }
-    if (!summarizing && this.requests.length === this.overflowAtRequest) {
+    if (!summarizing && (this.requests.length === this.overflowAtRequest || this.overflowRequests.has(this.requests.length))) {
       yield { type: 'finish', reason: { kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE, message: 'fixture context overflow' } } }
       return
     }
@@ -59,7 +61,7 @@ const contexts: Context[] = []
 afterEach(async () => { await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose())) })
 
 async function fixture(model = 'large', settings: MemberCompactionConfig = { ...DEFAULT_MEMBER_COMPACTION }, maxTokens?: number, engineConfig: BasicCompactionConfig = { maxTokens: MEMBER_SUMMARY_TOKENS }): Promise<{
-  ctx: Context; agent: Agent; adapter: BudgetAdapter; engine: MemberCompactionEngine;
+  ctx: Context; agent: Agent; adapter: BudgetAdapter; engine: MemberCompactionEngine; escalations: LlmFailure[]; clears: string[];
 }> {
   const ctx = new Context()
   contexts.push(ctx)
@@ -75,8 +77,13 @@ async function fixture(model = 'large', settings: MemberCompactionConfig = { ...
     provider: 'budget-test', model, ...maxTokens === undefined ? {} : { maxTokens },
   })
   installModelSelection(agent.ctx)
-  installMemberCompaction(agent.ctx, agent, () => settings, () => engine, () => false)
-  return { ctx, agent, adapter, engine }
+  const escalations: LlmFailure[] = []
+  const clears: string[] = []
+  installMemberCompaction(agent.ctx, agent, () => settings, () => engine, () => false, {
+    escalate: failure => escalations.push(failure),
+    clear: () => clears.push('clear'),
+  })
+  return { ctx, agent, adapter, engine, escalations, clears }
 }
 
 async function send(agent: Agent, tokens: number): Promise<void> {
@@ -574,5 +581,104 @@ describe('Member summary target and bounded fallback', () => {
     adapter.silentRoutes.delete('far')
     await engine.compactNow(agent, new AbortController().signal)
     expect(adapter.summaries.map(options => options.model)).toEqual(['far', 'large', 'large'])
+  })
+})
+
+describe('Unreachable compaction escalation', () => {
+  const lastTurn = (agent: Agent) => agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')?.data.reason
+  /** Seed history, then pause summaries on the committed route with a bounded failure. */
+  const degrade = async (agent: Agent, adapter: BudgetAdapter): Promise<void> => {
+    await send(agent, 85_000)
+    await send(agent, 85_000)
+    await send(agent, 80_000)
+    adapter.silentRoutes.add('large')
+    await send(agent, 40_000)
+    expect(lastTurn(agent)?.kind).toBe('completed')
+  }
+
+  it('escalates once after three consecutive provider overflows on a paused route', async () => {
+    const { agent, adapter, escalations } = await fixture()
+    await degrade(agent, adapter)
+    adapter.overflowRequests.add(5).add(6).add(7).add(8)
+    for (let turn = 0; turn < 4; turn += 1) {
+      await send(agent, 1_000)
+      expect(lastTurn(agent)?.kind).toBe('error')
+    }
+    expect(escalations).toHaveLength(1)
+    expect(escalations[0]?.code).toBe(CONTEXT_WINDOW_EXCEEDED_CODE)
+  })
+
+  it('does not escalate while a landed response breaks the overflow streak', async () => {
+    const { agent, adapter, escalations } = await fixture()
+    await degrade(agent, adapter)
+    adapter.overflowRequests.add(5).add(7).add(9)
+    await send(agent, 1_000)
+    expect(lastTurn(agent)?.kind).toBe('error')
+    await send(agent, 1_000)
+    expect(lastTurn(agent)?.kind).toBe('completed')
+    await send(agent, 1_000)
+    expect(lastTurn(agent)?.kind).toBe('error')
+    await send(agent, 1_000)
+    expect(lastTurn(agent)?.kind).toBe('completed')
+    await send(agent, 1_000)
+    expect(lastTurn(agent)?.kind).toBe('error')
+    expect(escalations).toHaveLength(0)
+  })
+
+  it('retires the escalation when a response lands on the paused route', async () => {
+    const { agent, adapter, escalations, clears } = await fixture()
+    await degrade(agent, adapter)
+    adapter.overflowRequests.add(5).add(6).add(7)
+    await send(agent, 1_000)
+    await send(agent, 1_000)
+    await send(agent, 1_000)
+    expect(escalations).toHaveLength(1)
+    expect(clears).toHaveLength(0)
+    await send(agent, 1_000)
+    expect(lastTurn(agent)?.kind).toBe('completed')
+    expect(clears).toEqual(['clear'])
+    // A fresh outage escalates again rather than staying silenced by the first.
+    adapter.overflowRequests.add(9).add(10).add(11)
+    await send(agent, 1_000)
+    await send(agent, 1_000)
+    await send(agent, 1_000)
+    expect(escalations).toHaveLength(2)
+  })
+
+  it('never counts an overflow a healthy route could compact through', async () => {
+    const { agent, adapter, engine, escalations } = await fixture()
+    await send(agent, 85_000)
+    await send(agent, 85_000)
+    await send(agent, 80_000)
+    // Every request from here overflows: overflow recovery writes a checkpoint
+    // and retries into another overflow, so each turn errors — but summaries
+    // work, so none of it may count toward the unreachable-compaction escalation.
+    for (let position = 4; position <= 9; position += 1) adapter.overflowRequests.add(position)
+    for (let turn = 0; turn < 3; turn += 1) {
+      await send(agent, 1_000)
+      expect(lastTurn(agent)?.kind).toBe('error')
+    }
+    expect(engine.degraded(agent, { provider: 'budget-test', model: 'large' })).toBe(false)
+    expect(escalations).toHaveLength(0)
+  })
+
+  it('clears the count and the circuit when the route leaves the paused one', async () => {
+    const { agent, adapter, engine, escalations } = await fixture()
+    await degrade(agent, adapter)
+    adapter.overflowRequests.add(5).add(6)
+    await send(agent, 1_000)
+    await send(agent, 1_000)
+    expect(engine.degraded(agent, { provider: 'budget-test', model: 'large' })).toBe(true)
+    // The switch's own summaries fail too — 'middle' becomes the paused route —
+    // and its first request overflows. Had the count survived the route change
+    // this third overflow would escalate; the reset makes it only the first.
+    adapter.silentRoutes.add('middle')
+    agent.model.select({ provider: 'budget-test', model: 'middle' })
+    adapter.overflowRequests.add(7)
+    await send(agent, 1_000)
+    expect(lastTurn(agent)?.kind).toBe('error')
+    expect(engine.degraded(agent, { provider: 'budget-test', model: 'large' })).toBe(false)
+    expect(engine.degraded(agent, { provider: 'budget-test', model: 'middle' })).toBe(true)
+    expect(escalations).toHaveLength(0)
   })
 })

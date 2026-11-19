@@ -14,7 +14,7 @@ import { isAbsolute, join } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { installModelSelection, type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
-import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type LlmFailure, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-api-workspace-controller'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
@@ -612,6 +612,8 @@ export default class AgentTeam extends TypertRemoteService {
   private readonly memberFailures = new Map<AgentTeamMemberId, {
     activation?: AgentTeamMemberDiagnostic
     runtime?: string
+    /** Summaries stay paused while the provider keeps refusing the oversized request: compaction on that route is unreachable. */
+    compaction?: AgentTeamMemberDiagnostic
     /** A Team wake was discarded before the Agent opened its turn boundary. */
     preTurnCancellation?: AgentTeamMemberDiagnostic
     /** The post-commit configuration apply failed; the stored row is ahead of the live surface. */
@@ -917,6 +919,11 @@ export default class AgentTeam extends TypertRemoteService {
     if (live === undefined || live.provider !== config.provider || live.model !== config.model) return
     const running = member.model ?? this.ctx.agentDefaultModel.currentSelection()
     if (running.provider === config.provider && running.model === config.model) return
+    // A request that sent on a different route is the switch made real: the
+    // old route's paused-summary escalation no longer names this generation.
+    if (this.clearUnreachableCompaction(memberId)) {
+      this.ctx.logger.info(`agent-team: ${this.memberScope(memberId)} left its paused-summary route; the unreachable-compaction diagnostic is retired`)
+    }
     // The route alone: the effort belongs to the Session log, where activation re-reads it for the same route. Writing it
     // here would turn an inherited tier into a permanent one that later edits cannot lower.
     const model: AgentTeamModelSelection = Object.freeze({ provider: config.provider, model: config.model })
@@ -2095,6 +2102,7 @@ export default class AgentTeam extends TypertRemoteService {
     this.handles.delete(memberId)
     this.memberRuntime.forgetMember(memberId)
     this.clearMemberFailure(memberId, 'activation')
+    this.clearMemberFailure(memberId, 'compaction')
     this.dropInboxCoverage(memberId)
     // The previous log survives on disk; archiving hides it from every
     // grouping surface so one Member keeps exactly one visible Session.
@@ -2368,6 +2376,9 @@ export default class AgentTeam extends TypertRemoteService {
         this.recordApplyFailure(current.memberId, 'model-apply', active, receipt, requestId, error)
         throw new MemberModelApplyError(error)
       }
+      // The stored route just became the live one: an escalation pinned to the
+      // old route's paused summaries no longer names this generation.
+      this.clearUnreachableCompaction(memberId)
       effect = 'applied'
     }
     // The live route now runs the stored one, so a failure recorded by an
@@ -3304,6 +3315,8 @@ export default class AgentTeam extends TypertRemoteService {
       return
     }
     this.ctx.logger.info(`agent-team: compacted ${this.memberScope(memberId, agent.id)} at its acceptance boundary: ${result.shadowedSeqs.length} history item(s), ~${result.shadowedTokenCount} tokens`)
+    // A written checkpoint disproves the unreachable-compaction escalation too.
+    this.clearUnreachableCompaction(memberId)
   }
 
   /**
@@ -4254,6 +4267,10 @@ export default class AgentTeam extends TypertRemoteService {
         installMemberCompaction(
           agentCtx, agent, () => this.memberCompactionConfig(),
           () => this.compactionEngineFor(agent), () => this.retiringAgents.has(agent),
+          {
+            escalate: failure => this.escalateUnreachableCompaction(member.memberId, failure),
+            clear: () => this.clearUnreachableCompaction(member.memberId),
+          },
         )
         agentCtx.on('agent/pre-step', async ({ agent }, next) => {
           // The original inbox insertion is the durable replay source even if
@@ -4321,6 +4338,7 @@ export default class AgentTeam extends TypertRemoteService {
       this.sessionOwnershipBlocked.delete(member.memberId)
       this.memberIdle.status(member.memberId, created.agent.status, Date.now())
       this.clearMemberFailure(member.memberId, 'activation')
+      this.clearMemberFailure(member.memberId, 'compaction')
       this.clearMemberFailure(member.memberId, 'preTurnCancellation')
       this.clearMemberFailure(member.memberId, 'capabilityApply')
       this.clearMemberFailure(member.memberId, 'modelApply')
@@ -4452,6 +4470,7 @@ export default class AgentTeam extends TypertRemoteService {
       return Object.freeze({ member, availability: 'active', presence: 'error', capabilityState, diagnostic: { class: 'preset-composition' as const, detail: ORPHANED_MEMBER_DIAGNOSTIC } })
     }
     if (failures?.runtime !== undefined) return Object.freeze({ member, availability: 'active', presence: 'error', capabilityState, diagnostic: { class: 'runtime' as const, detail: failures.runtime } })
+    if (failures?.compaction !== undefined) return Object.freeze({ member, availability: 'active', presence: 'error', capabilityState, diagnostic: failures.compaction })
     if (failures?.preTurnCancellation !== undefined) return Object.freeze({ member, availability: 'active', presence: 'error', capabilityState, diagnostic: failures.preTurnCancellation })
     // A failed apply outranks the plain success row but not a live runtime
     // error: the Member runs, yet its stored configuration is ahead of the
@@ -4515,7 +4534,7 @@ export default class AgentTeam extends TypertRemoteService {
     return { class: 'activation' as const, detail: error instanceof Error ? error.message : String(error) }
   }
 
-  private clearMemberFailure(memberId: AgentTeamMemberId, slot: 'activation' | 'runtime' | 'preTurnCancellation' | 'capabilityApply' | 'modelApply'): boolean {
+  private clearMemberFailure(memberId: AgentTeamMemberId, slot: 'activation' | 'runtime' | 'compaction' | 'preTurnCancellation' | 'capabilityApply' | 'modelApply'): boolean {
     const failures = this.memberFailures.get(memberId)
     if (failures === undefined || failures[slot] === undefined) return false
     if (Object.keys(failures).length === 1) this.memberFailures.delete(memberId)
@@ -7175,6 +7194,35 @@ export default class AgentTeam extends TypertRemoteService {
     return handle.dispose()
   }
 
+  /**
+   * The route's summaries stay paused and the provider kept refusing the oversized request, so no compaction path on this
+   * generation can run: the Member reads as error with the last upstream failure and the actions that actually help —
+   * a route change, Member recovery, or a generation swap. `/compact` is deliberately absent: it re-runs the summary the
+   * provider already refused. One escalation per uninterrupted run of overflows; a response that lands clears it.
+   */
+  private escalateUnreachableCompaction(memberId: AgentTeamMemberId, failure: LlmFailure): void {
+    const member = this.requireLedger().getMember(memberId)
+    if (member === undefined) return
+    const failures = this.memberFailures.get(memberId) ?? {}
+    failures.compaction = Object.freeze({
+      class: 'runtime' as const,
+      detail: 'Context overflowed repeatedly while summarization was paused for this route, so no compaction can run: change the model route, run Member recovery, or wait for an idle generation swap.',
+      source: `provider failure: ${failure.message}`,
+      occurredAt: new Date().toISOString(),
+    })
+    this.memberFailures.set(memberId, failures)
+    this.ctx.logger.warn(`agent-team: ${this.memberScope(memberId)} has no reachable compaction after consecutive context-window refusals on a paused route: ${failure.message}; recovery is a route change, Member recovery, or an idle generation swap`)
+    this.emitMemberPresenceChanged(member)
+  }
+
+  /** Retire the unreachable-compaction diagnostic: a response landed, the route moved, or a fresh generation replaced the paused one. */
+  private clearUnreachableCompaction(memberId: AgentTeamMemberId): boolean {
+    if (!this.clearMemberFailure(memberId, 'compaction')) return false
+    const member = this.requireLedger().getMember(memberId)
+    if (member !== undefined) this.emitMemberPresenceChanged(member)
+    return true
+  }
+
   private setPreTurnCancellation(memberId: AgentTeamMemberId, sessionId: SessionId): void {
     const failures = this.memberFailures.get(memberId) ?? {}
     failures.preTurnCancellation = Object.freeze({
@@ -7220,12 +7268,14 @@ export default class AgentTeam extends TypertRemoteService {
     this.memberRuntime.forgetMember(memberId)
     this.memberIdle.forget(memberId)
     this.clearMemberFailure(memberId, 'activation')
+    this.clearMemberFailure(memberId, 'compaction')
     this.clearMemberFailure(memberId, 'preTurnCancellation')
   }
 
   private clearMemberRecoveryState(member: Pick<AgentTeamAgentMember, 'memberId' | 'sessionId'>): void {
     this.recovery.stopTracking(member.memberId, 'session-disposed')
     this.clearMemberFailure(member.memberId, 'runtime')
+    this.clearMemberFailure(member.memberId, 'compaction')
     this.clearMemberFailure(member.memberId, 'preTurnCancellation')
     this.clearMemberNotificationState(member.memberId)
   }
