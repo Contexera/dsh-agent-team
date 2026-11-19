@@ -184,7 +184,7 @@ Record candidate tag, symptom, affected interface, reproduction command, and nex
 
 ## 6. Current baseline
 
-The current certified baseline is DSH `0.2.2-rc.2`; the paragraphs below preserve the history that produced the preceding baselines.
+The newest certified candidate is DSH `0.2.2-rc.5` on the peers' certified `0.2.2` line; the paragraphs below preserve the history that produced the preceding baselines.
 
 The DSH peers state exactly that certified line, `>=0.2.2-rc.2 <0.2.3`, so a line this repository has not verified falls outside the declared range instead of installing under an unverified compatibility claim. The removed `@deepseek-ai/dsh-tool-todo` peer left with the preset row it named when the Team surface dropped the session-local todo tool; the remaining peers keep the one certified range.
 
@@ -437,3 +437,27 @@ Evidence on tree `59ac598` against the candidate: `npm run typecheck`, `npm test
 The one journey that fails is `team-inbox-and-recovery`'s inbox-badge scenario, and it fails identically on the certified `0.2.2-rc.2` host with the same tree: the sidebar keeps one unread while the Host reports none. That is a bundle-side client projection defect on `master`, introduced before this round rather than by it, so it blocks the next Team release until it is fixed but affects no part of this baseline.
 
 Section 3.5 resolves a single DSH generation: 285 packages installed from the published `0.2.8` bundle in an empty directory, 102 of them `@deepseek-ai/dsh-*` and every one at `0.2.2-rc.4`, with no older set and no peer conflict.
+
+### DSH 0.2.2-rc.5
+
+DSH `0.2.2-rc.5` is certified on the same peers with no manifest change. The candidate falls inside `>=0.2.2-rc.2 <0.2.3`, so section 4 records a baseline instead of a peer move, and every version spot keeps naming the range's lower bound.
+
+No Team release is involved: Agent Team `0.2.8` already declares this range and now carries both dist-tags — DSH's own `latest` reached this candidate on 2026-11-19, which is the condition section 2.4 waits for before a bundle moves to `latest`.
+
+Tag `9c2670d3bc` (2026-11-18) carries 5 commits and 433 changed files against `dsh-v0.2.2-rc.4`.
+
+380 of those files are version-only manifests, so 53 files carry content. Only one of the fifty peered packages changes any source:
+
+- `@deepseek-ai/dsh-tool-web` now forwards the route of the model request that called it (`exec.agent?.session.requestContext()?.provider`) into `ctx.web.search`, and `WebSearchRequest` gains an optional `llmProvider`.
+- While no search provider is configured, that seam prefers DeepSeek Messages search on the two DeepSeek model routes and the DeepSeek Search API elsewhere. The `tool-web` row this bundle mounts keeps its `searchTimeoutMs` config and its schema, so this round needs no adaptation.
+- Everything else sits outside this bundle's peers or its surface: search-provider client copy and its settings card, the `dsh-web`-side selection rules, one `tool-cordis` catalog line, and the base bundle dropping its hard `searchProvider: deepseek-search-api` pin.
+
+Section 3.6 is not re-triggered: nothing under the session, format-migration, persistence, or preset packages changes beyond its manifest, no message-source kind is added or renamed, and the format stays at V4. Section 3.7 is unchanged as well: the two official Team packages change only their manifest version line.
+
+Typert output is stable — 40 generated artifacts stay byte-identical — and the generated facades still resolve 584 Harness mappings.
+
+Evidence on tree `c702d29` against the candidate: `npm run typecheck`, `npm test` (2908 passed, 1 skipped, 223 files), `npm run lint` (oxlint `1.76.0` run directly, because this sandbox has no `corepack`; 74 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (499 files), `check:artifact` (144 runtime relative imports resolved), `git diff --check`, and `npm run test:browser` (21 journeys, all passing).
+
+The inbox-badge journey that failed on rc.4 passes here: its client fix is already in `master`, so this round leaves no failing journey.
+
+Section 3.5 resolves a single DSH generation: the published `0.2.8` bundle resolves in an empty directory to 102 `@deepseek-ai/dsh-*` packages, every one at `0.2.2-rc.5`, with no older set and no peer conflict.

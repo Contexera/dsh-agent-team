@@ -245,7 +245,7 @@ Member 工具策略测试在 Member 激活前或激活后挂载真实的官方 T
 
 ## 6. 当前基线
 
-当前 Team bundle 的已认证基线是 DSH `0.2.2-rc.2`；以下几段保留产生前几条基线的历史。
+当前已认证到 DSH `0.2.2-rc.5`，落在 peers 声明并经认证的 `0.2.2` 线上；以下几段保留产生前几条基线的历史。
 
 DSH peers 正好声明这条已认证线：`>=0.2.2-rc.2 <0.2.3`。本仓库尚未验证的线会落在声明区间之外，而不是在未经核实的兼容声明下被装上。Team 面向模型的工具面去掉 session-local todo 工具时，被移除的 `@deepseek-ai/dsh-tool-todo` peer 随它指名的 preset row 一并删除。其余 peers 仍保持唯一一条已认证区间。
 
@@ -516,3 +516,31 @@ tag `3f321d32bf`（2026-11-17）相对 `dsh-v0.2.2-rc.3` 改了 395 个文件、
 本沙箱没有 `corepack`，lint 直接跑脚本钉住的 oxlint `1.76.0`，读数与脚本一致。
 
 §3.5 只解析出一代 DSH：空目录里从 registry 装已发布的 `0.2.8`，共 285 个包，其中 102 个 `@deepseek-ai/dsh-*` 全部落在 `0.2.2-rc.4`，没有旧线残留，也没有 peer 冲突。
+
+### DSH 0.2.2-rc.5
+
+DSH `0.2.2-rc.5` 在同一条 peer 线上认证通过，manifest 不变。候选版本落在 `>=0.2.2-rc.2 <0.2.3` 之内，因此按 §4 就地记录基线、不移动 peer，所有版本点仍写区间的下界。
+
+本轮也不涉及 Team 发版：Agent Team `0.2.8` 已经声明这条区间，现在同时挂着 `latest` 与 `next`——DSH 自己的 `latest` 在 2026-11-19 到达本候选，这正是 §2.4 等待的搬移条件。
+
+tag `9c2670d3bc`（2026-11-18）相对 `dsh-v0.2.2-rc.4` 有 5 笔提交、433 个改动文件。
+
+其中 380 个只是 manifest 的版本行，真正带内容的是 53 个文件。50 个 peer 包中只有一个动了源码：
+
+- `@deepseek-ai/dsh-tool-web` 把调用它的那次模型请求所属的路由（`exec.agent?.session.requestContext()?.provider`）传给 `ctx.web.search`，`WebSearchRequest` 新增可选字段 `llmProvider`。
+- 未配置搜索提供方时，seam 在两条 DeepSeek 模型路由上优先用 Messages 搜索，其余路由用 Search API。本 bundle 挂载的 `tool-web` 行 config 仍是 `searchTimeoutMs`、schema 未变，本轮无需适配。
+- 其余都在本 bundle 的 peers 或使用面之外：搜索提供方的客户端文案与设置卡片、`dsh-web` 侧的选择规则、`tool-cordis` 的一行目录，以及 base bundle 去掉写死的 `searchProvider: deepseek-search-api`。
+
+§3.6 未被重新触发：session、格式迁移、持久化与 preset 各包除 manifest 外无改动，没有新增或改名任何消息来源类型，格式仍是 V4。§3.7 同样不变：两个官方 Team 包只改 manifest 版本行。
+
+Typert 产物稳定——40 个生成物逐字节不变——生成的 facades 仍解析 584 条 Harness 映射。
+
+证据（认证树 `c702d29`，对候选宿主）：`npm run typecheck`、`npm test`（2908 通过、1 跳过，223 文件）、`npm run lint`（74 warning、0 error）、`npm run build`、`npm pack --dry-run`（499 文件）。
+
+另有 `check:artifact`（144 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（21 条旅程全部通过）。
+
+rc.4 上未通过的收件箱徽标旅程在这里已通过：对应的客户端修复已随 `master` 合入，本轮没有遗留失败。
+
+本沙箱没有 `corepack`，lint 直接跑脚本钉住的 oxlint `1.76.0`，读数与脚本一致。
+
+§3.5 只解析出一代 DSH：空目录里已发布的 `0.2.8` 解析出 102 个 `@deepseek-ai/dsh-*`，全部落在 `0.2.2-rc.5`，没有旧线残留，也没有 peer 冲突。
