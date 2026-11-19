@@ -525,6 +525,13 @@ describe('Team conversation surfaces', () => {
     fireEvent.contextMenu(chip, { clientX: 120, clientY: 80 })
     fireEvent.click(await b.view.findByRole('menuitem', { name: '在文件夹中显示' }))
     await waitFor(() => { expect(b.openAttachment).toHaveBeenCalledWith({ attachmentId: 'attachment:pdf', action: 'reveal' }) })
+
+    // The keyboard context-menu gesture (Shift+F10) seats the same menu — the chip, not only the pointer, is its trigger.
+    fireEvent.keyDown(chip, { key: 'F10', shiftKey: true })
+    fireEvent.click(await b.view.findByRole('menuitem', { name: '在文件夹中显示' }))
+    await waitFor(() => { expect(b.openAttachment).toHaveBeenCalledTimes(4) })
+    fireEvent.keyDown(mention, { key: 'F10', shiftKey: true })
+    expect(await b.view.findByRole('menuitem', { name: '打开' })).toBeTruthy()
   })
 
   it('lists native handlers under the attachment Open with submenu', async () => {

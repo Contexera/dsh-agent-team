@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import { MarkdownText, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownFileMentions, MarkdownLabels, MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -153,6 +153,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
               const rect = event.currentTarget.getBoundingClientRect()
               openAttachmentMenu(attachment, event.clientX || rect.left + rect.width / 2, event.clientY || rect.top + rect.height / 2)
             },
+            onKeyDown: (event) => { attachmentMenuKeyDown(event, (x, y) => { openAttachmentMenu(attachment, x, y) }) },
           },
         }
       },
@@ -584,6 +585,15 @@ function renderRefsFromText(text: string, onOpenRef: ((ref: string) => void) | u
   })
 }
 
+/** Shipped context-menu trigger keys (ContextMenu / Shift+F10) seat the menu at the element, like the pointer fallback. */
+function attachmentMenuKeyDown(event: KeyboardEvent<HTMLElement>, openAt: (x: number, y: number) => void): void {
+  if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.ctrlKey || event.altKey || event.metaKey) return
+  if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
+  event.preventDefault()
+  const rect = event.currentTarget.getBoundingClientRect()
+  openAt(rect.left, rect.bottom)
+}
+
 function TeamAttachmentStrip({ attachments, loadAttachment, onOpen, onMenu, t }: {
   readonly attachments: readonly AgentTeamMessageAttachment[]
   readonly loadAttachment?: TeamConversationProps['getAttachment'] | undefined
@@ -713,9 +723,13 @@ function TeamAttachment({ attachment, loadAttachment, onOpen, onMenu, t, onZoom 
     const rect = event.currentTarget.getBoundingClientRect()
     onMenu(attachment, event.clientX || rect.left + rect.width / 2, event.clientY || rect.top + rect.height / 2)
   }
+  const menuKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (onMenu === undefined) return
+    attachmentMenuKeyDown(event, (x, y) => { onMenu(attachment, x, y) })
+  }
   const expired = t?.('attachmentExpired') ?? 'File no longer cached'
   if (wantsPreview && preview.kind === 'ready') {
-    return <button ref={thumbRef} type="button" className={css.attachmentThumb} aria-label={t?.('viewImage', { name: attachment.name }) ?? attachment.name} title={attachment.name} onClick={() => { onZoom(preview.dataUrl) }} onContextMenu={openMenu}>
+    return <button ref={thumbRef} type="button" className={css.attachmentThumb} aria-label={t?.('viewImage', { name: attachment.name }) ?? attachment.name} title={attachment.name} onClick={() => { onZoom(preview.dataUrl) }} onContextMenu={openMenu} onKeyDown={menuKeyDown}>
       <img src={preview.dataUrl} alt={attachment.name} onError={() => {
         invalidateAttachmentDataUrl(attachment.attachmentId)
         retryPending.current = true
@@ -752,9 +766,10 @@ function TeamAttachment({ attachment, loadAttachment, onOpen, onMenu, t, onZoom 
       title={chipTitle}
       onClick={() => { onOpen(attachment) }}
       onContextMenu={openMenu}
+      onKeyDown={menuKeyDown}
     >{contents}</button>
   }
-  return <span ref={(node) => { chipRef.current = node }} tabIndex={wantsPreview ? -1 : undefined} aria-live={wantsPreview ? 'polite' : undefined} className={css.attachmentChip} title={chipTitle} onContextMenu={openMenu}>
+  return <span ref={(node) => { chipRef.current = node }} tabIndex={wantsPreview ? -1 : undefined} aria-live={wantsPreview ? 'polite' : undefined} className={css.attachmentChip} title={chipTitle} onContextMenu={openMenu} onKeyDown={menuKeyDown}>
     {contents}
   </span>
 }

@@ -32,7 +32,9 @@ A Message's files render as one strip under its body: a wrapping row at a 6px ga
 
 A file that is not an image is a chip: the name, then its byte size. An image starts as the same chip stating its own state — `Loading image`, `File expired and cleaned up` on a confirmed cache miss, `Image unavailable` after a read or decode failure with a retry control beside it — and becomes a thumbnail that opens the large view once its bytes decode.
 
-A chip is also the open target for its verified cache entry. A document chip opens in the serving desktop's default application on click or Enter; an inline-code mention of its name resolves to the same action; and the context menu offers **Open with** from the Host's registered handlers and **Show in folder**. An image keeps thumbnail-to-large-view on click and exposes the same menu by right click. A Host with no desktop opener answers `opened: false`, which the row states as a failure instead of a silent no-op.
+A chip is also the open target for its verified cache entry. A document chip opens in the serving desktop's default application on click or Enter; an inline-code mention of its name resolves to the same action; the context menu — right click or the keyboard gesture (ContextMenu, Shift+F10) — offers **Open with** and **Show in folder**.
+
+An image keeps thumbnail-to-large-view on click and exposes the same menu by right click or key. A Host with no desktop opener answers `opened: false`, which the row states as a failure instead of a silent no-op.
 
 While it waits, that chip is a polite live region, so the state change is announced rather than only painted. The name ellipsizes inside the chip: the chip's automatic minimum would otherwise win over its cap, so the chip sets `min-width: 0` and the name keeps `nowrap` with an ellipsis, and a long name shortens in place instead of widening the row.
 

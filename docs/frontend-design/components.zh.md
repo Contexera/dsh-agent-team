@@ -26,7 +26,7 @@
 ## 附件（attachments）
 - 一条 Message 的文件在正文下方排成一条：可换行，间距 6px，缩略图与 chip 混排。这条是正文列的 flex item，取列宽而不是自己的宽度。没有断行机会的文件名会让它撑出 fit-content 宽度、越过列宽，把时间线推进横向滚动。
 - 非图片文件就是一个 chip：文件名 + 字节大小。图片起初也是同一个 chip，并写出自己的状态：`图片读取中`、确认缓存缺失时的 `文件已过期清理`、读取或解码失败时的 `图片暂不可用`（旁边给重试钮）；字节解码完成后才变成点开看大图的缩略图。
-- chip 同时是这个已验证 cache entry 的打开目标。文档 chip 在点击或 Enter 时用 serving desktop 的默认应用打开；正文 inline code 提到同一文件名时解析到同一个动作；右键菜单给出 Host 已注册 handler 的 **打开方式** 与 **在文件夹中显示**。图片仍保留点击看大图，并可通过右键使用同一菜单。没有桌面 opener 的 Host 返回 `opened: false`，行内明确报失败，而不是静默无反应。
+- chip 同时是这个已验证 cache entry 的打开目标。文档 chip 在点击或 Enter 时用 serving desktop 的默认应用打开；正文 inline code 提到同一文件名时解析到同一个动作；右键或键盘菜单手势（ContextMenu、Shift+F10）呼出的上下文菜单给出 Host 已注册 handler 的 **打开方式** 与 **在文件夹中显示**。图片仍保留点击看大图，并可通过右键或同一键盘手势使用同一菜单。没有桌面 opener 的 Host 返回 `opened: false`，行内明确报失败，而不是静默无反应。
 - 等待期间这个 chip 是 polite live region，状态变化会被播报，而不只是画出来。文件名在 chip 内省略：chip 的自动最小宽度本来会压过它的上限，所以 chip 设 `min-width: 0`，名字保持 `nowrap` + `text-overflow: ellipsis`，长名字就地缩短，而不是把整行撑宽。
 - 重试钮取 `flex: none`：它是动作标签，名字在旁边缩短时它保持一行，不跟着折行。
 
