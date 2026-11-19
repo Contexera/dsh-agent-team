@@ -116,7 +116,7 @@ Inbox 页作为屏上面孔时卡片/图标携带 `aria-current='page'`。窄轨
 
 ## 任务看板（Task board）
 
-「任务看板」入口是收件箱入口的兄弟：宽栏上是工作区选择器之上的一张卡片，自带 checklist 图形，墨色与收件箱同档（tertiary），窄轨上是第二枚图标。它打开唯一的跨 Workspace 看板（`TeamTaskBoardPage`），把所有可见 Workspace 的 open Task 分进三个未完结状态列，卡片沿用 Project 看板的语言——状态点、编号、主题、负责人、待你验收徽标——但不带 Project 看板的未读徽标，那仍是 Project 面上按 Thread 计的未读事实。
+「任务看板」入口是收件箱入口的兄弟：宽栏上是工作区选择器之上的一张卡片，自带 checklist 图形，墨色与收件箱同档（tertiary），窄轨上是第二枚图标。它打开唯一的跨 Workspace 看板（`TeamTaskBoardPage`），把所有可见 Workspace 的 open Task 分进三个未完结状态列，卡片沿用 Project 看板的语言——状态点、编号、主题、负责人、待验收徽标——但不带 Project 看板的未读徽标，那仍是 Project 面上按 Thread 计的未读事实。
 
 空态规则与 Project 看板同一条：没有 open Task 时只留空态文案，列头不与之并立。卡片打开 Task 的 Thread 层；页面在屏时它的侧栏行携带 `aria-current='page'`——其下的工作区选择器绝不携带。
 

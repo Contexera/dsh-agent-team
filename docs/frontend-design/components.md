@@ -203,7 +203,7 @@ The seat is one component on every face that names a Task's responsibility — a
 
 The cards and the band resolve the person from the roster (`rosterAccountableOwner`, the resolution every other person ref on those surfaces uses), and an id the roster cannot answer for stays the id rather than being invented. The board reads the Host's own `accountableOwner`, because the cross-Workspace board holds no roster.
 
-A `待你验收` badge rides the cards the reader may accept.
+A `待验收` badge rides the cards the reader may accept.
 
 A Task started from the composer switches the Project to the board, and the keyboard focus lands on that Task's own new card rather than the `看板` tab. The composer unmounts with the switch, so focus has to move somewhere; the card the reader just created is that place, and Enter on it opens the Task. A pointer-driven send focuses the card without a visible ring, and the landing takes the same `:focus-visible` ring every board card draws — the tab is not rung.
 

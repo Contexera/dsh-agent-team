@@ -122,7 +122,7 @@ While the Inbox page stands, the card/icon carries `aria-current="page"` — and
 
 ## Task board (任务看板)
 
-The Task board entry is the Inbox entry's sibling: one card on the wide rail above the Workspace selector, its own checklist glyph at the same tertiary ink, and the rail's second icon. It opens the one cross-Workspace board (`TeamTaskBoardPage`), which groups every visible Workspace's open Tasks into the three open-status columns and carries the Project board's card language — dot, number, subject, accountable owner, and the 待你验收 badge — without the Project board's unread badges, which stay per-Thread facts on the Project face.
+The Task board entry is the Inbox entry's sibling: one card on the wide rail above the Workspace selector, its own checklist glyph at the same tertiary ink, and the rail's second icon. It opens the one cross-Workspace board (`TeamTaskBoardPage`), which groups every visible Workspace's open Tasks into the three open-status columns and carries the Project board's card language — dot, number, subject, accountable owner, and the 待验收 badge — without the Project board's unread badges, which stay per-Thread facts on the Project face.
 
 The page answers to the same empty rule as the Project board: when no Task is open, the empty message stands alone and no column head renders beside it. Its cards open the Task's Thread level, and while the page stands its sidebar row carries `aria-current="page"` — never the Workspace selector under it.
 
