@@ -274,7 +274,7 @@ export const zh = {
   // built-in DSH feature switch.
   extraToolsTitle: '额外工具许可',
   extraToolsSelected: '已选 {count} 个名称',
-  extraToolsIntro: '允许当前 profile 的所有固定成员使用外部插件工具，从下一轮生效。',
+  extraToolsIntro: '允许当前 profile 的所有成员使用外部插件工具，从下一轮生效。',
   extraToolsRegistrationHint: '只列出成员可接入的工具；不安装插件，也不开启 DSH 内置功能。',
   extraToolsListLoading: '正在读取已保存的额外工具名单…',
   extraToolsListFailed: '额外工具名单读取失败：{message}。在成功读取前不会按空名单保存。',

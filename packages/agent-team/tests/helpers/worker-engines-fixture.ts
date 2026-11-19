@@ -38,6 +38,8 @@ export interface FakeWorker {
   disposeFails: boolean
   /** Hold disposal open, as a process that is still shutting down does. */
   disposeHangs: boolean
+  /** Complete disposal after this delay, as a slow but responsive process does. */
+  disposeDelayMs: number
   /** Let a held disposal finish. */
   readonly release: () => void
 }
@@ -100,6 +102,7 @@ export function fakeEngines(): FakeEngines {
         disposed: false,
         disposeFails: false,
         disposeHangs: false,
+        disposeDelayMs: 0,
         release: () => { released.resolve() },
       }
       state.workers.set(childId, worker)
@@ -110,6 +113,9 @@ export function fakeEngines(): FakeEngines {
           worker.disposed = true
           pending.delete(childId)
           state.order.push(`dispose:${childId}`)
+          if (worker.disposeDelayMs > 0) {
+            await new Promise<void>(resolve => { setTimeout(resolve, worker.disposeDelayMs) })
+          }
           if (worker.disposeHangs) await released.promise
           if (worker.disposeFails) {
             result.resolve({

@@ -299,7 +299,7 @@ The live delivery control belongs to this Host's run registry: it is created whe
 
 Unloading the bundle refuses new delegations, cancels starts that are still opening (including one still writing its opening record), and gives active steer calls the same bounded opening wait before fencing off late receipt writes. It then waits for the runs this Host holds to report and record their endings before it closes storage.
 
-A run still unconfirmed at that boundary keeps its `running` record and is sealed, so no late ending is written after storage closes. Durable writes already in flight are awaited before providers are released; the five-second lifecycle deadline does not cancel a storage write that stopped answering.
+A run still unconfirmed at that boundary keeps its `running` record and is sealed, so no late ending is written after storage closes. Durable writes already in flight are awaited before providers are released; the eleven-second ending deadline does not cancel a storage write that stopped answering.
 
 ## Team manager surface
 

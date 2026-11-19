@@ -57,6 +57,7 @@ All notable changes to this project are documented in this file. The format foll
 - Team manager and Member skill providers now mount through Team's isolated preset registry when a separate Host registry is also present. Their bundled and private catalogs and `skill` calls survive fresh activation and Host restart instead of falling back to an empty Host view.
 - Team startup no longer waits for Member or manager Session restoration, and teardown cancels a stuck restore instead of moving the boot hang into shutdown. Restart restoration resumes the ledger's current Session without applying cold-generation recycling. If a reload leaves the previous Agent holding that Session's write handle, its disposal automatically retries the same binding, preserving history without requiring manual recovery.
 - Worker cleanup confirmation no longer times out before the native runtime's own Windows process-tree capture can finish; a genuinely unconfirmed disposal still records `failed` rather than `stopped`.
+- Host unload now gives native cleanup its full ten-second budget plus one second for settlement before sealing an execution as unconfirmed. A slow confirmed cancellation records `stopped`, and a cleanup rejection or timeout records `failed` with its diagnostic instead of leaving either one as a stale `running` record.
 
 ## [0.2.8] - 2026-11-12
 

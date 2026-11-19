@@ -94,7 +94,6 @@ const integrationSpecs = [
   'packages/agent-team/tests/webhook-entry.spec.ts',
   'packages/agent-team/tests/worker-anchors.spec.ts',
   'packages/agent-team/tests/worker-catalog-continuation.spec.ts',
-  'packages/agent-team/tests/worker-composition.spec.ts',
   'packages/agent-team/tests/worker-steer.spec.ts',
   'packages/agent-team/tests/worker-stop-notice.spec.ts',
   // Integration specs (tool-agent-team): they boot a real Host runtime.
@@ -127,6 +126,7 @@ const integrationSpecs = [
 
 const longSpecs = [
   'packages/agent-team/tests/worker-inspect.spec.ts',
+  'packages/agent-team/tests/worker-composition.spec.ts',
   'packages/agent-team/tests/storage-bench.spec.ts',
   'packages/agent-team/tests/member-tool-policy.spec.ts',
 ]
@@ -153,10 +153,11 @@ export default defineConfig({
   test: {
     // Timeout policy lives here rather than in per-file `vi.setConfig` calls or
     // inline test/hook timeout arguments, so no file can quietly widen the budget.
-    // Five mutually exclusive projects partition the suite by execution cost:
+    // Six mutually exclusive projects partition the suite by execution cost:
     // - unit (5s): pure functions, ledger specs, tool rendering, lightweight UI
     // - integration (60s): every spec that boots a real Host/Member runtime or the
     //   Client bench; the fixed list below is the classification, not a discovery scan
+    // - worker-composition (60s test / 30s hook): its native cleanup can outlast 10s
     // - worker-long (120s test / 30s hook): worker-inspect.spec.ts
     // - benchmark (900s): storage-bench.spec.ts (gated by DSH_BENCH_STORAGE=1)
     // - shared-host (30s test / 30s hook): member-tool-policy.spec.ts
@@ -176,6 +177,15 @@ export default defineConfig({
           name: 'integration',
           include: integrationSpecs,
           testTimeout: 60_000,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'worker-composition',
+          include: ['packages/agent-team/tests/worker-composition.spec.ts'],
+          testTimeout: 60_000,
+          hookTimeout: 30_000,
         },
       },
       {

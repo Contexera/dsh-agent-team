@@ -419,3 +419,21 @@ The official Team packages change only their manifest version line, so section 3
 Typert output is unchanged, and the generated facades absorb one new upstream package this bundle does not import: 584 Harness mappings against 581.
 
 Evidence on the certified tree: `npm run typecheck`, `npm test` (2683 passed, 1 skipped, 208 files), `npm run lint` (oxlint `1.76.0` run directly, because this sandbox has no `corepack`; 108 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (458 files), `check:artifact` (133 runtime relative imports resolved), `git diff --check`, and `npm run test:browser` (28 journeys).
+
+### DSH 0.2.2-rc.4
+
+DSH `0.2.2-rc.4` is certified on the same peers with no manifest change. The candidate falls inside `>=0.2.2-rc.2 <0.2.3`, so section 4 records a baseline instead of a peer move, and every version spot keeps naming the range's lower bound. No Team release is involved: Agent Team `0.2.8` already declares this range and is what the `next` dist-tag carries; section 2.4 keeps `latest` at `0.2.7` while DSH's own `latest` is still `0.2.2-rc.1`.
+
+Tag `3f321d32bf` (2026-11-17) carries 395 changed files and 8 commits against `dsh-v0.2.2-rc.3`, and 380 of those files are version-only manifests, so almost nothing this bundle consumes moved:
+
+- `LLM_FAILURE_CODES` gains `CONTENT_REFUSED`, which replaces the `MALFORMED_RESPONSE` the adapter used to raise for a `refusal` stop; `llm-deepseek` now reports the billed usage before throwing it. This bundle classifies only `RATE_LIMIT`, `TRANSPORT`, `TIMEOUT`, and 429/503 as recoverable, so the new code stays manual exactly as the old one did and a refusal is never auto-retried.
+- The desktop LiveShare tunnel worker starts under the Host's Electron Node mode, with its credential-horizon and tunnel-worker tests.
+- The rest is a new upgrade guide for that refusal code and the V4 Session snapshot fixture it ships with. The format stays at V4.
+
+Section 3.6 is not re-triggered: nothing under `packages/session` changes beyond manifest version lines, no message-source kind is added or renamed, and every shipped preset row this bundle mounts is untouched. No file in the Client surface this bundle composes into changes at all, and Typert output is unchanged: the generated facades absorb no new upstream package, so 584 Harness mappings stay as in the previous round.
+
+Evidence on tree `59ac598` against the candidate: `npm run typecheck`, `npm test` (2905 passed, 1 skipped, 222 files), `npm run lint` (oxlint `1.76.0` run directly, because this sandbox has no `corepack`; 74 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (499 files), `check:artifact` (144 runtime relative imports resolved), `git diff --check`, and `npm run test:browser` (20 of 21 journeys).
+
+The one journey that fails is `team-inbox-and-recovery`'s inbox-badge scenario, and it fails identically on the certified `0.2.2-rc.2` host with the same tree: the sidebar keeps one unread while the Host reports none. That is a bundle-side client projection defect on `master`, introduced before this round rather than by it, so it blocks the next Team release until it is fixed but affects no part of this baseline.
+
+Section 3.5 resolves a single DSH generation: 285 packages installed from the published `0.2.8` bundle in an empty directory, 102 of them `@deepseek-ai/dsh-*` and every one at `0.2.2-rc.4`, with no older set and no peer conflict.

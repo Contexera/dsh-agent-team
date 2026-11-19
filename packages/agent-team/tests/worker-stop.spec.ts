@@ -393,6 +393,63 @@ describe('releasing the Host', () => {
     expect(releaseAt).toBeGreaterThan(disposeAt)
   })
 
+  it.each([
+    { cleanupFails: false, expectedState: 'stopped' },
+    { cleanupFails: true, expectedState: 'failed' },
+  ])('records the $expectedState outcome of an eight-second cleanup during Host release', async ({
+    cleanupFails, expectedState,
+  }) => {
+    const host = await boot(new MemoryMediaPool())
+    const projectRef = await createProject(host)
+    const owner = await addMember(host, projectRef, { owner: true, handle: 'owner' })
+    const thread = await startThread(host, projectRef, 'discussion')
+    const run = await host.host.workerStartForAgent(owner.agent, { requestId: requestId('run'),
+      threadRef: thread.threadRef, task: 'check the schedule', cwd: process.cwd() })
+    const worker = host.engines.workers.get('session:worker-1')!
+    worker.disposeDelayMs = 8_000
+    worker.disposeFails = cleanupFails
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+
+    const releasing = host.fiber.dispose()
+    await vi.advanceTimersByTimeAsync(8_000)
+    await releasing
+
+    const execution = host.host['ledger']!.workerExecution(run.workerRef)
+    expect(execution).toMatchObject({
+      state: expectedState,
+      ...cleanupFails ? {
+        stage: 'dispose',
+        diagnostic: expect.stringMatching(/did not confirm|may still be active/u) as unknown as string,
+      } : {},
+    })
+  })
+
+  it('seals a permanently stuck ending only after the full cleanup and settlement budget', async () => {
+    const host = await boot(new MemoryMediaPool())
+    const projectRef = await createProject(host)
+    const owner = await addMember(host, projectRef, { owner: true, handle: 'owner' })
+    const thread = await startThread(host, projectRef, 'discussion')
+    const run = await host.host.workerStartForAgent(owner.agent, { requestId: requestId('run'),
+      threadRef: thread.threadRef, task: 'check the schedule', cwd: process.cwd() })
+    const worker = host.engines.workers.get('session:worker-1')!
+    worker.disposeHangs = true
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    let released = false
+    const releasing = host.fiber.dispose().then(() => { released = true })
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(released).toBe(false)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await releasing
+    expect(host.host['ledger']!.workerRunState(run.workerRef)).toBe('running')
+    expect(host.host['workerRegistry']!.liveState(run.workerRef)).toBeUndefined()
+
+    worker.release()
+    await worker.result.promise
+    await vi.advanceTimersByTimeAsync(0)
+    expect(host.host['ledger']!.workerRunState(run.workerRef)).toBe('running')
+  })
+
   it('covers a start still writing its opening record when the release begins', async () => {
     const host = await boot(new MemoryMediaPool())
     const projectRef = await createProject(host)
@@ -468,7 +525,7 @@ describe('releasing the Host', () => {
 
     const releasing = host.fiber.dispose()
     await vi.advanceTimersByTimeAsync(5_000)
-    await vi.advanceTimersByTimeAsync(5_000)
+    await vi.advanceTimersByTimeAsync(11_000)
     await releasing
     // The provider is gone before the late handle arrives; its release is the order marker.
     expect(host.engines.order).toContain('release')
