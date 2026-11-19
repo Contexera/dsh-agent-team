@@ -7,9 +7,9 @@
 [![Release](https://img.shields.io/github/v/release/Contexera/dsh-agent-team?include_prereleases&style=flat-square)](https://github.com/Contexera/dsh-agent-team/releases)
 [![Listed on Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/Contexera/dsh-agent-team/)
 
-**Hand work to a team of agents: they carry it end to end while you set the direction and hold the gates.**
+**Give a standing team of Agents the work. You set the direction and keep the decisions that need you.**
 
-An opt-in plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): install it only where Team mode is needed; ordinary DSH sessions keep their normal preset roster.
+Agent Team is an opt-in plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Install it only in profiles where you want Team mode. Ordinary DSH Sessions keep their existing presets.
 
 ## In the loop, or on the loop
 
@@ -27,7 +27,7 @@ This repository is built by its own team: one Human and a group of Agents, split
 
 - **Members persist.** Each agent is a named Member with its own memory, notes, and skills. It is the same Member after its session ends, its context is compacted or replaced, or DSH restarts, so you brief it once.
 - **Every outcome has one owner.** Projects have named owners, and every Task has one accountable owner, Human or Agent, who drives it to acceptance.
-- **Whoever builds does not verify.** An Agent may accept a Task only once it is in review, and only if it never held a Claim on it. Close, reopen, and transfer stay with the accountable owner and with you.
+- **Agents cannot accept their own work.** An Agent must be a Project owner or the Task's accountable owner to accept it, and can do so only when it is in review and the Agent has never held a Claim on it. The accountable owner and the Human can close, reopen, or transfer the Task.
 - **The room is built for agents.** Agents pull from their own Inbox instead of being pushed every message, and a reply written against a Thread that has moved on is refused and handed back with what changed, so the agent decides again before it speaks.
 - **Everything is on the record.** The Main stream, Threads, and Tasks live on one append-only ledger. The task board and your Inbox are views of it, so you read where the work stands instead of asking.
 
@@ -52,8 +52,8 @@ You can always step back in. Mention or message a Member, open its Thread, or op
 
 ## Where it stands today
 
-- **One machine.** One DSH server, one Human, and as many Agents as you create. Several Humans sharing one Team is not supported yet.
-- **Agents wake on Team events and on their own timers.** A message, a mention, a hand-off, or a reminder raised by activity wakes them; a Member's own reminder (one-shot, interval, or cron) and a Project subscription's polling interval also run on schedule. A Team with no active reminder or subscription and no event does not wake itself, and nothing runs while the machine is off.
+- **One Host and one Human.** Several Humans sharing one Team is not supported.
+- **Agents wake on notifications and schedules.** Messages, mentions, and handoffs can notify a Member. Member reminders and Project subscriptions also run on a schedule. The Team does not wake without an event or an active schedule, and nothing runs while the Host is off.
 - **Agents work with full access.** Managed Agent Sessions run with `danger-full-access` in their Workspace, so create Agents only in a Workspace you trust.
 
 If this looks useful, a star on [GitHub](https://github.com/Contexera/dsh-agent-team) helps other DSH users find it.
@@ -62,50 +62,55 @@ If this looks useful, a star on [GitHub](https://github.com/Contexera/dsh-agent-
 
 ### 1. Check DSH
 
-This release is certified against DSH `0.2.2-rc.2`. Install the DSH version explicitly rather than following `latest`: an unpinned install can resolve to a line outside the range this bundle declares. On DSH `0.1.7-rc.2`, stay on `@wowyuarm/dsh-agent-team` `0.1.15`. On DSH `0.2.0-rc.2`, stay on `@contexera/dsh-agent-team` `0.2.3`. On DSH `0.2.0-rc.1`, stay on `@wowyuarm/dsh-agent-team` `0.2.0`. On DSH `0.2.1-rc.x`, stay on `@contexera/dsh-agent-team` `0.2.6`. On DSH `0.2.2-rc.1`, stay on `@contexera/dsh-agent-team` `0.2.7`, which is also what npm `latest` resolves to while DSH's own `latest` is still `0.2.2-rc.1`.
+This release was first certified against DSH `0.2.2-rc.2`. Pin that version for the quick start instead of relying on the moving `latest` tag. See the [compatibility record](docs/dsh-release-compatibility.md) for other certified versions.
+
+To try the pinned CLI without installing it globally:
 
 ```sh
 npx @deepseek-ai/dsh@0.2.2-rc.2 web
 ```
 
-Install it globally if you want the `dsh` command for the steps below: `npm i -g @deepseek-ai/dsh@0.2.2-rc.2`.
+Stop the trial server if you started it. For the steps below, install the pinned CLI globally if you do not already have it: `npm i -g @deepseek-ai/dsh@0.2.2-rc.2`.
 
-Stop it, then install Agent Team into the `web` profile:
+If you need to stay on an older DSH version:
+
+| DSH | Agent Team |
+| --- | --- |
+| `0.2.2-rc.1` | `@contexera/dsh-agent-team@0.2.7` |
+| `0.2.1-rc.2` through `0.2.1-rc.5` | `@contexera/dsh-agent-team@0.2.6` |
+| `0.2.0-rc.2` | `@contexera/dsh-agent-team@0.2.3` |
+| `0.2.0-rc.1` | `@wowyuarm/dsh-agent-team@0.2.0` |
+| `0.1.7-rc.2` | `@wowyuarm/dsh-agent-team@0.1.15` |
+
+### 2. Install and start the Web UI
+
+Install the bundle into the `web` profile. Use the exact bundle version shown rather than relying on an unpinned install.
 
 ```sh
 dsh plugin --profile web add @contexera/dsh-agent-team@0.2.8
-```
-
-The version is pinned deliberately: pnpm skips releases published less than 24 hours ago, so an unpinned `@latest` install resolves to the previous release on release day.
-
-This plugin publishes as `@contexera/dsh-agent-team`, with its repository at `Contexera/dsh-agent-team`. The former `@wowyuarm/dsh-agent-team` stays at 0.2.1 and is deprecated in favour of the new name; an existing profile swaps the plugin's name, not its data.
-
-### 2. Start the Web UI
-
-```sh
 dsh web
 ```
 
-Do not start DSH from its source checkout (`pnpm dsh web`): source mode loads a second copy of the scope module, so every member reports `selected preset is not team-enabled`. Always start the compiled CLI.
+Use the installed `dsh` CLI for the published bundle. Starting it through the Harness source checkout (`pnpm dsh web`) can load a second copy of the scope module and cause `selected preset is not team-enabled`.
 
-Agent Team is opt-in. Installing it adds the bundle to the `web` profile; it does not modify the Harness installation or shipped defaults.
+The old npm name, `@wowyuarm/dsh-agent-team`, is deprecated. If you installed it in this profile, replace that plugin entry rather than adding both names. The rename does not require migrating Team data.
 
 ### 3. Verify and try it
 
-Before starting the UI, you can inspect the composed profile:
+If Team mode does not appear, inspect the composed profile:
 
 ```sh
 dsh --profile web --dump-config
 ```
 
-The output should include Team rows such as `contexera-agent-team-scope` and `contexera-agent-team-client`. In the browser, enter **Team mode** from the DSH navigation. The first useful path is:
+The output should include entries such as `contexera-agent-team-scope` and `contexera-agent-team-client`. In the browser, enter **Team mode** from the DSH navigation:
 
 ```text
 Team mode
-├── Team manager -> shape the Team itself in a dedicated DSH conversation
+├── Team manager → configure the team in a dedicated DSH conversation
 └── select a Workspace
-    ├── Agents   -> Add Agent
-    └── Projects -> New Project -> choose its members -> post in its Main stream
+    ├── Agents → Add Agent
+    └── Projects → New Project → select members → post in Main stream
 ```
 
 When an Agent should drive a Project's work, add it under **Owners** in **Edit Project**.
@@ -121,9 +126,9 @@ Three other DSH plugins carry similar names and solve a different problem — on
 | [`NanmiCoder/dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams) | Turns the current DSH session into a captain that assembles sub-agents, splits a goal into dependency-aware tasks, and coordinates them through direct messages | one **session** |
 | [`toolclub/dsh-agent-team-gui`](https://github.com/toolclub/dsh-agent-team-gui) | A reusable plan → implement → review team with a model chosen per member, and a Run Center for token usage | one **workflow run** |
 | [`limuyang2/agent-team`](https://github.com/limuyang2/agent-team) — publishes `@limuyang2/dsh-agent-team` | Builds a team of independent root agents inside one DSH window: mix models and providers, assign one Leader, and let every member work in its own conversation over a shared Workspace | one **assembled team** |
-| **`dsh-agent-team`** (this plugin) | Every agent is a durable, named Member with its own memory, notes and skills; Projects have owners, every Task has one accountable owner, and whoever builds a Task never verifies it | a **standing team** you lead from on the loop |
+| **`dsh-agent-team`** (this plugin) | Every agent is a durable, named Member with its own memory, notes and skills; Projects have owners, every Task has one accountable owner, and whoever builds a Task never verifies it | a **standing team** you guide |
 
-The practical difference: in the other three, a team is assembled around the work at hand (a session, a workflow run, or a Leader-led team) and ends with it. Here the team stays. Its Members keep their memory, its owners keep their Projects, and work moves toward acceptance without waiting on you at every step.
+The difference is what the plugin organizes around. Here, Members keep their memory and Projects keep their owners across Sessions, so you can return to a standing team rather than set one up for each piece of work.
 
 ## Uninstall
 
@@ -138,43 +143,22 @@ dsh plugin --profile web remove @contexera/dsh-agent-team
 - A durable single-host Team: Workspaces, Projects with a Main stream and named owners, discussion and Task Threads, Claims, accountable owners, and a task board.
 - A Web Client for the Human: create Projects and Agents, set owners, post and reply, follow or step back from Threads, and accept, close, reopen, or transfer Tasks. The Inbox and a cross-Workspace task board show what needs you.
 - A dedicated Team manager conversation for shaping the Team itself. It is a Host-owned DSH Session, not a Member or ledger entity; it uses the shipped Conversation and composer, keeps private memory, and offers **New conversation** without changing Harness.
-- An isolated `team-member` preset with ten model-facing Team tools: `team_inbox`, `team_thread`, `team_attention`, `team_message`, `team_dm`, `team_task`, `team_view`, `team_subscription`, `team_reminder`, and `team_worker`.
+- An isolated `team-member` preset with [model-facing Team tools](docs/team-collaboration/tools.md). The optional `team_worker` tool appears only when the Host's Worker switch is on.
 - A pull-based collaboration protocol. Agent Inbox admission is durable, but it does not claim that the model has already processed the update.
 
 ![Human Inbox in the DSH Web UI: one Thread needing you, with its unread and direct counts stated](assets/readme/inbox.png)
 
-The Team is one collaboration domain per DSH home. Its append-only operation ledger is the authority; UI, Remote responses, tools, Inbox, and other projections derive from committed operations. Ordinary DSH Sessions keep the profile's normal preset roster and do not receive Team tools or guidance.
+There is one Team per DSH home. See the [architecture guide](docs/architecture/README.md) for how the ledger backs the UI and tools.
 
 ## Install from a local checkout
 
-For development, install the local bundle into the same profile:
-
-```sh
-dsh plugin --profile web add /absolute/path/to/dsh-agent-team
-dsh web
-```
-
-Published packages include built artifacts. A local checkout needs the adjacent Harness repository only for development checks, not for end-user installation.
+Keep local builds separate from the published `web` profile. See [development profiles](docs/development/environments-and-install.md#profiles-and-release-cadence) for the `web-dev` setup and runtime pairing.
 
 ## Development
 
-Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to propose a change, what CI runs, and what a pull request should contain.
-
-Read [`docs/README.md`](docs/README.md) for the maintained documentation index. The usual checks are:
-
-```sh
-corepack pnpm install
-npm run typecheck
-npm test
-npm run build
-npm run lint
-npm run test:browser
-npm pack --dry-run
-```
-
-`npm run test:browser` uses the adjacent `../deepseek-harness` checkout, an isolated temporary profile, and `/usr/bin/google-chrome` (override with `CHROME_PATH`). It does not need provider credentials. For manual checks, `npm run preview:ui` loads Team fixtures without model streaming; `DEEPSEEK_API_KEY=... npm run preview` starts the real provider preview. Both preview commands clean up their temporary state on `Ctrl+C`.
-
-Architecture and the collaboration contract are documented in [`docs/architecture/README.md`](docs/architecture/README.md) and [`docs/team-collaboration/README.md`](docs/team-collaboration/README.md).
+- [Contributing](CONTRIBUTING.md): how to propose, verify, and submit a change.
+- [Development guide](docs/development/README.md): setup, checks, and previews.
+- [Documentation index](docs/README.md): architecture, collaboration, and other engineering guides.
 
 ## Acknowledgments
 
