@@ -4,13 +4,17 @@
 
 ```text
 packages/agent-team
-  Host service + operation ledger + projections + Agent lifecycle + Remote declarations
+  Host service + operation ledger + projections + Agent lifecycle
+  + Team manager Session + Remote declarations
         │
         ├── packages/tool-agent-team
-        │     model-facing team_view / team_inbox / team_thread / team_message / team_task / team_attention / team_dm
+        │     team-member:  team_view / team_inbox / team_thread / team_message / team_task
+        │                   / team_attention / team_dm / team_subscription / team_reminder / team_worker
+        │     team-manager: team_overview / team_models / member_create / member_update / member_state
+        │                   / member_workspace / project_create / project_owner / project_update
         │
         └── packages/client-agent-team
-              typed Remote client + Team mode + browser presentation
+              typed Remote client + Team mode + manager destination + browser presentation
 ```
 
 这三个目录是同一发布包 `@contexera/dsh-agent-team` 的构建与导出接缝，由根 `package.json` 声明；它们都没有自己的 manifest。依赖方向是单向的：Host 从不导入 Client 或 tools 的实现内部，tools 在执行时解析 live Host service，Client 只消费 typed Remote、公开类型与 Harness slots——绝不通过相对路径进入另一个接缝的生成 `lib/`。[`generated-and-seams.zh.md`](../development/generated-and-seams.zh.md) 负责接缝的具体机制、Host 模块布局与新增 operation 的清单。

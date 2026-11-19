@@ -27,14 +27,15 @@ Generated Remote methods resolve a `RemoteResult`: `{ ok: true, value }` carries
 - `openAttachment` and `attachmentApplications` resolve the payload path from the same verified cache entry, then hand it to the serving desktop's own opener or handler list. Neither accepts a Client-supplied path, so an attachment action cannot open an arbitrary Host file; a headless Host answers `opened: false` and no handlers instead of failing a Client that cannot open anything.
 
 ## Client plugin and slot composition
-The external Client plugin leaves the shipped Shell as outer-layout owner. Team adds one global panel and shadows three seats:
+The external Client plugin leaves the shipped Shell as outer-layout owner. Team adds one global panel and a settings page, and shadows two seats while Team mode stands:
 
 ```text
 sidebar.panellist           additive Team row, order 20
 main (key agent-team)       Team panel, priority -100
 sidebar.workspaces          Team shadow, priority -100
 main (key conversation)     Team shadow, priority -100
-sidebar.settings            Team shadow, priority -100
+settings.section            additive Team settings page, order 5
+settings.section.icon       Team mark on that page's nav row
 ```
 
 Activation mounts `agentTeamRemote`, waits for `remote.agentTeam`, then registers the Team panel, its rail row, and the mode shadows. `dsh.client.inject` describes the module graph but does not guarantee apply order or service readiness; use `ctx.slots.inject()` when a declaration may appear later.
