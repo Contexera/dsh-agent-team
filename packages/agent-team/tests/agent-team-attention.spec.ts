@@ -1854,6 +1854,39 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(() => ledger.validate()).not.toThrow()
   })
 
+  it('recovers when an appended record fails validation after registering a ref', async () => {
+    const test = await harness()
+    const ledger = ledgerAtBoot(test)
+    await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    ledger.validate()
+    const table = test.facility.get('agent_team')!.table('operations')
+    const [lastId, lastOperation] = [...table.entries()].at(-1)! as [AgentTeamOperationId, AgentTeamOperation]
+    if (lastOperation.kind !== 'team/project-created') throw new Error('expected the project-created record last')
+    // A bad append: the project-created check registers project.projectRef
+    // into the cursor's ref set before the initial Member check throws, so a
+    // failed incremental pass leaves the cursor holding facts about a record
+    // it never finished validating.
+    const appendedId = `operation:${crypto.randomUUID()}` as AgentTeamOperationId
+    const appended: AgentTeamOperation = {
+      ...lastOperation,
+      sequence: lastOperation.sequence + 1,
+      operationId: appendedId,
+      requestId: requestId('broken-append'),
+      previousOperationId: lastId,
+      data: {
+        ...lastOperation.data,
+        project: { ...lastOperation.data.project, projectRef: `project:${crypto.randomUUID()}` as never, createdAtSequence: lastOperation.sequence + 1 },
+        memberIds: ['member:agent-nonexistent' as never],
+      },
+    }
+    await table.put(appendedId, appended)
+    expect(() => ledger.validate()).toThrow(/invalid initial Project Member/)
+    // Fix the record in place — same key, same projectRef. The next check must
+    // not trip over the ref the failed pass registered.
+    await table.put(appendedId, { ...appended, data: { ...appended.data, memberIds: lastOperation.data.memberIds } })
+    expect(() => ledger.validate()).not.toThrow()
+  })
+
   it('releases the deferred failure once a replay comes back clean', async () => {
     const settle = (): Promise<void> => new Promise(resolve => setImmediate(resolve))
     const test = await harness()

@@ -7,7 +7,7 @@
  * are deliberately not a fixture registry — a spec that needs a different
  * arrangement builds it locally and keeps it local.
  */
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -87,6 +87,7 @@ export async function harness(
   let facility: DomainFacility | undefined
   let closed = false
   let restoreDshHome: (() => void) | undefined
+  let selfHome: string | undefined
 
   const close = async (): Promise<void> => {
     if (closed) return
@@ -100,6 +101,7 @@ export async function harness(
       () => ctx?.fiber.dispose(),
       () => facility?.closeAll(),
       () => { restoreDshHome?.() },
+      () => selfHome === undefined ? undefined : rm(selfHome, { recursive: true, force: true }),
     ])
   }
 
@@ -109,8 +111,10 @@ export async function harness(
     // The Host provisions Member private memory under DSH_HOME at activation;
     // an unisolated boot writes Member scaffolds into the real home (the
     // member-bench-*/member-agent-* directories that appeared under the live
-    // members root came from exactly this leak).
-    restoreDshHome = pushDshHome(options?.dshHome ?? await mkdtemp(join(tmpdir(), 'dsh-agent-team-ledger-home-')))
+    // members root came from exactly this leak). A home the harness creates
+    // itself is removed at close; one the caller supplies stays the caller's.
+    selfHome = options?.dshHome === undefined ? await mkdtemp(join(tmpdir(), 'dsh-agent-team-ledger-home-')) : undefined
+    restoreDshHome = pushDshHome(options?.dshHome ?? selfHome!)
     ctx = new Context()
     await ctx.plugin(Storage)
     ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
@@ -153,6 +157,7 @@ export async function sqliteHarness(path: string, options?: HostHarnessOptions):
   let backend: SqliteStorageBackend | undefined
   let closed = false
   let restoreDshHome: (() => void) | undefined
+  let selfHome: string | undefined
 
   const close = async (): Promise<void> => {
     if (closed) return
@@ -167,13 +172,15 @@ export async function sqliteHarness(path: string, options?: HostHarnessOptions):
       () => facility?.closeAll(),
       () => backend?.close(),
       () => { restoreDshHome?.() },
+      () => selfHome === undefined ? undefined : rm(selfHome, { recursive: true, force: true }),
     ])
   }
 
   registerAutoCleanup(close, options?.registerCleanup)
 
   try {
-    restoreDshHome = pushDshHome(options?.dshHome ?? await mkdtemp(join(tmpdir(), 'dsh-agent-team-ledger-home-')))
+    selfHome = options?.dshHome === undefined ? await mkdtemp(join(tmpdir(), 'dsh-agent-team-ledger-home-')) : undefined
+    restoreDshHome = pushDshHome(options?.dshHome ?? selfHome!)
     ctx = new Context()
     await ctx.plugin(Storage)
     backend = new SqliteStorageBackend({ path, journalMode: 'delete' })

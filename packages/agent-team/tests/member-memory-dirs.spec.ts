@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, readdir } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
@@ -228,23 +228,27 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
     // left real directories under the live home. Seed, reopen, and the
     // caller's home must stay clean throughout.
     const home = await mkdtemp(join(tmpdir(), 'dsh-agent-team-outer-home-'))
-    const pool = new MemoryMediaPool()
-    const first = await harness(pool)
-    await addLedgerMember(ledgerAtBoot(first), undefined, 'member:agent-probe', 'probe')
-    await first.close()
-
-    const previous = process.env.DSH_HOME
-    process.env.DSH_HOME = home
     try {
-      const second = await harness(pool)
-      // Boot restore runs asynchronously; give the lifecycle queue its slot,
-      // then close and check nothing escaped into the caller's home.
-      await new Promise(resolve => setTimeout(resolve, 500))
-      await second.close()
+      const pool = new MemoryMediaPool()
+      const first = await harness(pool)
+      await addLedgerMember(ledgerAtBoot(first), undefined, 'member:agent-probe', 'probe')
+      await first.close()
+
+      const previous = process.env.DSH_HOME
+      process.env.DSH_HOME = home
+      try {
+        const second = await harness(pool)
+        // Boot restore runs asynchronously; give the lifecycle queue its slot,
+        // then close and check nothing escaped into the caller's home.
+        await new Promise(resolve => setTimeout(resolve, 500))
+        await second.close()
+      } finally {
+        if (previous === undefined) delete process.env.DSH_HOME
+        else process.env.DSH_HOME = previous
+      }
+      await expect(readdir(join(home, 'agent-team', 'members'))).rejects.toThrow()
     } finally {
-      if (previous === undefined) delete process.env.DSH_HOME
-      else process.env.DSH_HOME = previous
+      await rm(home, { recursive: true, force: true })
     }
-    await expect(readdir(join(home, 'agent-team', 'members'))).rejects.toThrow()
   })
 })

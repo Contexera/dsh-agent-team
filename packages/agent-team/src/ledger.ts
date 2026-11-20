@@ -5019,10 +5019,19 @@ export class AgentTeamLedger {
       return
     }
     const from = cursor.processed.length
-    this.extendValidationMaps(cursor, records.slice(from))
-    for (let index = from; index < records.length; index += 1) {
-      const [key, operation] = records[index]!
-      this.validateRecord(cursor, key, operation)
+    try {
+      this.extendValidationMaps(cursor, records.slice(from))
+      for (let index = from; index < records.length; index += 1) {
+        const [key, operation] = records[index]!
+        this.validateRecord(cursor, key, operation)
+      }
+    } catch (error) {
+      // The records after `from` mutated the cursor before the throw
+      // (scratch projection, ref set, repair maps): it no longer describes
+      // any durable prefix, so the next check must rebuild it from scratch
+      // instead of trusting a poisoned incremental state.
+      this.validationCursor = undefined
+      throw error
     }
     this.validationCursor = cursor
   }
