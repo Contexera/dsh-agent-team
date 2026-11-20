@@ -2,82 +2,43 @@
 
 English | [中文](harness-navigation.zh.md)
 
-Date: 2026-09-18
+Use this page when a Team change depends on a Harness capability. The Team repository owns Team behavior; Harness owns the services and extension points that Team uses.
 
-This maintained engineering navigation records cross-repository routes verified against current source, tests, or Harness docs. Update it when packages, scripts, slots, or installation change. It is not a replacement for Harness documentation and does not change product decisions; source and tests define current behavior.
+## 1. Start with the right checkout
 
-## 1. Responsibility boundary
+Use the pinned `../deepseek-harness` checkout described in [development setup](development/environments-and-install.md). All paths in the Harness column are relative to that checkout. Read the relevant upstream guide, then verify the contract in upstream source and tests.
 
-| Question | Inspect this repository first | Then inspect `../deepseek-harness` | Authority |
-| --- | --- | --- | --- |
-| Team domain objects, permissions, ledger, Task/Claim/Attention/Inbox | `docs/domain-model.md`, `docs/team-collaboration/`, `packages/agent-team/src/`, tests | Only the consumed DSH service contract | This repository implementation |
-| Host behavior | `packages/agent-team/src/{index,ledger,spec,types}.ts`, tests | Architecture and relevant subsystem docs for Agent/Session/Workspace/Storage/Typert | This repository behavior; Harness owns underlying capabilities |
-| Model-facing tools and preset | `docs/team-collaboration/`, tool source, `team-member` preset | `docs/cookbook/adding-a-tool.md`, tools, permission-preset docs | Team tool semantics; Harness extension interface |
-| Client plugin, Team mode, UI | `docs/architecture/README.md`, `docs/development/README.md`, Client source | Client modules, client loading notes, `packages/client/AGENTS.md`, shipped UI source | This repository UI rules; Harness loading/slot/React boundaries |
-| Typed Remote | architecture, `@Remote` declarations, `scripts/generate-typert.mjs` | Typert docs/source and API remotes | Harness generation/assembly; Team methods |
-| Publishing and bundle install | root READMEs, `cordis.patch.yml`, root manifest | Harness README, package cookbook, profile/bundle docs | Harness installer; this repository bundle layout |
-| Real Web acceptance | development docs, browser scripts, ignored artifacts | Harness Web scaffold, testing docs, Client tests | The run's script output; archive only milestone evidence |
+If a public extension point is insufficient, record the limitation and choose a Team-owned plugin or design. Do not alter ordinary Harness behavior to make a Team change work. See the [repository guardrails](../AGENTS.md#architecture-guardrails).
 
-When Harness behavior is uncertain, read upstream docs, then implementation and tests. Do not treat `.scratch/` exploration as an API contract or rewrite Team semantics to match a guess. If public APIs cannot express an interaction, record the limitation and choose a bundle-owned plugin/design.
+## 2. Find the contract by change type
 
-## 2. Routes by change type
+| Change | Team: start here | Harness: inspect next |
+| --- | --- | --- |
+| Host, ledger, or lifecycle | [Host authority](architecture/host-authority.md); `packages/agent-team/src/{index,ledger,spec,types}.ts` and Host tests | `docs/architecture.md`, `docs/agent-lifecycle.md`, `docs/subsystems/storage.md` |
+| Model-facing tool or preset | [Tool contracts](team-collaboration/tools.md), `packages/tool-agent-team/src/`, and the isolated preset rows in [cordis.patch.yml](../cordis.patch.yml) | `docs/cookbook/adding-a-tool.md`, `docs/subsystems/permission-presets.md`, `docs/subsystems/system-prompt.md` |
+| Client plugin, slots, or loading | [Client and Remote](architecture/client-and-remote.md), then `packages/client-agent-team/src/client/` | `packages/client/AGENTS.md`, `docs/subsystems/client-modules.md`, `docs/subsystems/slots.md`, `docs/cordis-tutorial/02-lifecycle-and-effects.md` |
+| Typed Remote, RPC, or generated files | Host `@Remote` declarations in `packages/agent-team/src/index.ts` and [the generator](../scripts/generate-typert.mjs) | `docs/subsystems/typert.md`, `packages/typert/{generator,loader,protocol,registry}/`, `packages/api/remotes/` |
+| Workspace, Session, or directory selection | [Workspace, Session, and storage](architecture/workspace-session-storage.md) and Workspace reads in `packages/client-agent-team/src/client/index.ts` | `docs/subsystems/{workspace,session,working-directory,storage}.md` |
+| Persistence, replay, or Thread Inbox | [Host authority](architecture/host-authority.md), [Inbox and messaging](team-collaboration/attention-and-messaging.md), and ledger tests | `docs/subsystems/{storage,persistence}.md`, `docs/defensive-patterns/` |
+| CSS, UI primitives, or responsive layout | [UI design guide](frontend-design/README.md), then the component and its CSS Module | `docs/web-styling.md`, `packages/client/AGENTS.md`, `packages/client/ui-primitives/` |
+| Publishing or bundle installation | [Compatibility record](dsh-release-compatibility.md), [package.json](../package.json), and [cordis.patch.yml](../cordis.patch.yml) | `apps/cli/reference/README.md`, `docs/user/develop/basic/publish.md` |
+| Real Web acceptance | [Browser lanes](development/e2e-lanes.md), `scripts/e2e/`, and the current run's output | `docs/testing.md` and `packages/client/` tests |
 
-### Host, ledger, or lifecycle
+## 3. Verify at the boundary
 
-Read Team source/tests and `docs/domain-model.md`/`docs/team-collaboration/`; inspect `index.ts`, `ledger.ts`, `spec.ts`, and `types.ts` to ensure one authority and durable commit path. Then consult Harness architecture, storage, workspace, Typert, and defensive-pattern docs and the corresponding source packages. New model-visible inputs need session-log evidence; package tests and real composition should cover lifecycle.
+- **Host or persistence:** keep one durable commit path. Use Session logs as evidence for new model-visible input. For lifecycle changes, cover package behavior and real composition; for storage or replay, test failure and recovery rather than adding a silent fallback.
+- **Remote:** `InvocationDescriptor` is reflection metadata, not wire data. Follow the [generated-file workflow](development/generated-and-seams.md#generated-files) for regeneration, typecheck, build, and checking that output is stable. Never hand-edit `packages/agent-team/lib/typert.*`.
+- **Workspace:** the Team Client reads `ctx.workspaces.list`. It does not pick directories or create Workspaces; users do that in the ordinary DSH UI. Preserve branded Workspace IDs and Host-owned working-directory rules.
+- **Client or Web:** follow the [repository browser checks](../AGENTS.md#choose-checks-for-the-change). Verify that ordinary Sessions do not acquire Team tools, guidance, or UI. Do not commit temporary overlays, browser tests, or generated files to Harness.
 
-### Model-facing tool or preset
+## 4. Install or develop the bundle
 
-Read the Team collaboration docs, tool source, and isolated preset. Consult Harness tool, permission-preset, and system-prompt docs and source. Schema, canonical output, execute, and presentation are separate layers; do not turn Host into a global tool. Ordinary Sessions must not receive Team tools or guidance.
+Use the [published quick start](../README.md#quick-start) for installation without a sibling checkout. For local builds and verification, use [development setup](development/environments-and-install.md) and the [check guide](development/start-and-checks.md), including when to run preview or browser tests.
 
-### Client, browser bundle, or loading graph
+The root manifest points `dsh.bundle.patch` at `cordis.patch.yml`. The patch mounts the Host inside `contexera-agent-team-scope`, with a private `agentPresets` registry for `team-member` and `team-manager`. Client and invariant rows sit outside that group.
 
-Read architecture Client sections, development UI acceptance, and target components; use Harness client-module docs, client loading notes, `packages/client/AGENTS.md`, web styling, Cordis lifecycle tutorials, and the relevant slot/runtime/sidebar/conversation/workspace/theme/module sources. Mount the generated Remote before injecting dependent UI, and use `ctx.slots.inject()` when declarations can arrive later.
+For local generation, `generate:typert` uses Harness's `WorkspaceAnalyzer` and `FaceModelEmitter`. `scripts/sync-paths.mjs` generates the root TypeScript facades: tests use Harness source; typecheck and build use declarations. Do not hand-edit the facades or add `include` or `files` to them.
 
-A slot parent's `children` declaration is render authority. Team's `sidebar.workspaces` shadow must not copy shipped `sidebar.workspaces.directoryFlow`; SlotCore rejects duplicate live child declarations. Reuse public exports and theme tokens, not private shipped components or CSS; components receive data through slot contracts rather than `ctx`.
+## 5. Maintain these routes
 
-### Typed Remote, RPC, or generated artifacts
-
-Read the Team service declaration, types, and generator script; read Harness Typert generator/loader/protocol/registry and API-remote sources. `InvocationDescriptor` is reflection metadata, not wire data. Run `npm run generate:typert`, typecheck, build, and ensure output is stable. Never hand-edit `lib/typert.*`.
-
-### Workspace, Session, or directory selection
-
-Team reads `ctx.workspaces.list` and does not duplicate Workspace creation/browser state. Read Harness workspace, session, and storage docs/source, and preserve branded Workspace IDs and Host-owned cwd semantics. The current UI does not call `pickDirectory()` or `create()`; users use ordinary Session UI when creating a Workspace.
-
-### Storage, persistence, replay, or Thread Inbox
-
-Read Team ledger/projection/lifecycle source and JSON/SQLite tests, then Harness storage, persistence, session-persistence, and defensive-pattern docs/source. The ledger is the only durable authority; add failure-injection/recovery evidence instead of silent fallbacks.
-
-### CSS, primitives, or responsive layout
-
-Read the target component and CSS Module, then architecture/development and UI history only for context. Consult Harness web styling, primitives/theme source, and Client rules. Resolve layout and public primitive reuse before styling; preserve CSS Modules, `--dsw-*` tokens, focus, dialog/menu names, and 390×844 reflow.
-
-## 3. External bundle installation and verification
-
-Verified installation:
-
-```sh
-dsh plugin --profile team-demo add @contexera/dsh-agent-team
-dsh --profile team-demo
-```
-
-Local development installation:
-
-```sh
-dsh plugin --profile team-demo add /absolute/path/to/dsh-agent-team
-dsh --profile team-demo
-```
-
-`cordis.patch.yml` exposes `dsh.bundle.patch`, mounting Host, Client, and invariant rows in `contexera-agent-team-scope` and declaring the Team preset registry and the `team-member` definition row inside `isolate.agentPresets`. Ordinary DSH rosters are unchanged.
-
-Verification order is `npm run typecheck`, `npm test`, `npm run build`, `npm pack --dry-run`, and browser tests for browser/bundle changes. Manual preview uses `npm run preview`; check ordinary Sessions for absence of Team tools, guidance, and UI. Do not commit temporary overlays, browser tests, or generated files to Harness.
-
-## 4. Development checkout dependencies
-
-`npm run generate:typert` uses the adjacent checkout's `WorkspaceAnalyzer` and `FaceModelEmitter`. `scripts/sync-paths.mjs` generates root `tsconfig*.json` facades so tests use Harness source, typecheck uses declarations, and build uses built declarations. Do not edit these facades or add `include`/`files`.
-
-Published bundle installation does not need a sibling checkout; only local Typert generation, typecheck, build, and real browser verification do.
-
-## 5. Maintenance boundary
-
-Harness paths and rules quoted here must be rechecked when Harness changes. Historical sessions and `.scratch/` remain context only. This document is a lookup route, not a duplicate manifest, command list, or domain specification; those facts belong in their authoritative files and `development/README.md`/`architecture/README.md`. When linking archive material, label it as design or history.
+Recheck upstream paths and contracts when the pinned Harness checkout changes. Keep implementation details in their owning docs, and label any linked `.scratch/` material as design or history, not a contract.

@@ -2,7 +2,17 @@
 
 English | [中文](README.zh.md)
 
-This directory contains the maintained engineering documentation for this repository. The root `AGENTS.md` keeps only rules that every task must know; [`AGENTS.md`](AGENTS.md) here routes doc edits and maintenance — read it before changing anything under `docs/`. Use this index for detailed workflows, architecture, domain language, and cross-repository navigation.
+Use this index to find the maintained guide for your change. For installation or contribution, start with the [project README](../README.md) or the [contributing guide](../CONTRIBUTING.md).
+
+## Where to start
+
+- **Set up the repository or choose checks:** [Start and checks](development/start-and-checks.md). For a targeted browser run, use the [lane catalog](development/e2e-lanes.md).
+- **Change Host or domain behavior:** [Host authority](architecture/host-authority.md) and the [domain model](domain-model.md). Confirm behavior in `packages/agent-team/` source and tests.
+- **Change a tool or preset:** [Tools and presets](architecture/tools-and-preset.md) and the [collaboration tool contracts](team-collaboration/tools.md).
+- **Change Client UI or Remote behavior:** [Client and Remote](architecture/client-and-remote.md) and the [UI design guide](frontend-design/README.md). Use [Harness navigation](harness-navigation.md) for upstream contracts.
+- **Change generated files or package boundaries:** [Generated files and seams](development/generated-and-seams.md).
+- **Measure Team behavior at scale:** [Performance scenarios](development/team-performance.md).
+- **Certify DSH or publish a bundle:** the [compatibility record](dsh-release-compatibility.md) and [release runbook](release-runbook.md).
 
 ## Documentation entry points
 
@@ -17,16 +27,16 @@ This directory contains the maintained engineering documentation for this reposi
 | [`development/team-performance.md`](development/team-performance.md) | Reusable Team performance scenarios, scale matrix, browser loading, semantic probes, and current constraints | Measuring or changing performance-sensitive Team paths |
 | [`dsh-release-compatibility.md`](dsh-release-compatibility.md) | Evaluating new DSH versions, isolated certification, installation checks, and release gates | DSH releases, updating `peerDependencies`, or investigating cross-version installation failures |
 | [`release-runbook.md`](release-runbook.md) | The end-to-end procedure for publishing a bundle version: pre-flight, check ladder, release material, tag and publish, post-publish verification | Publishing a version, or reviewing what a release must prove before it ships |
-| [`architecture/README.md`](architecture/README.md) | Host, tools, command, typed Remote, Client plugin, and authority boundaries | Changing runtime, RPC, preset, Client, or persistence |
+| [`architecture/README.md`](architecture/README.md) | Host, tools, presets, typed Remote, and Client plugin boundaries | Changing runtime, RPC, preset, Client, or persistence |
 | [`architecture/package-ownership.md`](architecture/package-ownership.md) | The three package directories, the published manifest, and the one-way dependency direction | Changing package seams, manifests, or import direction |
 | [`architecture/host-authority.md`](architecture/host-authority.md) | What the Host owns: ledger, lifecycle, projections, Session persistence, Attention, context pressure, private memory, and member capabilities | Changing Host runtime, persistence, replay, Attention, or memory behavior |
 | [`architecture/tools-and-preset.md`](architecture/tools-and-preset.md) | The model-facing tools, their defining modules, and the isolated `team-member` and `team-manager` presets | Changing a model-facing tool or what a preset mounts |
 | [`architecture/client-and-remote.md`](architecture/client-and-remote.md) | The typed Remote declaration, Client plugin and slot composition, and the Client data/presentation boundary | Changing RPC, Client plugin loading, slots, or projection |
 | [`architecture/workspace-session-storage.md`](architecture/workspace-session-storage.md) | Reuse of Harness Workspace, Session, and storage instead of parallel Team state | Changing Workspace selection, Session storage, or ledger routing |
 | [`domain-model.md`](domain-model.md) | Stable Agent Team vocabulary | Changing domain semantics, type names, or the collaboration contract |
-| [`team-collaboration/README.md`](team-collaboration/README.md) | The implemented ten-tool, Thread Attention, Inbox, reading, mention, and mutation-fence contract | Changing collaboration semantics, model-facing tools, or Agent notifications |
+| [`team-collaboration/README.md`](team-collaboration/README.md) | Collaboration tools, Thread Attention, Inbox, and mutation boundaries | Changing collaboration semantics, model-facing tools, or Agent notifications |
 | [`team-collaboration/model-and-time.md`](team-collaboration/model-and-time.md) | The collaboration model and Member time awareness | Changing what a Thread, Task, Claim, or a time notice means |
-| [`team-collaboration/tools.md`](team-collaboration/tools.md) | The ten model-facing tools and the rules shared by all of them | Changing a tool contract, its refs, or the mutation fence around it |
+| [`team-collaboration/tools.md`](team-collaboration/tools.md) | Model-facing tools and their shared rules | Changing a tool contract, its refs, or the mutation fence around it |
 | [`team-collaboration/attention-and-messaging.md`](team-collaboration/attention-and-messaging.md) | Attention, Inbox, mentions, human-readable messages, and ref citation | Changing notifications, mention delivery, or how a Message is rendered |
 | [`team-collaboration/boundaries.md`](team-collaboration/boundaries.md) | Mutation fences, the Human Remote boundary, and the Team Member context boundary | Changing who may mutate what, or what a Member may see of another Session |
 | [`team-collaboration/memory-and-context.md`](team-collaboration/memory-and-context.md) | Member memory, context pressure ownership, Agent notifications, and assembled acceptance | Changing memory upkeep, context pressure handling, or what acceptance must prove |
@@ -41,13 +51,4 @@ This directory contains the maintained engineering documentation for this reposi
 
 ## Documentation rules
 
-Editing or adding a document under `docs/`? Routing branches and the maintenance discipline live in [`AGENTS.md`](AGENTS.md) — read it first.
-
-## Where to start
-
-- **Host or domain changes:** [`architecture/README.md`](architecture/README.md) for boundaries, [`domain-model.md`](domain-model.md) for vocabulary; `packages/agent-team/src/` and its tests are the authority. Use `.scratch/README.md` to locate historical decisions when needed.
-- **Tools or preset changes:** the relevant sections of [`architecture/README.md`](architecture/README.md), then the Harness cookbook and subsystem docs.
-- **Client or UI changes:** [`frontend-design/README.md`](frontend-design/README.md) for the UI system, [`harness-navigation.md`](harness-navigation.md) for the cross-repository route.
-- **Installation, build, tests, or Remote generation:** [`development/README.md`](development/README.md), then the actual `package.json` or script implementation; use [`development/e2e-lanes.md`](development/e2e-lanes.md) to pick a targeted browser lane.
-- **Measuring or changing Team performance:** [`development/team-performance.md`](development/team-performance.md), then the matching benchmark or semantic probe.
-- **Publishing a release:** [`release-runbook.md`](release-runbook.md) for the procedure and its gates, then [`dsh-release-compatibility.md`](dsh-release-compatibility.md) for the certification that must precede any peer-range change.
+Before editing or adding a page here, read the [routing and maintenance rules](AGENTS.md).
