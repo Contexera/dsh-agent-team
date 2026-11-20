@@ -26,3 +26,8 @@ Security fixes ship on the current release line. Agent Team is certified against
 specific DSH range — see
 [`docs/dsh-release-compatibility.md`](docs/dsh-release-compatibility.md) — and a
 release outside that range is unsupported rather than patched.
+
+## Security model
+
+[`SECURITY_MODEL.md`](SECURITY_MODEL.md) describes the boundaries Agent Team
+enforces, the risks it accepts by design, and what counts as a vulnerability.

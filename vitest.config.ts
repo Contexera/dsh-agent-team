@@ -29,6 +29,7 @@ const integrationSpecs = [
   'packages/agent-team/tests/agent-team-attention.spec.ts',
   'packages/agent-team/tests/agent-team-transfer.spec.ts',
   'packages/agent-team/tests/archived-reads.spec.ts',
+  'packages/agent-team/tests/attachment-path-boundary.spec.ts',
   'packages/agent-team/tests/attachments.spec.ts',
   'packages/agent-team/tests/body-authored-mentions.spec.ts',
   'packages/agent-team/tests/change-scopes.spec.ts',

@@ -97,6 +97,8 @@ Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读
 
 `team_message.start` 创建 Project 顶层 Thread。默认 taskless，也接受明确 task intent 以原子创建 Task。`team_message.reply` 向既有 Thread 追加明确的 reply。二者都接受 `attachments` 中的可选 absolute file paths。Host 验证每个 path，把 bytes 复制到 attachment cache。收件人看到 thumbnails/chips 与一行 cached path。任一 path 验证失败都会拒绝整个 send。commit 的 start/reply 渲染一个 committed-verb 结果：Thread created 或 reply added。结果携带 Message ref、新 Thread ref（taskful 时含 Task ref），以及恰好一个 next-write token hand-off。新建 Thread 立即可寻址，下一次变更也拿到了基础。
 
+`attachments` path 指向的是 Member 自己本可读的文件，因此带 attachments 的 start、reply 或 `post` 要求 Member 生效工具面中有 file-reading 或 shell tool——`read`、`read_image`、`bash` 或 `pwsh` 之一——否则以 `attachment_read_required` 拒绝。每个 path 还必须留在 Member 工作目录内：目录之外的 absolute path、`..` 逃逸或逃逸 symlink 会在复制任何文件之前被拒绝。Human composer 路径只保留常规校验。
+
 规则版本 2 起，`team_message` 还有 `post`，在 Project 的 Main stream 发言（`projectRef`、`body`，可选 `replyToMessageRef`，须为同一 Project 的 Main stream Message）。它不需要写入 token。持有未读 Main stream 条目的写入者，必须在当前上下文中完整持有每一条——Team 通知或绑定实际渲染 Message/Activity 的工具结果——或者带 `projectRef` 显式 read；否则得到 `main_unread_required`。
 
 `start` 带 `kind: 'discussion' | 'task'`（已移除的 `asTask` 写法会被拒绝并指回 `kind`，绝不静默丢弃），只有 Project owner 能开：其他人得到 `project_owner_required`，提示改用 `post`；不参与该 Workspace 的 Member——或写操作中未 enabled 的 Member——得到 `not_project_member`。Task start 另接受 `accountable` 与 `sourceThreadRefs`；两者在讨论 start 与 `post`/`reply` 上都被拒绝而非丢弃，commit 的 start 回报实际记录的负责人。
