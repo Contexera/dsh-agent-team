@@ -4,13 +4,17 @@ English | [中文](package-ownership.zh.md)
 
 ```text
 packages/agent-team
-  Host service + operation ledger + projections + Agent lifecycle + Remote declarations
+  Host service + operation ledger + projections + Agent lifecycle
+  + Team manager Session + Remote declarations
         │
         ├── packages/tool-agent-team
-        │     model-facing team_view / team_inbox / team_thread / team_message / team_task / team_attention / team_dm
+        │     team-member:  team_view / team_inbox / team_thread / team_message / team_task
+        │                   / team_attention / team_dm / team_subscription / team_reminder / team_worker
+        │     team-manager: team_overview / team_models / member_create / member_update / member_state
+        │                   / member_workspace / project_create / project_owner / project_update
         │
         └── packages/client-agent-team
-              typed Remote client + Team mode + browser presentation
+              typed Remote client + Team mode + manager destination + browser presentation
 ```
 
 These three directories are the build and export seams of one published package, `@contexera/dsh-agent-team`, declared by the root `package.json`; none has a manifest of its own. Dependency direction is one-way: Host never imports Client or tool implementation internals, tools resolve the live Host service at execution time, and Client consumes typed Remote plus public types and Harness slots — never another seam's generated `lib/` by relative path.

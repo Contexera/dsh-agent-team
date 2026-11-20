@@ -35,14 +35,15 @@ Client remote service
 - `openAttachment` 与 `attachmentApplications` 从同一个已验证的 cache entry 解析 payload 路径，再交给 serving desktop 自己的 opener 或 handler 列表。两者都不接受 Client 传入的路径，因此 attachment 动作无法打开任意 Host 文件；headless Host 返回 `opened: false` 与空 handler 列表，而不是让无法打开任何东西的 Client 失败。
 
 ## Client plugin 和 slot composition
-Team browser plugin 是 external Client plugin。Shipped Shell 继续拥有 outer layout。Team 增加一个 additive footer action，并动态 shadow 三个 seats：
+Team browser plugin 是 external Client plugin。Shipped Shell 继续拥有 outer layout。Team 增加一个全局 panel 与一个设置页，并在 Team mode 期间动态 shadow 两个 seats：
 
 ```text
 sidebar.panellist           additive Team row, order 20
 main (key agent-team)       Team panel, priority -100
 sidebar.workspaces          Team shadow, priority -100
 main (key conversation)     Team shadow, priority -100
-sidebar.settings            Team shadow, priority -100
+settings.section            additive Team settings page, order 5
+settings.section.icon       Team mark on that page's nav row
 ```
 
 Browser activation 顺序是：

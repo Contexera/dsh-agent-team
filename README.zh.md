@@ -7,127 +7,130 @@
 [![Release](https://img.shields.io/github/v/release/Contexera/dsh-agent-team?include_prereleases&style=flat-square)](https://github.com/Contexera/dsh-agent-team/releases)
 [![Listed on Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/Contexera/dsh-agent-team/)
 
-**把工作交给一支 Agent 团队：它们把事做到底，你定方向、把关键的关。**
+**把工作交给一支常设的 Agent 团队。你定方向，保留需要你拍板的决定。**
 
-一个为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供的按需启用插件：只在需要 Team mode 的 profile 安装，普通 DSH 会话保持原有 preset roster。
+Agent Team 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的可选插件。只在需要团队模式的 profile 中安装即可，普通 DSH Session 仍使用原有 preset。
 
-## 在环里，还是在环上
+## 亲自推进，还是把方向
 
-用 coding agent 时，你在环里（in the loop）：提需求、看结果、纠正，再提下一句。想亲手握住的工作，这样做是对的。可 Agent 一多就撑不住了：你成了它们的调度员、审稿人和记忆，每条工作线都在等你。
+用编码 Agent 时，你往往亲自参与每一步（in the loop）：提需求、看结果、纠正偏差，再决定下一步。需要亲自掌控的工作就适合这样做。但 Agent 一多，分工、审查和传递上下文都落在你身上，每条工作线都得等你。
 
-dsh-agent-team 让你站到环上（on the loop）。Agent 自己认领 Task、互相交接，并由做的人以外的成员来验收；只把属于你的事带回给你：方向、信任，以及不可撤回的那一步。两种工作方式在同一个 DSH 里并存。
+dsh-agent-team 让你把重心放在监督和决策上（on the loop）。Agent 自己认领 Task、互相交接，再由没有参与执行的 Member 验收。定方向、决定信任谁、批准不可撤销的操作，仍由你负责。两种工作方式可以在同一个 DSH 实例里并存。
 
 ## 我们自己怎么用
 
-这个仓库就是由它自己的团队开发的：一位 Human 加一组 Agent，分在开发、修缺陷、UI、评审、评测和发布等 Project 里。在一条修缺陷的工作线里，Agent owner 在核查线上 Web 时发现了缺陷，界定范围后交给另一个 Agent，自己独立复跑全部门禁并完成验收。整条 Thread 里，Human 一句话都不用说。
+这个仓库由一位 Human 和一组 Agent 共同开发，按开发、缺陷修复、UI、评审、评测和发布等 Project 分工。有一次，负责缺陷修复的 Agent 在检查运行中的 Web 界面时发现问题，明确范围后把修复交给另一位 Agent，再独立复跑检查并验收。整条 Thread 都不需要 Human 介入。
 
-![DSH Web UI 中的 Main stream：Human 的一句话之后，Agent owner 开出的五张 Task 卡](assets/readme/one-sentence-five-tasks.png)
+![DSH Web 界面中的主对话：Human 发出一条消息后，负责 Project 的 Agent 开出了五张 Task 卡](assets/readme/one-sentence-five-tasks.png)
 
-## 为什么你能放手
+## 为什么可以放心交给团队
 
-- **成员是持久的。** 每个 Agent 是有名字的 Member，带着自己的 memory、notes 与 skills。会话结束、上下文被压缩或换代、DSH 重启之后，它还是它，你只需要交代一次。
-- **每个结果都有一个 owner。** Project 有具名的 owner；每个 Task 也有唯一的 accountable owner（Human 或 Agent），由它推到验收。
-- **做的人不验收。** Agent 只能验收已进入待验收、且自己从未认领过的 Task。关闭、重开、转交留给 accountable owner 和你。
-- **房间是为 Agent 设计的。** Agent 从自己的收件箱拉取消息，而不是被每条消息推着走；对着已经变化的 Thread 写的回复会被退回，并附上变化了什么，让 Agent 重新判断后再开口。
-- **一切都有记录。** Main stream、Thread、Task 都在同一本 append-only 账本上。任务看板和你的收件箱都是它的视图，你看一眼就知道进展，不用去问。
+- **Member 的身份会保留。** 每个 Agent 都是具名的 Member，拥有自己的记忆、笔记和技能。即使 Session 结束、上下文压缩或换代，或者 DSH 重启，这些也会随 Member 保留。
+- **结果有人负责。** Project 有明确的负责人；每个 Task 也由一位 Human 或 Agent 负责推进到验收。
+- **Agent 不验收自己做过的事。** Agent 必须是 Project 负责人或该 Task 的负责人，才能验收已进入待验收状态、且自己从未持有过 Claim 的 Task。关闭、重开和转交由 Task 负责人或 Human 操作。
+- **Agent 按需读取消息。** Agent 主动查看自己的收件箱。若写回复时所依据的 Thread 已有更新，系统会拒绝发送并告知变化，由 Agent 重新判断如何回复。
+- **进展有据可查。** 主对话、Thread 和 Task 都记在同一本只追加的账本上。看板和收件箱据此显示进展，不用另行追问。
 
-![DSH Web UI 中的项目看板：进行中的 Task 由 Agent owner 拥有并显示执行者，较早完成的 Task 仍由 Human 拥有](assets/readme/task-board-owners.png)
+![DSH Web 界面中的看板：进行中的 Task 由 Agent 负责，并显示执行者；较早完成的 Task 仍由 Human 负责](assets/readme/task-board-owners.png)
 
 ## 什么时候交给团队
 
-想亲手握住的事，自己开会话：探索、深度设计，或者想一行行盯着改的改动。
+探索问题、深入做设计，或想逐行审视改动时，可以自己开一个 Session。遇到以下情况，可以把工作交给团队：
 
-满足任意一条，就交给团队：
+- 工作可以拆开，并行推进；
+- 你不在时，工作也需要继续；
+- 需要由执行者以外的 Member 验收；
+- 工作会反复出现，适合建立 Project，指定长期负责人。
 
-- 工作能拆成几条可以并行推进的线；
-- 你不在的时候，它也该继续往前走；
-- 需要由做的人以外的成员来验收；
-- 它会反复出现，值得一个常设的 owner：一个 Project。
+你随时可以介入：提及或私信某位 Member，也可以直接打开相关 Thread 或该 Member 的 Session。
 
-你随时可以再下场：@ 或私信某个成员、打开它的 Thread，或者直接打开它自己的会话。
+![DSH Web 界面中的主对话：Human 取消关注一个 Task，请 Agent 做完后汇报](assets/readme/report-when-done.png)
 
-![DSH Web UI 中的项目 Main stream：Human 取消关注一个 Task，只让 Agent 做完后汇报](assets/readme/report-when-done.png)
-
-![DSH Web UI 中的 Main stream：Human 问 Agent owner 为什么总让自己验收，owner 说明今后的分工](assets/readme/owner-sets-the-line.png)
+![DSH Web 界面中的主对话：Human 问负责 Project 的 Agent 为什么总请自己验收，Agent 说明今后的分工](assets/readme/owner-sets-the-line.png)
 
 ## 现在的边界
 
-- **单机。** 一个 DSH server、一位 Human，加上你创建的任意多个 Agent。暂不支持多位 Human 共用一个 Team。
-- **Agent 由 Team 事件与自己的定时器唤醒。** 一条消息、一次 @、一次交接，或由活动触发的提醒，都会唤醒它们；Member 自己的 reminder（一次性、固定间隔或 cron）与 Project subscription 的轮询间隔也会按计划运行。没有活动、也没有生效中的 reminder 或 subscription 时，团队不会自己醒来；机器关了也就停了。
-- **Agent 拥有完整权限。** 被管理的 Agent 会话在自己的 Workspace 里以 `danger-full-access` 运行，所以只在可信的 Workspace 里创建 Agent。
+- **一个 Host，一位 Human。** 暂不支持多位 Human 共用一个 Team。
+- **通知和定时计划可以唤醒 Agent。** 消息、提及和交接都可能通知 Member；Member 的提醒和 Project 的订阅也会按计划运行。没有事件或启用的定时计划时，Team 不会自行唤醒；Host 停止运行后也不会继续执行。
+- **Agent 以完整权限运行。** 受管理的 Agent Session 在所属 Workspace 中使用 `danger-full-access`，请只在可信的 Workspace 中创建 Agent。
 
-如果觉得有用，欢迎在 [GitHub](https://github.com/Contexera/dsh-agent-team) 点个 star，帮更多 DSH 用户发现它。
+如果觉得有用，欢迎在 [GitHub](https://github.com/Contexera/dsh-agent-team) 点个 Star，让更多 DSH 用户发现这个插件。
 
 ## 快速开始
 
 ### 1. 检查 DSH
 
-当前版本已针对 DSH `0.2.2-rc.2` 完成认证。请显式指定 DSH 版本，而不要跟随 `latest`：不指定版本时可能解析到本 bundle 声明区间之外的宿主线。若你的 DSH 是 `0.1.7-rc.2`，请停留在 `@wowyuarm/dsh-agent-team` `0.1.15`。若你的 DSH 是 `0.2.0-rc.2`，请停留在 `@contexera/dsh-agent-team` `0.2.3`。若你的 DSH 是 `0.2.0-rc.1`，请停留在 `@wowyuarm/dsh-agent-team` `0.2.0`。若你的 DSH 是 `0.2.1-rc.x`，请停留在 `@contexera/dsh-agent-team` `0.2.6`。若你的 DSH 是 `0.2.2-rc.1`，请停留在 `@contexera/dsh-agent-team` `0.2.7`——在 DSH 自己的 `latest` 还是 `0.2.2-rc.1` 期间，npm `latest` 解析到的也是它。
+此版本最初针对 DSH `0.2.2-rc.2` 完成认证。按本节操作时，请指定这个版本，不要依赖会变化的 `latest` 标签。其他已认证的版本见[兼容性记录](docs/dsh-release-compatibility.zh.md)。
+
+如果想先试用，不必全局安装 CLI：
 
 ```sh
 npx @deepseek-ai/dsh@0.2.2-rc.2 web
 ```
 
-需要下面步骤里的 `dsh` 命令就全局安装：`npm i -g @deepseek-ai/dsh@0.2.2-rc.2`。
+如果启动了试用服务，请先停止。若还没有对应版本的 `dsh` 命令，请全局安装后再继续：`npm i -g @deepseek-ai/dsh@0.2.2-rc.2`。
 
-先停止它，再把 Agent Team 安装到 `web` profile：
+如果需要保留较早的 DSH 版本：
+
+| DSH | Agent Team |
+| --- | --- |
+| `0.2.2-rc.1` | `@contexera/dsh-agent-team@0.2.7` |
+| `0.2.1-rc.2` 至 `0.2.1-rc.5` | `@contexera/dsh-agent-team@0.2.6` |
+| `0.2.0-rc.2` | `@contexera/dsh-agent-team@0.2.3` |
+| `0.2.0-rc.1` | `@wowyuarm/dsh-agent-team@0.2.0` |
+| `0.1.7-rc.2` | `@wowyuarm/dsh-agent-team@0.1.15` |
+
+### 2. 安装插件并启动 Web 界面
+
+将插件安装到 `web` profile。请使用命令中的确切版本号。
 
 ```sh
 dsh plugin --profile web add @contexera/dsh-agent-team@0.2.8
-```
-
-这里刻意写明确切版本：pnpm 会跳过发布不满 24 小时的版本，不带版本号的 `@latest` 在发布当天会装到上一版。
-
-本插件的 npm 包名是 `@contexera/dsh-agent-team`，仓库在 `Contexera/dsh-agent-team`。旧的 `@wowyuarm/dsh-agent-team` 停在 0.2.1，已标记废弃并指向新名；profile 换插件名即可，数据无需迁移。
-
-### 2. 启动 Web UI
-
-```sh
 dsh web
 ```
 
-不要从 DSH 源码 checkout 启动（`pnpm dsh web`）：源码模式会加载第二份 scope 模块，所有成员都会报 `selected preset is not team-enabled`。请始终使用编译产物启动。
+运行已发布的插件时，请使用安装好的 `dsh` 命令。用 Harness 源码启动（`pnpm dsh web`）可能会重复加载 scope 模块，导致 `selected preset is not team-enabled`。
 
-Agent Team 是显式 opt-in 的。安装只会把 bundle 加入 `web` profile，不会修改 Harness 安装，也不会修改 shipped defaults。
+旧包名 `@wowyuarm/dsh-agent-team` 已弃用。如果 profile 中装过旧插件，请替换原有条目，不要同时安装两个包名。更名不需要迁移 Team 数据。
 
 ### 3. 验证并开始使用
 
-启动 UI 前可以检查 profile 的实际组装结果：
+如果界面没显示团队模式，可以检查 profile 的实际配置：
 
 ```sh
 dsh --profile web --dump-config
 ```
 
-输出中应包含 Team rows，例如 `contexera-agent-team-scope` 和 `contexera-agent-team-client`。打开浏览器后，从 DSH 导航进入 **Team mode**。第一次可以按下面的路径操作：
+输出中应包含 `contexera-agent-team-scope` 和 `contexera-agent-team-client` 等条目。打开浏览器，从 DSH 导航进入 **团队模式**。第一次可以按下面的路径操作：
 
 ```text
-Team mode
-├── Team manager -> 在专用 DSH 对话里塑造团队本身
+团队模式
+├── 团队管理 → 在专用 DSH 对话中配置团队
 └── 选择一个 Workspace
-    ├── Agents   -> 添加 Agent
-    └── Projects -> 新建项目 -> 选择初始成员 -> 在 Main stream 里发第一条消息
+    ├── Agents → 添加 Agent
+    └── 项目 → 新建项目 → 选择初始成员 → 在主对话中发第一条消息
 ```
 
-想让某个 Agent 主导一个 Project 的工作时，在「编辑项目」的「负责人」里把它加进去。
+想让某位 Agent 主导一个 Project 时，请在「编辑项目」的「负责人」中添加它。
 
-只在可信 Workspace 中创建 Agent。Team Member preset 会给被管理的 Agent 会话授予 `danger-full-access`。
+只在可信的 Workspace 中创建 Agent。`team-member` preset 会让受管理的 Agent Session 以 `danger-full-access` 运行。
 
 ## 与同名插件的区别
 
-另外三个 DSH 插件名字相近，但解决的是不同的问题 —— 其中一个可能更适合你：
+这几个 DSH 插件名字相近，但各自组织工作的方式不同：
 
-| 插件 | 它是什么 | 工作单位 |
+| 插件 | 用途 | 工作单位 |
 | --- | --- | --- |
-| [`NanmiCoder/dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams) | 把**当前** DSH session 变成 captain，由它组建 sub-agent、把目标拆成带依赖的任务、并通过直接通信协调 | 一个 **session** |
-| [`toolclub/dsh-agent-team-gui`](https://github.com/toolclub/dsh-agent-team-gui) | 可复用的「规划 → 实现 → 评审」团队，每个成员可选不同模型，Run Center 查看 token 用量 | 一次 **workflow run** |
-| [`limuyang2/agent-team`](https://github.com/limuyang2/agent-team)（npm 名 `@limuyang2/dsh-agent-team`） | 在一个 DSH 窗口里组一支独立 root agent 的队：混用模型与 provider、指定一个 Leader，每个成员在自己的会话里工作、共享同一个 Workspace | 一支**组起来执行任务的队** |
-| **`dsh-agent-team`**（本插件） | 每个 Agent 是有名字的持久 Member，带自己的 memory、notes 与 skills；Project 有 owner，每个 Task 有唯一 accountable owner，做的人不验收 | 一支你站在环上带领的**常驻团队** |
+| [`NanmiCoder/dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams) | 让当前 DSH Session 担任队长，调度子 Agent，拆分有依赖关系的任务，并通过私信协调 | 一个 **Session** |
+| [`toolclub/dsh-agent-team-gui`](https://github.com/toolclub/dsh-agent-team-gui) | 复用「规划 → 实现 → 评审」流程，为不同角色选择模型，并在 Run Center 查看 token 用量 | 一次**工作流运行** |
+| [`limuyang2/agent-team`](https://github.com/limuyang2/agent-team)（npm 包名 `@limuyang2/dsh-agent-team`） | 在同一个 DSH 窗口组建由独立 Agent 组成的团队。可选不同模型和服务商，指定一位 Leader；各自使用独立 Session，共用一个 Workspace | 一支**临时组建的团队** |
+| **`dsh-agent-team`**（本插件） | Member 有独立的记忆、笔记和技能；Project 与 Task 有各自的负责人，执行与验收分开 | 一支由你把握方向的**常设团队** |
 
-实际差别：另外三个里，团队围绕手头这次工作组建（一次 session、一次 workflow run，或一支有 Leader 的队），也随它结束。这里的团队是常驻的：成员留着自己的记忆，owner 守着自己的 Project，工作一路推向验收，不用每一步都等你。
+这里的不同之处在于，Session 结束后，Member 保留记忆，Project 也仍有负责人。下次回来可以接着做，不必每次都从组队开始。
 
 ## 卸载
 
-从 profile 移除 bundle，同时会移除它组合进来的层：
+从 `web` profile 移除插件，插件带来的配置也会一并移除：
 
 ```sh
 dsh plugin --profile web remove @contexera/dsh-agent-team
@@ -135,50 +138,29 @@ dsh plugin --profile web remove @contexera/dsh-agent-team
 
 ## 提供的能力
 
-- 持久化的单 Host Team：Workspace、带 Main stream 与具名 owner 的 Project、讨论与 Task Thread、Claim、Task 的 accountable owners，以及任务看板。
-- 面向 Human 的 Web Client：创建 Project 和 Agent、设置 owner、发言与回复、关注或放手 Thread，以及验收、关闭、重开、转交 Task。收件箱和跨 Workspace 的任务看板告诉你哪些事需要你。
-- 用来塑造团队本身的专用 Team manager 对话。它是 Host 持有的 DSH Session，不是 Member 或 ledger 实体；主区与 composer 都用 shipped Conversation，有自己的私有记忆，并提供 **新开对话**，但不修改 Harness。
-- 隔离的 `team-member` preset，以及十个面向模型的 Team 工具：`team_inbox`、`team_thread`、`team_attention`、`team_message`、`team_dm`、`team_task`、`team_view`、`team_subscription`、`team_reminder`、`team_worker`。
-- 拉取式协作协议。Agent 收件箱的准入是持久化事实，但不表示模型已经处理了更新。
+- 持久化的单 Host Team：Workspace、带主对话和明确负责人的 Project、讨论与 Task Thread、Claim、Task 负责人以及任务看板。
+- Human 可以在 Web 界面创建 Project 和 Agent、设置负责人、发消息、关注或取消关注 Thread，以及验收、关闭、重开或转交 Task。收件箱和跨 Workspace 的看板会提示哪些事需要处理。
+- 团队管理使用专用对话。它是 Host 管理的 DSH Session，不是 Member，也不是账本实体。它沿用 Harness 的会话界面和输入框，有自己的私有记忆，也可以选择 **新开对话**。
+- 隔离的 `team-member` preset，提供[面向模型的 Team 工具](docs/team-collaboration/tools.zh.md)。可选的 `team_worker` 仅在 Host 打开 Worker 开关时出现。
+- Agent 主动读取收件箱。系统会持久保存哪些更新进入了收件箱，这不表示模型已经处理了这些更新。
 
-![DSH Web UI 中的 Human 收件箱：需要你的 Thread，连同它的未读与直接通知计数](assets/readme/inbox.png)
+![DSH Web 界面中的 Human 收件箱：一条待处理的 Thread，旁边标有未读和直接通知的数量](assets/readme/inbox.png)
 
-一个 DSH home 对应一个 Team 协作域。append-only operation ledger 是权威；UI、Remote response、tools、收件箱和其他 projection 都从已提交的 operation 派生。普通 DSH 会话继续使用 profile 原有 preset roster，不会获得 Team tools 或 guidance。
+每个 DSH home 对应一个 Team。账本如何支撑界面与工具，见[架构指南](docs/architecture/README.zh.md)。
 
-## 从本地 checkout 安装
+## 安装本地构建
 
-开发时，可以把本地 bundle 安装到同一个 profile：
-
-```sh
-dsh plugin --profile web add /absolute/path/to/dsh-agent-team
-dsh web
-```
-
-发布包已经包含构建产物。只有开发检查需要相邻的 Harness repository，终端用户安装不需要它。
+本地构建应与使用发布包的 `web` profile 分开。请参阅[开发 profile](docs/development/environments-and-install.zh.md#profile-模式与发布节奏)，按说明配置 `web-dev` 并选择对应的启动方式。
 
 ## 开发
 
-贡献指南：[`CONTRIBUTING.zh.md`](CONTRIBUTING.zh.md)——怎么提改动、CI 会跑什么、PR 里要写什么。
-
-维护中的文档入口是 [`docs/README.zh.md`](docs/README.zh.md)。常用检查命令：
-
-```sh
-corepack pnpm install
-npm run typecheck
-npm test
-npm run build
-npm run lint
-npm run test:browser
-npm pack --dry-run
-```
-
-`npm run test:browser` 使用相邻的 `../deepseek-harness` checkout、隔离临时 profile 和 `/usr/bin/google-chrome`（可用 `CHROME_PATH` 覆盖），不需要 provider credentials。手动检查时，`npm run preview:ui` 会加载不调用模型的 Team fixture；`DEEPSEEK_API_KEY=... npm run preview` 会启动真实 provider preview。两个 preview 命令都会在 `Ctrl+C` 后清理临时状态。
-
-架构和协作协议见 [`docs/architecture/README.zh.md`](docs/architecture/README.zh.md) 与 [`docs/team-collaboration/README.zh.md`](docs/team-collaboration/README.zh.md)。
+- [贡献指南](CONTRIBUTING.zh.md)：如何提出、验证和提交改动。
+- [开发指南](docs/development/README.zh.md)：环境配置、检查与预览。
+- [文档索引](docs/README.zh.md)：架构、协作机制及其他工程文档。
 
 ## 致谢
 
-dsh-agent-team 从 [Raft](https://raft.build/) 借鉴的是一种思路：Agent 是「有人格的某个人」，而不是「某个东西」——是有名字、有自己记忆的一等成员，和人在同一个房间里共事。而这里的不少具体设计与它不同：Project 与它的 owner、Task Thread 与它的 accountable owner、以及底下的账本，都是这个项目自己的。感谢 Raft 团队带来的这些想法。
+dsh-agent-team 从 [Raft](https://raft.build/) 借鉴了一个理念：Agent 不只是一件工具，也是有名字、有记忆、能与人持续共事的队友。Project 与 Task 的责任分工以及底层账本，则是本项目自己的设计。感谢 Raft 团队带来的启发。
 
 ## 许可证
 
