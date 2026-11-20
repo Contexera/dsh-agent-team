@@ -217,7 +217,7 @@ describe('Agent Team Member lifecycle', () => {
   })
 
   it('every argument-shape rejection names the next action', async () => {
-    const { ctx, workspaceId } = await realHarness()
+    const { ctx, workspaceId } = await realHarness(new EmptyAdapter(), 'jsonl', undefined, false, undefined, 'memory', { memberReadTool: 'read' })
     const project = await ctx.agentTeam.createProject({ requestId: requestId('shape-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
     const added = await ctx.agentTeam.addMember({ requestId: requestId('shape-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     const agent = ctx.agents.get(added.status.member.sessionId)!
@@ -923,7 +923,7 @@ describe('Agent Team Member lifecycle', () => {
   })
 
   it('runs the five-tool pull protocol through one live Team Member', async () => {
-    const { ctx, workspaceId } = await realHarness()
+    const { ctx, workspaceId, checkout } = await realHarness(new EmptyAdapter(), 'jsonl', undefined, false, undefined, 'memory', { memberReadTool: 'read' })
     const project = await ctx.agentTeam.createProject({ requestId: requestId('protocol-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
     const builder = await ctx.agentTeam.addMember({ requestId: requestId('protocol-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
     const reviewer = await ctx.agentTeam.addMember({ requestId: requestId('protocol-reviewer'), workspaceId, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef], model: { provider: 'mock', model: 'mock' }})
@@ -993,7 +993,7 @@ describe('Agent Team Member lifecycle', () => {
     // team_message attachments: the tool passes absolute paths, the Host
     // validates and copies them into the cache, and the committed message
     // carries the same metadata and prompt lines as a manual upload.
-    const shotPath = join(process.env.DSH_HOME!, 'protocol-shot.png')
+    const shotPath = join(checkout, 'protocol-shot.png')
     await writeFile(shotPath, Buffer.from('png-bytes'))
     const shotMessage = await call('team_message', { action: 'start', projectRef: project.project.projectRef,
       body: 'Agent-created task with a screenshot', attachments: [shotPath] })

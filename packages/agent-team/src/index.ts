@@ -55,7 +55,7 @@ export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './s
 export { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
 import { carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY, type TeamContextProjectionState } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
-import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, isExtraToolGrantCandidate, memberMemoryDirectoryName, memberMemoryDirectoryPath, MemberRuntime, SHELL_TOOL_NAMES, type TurnBoundary } from './member-runtime.ts'
+import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, FILE_READ_TOOL_NAMES, isExtraToolGrantCandidate, memberMemoryDirectoryName, memberMemoryDirectoryPath, MemberRuntime, SHELL_TOOL_NAMES, type TurnBoundary } from './member-runtime.ts'
 import {
   EXTRA_TOOL_GRANTS_FIELD, extraToolGrantsFrom, sanitizeExtraToolGrants,
 } from './member-tool-grants.ts'
@@ -2597,13 +2597,30 @@ export default class AgentTeam extends TypertRemoteService {
   /**
    * Resolve uploaded ids and agent-supplied absolute paths into one attachment metadata list. All paths are validated before anything is copied,
    * so one rejection leaves the cache untouched; each copy takes a request-derived id, so a retry converges instead of writing an orphan.
+   * An Agent caller names files only inside its own working directory and only while its enforced tools include a file reader:
+   * a Member without one may not hand the Host an arbitrary file read it does not hold itself.
    */
-  private async resolveMessageAttachments(request: { readonly requestId: AgentTeamRequestId; readonly attachments?: readonly AgentTeamAttachmentId[] | undefined; readonly attachmentPaths?: readonly string[] | undefined }): Promise<readonly AgentTeamMessageAttachment[]> {
+  private async resolveMessageAttachments(
+    request: { readonly requestId: AgentTeamRequestId; readonly attachments?: readonly AgentTeamAttachmentId[] | undefined; readonly attachmentPaths?: readonly string[] | undefined },
+    actor: AgentTeamHumanActor | AgentTeamMemberActor,
+    agent: Agent | undefined,
+  ): Promise<readonly AgentTeamMessageAttachment[]> {
     const fromPaths: AgentTeamMessageAttachment[] = []
     if (request.attachmentPaths !== undefined && request.attachmentPaths.length > 0) {
-      for (const absolutePath of request.attachmentPaths) await validatePathAttachment(absolutePath)
+      let cwd: string | undefined
+      if (actor.kind === 'member') {
+        if (!this.memberRuntime.enforcesFileReadTool(actor.memberId)) {
+          const allowed = `${FILE_READ_TOOL_NAMES.slice(0, -1).join(', ')}, or ${FILE_READ_TOOL_NAMES.at(-1)}`
+          throw new Error(`reading a file into an attachment runs the Host's file access, and this Member has no ${allowed} tool (attachment_read_required); drop the attachments parameter or send it through the Human Web Client`)
+        }
+        const workingDirectory = agent?.ctx.get('workingDirectory') as { get(session: Agent['session']): string | undefined } | undefined
+        cwd = agent === undefined ? undefined : workingDirectory?.get(agent.session)
+        if (cwd === undefined) throw new Error('this Session has no working directory, so an attachment path cannot be resolved')
+      }
+      const resolved: string[] = []
+      for (const absolutePath of request.attachmentPaths) resolved.push(await validatePathAttachment(absolutePath, cwd))
       for (const [index, absolutePath] of request.attachmentPaths.entries()) {
-        fromPaths.push(Object.freeze(await copyPathAttachment(attachmentsRoot(), absolutePath, pathAttachmentId(request.requestId, index), request.requestId)))
+        fromPaths.push(Object.freeze(await copyPathAttachment(attachmentsRoot(), absolutePath, pathAttachmentId(request.requestId, index), request.requestId, resolved[index]!)))
       }
     }
     return [...fromPaths, ...await this.prepareAttachments(request.attachments)]
@@ -2974,12 +2991,12 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Agent-only start of a discussion or Task Thread; Project owners only. */
   async startThreadForAgent(agent: Agent, request: AgentTeamStartThreadRequest): Promise<AgentTeamStartThreadResult> {
-    return this.startThreadAs(this.memberCall(agent, request.workspaceId), request)
+    return this.startThreadAs(this.memberCall(agent, request.workspaceId), request, agent)
   }
 
   /** Agent-only Main stream Message. */
   async postMainMessageForAgent(agent: Agent, request: AgentTeamPostMainMessageRequest): Promise<AgentTeamPostMainMessageResult> {
-    return this.postMainMessageAs(this.memberCall(agent, request.workspaceId), request)
+    return this.postMainMessageAs(this.memberCall(agent, request.workspaceId), request, agent)
   }
 
   /** Agent-only Main stream read; a read with nothing to acknowledge commits nothing. */
@@ -3024,7 +3041,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Agent-only existing-Thread reply. */
   async replyForAgent(agent: Agent, request: AgentTeamReplyRequest): Promise<AgentTeamReplyResult> {
-    return this.replyAs(this.memberCall(agent, request.workspaceId), request)
+    return this.replyAs(this.memberCall(agent, request.workspaceId), request, agent)
   }
 
   /** Read one Message back verbatim, for the reader that has to answer it. */
@@ -4007,10 +4024,11 @@ export default class AgentTeam extends TypertRemoteService {
     actor: AgentTeamHumanActor | AgentTeamMemberActor,
     request: Req,
     commit: (authorized: Req & { readonly actor: AgentTeamHumanActor | AgentTeamMemberActor; readonly body: string; readonly resolvedAttachments?: readonly AgentTeamMessageAttachment[] }) => Promise<{ readonly committed: boolean; readonly value: Res }>,
+    agent?: Agent,
   ): Promise<Res> {
     return withMessageAttachmentEntries(attachmentsRoot(), request, async () => {
       try {
-        const metadata = await this.resolveMessageAttachments(request)
+        const metadata = await this.resolveMessageAttachments(request, actor, agent)
         const result = await commit({
           ...request, body: this.appendAttachmentLines(request.body, metadata),
           ...(metadata.length === 0 ? {} : { resolvedAttachments: metadata }),
@@ -4025,12 +4043,12 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
-  private startThreadAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamStartThreadRequest): Promise<AgentTeamStartThreadResult> {
-    return this.commitMessageAs(actor, request, authorized => this.requireLedger().startThread(authorized))
+  private startThreadAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamStartThreadRequest, agent?: Agent): Promise<AgentTeamStartThreadResult> {
+    return this.commitMessageAs(actor, request, authorized => this.requireLedger().startThread(authorized), agent)
   }
 
-  private postMainMessageAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamPostMainMessageRequest): Promise<AgentTeamPostMainMessageResult> {
-    return this.commitMessageAs(actor, request, authorized => this.requireLedger().postMainMessage(authorized))
+  private postMainMessageAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamPostMainMessageRequest, agent?: Agent): Promise<AgentTeamPostMainMessageResult> {
+    return this.commitMessageAs(actor, request, authorized => this.requireLedger().postMainMessage(authorized), agent)
   }
 
   private async readMainStreamAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamMainStreamReadRequest): Promise<AgentTeamMainStreamReadResult> {
@@ -4045,8 +4063,8 @@ export default class AgentTeam extends TypertRemoteService {
     return this.requireLedger().readMessage(actor, request)
   }
 
-  private replyAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReplyRequest): Promise<AgentTeamReplyResult> {
-    return this.commitMessageAs(actor, request, authorized => this.requireLedger().reply(authorized))
+  private replyAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReplyRequest, agent?: Agent): Promise<AgentTeamReplyResult> {
+    return this.commitMessageAs(actor, request, authorized => this.requireLedger().reply(authorized), agent)
   }
 
   /**

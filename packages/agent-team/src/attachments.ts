@@ -79,19 +79,42 @@ function refuseAttachment(subject: string, fault: string): never {
   throw new Error(`attachment ${subject} ${fault} — ${recoveryFor('attachment_path_rejected').sentence({ refused: subject })}`)
 }
 
-/** Validate an agent-supplied path before any cache write, so a rejection leaves the cache untouched. */
-export async function validatePathAttachment(raw: string): Promise<void> {
+/**
+ * Validate an agent-supplied path before any cache write, so a rejection leaves the cache untouched, and return the path to read.
+ * With a `root` (an Agent's working directory) the path must stay inside it: containment is checked lexically before any
+ * filesystem call, so an outside path cannot even probe existence, and again after `realpath`, so a symlink cannot escape.
+ */
+export async function validatePathAttachment(raw: string, root?: string): Promise<string> {
   if (!isAbsolute(raw)) refuseAttachment(`path '${raw}'`, 'must be absolute')
-  const info = await stat(raw).catch(() => undefined)
+  if (root === undefined) {
+    const info = await stat(raw).catch(() => undefined)
+    if (info === undefined) refuseAttachment(`path '${raw}'`, 'does not exist')
+    return checkedPathInfo(raw, raw, info)
+  }
+  if (outside(root, raw)) refuseAttachment(`path '${raw}'`, 'is outside your working directory')
+  const pair = await Promise.all([realpath(root), realpath(raw)]).catch(() => undefined)
+  if (pair === undefined) refuseAttachment(`path '${raw}'`, 'does not exist')
+  const [realRoot, resolved] = pair
+  if (outside(realRoot, resolved)) refuseAttachment(`path '${raw}'`, 'is outside your working directory')
+  const info = await stat(resolved).catch(() => undefined)
   if (info === undefined) refuseAttachment(`path '${raw}'`, 'does not exist')
+  return checkedPathInfo(raw, resolved, info)
+}
+
+/** The shared size and shape fence after a path is confirmed to exist, refusing under the caller's own `raw` spelling; returns the resolved path the caller may read. */
+function checkedPathInfo(raw: string, resolved: string, info: { isFile(): boolean; readonly size: number }): string {
   if (!info.isFile()) refuseAttachment(`path '${raw}'`, 'is not a regular file')
   if (info.size === 0) refuseAttachment(`'${basename(raw)}'`, 'must not be empty')
   if (info.size > ATTACHMENT_MAX_BYTES) refuseAttachment(`'${basename(raw)}'`, `exceeds the ${ATTACHMENT_MAX_BYTES} byte limit`)
+  return resolved
 }
 
-/** Copy a validated file under the request-stable id. A committed Message may reference that id, so an existing entry is never overwritten: identical content replays, anything else is refused as a request-id collision. */
-export async function copyPathAttachment(root: string, raw: string, attachmentId: AgentTeamAttachmentId, requestId: string): Promise<AgentTeamMessageAttachment> {
-  const { name, byteSize, mediaType } = await writeAttachmentOnce(root, attachmentId, requestId, basename(raw), mediaTypeForPath(raw), await readFile(raw))
+/**
+ * Copy a validated file under the request-stable id. A committed Message may reference that id, so an existing entry is never overwritten: identical content replays, anything else is refused as a request-id collision.
+ * `sourcePath` is the realpath-verified path `validatePathAttachment` returned; `raw` still supplies the display name and media type.
+ */
+export async function copyPathAttachment(root: string, raw: string, attachmentId: AgentTeamAttachmentId, requestId: string, sourcePath = raw): Promise<AgentTeamMessageAttachment> {
+  const { name, byteSize, mediaType } = await writeAttachmentOnce(root, attachmentId, requestId, basename(raw), mediaTypeForPath(raw), await readFile(sourcePath))
   return { attachmentId, name, byteSize, mediaType }
 }
 

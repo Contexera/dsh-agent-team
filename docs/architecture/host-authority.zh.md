@@ -126,6 +126,10 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
   Team tools 不受任何 allow-list 影响，因此会让 Host 运行代码的 Team tool 自己检查实际生效的工具范围：Agent 发起的订阅 create、update、test、resume 或 replay，只有在该 Member 当前安装的 restriction 放行 `bash` 或 `pwsh` 时才会执行，否则被拒绝；尚未安装 restriction 的 Member 视为没有 shell。见 [`team_subscription`](../team-collaboration/tools.zh.md#team_subscription)。
 
+  `team_message` 的 `attachments` path 是同一种越权形状：它让 Host 读取一个 Member 自己本来能读的 Host 文件。因此 Agent 发起的、带 attachments 的 start、reply 或 post，在该 Member 生效的工具面放行 `read`、`read_image`、`bash` 或 `pwsh` 之一之前，都会以 `attachment_read_required` 被拒绝。
+
+  path 还被约束在调用 Agent 的工作目录内：先做 lexical 检查（不触碰文件系统），再在 `realpath` 之后复检；落在目录之外的 absolute path、`..` 逃逸、或逃逸 symlink 都会让整个 send 被拒，且不写入 cache。Human Remote 路径没有 Member 工具面与工作目录，只保留常规校验。见 [`team_message`](../team-collaboration/tools.zh.md#team_message)。
+
   每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
 
   每次边界等待返回后，capability 与 Worker 工具面编辑都同步复查 live handle 和真正 idle。若新一轮已开始，就再次等待，而不是覆盖该轮冻结的许可。shutdown 释放等待，但不会再向退役 context 注册观察器或安装 restriction。

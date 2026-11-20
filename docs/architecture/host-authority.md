@@ -133,6 +133,10 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 
   Team tools survive every allow-list, so a Team tool that would make the Host run code checks the enforced surface itself: an Agent's subscription create, update, test, resume, or replay is refused unless the restriction currently installed for that Member admits `bash` or `pwsh`, and a Member with no installed restriction counts as having none. See [`team_subscription`](../team-collaboration/tools.md#team_subscription).
 
+  A `team_message` `attachments` path is the same shape of reach: it asks the Host to read one Host file the Member could read itself, so an Agent's start, reply, or post that carries one is refused with `attachment_read_required` unless the Member's enforced surface admits `read`, `read_image`, `bash`, or `pwsh`.
+
+  The path is then held to the calling Agent's working directory, checked lexically before any filesystem call and again after `realpath`, so an absolute path elsewhere, a `..` escape, or an escaping symlink refuses the whole send without touching the cache. The Human Remote path carries no Member surface or working directory and keeps only the ordinary validation. See [`team_message`](../team-collaboration/tools.md#team_message).
+
   Editing the allow-list on a live Member swaps the restriction at a turn boundary in the same Session: idle Members apply immediately, and a running Member's edit waits for that Member's turn to end. Each Member owns one lifecycle chain, so the wait holds only that Member's later operations, still in submission order, while managing another Member never queues behind it and the ledger keeps its single ordered writer.
 
   After each awaited boundary, capability and Worker-exposure edits synchronously recheck the live handle and true idle. A new turn delays the swap again rather than replacing its frozen grants. Shutdown releases the wait without allowing another observer or restriction to be installed on the retired context.

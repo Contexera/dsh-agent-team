@@ -213,6 +213,8 @@ export interface RealHarnessOptions {
   readonly isolatedPresetRealm?: boolean
   /** Add a stub `bash` tool to the `team-member` preset, for a Member whose surface must hold a shell. */
   readonly memberShellTool?: boolean
+  /** Add a stub file-reading tool of this name to the `team-member` preset, without a shell. */
+  readonly memberReadTool?: 'read' | 'read_image'
 }
 
 export async function realHarness(
@@ -330,6 +332,26 @@ export async function realHarness(
         '',
       ].join('\n'))
     }
+    // A stand-in for a shipped file-reading tool row: only its name matters to
+    // the Host, which gates message attachment paths on the Member holding a
+    // file-reading or shell tool.
+    const readToolStub = join(root, 'read-tool-stub.mjs')
+    if (options?.memberReadTool !== undefined) {
+      await writeFile(readToolStub, [
+        "export const name = 'test-read-tool'",
+        "export const inject = ['tools']",
+        'export function apply(scope) {',
+        '  scope.tools.register({',
+        `    name: '${options.memberReadTool}',`,
+        "    description: 'Read fixture',",
+        "    parameters: { type: 'object', properties: {}, additionalProperties: false },",
+        "    output: { schema: { type: 'object' }, render: () => [{ type: 'text', text: 'read fixture' }] },",
+        "    execute: async () => ({ ok: true }),",
+        '  })',
+        '}',
+        '',
+      ].join('\n'))
+    }
     // The team-member definition as one declarative row, the same shape the
     // shipped cordis.patch.yml declares; bare internal loader names resolve
     // through the self-linked node_modules.
@@ -341,6 +363,7 @@ export async function realHarness(
       // exactly as in production.
       { id: 'team-tools', name: '@contexera/dsh-agent-team/tools', config: { only: MEMBER_TEAM_TOOLS } },
       ...options?.memberShellTool ? [{ id: 'shell-tool', name: pathToFileURL(shellToolStub).href }] : [],
+      ...options?.memberReadTool !== undefined ? [{ id: 'read-tool', name: pathToFileURL(readToolStub).href }] : [],
       TEAM_SKILLS_PRESET_ROW,
       { id: 'compaction', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
         { id: 'compaction-stub', name: pathToFileURL(compactionStub).href },
