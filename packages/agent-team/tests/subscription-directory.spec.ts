@@ -15,7 +15,7 @@ process.once('exit', removeSpillRoot)
 
 describe('Workspace subscription discovery', () => {
   it('lists metadata without exposing scripts, credential references, webhook arms, or run history', async () => {
-    const test = await realHarness(new EmptyAdapter())
+    const test = await realHarness(new EmptyAdapter(), 'jsonl', undefined, false, undefined, 'memory', { memberShellTool: true })
     test.ctx.provide('credentials', {
       resolve: async () => ({ value: 'fixture-secret', source: 'fixture' }),
       describe: async () => ({ configured: true, writable: false }),

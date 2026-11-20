@@ -162,7 +162,8 @@ class AttachmentCacheInvalidError extends Error {
   }
 }
 
-function outside(root: string, target: string): boolean {
+/** Whether `target` lies outside `root`; both must already be resolved the same way (lexically or through `realpath`). */
+export function outside(root: string, target: string): boolean {
   const path = relative(root, target)
   return path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path)
 }

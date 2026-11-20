@@ -9,7 +9,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
@@ -35,7 +35,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { DomainFacility, type Domain, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { ATTACHMENT_MAX_BYTES, attachmentPayloadPath, attachmentsRoot, copyPathAttachment, pathAttachmentId, readAttachment, removeAttachment, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, withMessageAttachmentEntries, writeRequestScopedAttachment } from './attachments.ts'
+import { ATTACHMENT_MAX_BYTES, attachmentPayloadPath, attachmentsRoot, copyPathAttachment, outside, pathAttachmentId, readAttachment, removeAttachment, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, withMessageAttachmentEntries, writeRequestScopedAttachment } from './attachments.ts'
 import { reportEnvironment } from './environment-check.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile, type LegacyHumanProfileFields } from './human-profile.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowWrite } from './host-row-settings.ts'
@@ -55,7 +55,7 @@ export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './s
 export { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
 import { carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY, type TeamContextProjectionState } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
-import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, isExtraToolGrantCandidate, memberMemoryDirectoryName, memberMemoryDirectoryPath, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, isExtraToolGrantCandidate, memberMemoryDirectoryName, memberMemoryDirectoryPath, MemberRuntime, SHELL_TOOL_NAMES, type TurnBoundary } from './member-runtime.ts'
 import {
   EXTRA_TOOL_GRANTS_FIELD, extraToolGrantsFrom, sanitizeExtraToolGrants,
 } from './member-tool-grants.ts'
@@ -6275,8 +6275,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /** An Agent owner replays one failed delivery; the request id makes a retried call a no-op. */
-  replaySubscriptionDeliveryForAgent(agent: Agent, request: AgentTeamSubscriptionReplayRequest): Promise<AgentTeamSubscriptionReplayResult> {
-    return this.replaySubscriptionDelivery(this.memberCall(agent, request.workspaceId), request)
+  async replaySubscriptionDeliveryForAgent(agent: Agent, request: AgentTeamSubscriptionReplayRequest): Promise<AgentTeamSubscriptionReplayResult> {
+    return this.replaySubscriptionDelivery(this.scriptRunningMemberCall(agent, request.workspaceId), request)
   }
 
   @Remote('replaySubscriptionDelivery')
@@ -6306,10 +6306,17 @@ export default class AgentTeam extends TypertRemoteService {
     const workingDirectory = agent.ctx.get('workingDirectory') as { get(session: Agent['session']): string } | undefined
     const cwd = workingDirectory?.get(agent.session)
     if (cwd === undefined) throw new Error('this Session has no working directory, so a script path cannot be resolved')
-    const resolved = isAbsolute(scriptPath) ? scriptPath : join(cwd, scriptPath)
-    const bytes = await readFile(resolved).catch((error: unknown) => {
+    const lexical = isAbsolute(scriptPath) ? scriptPath : join(cwd, scriptPath)
+    const unreadable = (error: unknown): never => {
       throw new Error(`cannot read '${scriptPath}': ${error instanceof Error ? error.message : String(error)}`)
-    })
+    }
+    // Containment is checked lexically and again after symlinks resolve: the
+    // path names a script in the Member's checkout, never another Host file.
+    const escapes = (): Error => new Error(`'${scriptPath}' is outside your working directory; put the script inside it`)
+    if (outside(cwd, lexical)) throw escapes()
+    const [realRoot, resolved] = await Promise.all([realpath(cwd), realpath(lexical)]).catch(unreadable)
+    if (outside(realRoot, resolved)) throw escapes()
+    const bytes = await readFile(resolved).catch(unreadable)
     if (bytes.byteLength > SUBSCRIPTION_SCRIPT_MAX_BYTES) {
       throw new Error(`'${scriptPath}' is ${bytes.byteLength} bytes; the limit is ${SUBSCRIPTION_SCRIPT_MAX_BYTES}`)
     }
@@ -6446,8 +6453,21 @@ export default class AgentTeam extends TypertRemoteService {
       ...(origin === undefined ? {} : this.armedAddress(origin, result.value.webhookToken)) })
   }
 
+  /**
+   * The actor of an Agent call that makes the Host run a subscription script.
+   * The script runs on the Host's shell and its output returns to the caller,
+   * so a Member whose enforced tool surface holds no shell cannot ask for one.
+   */
+  private scriptRunningMemberCall(agent: Agent, workspaceId: AgentTeamViewRequest['workspaceId']): AgentTeamMemberActor {
+    const actor = this.memberCall(agent, workspaceId)
+    if (!this.memberRuntime.enforcesShellTool(actor.memberId)) {
+      throw new Error(`a subscription script runs on the Host's shell, and this Member has no ${SHELL_TOOL_NAMES.join(' or ')} tool (subscription_shell_required); the Human can manage this subscription from the Web Client`)
+    }
+    return actor
+  }
+
   async createSubscriptionForAgent(agent: Agent, request: AgentTeamCreateSubscriptionRequest): Promise<AgentTeamSubscriptionWriteResult> {
-    return this.createSubscriptionAs(this.memberCall(agent, request.workspaceId), request, agent)
+    return this.createSubscriptionAs(this.scriptRunningMemberCall(agent, request.workspaceId), request, agent)
   }
 
   /** Human creation from a page: the content is pasted, because a Human has no Session working directory. */
@@ -6504,7 +6524,7 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   async updateSubscriptionForAgent(agent: Agent, request: AgentTeamUpdateSubscriptionRequest): Promise<AgentTeamSubscriptionWriteResult> {
-    return this.updateSubscriptionAs(this.memberCall(agent, request.workspaceId), request, agent)
+    return this.updateSubscriptionAs(this.scriptRunningMemberCall(agent, request.workspaceId), request, agent)
   }
 
   @Remote('updateSubscription')
@@ -6528,8 +6548,7 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   async testSubscriptionForAgent(agent: Agent, request: AgentTeamTestSubscriptionRequest): Promise<AgentTeamSubscriptionTrialResult> {
-    const actor = this.memberCall(agent, request.workspaceId)
-    return this.testSubscription(request, actor)
+    return this.testSubscription(request, this.scriptRunningMemberCall(agent, request.workspaceId))
   }
 
   /** A trial run never changes durable state, so the Human path can offer it before any edit. */
@@ -6601,7 +6620,7 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   async resumeSubscriptionForAgent(agent: Agent, request: AgentTeamSubscriptionStateRequest): Promise<AgentTeamSubscriptionWriteResult> {
-    return this.resumeSubscriptionAs(this.memberCall(agent, request.workspaceId), request)
+    return this.resumeSubscriptionAs(this.scriptRunningMemberCall(agent, request.workspaceId), request)
   }
 
   @Remote('resumeSubscription')
