@@ -12,9 +12,10 @@ export function mentionSurfaceOf(draftKey: TeamDraftKey): MentionSurface {
 /**
  * How a candidate relates to what is being written. `owner` is a Project owner
  * (the Members who decide and can start work, so they lead the list); `thread`
- * is a follower of this Thread; `project` a Member the Project's catalog shows;
- * `other` the rest of the Workspace — under rules version 9 a mention enrolls
- * nobody, it only delivers one direct marker.
+ * is a follower of this Thread; `project` a Member the Workspace roster shows —
+ * under rules version 9 a Project's catalog roster is the Workspace, not a
+ * per-Project membership; `other` anything the roster still lists outside it.
+ * A mention enrolls nobody, it only delivers one direct marker.
  */
 export type MentionGroupKey = 'owner' | 'thread' | 'project' | 'other'
 
