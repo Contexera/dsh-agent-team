@@ -68,6 +68,18 @@ Each of these is a promise the code keeps. Breaking one is a vulnerability.
   (`subscription_shell_required`), before any script is read or run
   (`enforcesShellTool` in `packages/agent-team/src/member-runtime.ts`,
   `scriptRunningMemberCall` in `packages/agent-team/src/index.ts`).
+- **Message attachment paths.** A `team_message` `attachments` path from an
+  Agent asks the Host to read a file the Member could read itself, so the
+  same fence applies: a Member whose enforced tools include none of `read`,
+  `read_image`, `bash`, or `pwsh` is refused (`attachment_read_required`)
+  before any file is touched, and the path must resolve inside the calling
+  Agent's working directory, checked lexically and again after `realpath`,
+  so an absolute path elsewhere, `..`, or a symlink cannot copy another
+  Host file into the attachment cache (`enforcesFileReadTool` in
+  `packages/agent-team/src/member-runtime.ts`, `validatePathAttachment` in
+  `packages/agent-team/src/attachments.ts`, `resolveMessageAttachments` in
+  `packages/agent-team/src/index.ts`). The Human Remote path keeps no such
+  limit.
 - **Subscription script paths.** A `scriptPath` from an Agent must resolve
   inside that Agent's working directory, checked lexically and again after
   `realpath`, so an absolute path elsewhere, `..`, or a symlink cannot read
@@ -107,7 +119,7 @@ not a vulnerability.
 - **The Worker switch is an operator grant.** While the Host Worker switch is
   on, a Project owner can delegate to a Codex or Claude Worker through
   `team_worker`, even without a shell tool of its own. Turning the switch on
-  grants that, for every Member.
+  grants that, for every Project owner.
 - **The manager can widen Member settings.** `member_create` and
   `member_update` write `capabilities.tools.allow`. Steering the manager is
   therefore a way to widen a Member's tools, by design.
@@ -130,10 +142,14 @@ A finding is a vulnerability when it breaks a promise under
 [Boundaries the bundle enforces](#boundaries-the-bundle-enforces) without the
 operator granting it. For example:
 
-- A Member whose shell tools were removed reads Host files or runs commands
+- A Member whose shell tools were removed runs commands through a Team tool,
+  one whose file-reading and shell tools were all removed reads a Host file
+  through `team_message` attachments, or any Member reads a file outside its
+  working directory through a Team tool (`team_message` attachments or
+  `team_subscription` `scriptPath`).
+- A Member accepts its own work, acts in a Workspace it does not participate
+  in, or performs a Project-owner action on a Project it does not own,
   through a Team tool.
-- A Member accepts its own work, or acts in a Workspace or Project it does not
-  belong to, through a Team tool.
 - A webhook request without the right token is delivered, or a delivery
   reaches the browser API.
 - An ordinary DSH Session gains a Team tool.
