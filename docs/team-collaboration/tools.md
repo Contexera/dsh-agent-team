@@ -183,6 +183,10 @@ A committed resolution names the action, the resulting status and resolution, th
 
 Only the Project's owners may change one, test one, or replay a delivery (`project_owner_required` otherwise). Any Workspace Member may use `list` for Agent-facing metadata that omits scripts, credential references, and webhook arms; run history remains Project-member-only, with owner-only output as described below.
 
+`create`, `update`, `test`, `resume`, and `replay` make the Host run a script on its shell and hand the output back, so an Agent owner also needs a shell tool (`bash` or `pwsh`) in its own enforced tool surface; without one the call is refused with `subscription_shell_required` before any script is read or run.
+
+A `scriptPath` must stay inside the caller's working directory: a relative path resolves against it, and an absolute path, a `..` escape, or a symlink whose target lies outside is refused. The Human path is unaffected and always pastes the content.
+
 Empty `workspace`, `scriptPath`, and `scriptContent` slots are absent; two nonempty script sources still conflict, and no script is still an error. Zero `intervalMinutes` or `limit` uses omission semantics. This never drops `notify: []`, `credentials: []`, `webhook: false`, or an `expectedRevision`: clearing recipients, removing credentials, disarming a webhook, and revision checks remain real instructions.
 
 `create` and `update` take `intervalMinutes` for a timer, `webhook: true` for an address, or both, and refuse a subscription that names neither. On `update` the two triggers read omission differently: leaving out `intervalMinutes` drops the timer, while leaving out `webhook` keeps the address, and only an explicit `false` disarms it — a caller that does not model webhooks must not cut off a live provider. Arming the trigger needs the deployment's public origin (`webhook.publicOrigin` on the Host row).

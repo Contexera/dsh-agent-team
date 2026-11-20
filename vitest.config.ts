@@ -85,6 +85,7 @@ const integrationSpecs = [
   'packages/agent-team/tests/subscription-host.spec.ts',
   'packages/agent-team/tests/subscription-retry.spec.ts',
   'packages/agent-team/tests/subscription-runs.spec.ts',
+  'packages/agent-team/tests/subscription-script-boundary.spec.ts',
   'packages/agent-team/tests/surface-agreement.spec.ts',
   'packages/agent-team/tests/surface-exemption.spec.ts',
   'packages/agent-team/tests/surface-rejection-recovery.spec.ts',

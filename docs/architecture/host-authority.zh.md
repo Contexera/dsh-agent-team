@@ -124,6 +124,8 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
   Host row 里的 profile 级 `extraToolGrants` 是另一份按确切已注册工具名的许可：它可以重新放行 allow-list 省略的继承基线名称，也可准入 Agent scope 注册，但不能重开 Team tools、`working_directory` 或 Worker 开关。Host 在 `turn/start` 同步读取并在该轮冻结，后续回合总读取最新已保存名单。
 
+  Team tools 不受任何 allow-list 影响，因此会让 Host 运行代码的 Team tool 自己检查实际生效的工具范围：Agent 发起的订阅 create、update、test、resume 或 replay，只有在该 Member 当前安装的 restriction 放行 `bash` 或 `pwsh` 时才会执行，否则被拒绝；尚未安装 restriction 的 Member 视为没有 shell。见 [`team_subscription`](../team-collaboration/tools.zh.md#team_subscription)。
+
   每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
 
   每次边界等待返回后，capability 与 Worker 工具面编辑都同步复查 live handle 和真正 idle。若新一轮已开始，就再次等待，而不是覆盖该轮冻结的许可。shutdown 释放等待，但不会再向退役 context 注册观察器或安装 restriction。
