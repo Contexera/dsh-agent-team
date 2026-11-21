@@ -2,7 +2,9 @@
 
 [English](tools-and-preset.md) | 中文
 
-显式的 `team-member` preset 是唯一的 Team Member composition。它含一整套 coding capability rows：shell、filesystem/search、web search 与 fetch。还有 background jobs、skill 加载工具、compaction。另有 Team collaboration guidance/tools、Harness Workspace instruction discovery，和有界的 private-memory reference context。普通 Sessions 留在这个 isolated roster 之外，拿不到 Team prompt sections、tools 或 Member memory。
+显式的 `team-member` preset 是唯一的 Team Member composition。它含一整套 coding capability rows：shell、filesystem/search、web search 与 fetch，以及 background jobs、skill 加载工具、compaction。
+
+它还含 Team collaboration guidance/tools、Harness Workspace instruction discovery、有界的 private-memory reference context，以及 Member 参与的每个 Workspace 的 [Workspace 规则](../team-collaboration/memory-and-context.zh.md#workspace-规则)。普通 Sessions 留在这个 isolated roster 之外，拿不到 Team prompt sections、tools 或 Member memory。
 
 嵌套的 preset group 把 skills registry、Team 的逐 Agent router 与 skill loader 放在同一个隔离域；确切 roots 与选择生命周期归 [Host authority](host-authority.zh.md#member-capabilities-与-skills)。
 
@@ -79,9 +81,9 @@ Web Client 是唯一的 Human control surface。它经 typed Remote 把每个 mu
 
 ## Team manager preset
 
-Host 为 [Team manager](../domain-model.zh.md#team-manager) Session 挂载另一个隔离的 `team-manager` preset。它保留通用 coding 工具面——persona、时间与 Workspace instructions、shell、filesystem/search、web、jobs、skill 加载、ask-user 与 basic compaction——但有意省略 Member context、Member time context、Member memory 及其 compaction adapter、Worker 与 rollover policy，以及 profile 的 `extraToolGrants`。当前构建注册计划中的九个 manager 工具，其余不注册。
+Host 为 [Team manager](../domain-model.zh.md#team-manager) Session 挂载另一个隔离的 `team-manager` preset。它保留通用 coding 工具面——persona、时间与 Workspace instructions、shell、filesystem/search、web、jobs、skill 加载、ask-user、basic compaction，以及所有已注册 Workspace 的规则——但有意省略 Member context、Member time context、Member memory 及其 compaction adapter、Worker 与 rollover policy，以及 profile 的 `extraToolGrants`。当前构建注册计划中的九个 manager 工具，其余不注册。
 
-这个工具面跑在可信的 `danger-full-access` policy 上，所以数据红线由 persona 写成规则而不是期望：在 `$DSH_HOME` 下，manager 只读写自己的 `agent-team/manager/` 目录，加上 `team_overview` 刚按 ref 查实的 Member 私有资产；绝不碰 Host 的 sqlite 文件；Member 的 Session 只能经由 locator 给出的只读 reader 读取，绝不自己打开日志文件。
+这个工具面跑在可信的 `danger-full-access` policy 上，所以数据红线由 persona 写成规则而不是期望：在 `$DSH_HOME` 下，manager 只读写自己的 `agent-team/manager/` 目录、它主编的 `agent-team/workspaces/` 下各 Workspace 规则文件，以及 `team_overview` 刚按 ref 查实的 Member 私有资产；绝不碰 Host 的 sqlite 文件；Member 的 Session 只能经由 locator 给出的只读 reader 读取，绝不自己打开日志文件。
 
 只有 Human 当前请求明确要求时，才能按相应的维护规则整理该 Member 的 memory、notes 或 skills；不得删除成员目录，也不得把私有内容复制进共享材料。它自己的 memory、notes 和一条工具结果只记录过去说过的话，因此它们都不能代替 Human 现在提出请求，来为不可逆或高代价的动作授权。
 

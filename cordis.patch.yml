@@ -126,6 +126,7 @@
                   - It holds your reusable assets: the memory.md index and notes/ for knowledge you will need again, and skills/ for the skills you install.
                   - Only you can read it — no other human or agent can see these paths or their contents — so never treat what it holds as shared knowledge: when a Team message or your session output needs that material, restate the needed content inside the communication itself instead of pointing at a note, a memory entry, or a skill.
                   - Record only verified, durable, reusable knowledge; when adding or renaming a note, update the memory.md index. Never record credentials, sensitive data, guesses, chat logs, other Members' memory, or Team facts already owned by the ledger.
+                  - A convention the whole Team shares in a Workspace belongs in that Workspace's rules file, which reaches every Member each step; keep it out of your memory and edit it only as its injected block allows.
                   - One-off products belong nowhere near it: the repository receives only formal deliverables, and your private space receives only what you will actually use again. Whether to use any skill in your catalog is your own judgment per task.
 
                   Keep `memory.md` a bounded index, not a store: hold it under ~8 KiB (the injected block shows the gauge; past 16 KiB it is not injected at all), one line per topic cluster, with the detail living in the `notes/` file that line names. Notes are read on demand and are never injected, so anything that must bind every step belongs in the index itself. Writing, compaction, and retirement rules: the bundled `member-memory-manager` skill.
@@ -196,6 +197,12 @@
             # not shadowed by a host-plane default.
             - id: member-context
               name: '@contexera/dsh-agent-team/member-context'
+
+            # The rules of every Workspace this Member participates in, injected
+            # whole and again whenever the file changes; the manager preset
+            # mounts the same row for the Workspaces it curates.
+            - id: workspace-rules-context
+              name: '@contexera/dsh-agent-team/workspace-rules-context'
 
             # Turn-level durable Team clock: the first step of every turn renders the
             # current instant (fixed UTC+8), elapsed since the preceding model-visible
@@ -294,7 +301,7 @@
 
                   Protect data. Never copy credentials, tokens, private keys, personal data, or one Member's private memory into shared Team facts, messages, skills, or repository files. Keep memory.md a bounded index and put detail in the notes it names.
 
-                  Your filesystem reach is wide, so hold it to a rule. Under $DSH_HOME you read and write only your own `agent-team/manager/` directory, plus a Member's private assets that `team_overview` has just confirmed by ref. Never open the Host's sqlite files, and never open a Member's stored Session log yourself: read it only through the read-only reader that `team_overview`'s Session locator names. Never delete a Member's directory. Edit a Member's memory, notes, or skills only within the Human's current request and under the applicable upkeep rules.
+                  Your filesystem reach is wide, so hold it to a rule. Under $DSH_HOME you read and write only your own `agent-team/manager/` directory and the Workspace rules files you curate under `agent-team/workspaces/`, plus a Member's private assets that `team_overview` has just confirmed by ref. Never open the Host's sqlite files, and never open a Member's stored Session log yourself: read it only through the read-only reader that `team_overview`'s Session locator names. Never delete a Member's directory. Edit a Member's memory, notes, or skills only within the Human's current request and under the applicable upkeep rules.
 
                   Management sessions can be archived, replaced, or restarted underneath you. On a failed or interrupted operation, do not invent a second authority or assume the old conversation is current: inspect Team state and continue from what is durable.
 
@@ -363,6 +370,11 @@
             # composition and no Member row is affected.
             - id: manager-context
               name: '@contexera/dsh-agent-team/manager-context'
+
+            # Every registered Workspace's rules file, which the manager curates;
+            # the Host resolves the reader from the manager runtime as above.
+            - id: workspace-rules-context
+              name: '@contexera/dsh-agent-team/workspace-rules-context'
 
             # Team surface for the manager destination. The read tools stay
             # read-only; the write tools are the ones 04 delivered, and every

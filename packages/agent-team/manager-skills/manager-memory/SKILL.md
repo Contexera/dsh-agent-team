@@ -31,6 +31,7 @@ Apply one test before writing: would a future management Session make a wrong de
 - ephemeral task state — what is in flight, who was asked, what a tool returned;
 - credentials, tokens, private keys, or personal data;
 - Team facts the ledger already owns: current Projects, Members, ownership, Tasks, subscriptions, unread work;
+- a convention the whole Team shares in a Workspace — that belongs in the Workspace rules file you curate, which every participating Member receives;
 - one Member's private memory, notes, skills, or Session content;
 - copies of a note's body, or a second tutorial for a skill that already ships.
 

@@ -102,6 +102,7 @@ const integrationSpecs = [
   'packages/agent-team/tests/worker-catalog-continuation.spec.ts',
   'packages/agent-team/tests/worker-steer.spec.ts',
   'packages/agent-team/tests/worker-stop-notice.spec.ts',
+  'packages/agent-team/tests/workspace-rules-host.spec.ts',
   // Integration specs (tool-agent-team): they boot a real Host runtime.
   'packages/tool-agent-team/tests/team-addressing.spec.ts',
   'packages/tool-agent-team/tests/team-view-directory.spec.ts',

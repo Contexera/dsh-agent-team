@@ -3,7 +3,7 @@
  * same boundary, so no astral character is ever halved.
  */
 import { describe, expect, it } from 'vitest'
-import { characterLength, truncateToCharacters } from '../src/text.ts'
+import { characterLength, truncateToCharacters, utf8HeadOnLineBoundary } from '../src/text.ts'
 
 /** A string holding a UTF-16 surrogate that no code point produced: the trace a cut through an astral character leaves. */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
@@ -34,5 +34,27 @@ describe('character counting and cutting', () => {
     expect(truncateToCharacters(body, characterLength(body))).toBe(body)
     expect(truncateToCharacters(body, 1000)).toBe(body)
     expect(truncateToCharacters(body, 0)).toBe('')
+  })
+})
+
+describe('UTF-8 head within a byte budget', () => {
+  it('returns the whole text within the budget and whole lines past it', () => {
+    expect(utf8HeadOnLineBoundary(Buffer.from('one\ntwo\n'), 8)).toBe('one\ntwo\n')
+    expect(utf8HeadOnLineBoundary(Buffer.from('one\ntwo\nthree\n'), 10)).toBe('one\ntwo\n')
+    // A newline exactly at the last byte of the budget keeps that line.
+    expect(utf8HeadOnLineBoundary(Buffer.from('one\ntwo\nthree\n'), 8)).toBe('one\ntwo\n')
+  })
+
+  it('cuts one over-long line on a character boundary, never inside a multi-byte character', () => {
+    // Each 规 is three bytes, so a seven-byte budget ends one byte into the third.
+    const cut = utf8HeadOnLineBoundary(Buffer.from('规规规规'), 7)
+    expect(cut).toBe('规规')
+    expect(Buffer.byteLength(cut)).toBe(6)
+    expect(utf8HeadOnLineBoundary(Buffer.from('🎈🎈'), 5)).toBe('🎈')
+  })
+
+  it('reads a view into a larger buffer without leaking bytes outside it', () => {
+    const backing = Buffer.from('xxxxone\ntwo\nyyyy')
+    expect(utf8HeadOnLineBoundary(backing.subarray(4, 12), 6)).toBe('one\n')
   })
 })

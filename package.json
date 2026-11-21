@@ -151,6 +151,10 @@
       "types": "./packages/agent-team/lib/types/manager-context.d.ts",
       "default": "./packages/agent-team/lib/manager-context.js"
     },
+    "./workspace-rules-context": {
+      "types": "./packages/agent-team/lib/types/workspace-rules-context.d.ts",
+      "default": "./packages/agent-team/lib/workspace-rules-context.js"
+    },
     "./member-time-context": {
       "types": "./packages/agent-team/lib/types/member-time-context.d.ts",
       "default": "./packages/agent-team/lib/member-time-context.js"

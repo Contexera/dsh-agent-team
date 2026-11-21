@@ -17,3 +17,19 @@ export function truncateToCharacters(value: string, limit: number): string {
   const characters = [...value]
   return characters.length <= limit ? value : characters.slice(0, limit).join('')
 }
+
+/**
+ * The longest head of UTF-8 `raw` within `maxBytes` that ends on a line boundary, so a byte budget shows
+ * whole lines; a first line longer than the budget is cut on a code-point boundary instead. A newline byte
+ * never occurs inside a multi-byte sequence, so cutting after one cannot split a character.
+ */
+export function utf8HeadOnLineBoundary(raw: Uint8Array, maxBytes: number): string {
+  const decode = (end: number): string => Buffer.from(raw.buffer, raw.byteOffset, end).toString('utf8')
+  if (raw.byteLength <= maxBytes) return decode(raw.byteLength)
+  const newline = raw.subarray(0, maxBytes).lastIndexOf(0x0a)
+  if (newline !== -1) return decode(newline + 1)
+  let end = maxBytes
+  // A continuation byte (10xxxxxx) at the cut means the cut falls inside one character.
+  while (end > 0 && (raw[end]! & 0xc0) === 0x80) end -= 1
+  return decode(end)
+}

@@ -110,6 +110,7 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 
 ## Private memory, archival, and identity effects
 - The Member preset derives identity, Project ownership, Workspace participation, and private-memory context from current Host facts and the current Session surface. Classification and memory-update rules are defined in [Member context injection](../team-collaboration/memory-and-context.md#member-context-injection); this creates no second durable state store.
+- `workspaceRulesForAgent` resolves which [Workspace rules](../team-collaboration/memory-and-context.md#workspace-rules) files a Member or the current manager reads; the files are Team-owned, not ledger facts, and the Host only reads them.
 - Private-memory directories under `$DSH_HOME/agent-team/members/` are Host-owned effects of Member identity. Activation ensures the directory, `notes/`, and missing `memory.md`; startup does not prune unknown directories. Explicit removal archives the Session and removes that Member's private directory; unrelated entries remain untouched.
 
   Both that removal and the activation-time rename of a pre-fix colon directory are confined to the running process's own members root. The recorded `privateMemoryPath` is a durable absolute fact that names a directory in whichever DSH home added the Member, so a process resolving another home refuses to move or delete it (with a warning) instead of taking the Member's real private memory out of its home.

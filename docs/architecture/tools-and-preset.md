@@ -2,7 +2,7 @@
 
 English | [中文](tools-and-preset.zh.md)
 
-The explicit `team-member` preset is the only Team Member composition. It adds coding capability rows (shell, filesystem/search, web search and fetch, background jobs, the skill loader tool, compaction), collaboration guidance/tools, Harness Workspace instruction discovery, and bounded private-memory context. Ordinary Sessions remain outside this roster and receive no Team prompt sections, tools, or Member memory.
+The explicit `team-member` preset is the only Team Member composition. It adds coding capability rows (shell, filesystem/search, web search and fetch, background jobs, the skill loader tool, compaction), collaboration guidance/tools, Harness Workspace instruction discovery, bounded private-memory context, and the [Workspace rules](../team-collaboration/memory-and-context.md#workspace-rules) of each Workspace the Member participates in. Ordinary Sessions remain outside this roster and receive no Team prompt sections, tools, or Member memory.
 
 A nested preset group isolates the skills registry, Team's per-Agent router, and the skill loader together; [Host authority](host-authority.md#member-capabilities-and-skills) owns the exact roots and selection lifecycle.
 
@@ -81,9 +81,9 @@ The wake decision itself is a pure gate ladder in `wake-recycle.ts`: disabled, n
 
 ## Team manager preset
 
-The Host mounts a separate isolated `team-manager` preset for its [Team manager](../domain-model.md#team-manager) Session. It keeps a generic coding surface — persona, time and Workspace instructions, shell, filesystem/search, web, jobs, skill loading, ask-user, and basic compaction — but deliberately omits Member context, the Member time context, Member memory and its compaction adapter, Worker and rollover policy, and the profile `extraToolGrants`. This build registers the nine manager tools of the planned management set and none of the rest.
+The Host mounts a separate isolated `team-manager` preset for its [Team manager](../domain-model.md#team-manager) Session. It keeps a generic coding surface — persona, time and Workspace instructions, shell, filesystem/search, web, jobs, skill loading, ask-user, basic compaction, and every registered Workspace's rules — but deliberately omits Member context, the Member time context, Member memory and its compaction adapter, Worker and rollover policy, and the profile `extraToolGrants`. This build registers the nine manager tools of the planned management set and none of the rest.
 
-That surface runs at the trusted `danger-full-access` policy, so the persona carries the data red line as a rule: under `$DSH_HOME` the manager reads and writes only its own `agent-team/manager/` directory plus a Member's private assets `team_overview` has just confirmed by ref, never the Host's sqlite files, and a Member's Session only through the read-only reader the locator names — never by opening the stored log itself.
+That surface runs at the trusted `danger-full-access` policy, so the persona carries the data red line as a rule: under `$DSH_HOME` the manager reads and writes only its own `agent-team/manager/` directory, the Workspace rules files it curates under `agent-team/workspaces/`, and a Member's private assets `team_overview` has just confirmed by ref, never the Host's sqlite files, and a Member's Session only through the read-only reader the locator names — never by opening the stored log itself.
 
 It edits a Member's memory, notes or skills only within the Human's current request and under the applicable upkeep rules; it never deletes a Member's directory or copies private content into shared material. Its own memory, notes and a tool result record what was once said, so none of them authorizes an irreversible or costly action in place of the Human asking for it now.
 

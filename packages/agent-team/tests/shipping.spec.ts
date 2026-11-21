@@ -282,6 +282,7 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-tool-presentation'")
     expect(preset).toContain('mode: native')
     expect(preset).toContain("name: '@contexera/dsh-agent-team/member-context'")
+    expect(preset).toContain("name: '@contexera/dsh-agent-team/workspace-rules-context'")
     expect(preset).toContain("name: '@deepseek-ai/dsh-command-compact'")
     // Every lib directory that can enter the pack must be cleaned, so a
     // deleted source module cannot leave stale output behind.
@@ -508,6 +509,9 @@ describe('Agent Team shipping contract', () => {
       // The manager's own private memory index: the Member context plugin is
       // excluded above, so this row is the only memory entry point it has.
       '@contexera/dsh-agent-team/manager-context',
+      // The rules of every Workspace, which the manager curates: the same row
+      // the Member preset mounts, resolved for the manager by the Host.
+      '@contexera/dsh-agent-team/workspace-rules-context',
     ]) expect(preset).toContain(`name: '${row}'`)
     expect(preset).toMatch(/- id: tool-fs\n\s+name: '@deepseek-ai\/dsh-tool-fs'\n\s+config:\n\s+applyPatch: false\n/)
     expect(preset).toContain('mode: native')

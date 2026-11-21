@@ -46,6 +46,10 @@ Durable capability intent on the Member entity (optional `capabilities` field: `
 
 A shared working directory and authorization domain. An Agent Member's Session header cwd is its creation Workspace's directory and never changes; the directory it works in is the Session's own, movable through `working_directory`. Private memory lives outside the Workspace directory.
 
+## Workspace Rules
+
+One Team-owned file per Workspace, outside every repository, holding the conventions only this Team shares there. It is injected to every participating Member and to the Team manager, its primary curator; it ranks below the repository's `AGENTS.md` and is not a Team fact. [Memory and context](team-collaboration/memory-and-context.md#workspace-rules) owns its injection.
+
 ## Project
 
 A persistent collaboration place in a Workspace. Under rules version 9 a Project keeps only two relations of its own — ownership and follow — and everything else comes from the Workspace: a Member who participates in the Project's Workspace reads its content, and an enabled one writes, whether or not it ever appeared in the Project. There is no membership to enroll in or grant. Human Members can view every Workspace Project.

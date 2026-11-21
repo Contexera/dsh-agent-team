@@ -8,11 +8,20 @@ English | [中文](memory-and-context.zh.md)
 Upkeep craft (what earns a line, the three tiers, compaction and demotion) is owned by the bundled `member-memory-manager` core skill, on the same pattern as skill craft in `member-skill-manager`. The persona carries only the resident rule that the index stays bounded and that detail lives in the note it names, and a Member's first-run `memory.md` scaffold states the same sections.
 
 ## Member context injection
-A Member's per-step context is assembled as four classified blocks: identity, Project ownership, Workspace participation, and private memory. Each block is a separate surface message; a later block of the same class supersedes the earlier one semantically — the earlier message stays in the Session log and surface until compaction — and an unchanged class appends nothing.
+A Member's per-step context is assembled as four classified blocks: identity, Project ownership, Workspace participation, and private memory. [Workspace rules](#workspace-rules) arrive through their own row beside them. Each block is a separate surface message; a later block of the same class supersedes the earlier one semantically — the earlier message stays in the Session log and surface until compaction — and an unchanged class appends nothing.
 
 Ownership and participation are always stated in full, including an empty ownership list and a participation list that shrank from several Workspaces to one. Each ownership line names what that owner answers for in the Project, and an unspecified responsibility is stated as unspecified — a neutral fact about the grant, not a gap the Member is expected to close.
 
 Private memory has two shapes. The complete index is the baseline. After `memory.md` changes, the Member gets one compact notice that the earlier copy is stale, where the file is, and its current budget use. The newest memory event is compared with the file's current state, so an older matching notice cannot hide a later change. A notice is not an index: a compaction that leaves only the notice still triggers the latest complete baseline. A missing, unreadable, or over-budget index states that condition and its path instead of injecting content.
+
+## Workspace rules
+Each Workspace can carry one Team-owned rules file, `$DSH_HOME/agent-team/workspaces/<workspaceId>/rules.md`, outside every repository. It holds what only this Team shares in this Workspace: collaboration conventions, shared-checkout discipline, and local environment clues. Public engineering rules stay in the repository's `AGENTS.md`; live state stays in the ledger.
+
+The `workspace-rules-context` row, mounted in both Team presets, injects one block per Workspace. A Member reads the Workspaces it participates in now; the Team manager reads every registered Workspace. Ordinary Sessions and forks read none. The Host never creates the file, so a missing file is stated with its path; only the manager is invited to start it, and a Member creates it only to record a rule its editing terms allow.
+
+The block names the file, states that it ranks below system, developer and user instructions and below `AGENTS.md`, and states who may edit what. The manager is told it is the primary curator. A Member may directly correct a stale fact or record a rule the Human already settled, citing date and ref, but proposes a new or overturned cross-Member rule to the Human instead.
+
+Unlike private memory, a changed file is injected in full again, because the reader is usually not the writer. An unchanged file appends nothing, and a compaction that drops the block brings it back. The budget is 8 KiB: past it, only whole leading lines up to the budget are injected, with a note to read the rest, and the file itself is never trimmed.
 
 ## Team manager memory and skills
 The Team manager Session keeps its own private space under `$DSH_HOME/agent-team/manager/` — `memory.md`, `notes/`, and `skills/` — and it is not a Member's. The directory outlives every manager Session: a restart, a reopen after archival, and "new conversation" all read the same files, so what the Human taught the manager survives the conversation that taught it.

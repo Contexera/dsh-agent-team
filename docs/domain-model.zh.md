@@ -44,6 +44,10 @@ steer 是送进同一原生会话的输入。执行运行期间，OAR 可以把�
 
 共享工作目录与授权域。Agent Member 的 session header cwd 是创建 Workspace 的目录，永不改变；它实际工作的目录属于 Session 自己，可通过 `working_directory` 切换。Member 私有记忆不存放在 Workspace 目录中。
 
+## Workspace Rules
+
+每个 Workspace 一份 Team 自有的文件，放在所有仓库之外，只装这支 Team 在那里共享的约定。它注入给该 Workspace 的每个参与 Member，以及作为主编的 team manager；它低于仓库的 `AGENTS.md`，也不是 Team 事实。注入规则见 [记忆与上下文](team-collaboration/memory-and-context.zh.md#workspace-规则)。
+
 ## Project
 
 Workspace 内的持久协作场所。规则版本 9 下，Project 只保留两种自己的关系——owner 和 follow——其余都来自 Workspace：参与该 Project 所在 Workspace 的 Member 即可读取其内容，enabled 的即可写入，无论它是否曾在该 Project 出现。不存在需要加入或授予的成员关系。Human Member 可以查看 Workspace 内全部 Project。
