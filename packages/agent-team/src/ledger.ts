@@ -296,9 +296,11 @@ export const TASK_BOARD_FINISHED_PER_PROJECT = 5
  * Version 9 retires Project membership as an authority: read and write ask only whether the Member participates in
  * the Project's Workspace, responsibility targets any enabled Workspace Member, ordinary Main stream wakes reach
  * followers alone, and a responsibility's end retires only the follow that responsibility established. Every
- * membership-derived rule stays in force for the segments that ran under it.
+ * membership-derived rule stays in force for the segments that ran under it. Version 10 lets a Task start or a
+ * promotion name the accountable a transfer could reach: an Agent owner no longer starts as accountable and transfers
+ * in a second write, and a promotion that names one records it instead of the promoter.
  */
-export const AGENT_TEAM_RULES_VERSION = 9
+export const AGENT_TEAM_RULES_VERSION = 10
 
 /**
  * The bounded, single-line reason a finished run gives its Thread. It is derived
@@ -3519,10 +3521,7 @@ export class AgentTeamLedger {
       const base = this.operationBase(request, sequence)
       const threadRef = this.ref('thread')
       const taskRef = request.kind === 'task' ? this.ref('task') : undefined
-      if (request.kind === 'task' && actor.kind === 'member' && request.accountable !== undefined && request.accountable !== actor.memberId) {
-        throw new Error(`An Agent names itself accountable when starting a Task (accountable_target_invalid) — ${recoveryFor('accountable_target_invalid').sentence({})}`)
-      }
-      const accountable = request.kind === 'task' ? this.resolveAccountable(project.projectRef, actor, request.accountable) : undefined
+      const accountable = request.kind === 'task' ? this.resolveStartAccountable(project.projectRef, actor, request.accountable, 'starting') : undefined
       if (request.kind !== 'task' && (request.accountable !== undefined || request.sourceThreadRefs !== undefined)) throw new Error('only a Task accepts accountable and sourceThreadRefs')
       const sourceThreadRefs = request.kind === 'task' ? this.validateTaskSources(project.projectRef, request.sourceThreadRefs) : []
       const task = taskRef === undefined || accountable === undefined ? undefined
@@ -3602,10 +3601,7 @@ export class AgentTeamLedger {
       const sequence = this.nextSequence()
       const base = this.operationBase(request, sequence)
       const taskRef = this.ref('task')
-      if (request.actor.kind === 'member' && request.accountable !== undefined && request.accountable !== request.actor.memberId) {
-        throw new Error(`An Agent names itself accountable when promoting a Task (accountable_target_invalid) — ${recoveryFor('accountable_target_invalid').sentence({})}`)
-      }
-      const accountable = this.resolveAccountable(projectRef, request.actor, request.accountable)
+      const accountable = this.resolveStartAccountable(projectRef, request.actor, request.accountable, 'promoting')
       const task: AgentTeamTask = Object.freeze({ taskRef, projectRef, threadRef: thread.threadRef, status: 'todo', resolution: 'open', accountable, sourceThreadRefs: [] })
       const nextThread: AgentTeamThread = Object.freeze({ threadRef: thread.threadRef, taskRef, revision: sequence })
       const activity: AgentTeamTaskActivity = Object.freeze({ activityRef: this.ref('activity'), kind: 'promote',
@@ -5921,7 +5917,8 @@ export class AgentTeamLedger {
         || activity.taskRef !== task.taskRef || activity.threadRef !== thread.threadRef) throw new Error('invalid Thread promotion')
       if (promoter !== undefined && !this.isProjectOwnerFrom(projection, projectRef, actorMemberId())) throw new Error('invalid Thread promotion: not a Project owner')
       const expectedAccountable = promoter?.memberId ?? AGENT_TEAM_HUMAN_MEMBER_ID
-      if (projection.rulesVersion >= 2 && (task.accountable !== expectedAccountable || task.sourceThreadRefs.length !== 0)) throw new Error('invalid Task accountability on promotion')
+      if (projection.rulesVersion >= 10 && (!this.startAccountableIsValidFrom(projection, projectRef, task.accountable) || task.sourceThreadRefs.length !== 0)) throw new Error('invalid Task accountability on promotion')
+      if (projection.rulesVersion >= 2 && projection.rulesVersion < 10 && (task.accountable !== expectedAccountable || task.sourceThreadRefs.length !== 0)) throw new Error('invalid Task accountability on promotion')
       if (projection.rulesVersion < 2 && (task.accountable !== AGENT_TEAM_HUMAN_MEMBER_ID || task.sourceThreadRefs.length !== 0)) throw new Error('invalid legacy Task defaults')
       this.addRef(refs, task.taskRef)
       this.addRef(refs, activity.activityRef)
@@ -5955,8 +5952,11 @@ export class AgentTeamLedger {
       // the creation activity and with the discussion's plain inbox; a Task
       // without an activity is exactly that shape, replayed as it was written.
       const legacyTaskStart = task !== undefined && storedActivity === undefined
-      // An Agent Task creator is the accountable; the Human may name an enabled Project owner or itself.
-      if (task !== undefined && !legacyTaskStart) {
+      // From version 10 a start names any accountable a transfer could reach. Before it, an Agent Task creator is the
+      // accountable and the Human may name an enabled Project owner or itself.
+      if (task !== undefined && !legacyTaskStart && projection.rulesVersion >= 10) {
+        if (!this.startAccountableIsValidFrom(projection, projectRef, task.accountable)) throw new Error('invalid Task accountable')
+      } else if (task !== undefined && !legacyTaskStart) {
         const validAccountable = actor !== undefined
           ? task.accountable === actorMemberId()
           : task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID
@@ -8545,6 +8545,25 @@ export class AgentTeamLedger {
     return `Agent Member '${actor.handle}' ${reason} (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`
   }
 
+  /**
+   * Who a new Task — started or promoted — is accountable to. Version 10 accepts exactly the targets a transfer
+   * reaches, so naming the accountable at creation is the same move as creating and transferring. Earlier segments
+   * keep their rule: an Agent names only itself, a Human start names an enabled Project owner or itself, and a
+   * promotion records its promoter, which is the one shape their replay accepts.
+   */
+  private resolveStartAccountable(projectRef: AgentTeamProjectRef, actor: AgentTeamHumanActor | AgentTeamMemberActor,
+    requested: AgentTeamMemberId | undefined, verb: 'starting' | 'promoting'): AgentTeamMemberId {
+    const creator = actor.kind === 'member' ? actor.memberId : AGENT_TEAM_HUMAN_MEMBER_ID
+    if (requested === undefined) return creator
+    if (this.state.rulesVersion >= 10) {
+      return requested === AGENT_TEAM_HUMAN_MEMBER_ID ? requested : this.resolveTransferTarget(projectRef, requested)
+    }
+    if ((actor.kind === 'member' || verb === 'promoting') && requested !== creator) {
+      throw new Error(`Before rules version 10 the ${actor.kind === 'member' ? 'Agent' : 'Human'} ${verb} a Task is its accountable (accountable_target_invalid) — ${recoveryFor('accountable_target_invalid').sentence({})}`)
+    }
+    return this.resolveAccountable(projectRef, actor, requested)
+  }
+
   private resolveAccountable(projectRef: AgentTeamProjectRef, actor: AgentTeamHumanActor | AgentTeamMemberActor, requested?: AgentTeamMemberId): AgentTeamMemberId {
     const accountable = requested ?? (actor.kind === 'member' ? actor.memberId : AGENT_TEAM_HUMAN_MEMBER_ID)
     if (accountable !== AGENT_TEAM_HUMAN_MEMBER_ID) {
@@ -8557,9 +8576,8 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Who a transfer may hand a Task to. Creating a Task still names an owner, so responsibility reaches a plain
-   * Project member only through this move; version 3 therefore asks the narrower question, whether the target
-   * still takes part in the Project, and not whether it owns it. Following the Thread is never part of it.
+   * Who a transfer may hand a Task to — and, from version 10, who a new Task may name. It asks whether the target
+   * still takes part in the Project, not whether it owns it; following the Thread is never part of it.
    */
   private resolveTransferTarget(projectRef: AgentTeamProjectRef, requested: AgentTeamMemberId): AgentTeamMemberId {
     const member = this.requireMember(requested)
@@ -8605,6 +8623,12 @@ export class AgentTeamLedger {
     if (this.heldTaskClaimFrom(projection, task.taskRef, memberId)) return false
     return this.isProjectOwnerFrom(projection, task.projectRef, memberId)
       || (projection.rulesVersion >= 3 && task.accountable === memberId)
+  }
+
+  /** A version-10 Task creation's accountable: the Human, or an enabled Member a transfer could reach. */
+  private startAccountableIsValidFrom(projection: Projection, projectRef: AgentTeamProjectRef, accountable: AgentTeamMemberId): boolean {
+    if (accountable === AGENT_TEAM_HUMAN_MEMBER_ID) return true
+    return projection.members.get(accountable)?.state === 'enabled' && this.takesPartInProjectFrom(projection, projectRef, accountable)
   }
 
   /** The target a committed transfer landed on, judged by the rules the segment that wrote it ran under. */

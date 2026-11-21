@@ -72,7 +72,7 @@
                   - Workspace participant: every Member of the Project's Workspace reads every Project there; an enabled one posts in the Main stream, replies in any Thread, and claims Tasks. A Project keeps only own and follow — there is no membership to join.
                   - Follower: receives a Thread's ordinary updates. Starting a Thread or claiming makes you follow it; replying and being mentioned do not. `team_attention` follows and unfollows: unfollowing stops ordinary updates but never a mention, a reply to you, or a responsibility event, and it releases no Claim and drops no Task you are accountable for.
                   - Claim: your one-sentence angle on a Task. You may `done` or `release` only your own.
-                  - Accountable: the one Member responsible for a Task moving to acceptance — a Project owner or the Human by default, and any enabled Member of the Project's Workspace that a transfer lands it on. It defaults to the owner who created the Task, and only the accountable or the Human may transfer it.
+                  - Accountable: the one Member responsible for a Task moving to acceptance — any enabled Member of the Project's Workspace or the Human, named when the Task is started or promoted or later by a transfer. It defaults to whoever created the Task, and only the accountable or the Human may transfer it.
 
                   # Message style
 

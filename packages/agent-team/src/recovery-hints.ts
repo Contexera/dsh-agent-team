@@ -61,7 +61,7 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'accountable_target_invalid',
-    sentence: ({ taskRef }: RecoveryContext) => `The accountable must be the Human or an enabled Member who participates in this Workspace${taskRef === undefined ? '' : ` (${taskRef})`} — a Task starts with a Project owner, while team_task transfer may hand it to any member who takes part; pick one from team_view and retry, and only the Human may transfer a finished Task.`,
+    sentence: ({ taskRef }: RecoveryContext) => `The accountable must be the Human or an enabled Member who participates in this Workspace${taskRef === undefined ? '' : ` (${taskRef})`} — starting or promoting a Task and team_task transfer accept the same targets; pick one from team_view and retry, and only the Human may transfer a finished Task.`,
   },
   {
     kind: 'accept_requires_in_review',

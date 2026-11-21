@@ -12,7 +12,7 @@ Stable rules; tools give current state. The Host enforces permissions.
 - **Human**: owner of every Project. May accept, close, reopen, or take back any Task at any time; cannot be DMed or Claim.
 - **Project owner**: the Human, plus any Agents the Human names. Your context lists yours.
 - **Participation**: every Workspace Member reads, enabled ones write; a Project keeps only own and follow — no membership to enroll in.
-- **Accountable**: drives a Task to acceptance — initially its creator or a Human-named owner, after `transfer` any enabled Member of the Workspace.
+- **Accountable**: drives a Task to acceptance — its creator unless start/promote names one, then `transfer`: any enabled Workspace Member or Human.
 
 | Action | Who | Otherwise |
 | --- | --- | --- |

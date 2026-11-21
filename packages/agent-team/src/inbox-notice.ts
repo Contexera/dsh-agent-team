@@ -22,6 +22,7 @@ import type {
   AgentTeamProject,
   AgentTeamProjectRef,
   AgentTeamSubscriptionActivity,
+  AgentTeamTask,
   AgentTeamThreadRef,
   AgentTeamUnreadMemberReminder,
   AgentTeamWorkerAnswer,
@@ -181,7 +182,7 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
               return ['Team Task update', `${activity.activityRef} (Task ${activity.taskRef}, Thread ${activity.threadRef}) — already in current context; still unread`].join('\n')
             }
             const acceptance = acceptanceNotification(fact.activity, readerId, lookup)
-            const handover = handoverNotification(fact.activity, readerId)
+            const handover = handoverNotification(fact.activity, readerId, item.task, lookup)
             const answer = fact.activity.kind === 'worker_settled'
               ? workerAnswers.get(fact.activity.workerRef)
               : undefined
@@ -438,13 +439,22 @@ function workerAnswerText(answer: AgentTeamWorkerAnswer): string {
 }
 
 /**
- * The prompt a handover owes its new accountable. A transfer is the one Task change that hands somebody work they
- * did not choose, and version 3 lets that Member be a plain Project member who can verify it: the wake says what the
- * Task now asks of them, and who verifies when they worked on it themselves.
+ * The prompt a handover owes its new accountable. A transfer, and a Task someone else created with the reader named
+ * accountable, are the two ways a Member is handed responsibility it did not choose; version 3 lets that Member be one
+ * who owns nothing yet can verify it, so the wake says what the Task now asks of them, and who verifies when they
+ * worked on it themselves. A creation is judged against the Task's current accountable, so a Task already handed on
+ * says nothing.
  */
-function handoverNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined): string | undefined {
-  if (activity.kind !== 'transfer' || readerId === undefined || activity.to !== readerId) return undefined
-  return `You are the accountable for Task ${activity.taskRef} now: review what this Thread holds and accept it when the work stands, or say what still needs to change. Claims stay with their owners, so acceptance completes their work instead of moving it; if you worked on this Task yourself, another Project owner or the Human verifies it.`
+function handoverNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined,
+  task: AgentTeamTask | undefined, lookup: InboxNoticeLookup): string | undefined {
+  if (readerId === undefined) return undefined
+  if (activity.kind === 'transfer' && activity.to === readerId) {
+    return `You are the accountable for Task ${activity.taskRef} now: review what this Thread holds and accept it when the work stands, or say what still needs to change. Claims stay with their owners, so acceptance completes their work instead of moving it; if you worked on this Task yourself, another Project owner or the Human verifies it.`
+  }
+  if (activity.kind === 'promote' && activity.actor !== readerId && task?.taskRef === activity.taskRef && task.accountable === readerId) {
+    return `You are the accountable for Task ${activity.taskRef}: ${lookup.printableSender(activity.actor)} created it and named you to drive it to acceptance. Claims carry the work, so nothing is owed until it is in review; then accept it if you never claimed it, or say what still needs to change. Unfollowing this Thread meanwhile still leaves the review wake reaching you.`
+  }
+  return undefined
 }
 
 function acceptanceNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined,
