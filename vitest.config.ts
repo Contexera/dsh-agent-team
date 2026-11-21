@@ -87,6 +87,8 @@ const integrationSpecs = [
   'packages/agent-team/tests/subscription-retry.spec.ts',
   'packages/agent-team/tests/subscription-runs.spec.ts',
   'packages/agent-team/tests/subscription-script-boundary.spec.ts',
+  // Real on-disk sqlite migrations: the windows lane measured a v3 skip at 5.9s against the unit budget.
+  'packages/agent-team/tests/subscription-storage-upgrade.spec.ts',
   'packages/agent-team/tests/surface-agreement.spec.ts',
   'packages/agent-team/tests/surface-exemption.spec.ts',
   'packages/agent-team/tests/surface-rejection-recovery.spec.ts',
