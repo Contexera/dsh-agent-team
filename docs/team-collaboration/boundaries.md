@@ -43,7 +43,7 @@ Task responsibility moves through the Human `transferTask` Remote. The Host acce
 
 The Client re-implements neither the transfer rules nor the accept/close/reopen authority, which stay on the Host.
 
-The control also stands on a finished Task, because only a Member actor is confined to open Tasks. An accepted Task keeps its Thread's followers, so a Task whose accountable left the Project is mended there. Closing ends every Attention row, so a closed Task's Thread has no follower left; a follow is the only Attention row it can still create, and it puts a reader back in the offer — and until somebody follows it, the dialog says that nobody can take the Task instead of naming a target of its own.
+The control also stands on a finished Task, because only a Member actor is confined to open Tasks. An accepted Task keeps its Thread's followers, so a Task whose accountable left the Project is mended there. Closing ends every Attention row, so a closed Task's Thread has no follower left and a follow is the only Attention row it can still create — but the offer does not read the followers, it reads the Workspace roster, so the same enabled Members plus the Human remain on it and the Task can still be handed over.
 
 A committed transfer is also stated where the control stands: the band prints the new accountable from the Host's own committed result, and retires that line once the projection stops agreeing with it. The Host's transfer activity row still records the move in the feed — the band's line is the same fact at the control, not a second authority over it.
 

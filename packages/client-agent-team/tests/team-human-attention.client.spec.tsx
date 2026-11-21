@@ -42,9 +42,10 @@ async function openTransferDialog(b: Bench): Promise<HTMLElement> {
   return b.view.findByRole('dialog', { name: '转交负责人' })
 }
 
-/** The candidate rows the dialog offers, by their visible labels, in render order. */
+/** The candidate rows the dialog offers, by their accessible names, in render order. A row's visible
+    text is the roster identity (handle and description), so the action each row takes lives on its label. */
 function candidateLabels(dialog: HTMLElement): string[] {
-  return [...dialog.querySelectorAll('li button')].map(node => node.textContent ?? '')
+  return [...dialog.querySelectorAll('li button')].map(node => node.getAttribute('aria-label') ?? '')
 }
 
 describe('Team Human Attention and Task transfer controls', () => {

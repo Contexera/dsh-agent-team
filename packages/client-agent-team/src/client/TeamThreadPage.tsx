@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type {
   AgentTeamClientMemberStatus,
   AgentTeamThreadTaskCard,
@@ -16,9 +16,11 @@ import { Button, IconChevronLeftOutlineRegular, Modal, Pill, Tooltip } from '@de
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
+import { TeamMemberIdentity } from './TeamMemberRow.tsx'
+import { useAvatarImage } from './avatar-image.ts'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { firstSentence, formatActivity, formatRiskClass, formatTaskStatus, plainGist, taskStatusDot } from './team-formatters.ts'
+import { firstSentence, formatActivity, formatRiskClass, formatTaskStatus, HUMAN_MEMBER_ID, identityInitial, memberHue, plainGist, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { TeamOwnerSeat } from './TeamOwnerSeat.tsx'
 import { TeamThreadCard } from './TeamThreadCard.tsx'
@@ -32,6 +34,8 @@ import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread, resolvedThreadDestination } from './refs.ts'
 import { rosterAccountableOwner, rosterProjectName, rosterMember } from './refs.ts'
 import css from './conversation.module.css'
+import rowCss from './member-row.module.css'
+import sidebarCss from './sidebar.module.css'
 import threadCss from './thread.module.css'
 
 interface TeamThreadPageProps {
@@ -89,6 +93,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // Label source for the promote/accept buttons only: a reply send also raises
   // the shared `pending` gate, and must not retitle those buttons.
   const [transferDialogOpen, setTransferDialogOpen] = useState(false)
+  const humanImage = useAvatarImage(humanAvatarUrl)
   const mountedRef = useRef(false)
   const supplementalRef = useRef<Promise<void>>()
   const supplementalPendingRef = useRef(false)
@@ -219,14 +224,15 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // The dialog offers every enabled Member of this Workspace plus the Human: under rules version 9 a
   // handover lands on any enabled Workspace Member, so the offer reads the same roster the workspace
   // directory lists rather than this Thread's follower set. The current accountable is never offered:
-  // a transfer it already holds is refused as a no-op.
+  // a transfer it already holds is refused as a no-op. The Human's seat closes the list, pinned rather
+  // than sorted, so the return-to-you move always sits in the same place.
   const transferCandidates = useMemo(() => {
-    if (task === undefined) return []
-    const human = projectView?.humanMemberId
-    const candidates = members.filter(status => status.member.state === 'enabled').map(status => status.member.memberId)
-    return [human, ...candidates]
-      .filter((memberId): memberId is AgentTeamMemberId => memberId !== undefined && memberId !== task.accountable)
-      .sort((left, right) => memberName(left).localeCompare(memberName(right)))
+    if (task === undefined) return { members: [] as AgentTeamClientMemberStatus[], human: false }
+    const roster = members
+      .filter(status => status.member.state === 'enabled' && status.member.memberId !== task.accountable)
+      .sort((left, right) => `@${left.member.handle}`.localeCompare(`@${right.member.handle}`))
+    const human = projectView?.humanMemberId !== undefined && task.accountable !== projectView.humanMemberId
+    return { members: roster, human }
   }, [members, projectView?.humanMemberId, task?.accountable])
 
   // Identity-stable: `openRef` feeds every row's props, so a fresh destination per render would re-render the timeline. The
@@ -592,27 +598,46 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           <span title={full}><strong className={threadCss.riskClass}>{label}</strong> · {t(sentenceKey, { member: status.member.handle })} — {reason}</span>
         </p>)}
       </section>}
-      {/* The handover dialog: this Thread's enabled followers, one row each, and an empty state that says why
-          nobody is offered. A candidate is a button, so the list is reachable and dismissable by keyboard alone;
-          the write stays on the page's own hook, which keeps the Task's current accountable on screen until the
-          Host commits, and closes the dialog on that commit rather than on the click. */}
+      {/* The handover dialog: every enabled Member of this Workspace plus the Human, one roster row
+          each, and an empty state that says why nobody is offered. The header names the current
+          accountable, because the transfer it explains is theirs to lose. A candidate is a button, so
+          the list is reachable and dismissable by keyboard alone; the write stays on the page's own
+          hook, which keeps the Task's current accountable on screen until the Host commits, and
+          closes the dialog on that commit rather than on the click. */}
       {task !== undefined && <Modal
         open={transferDialogOpen}
         onClose={() => { if (!transfer.pending) setTransferDialogOpen(false) }}
         title={t('transferTitle')}
+        description={t('transferBody')}
         closeLabel={t('cancel')}
         footer={<Button variant="outline" disabled={transfer.pending} onClick={() => { setTransferDialogOpen(false) }}>{t('cancel')}</Button>}
       >
-        <p className={css.confirmBody}>{t('transferBody')}</p>
-        {transferCandidates.length === 0
+        <p className={css.transferAccountable}>{t('transferAccountable', { name: memberName(task.accountable) })}</p>
+        {transferCandidates.members.length === 0 && !transferCandidates.human
           ? <p className={css.transferEmpty} role="status">{t('transferEmpty')}</p>
           : <ul className={css.transferList}>
-              {transferCandidates.map(memberId => <li key={memberId}>
+              {transferCandidates.members.map(status => <li key={status.member.memberId}>
                 <button type="button" className={css.transferCandidate} disabled={transfer.pending}
-                  onClick={() => { void transfer.transfer(memberId) }}>
-                  {memberId === projectView?.humanMemberId ? t('transferTargetYou') : t('transferTargetLabel', { name: memberName(memberId) })}
+                  aria-label={t('transferTargetLabel', { name: memberName(status.member.memberId) })}
+                  onClick={() => { void transfer.transfer(status.member.memberId) }}>
+                  <TeamMemberIdentity status={status} t={t} />
                 </button>
               </li>)}
+              {transferCandidates.human && projectView?.humanMemberId !== undefined && <li>
+                <button type="button" className={css.transferCandidate} disabled={transfer.pending}
+                  aria-label={t('transferTargetYou')}
+                  onClick={() => { void transfer.transfer(projectView.humanMemberId) }}>
+                  <span className={sidebarCss.agentAvatar} style={{ '--team-avatar-hue': memberHue(HUMAN_MEMBER_ID), overflow: 'hidden' } as CSSProperties} aria-hidden="true">
+                    {humanImage.image.kind === 'image'
+                      ? <img src={humanImage.image.src} alt="" width={34} height={34} onError={humanImage.failed} />
+                      : identityInitial(humanName)}
+                  </span>
+                  <span className={rowCss.copy}>
+                    <strong>{humanName}</strong>
+                    <small>{t('transferHumanHint')}</small>
+                  </span>
+                </button>
+              </li>}
             </ul>}
         {/* A failure is stated where the reader pressed, and never twice: while the dialog is open it is the
             dialog's own line, because the band's line sits behind the modal. */}
