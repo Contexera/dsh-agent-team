@@ -244,10 +244,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const projectDialog = page.getByRole('dialog', { name: '新建项目' })
   await projectDialog.getByLabel('名称').fill('delivery')
   await projectDialog.getByLabel('说明').fill('M2 完整协作验收')
-  await projectDialog.getByRole('button', { name: '初始成员' }).click()
-  await page.getByRole('menuitem', { name: /builder/ }).click()
-  await page.getByRole('menuitem', { name: /reviewer/ }).click()
-  await expect.poll(async () => (await projectDialog.getByRole('button', { name: /初始成员/ }).textContent())?.trim() ?? '').toContain('已选 2 个成员')
+  // v9 dropped initial-member selection from project creation; a new Project
+  // starts with only the Human and Members enter by owner grant or work.
   await page.screenshot({ path: join(UI03_SHOTS, 'project-create-modal.png'), fullPage: true })
   await projectDialog.getByRole('button', { name: '创建项目' }).click()
   // Reopen from the narrow-expanded sidebar after the collapse settles.
@@ -327,16 +325,17 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       }
     }))
   expect(rampWide.length).toBeGreaterThan(0)
-  // A brand-new Project carries no Member yet, so every Workspace candidate is
-  // a peer a pick would enroll — the 'other' group, dimmed and named as such.
+  // Rules version 9 retired Project membership: a mention addresses any
+  // enabled Workspace Member, so every candidate here lands in the 'project'
+  // ('本 Workspace') group — none dimmed, none named as joining.
   for (const row of rampWide) {
-    expect(row.group).toBe('other')
-    expect(row.inside).toBe('false')
+    expect(row.group).toBe('project')
+    expect(row.inside).toBe('true')
   }
-  expect(await rampMenu.textContent()).toContain('选择后加入本项目')
+  expect(await rampMenu.textContent()).toContain('本 Workspace')
   // Resolve the alias the rule names so the expectation follows a theme swap.
-  const labelSecondary = await resolveAliasColor(page, '--dsw-alias-label-secondary')
-  expect([...new Set(rampWide.map(row => row.nameColor))]).toEqual([labelSecondary])
+  const labelPrimary = await resolveAliasColor(page, '--dsw-alias-label-primary')
+  expect([...new Set(rampWide.map(row => row.nameColor))]).toEqual([labelPrimary])
   await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-outside.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
@@ -351,7 +350,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(rampNarrow.length).toBeGreaterThan(0)
   for (const row of rampNarrow) {
     expect(row.descriptionDisplay).toBe('none')
-    expect(row.nameColor).toBe(labelSecondary)
+    expect(row.nameColor).toBe(labelPrimary)
   }
   await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-outside-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
