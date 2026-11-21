@@ -24,6 +24,7 @@ UI 呈现偏好不属于 Team fact、也不进账本——Team 侧栏 Projects/A
 - `tsconfig.json`
 - `tsconfig.types.json`
 - `tsconfig.build-deps.json`
+- `.generated-harness`（记录路径映射所用的 checkout）
 
 Remote artifacts 使用 `scripts/generate-typert.mjs` 生成；TypeScript path facades 使用 `scripts/sync-paths.mjs` 生成。修改输入后重新运行生成脚本，并检查生成结果是否稳定。
 
@@ -34,7 +35,7 @@ node scripts/sync-paths.mjs
 
 `tsconfig*.json` path facades 不应添加 `include` 或 `files`；它们需要保持对当前仓库文件和相邻 Harness source/declaration 的匹配行为。
 
-`generate:typert` 分析的是 Harness checkout 内的一份 Host face 副本，因此它自己准备那个临时包的外部依赖。Host face 只用两个依赖：`zod` 与 `yaml`，两者都从本仓库根安装链接过去——POSIX 上是 symlink，Windows 上是目录 junction（那里真正的 symlink 需要特权）。
+`generate:typert` 分析的是 Harness checkout 内的一份 Host face 副本，因此它自己准备那个临时包的外部依赖。脚本从 Team 根目录的安装中链接 `zod`、`yaml` 和 `@botiverse/oar`：POSIX 使用符号链接，Windows 使用目录 junction。
 
 `zod` 必须保持为链接。复制会把 zod 自己的声明放进被分析的包内，分析器的 reachable-files 遍历会因此排入一个 program 从未加载的声明文件，以 `TypeError` 而非可诊断错误终止。反之链接若解析不到，才会以每个引用文件都报 `TS2307: Cannot find module 'zod'` 的形式暴露。
 
@@ -50,9 +51,7 @@ node scripts/sync-paths.mjs
 
 因此消费方一律通过声明的 subpath（`@contexera/dsh-agent-team/host`、`/remote`、`/types`、`/tools`、`/client`）访问，而不是用相对路径进入另一个目录的 `lib/`。生成的 `tsconfig*.json` facades 与 Client bundler 都映射这些 subpath；源码层跨接缝写相对导入，等于绕过"让生成产物可替换"的那份契约本身。`scripts/harness-dir.mjs` 是这些映射解析相邻 Harness checkout 的唯一指针。
 
-Host 源码刻意保持扁平。`packages/agent-team/src/` 按文件划分 authority 与接缝，有三个结构锚点——`index.ts` 是 composition root 与 Remote adapter，`ledger.ts` 是 durable authority，`spec.ts` 与 `types.ts` barrel 持有 record schema 与公开类型。其余每个文件都是一个 earned seam；它们各自的归属见 [`architecture/README.zh.md`](../architecture/README.zh.md)。
-
-由此有两条机械结论，遵守它们比事后修复便宜：什么算 earned seam，以及为什么薄改名要删掉而不是留作接缝。两条都随归属规则写在 [`architecture/package-ownership.zh.md`](../architecture/package-ownership.zh.md) 里。
+Host 源码刻意保持扁平。`packages/agent-team/src/` 按文件划分 authority 与接缝，有三个结构锚点——`index.ts` 是 composition root 与 Remote adapter，`ledger.ts` 是 durable authority，`spec.ts` 与 `types.ts` barrel 持有 record schema 与公开类型。其余每个文件都是一个 earned seam；它们各自的归属见 [`architecture/package-ownership.zh.md`](../architecture/package-ownership.zh.md)。
 
 ## 新增一条 Host operation
 一条 durable Team operation 是一个纵切 authority 层的完整切片，不是按层拆分的任务清单。类型、record、commit、projection 与读表面要在同一次改动里配齐；ledger 会拒绝自己无法 replay 的 record，因此半成品切片会明确报错，而不是静默通过。
@@ -71,12 +70,12 @@ types/requests-results.ts   公开的 request 与 result 形状
 2. **公开形状。** 在 `types/requests-results.ts` 加上 request 与 result 类型；`types.ts` 是公开 barrel 会自动 re-export，不需要逐 operation 编辑。
 3. **Commit。** 加上由 `operationBase(...)` 与下一个 sequence 构造 record 的 ledger 方法，以及它会唤醒的 change scope。
 4. **校验与 projection。** 扩展 ledger 的 per-kind commit 校验与校验入口，并加上把该 record 应用到 projection 的 case。replay 正确性就在这里——加载时没有应用的 projection 会与 durable table 分叉。
-5. **Host 与 Remote。** 在 `index.ts` 加上 `@Remote('<action>')` 方法：授权、以 Human 或 Member actor 分派给 ledger、发出 committed receipt。
-6. **测试与文档。** 覆盖 commit、replay、授权与 projection 效果；然后更新该事实的归属文档（边界改 `architecture/README.md`，语义改 `domain-model.md`，面向模型的契约改 `team-collaboration/README.md`）。
+5. **Host 与 Remote。** 把调用接到 Host。若 Client 需要调用，在 `index.ts` 用 `@Remote('<action>')` 暴露入口。校验操作者的权限，交给 ledger 处理，再发出提交回执。
+6. **测试与文档。** 覆盖 commit、replay、授权与 projection 效果；然后更新该事实的归属文档（见[文档归属表](../AGENTS.md#routing)）。
 
-**那六个面不会问的一个问题：崩溃重导。** 对这个 operation 驱动的每一个进程内效果——一次唤醒、一次销毁、一次激活、一个外部文件副作用——回答：如果进程在 commit 与效果之间死掉，由哪个 durable state 重导它，而这次重导是否幂等？效果是在 replay **之后**重导的，而不是由 replay 代替；它是一句问句，而不是第七个面。[`host-authority.md`](../architecture/host-authority.md) 记录了 Host 自己的那些重导。
+**那六个面不会问的一个问题：崩溃后如何恢复。** 对这个 operation 驱动的每一个进程内效果——一次唤醒、一次销毁、一次激活、一个外部文件副作用——回答：如果进程在 commit 与效果之间死掉，由哪个 durable state 恢复它，恢复过程是否幂等？先重放 ledger，再恢复效果；重放本身不能代替这一步。[`host-authority.md`](../architecture/host-authority.md) 记录了 Host 的恢复路径。
 
-invariant companion 是"被覆盖"而不是"要扩展"。`invariant.ts` 在 mount 时与每次 commit 后校验整个 durable ledger，所以只要新 operation 能 replay，它的 durable record 就自动纳入覆盖。覆盖止于 durable table——上面那句问的进程内效果没有 invariant。只有当新 record 形状需要 projection validator 尚未断言的关系时才扩展它。
+invariant companion 是"被覆盖"而不是"要扩展"。`invariant.ts` 在挂载时检查 ledger，并把一批提交合并为一次重放，在响应的 I/O 轮次之后执行，所以只要新 operation 能 replay，它的 durable record 就自动纳入覆盖。覆盖止于 durable table——上面那句问的进程内效果没有 invariant。只有当新 record 形状需要 projection validator 尚未断言的关系时才扩展它。
 
 这份清单依赖两条边界：
 

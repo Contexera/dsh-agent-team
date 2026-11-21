@@ -1,15 +1,6 @@
 import { characterLength } from './text.ts'
 import type { AgentTeamMemberReminderState, AgentTeamReminderRef, AgentTeamReminderSchedule } from './types/entities.ts'
 
-/**
- * Member reminders are time promises bound to a Member, not to a Session: the
- * Team ledger keeps them, so a Session being recycled, rolled over or restarted
- * never costs the Member its reminder. Everything here is pure — the schedule
- * is parsed once at creation and replayed from the ledger afterwards, and the
- * plan answers "what is due now" without touching durable state.
- */
-
-/** Active reminders one Member may carry. */
 export const MAX_ACTIVE_REMINDERS_PER_MEMBER = 50
 
 /**
@@ -19,7 +10,6 @@ export const MAX_ACTIVE_REMINDERS_PER_MEMBER = 50
  */
 export const MEMBER_REMINDER_REF_PATTERN = /^reminder:[^:]+$/
 
-/** The note is handed to the creating Member when the occurrence fires. */
 export const MAX_REMINDER_NOTE_CHARACTERS = 2000
 
 /** Floor on the gap between two consecutive fires of a recurring reminder. */
@@ -28,7 +18,7 @@ export const MIN_RECURRING_MINUTES = 10
 /** The fixed Team coordination offset from UTC, in minutes; no daylight-saving component. */
 const TEAM_ZONE_OFFSET_MINUTES = 8 * 60
 
-/** How far ahead a cron expression is searched before it is called never-firing. February 29 can sit eight years from any instant (2096→2104), so the horizon must outreaches that gap. */
+// The search must cross the eight-year leap-day gap at a skipped century (2096–2104).
 const CRON_SEARCH_HORIZON_MS = 9 * 366 * 24 * 60 * 60 * 1000
 
 /**
@@ -160,7 +150,7 @@ function cronNextAfter(fields: CronFields, fromMs: number): number | undefined {
   return undefined
 }
 
-/** The instant a schedule next fires after `fromMs`, or undefined when it never will. */
+/** One-shots keep their absolute instant; recurring schedules advance strictly after `fromMs`. */
 export function nextOccurrenceAt(schedule: AgentTeamReminderSchedule, fromMs: number): number | undefined {
   if (schedule.kind === 'once') return Date.parse(schedule.at)
   if (schedule.kind === 'every') return fromMs + schedule.minutes * MINUTE_MS
@@ -183,7 +173,6 @@ function monthLength(year: number, month: number): number {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28
 }
 
-/** The Vixie rule for one date, from whether its day-of-month and day-of-week matched. */
 function cronDateMatches(fields: CronFields, dayOfMonth: boolean, dayOfWeek: boolean): boolean {
   return fields.dayOfMonthRestricted && fields.dayOfWeekRestricted ? dayOfMonth || dayOfWeek : dayOfMonth && dayOfWeek
 }
@@ -230,13 +219,7 @@ function cronDatePattern(fields: CronFields): { readonly fires: boolean; readonl
   return { fires, adjacent: adjacent || (firstDateMatches && previousMatched) }
 }
 
-/**
- * The closest two consecutive fires of a cron expression come, in minutes, or
- * `undefined` when no date matches. Every matching day repeats the same set of
- * minutes, so the closest pair is either two fires inside one day or a day's last
- * fire and the next matching day's first — and the second only exists when two
- * matching dates sit side by side in the calendar.
- */
+// Only adjacent calendar dates can shorten the within-day minimum across midnight.
 function cronClosestFireGap(fields: CronFields): number | undefined {
   const pattern = cronDatePattern(fields)
   if (!pattern.fires) return undefined
@@ -342,43 +325,37 @@ export interface MemberReminderPlanInput {
   readonly reminders: readonly MemberReminderPlanEntry[]
 }
 
-/** One occurrence to raise. The instant is when it is raised, not when it was scheduled: a missed cadence collapses into a single make-up. */
+/** One-shots keep their scheduled instant; a missed recurring cadence collapses into one make-up. */
 export interface MemberReminderCandidate {
   readonly reminderRef: string
   readonly memberId: string
   readonly scheduledAt: string
 }
 
-/**
- * What is due now, at most one occurrence per reminder. A recurring reminder
- * whose previous occurrence is still unconsumed is still due: replacement is
- * the delivery's business, so the plan never suppresses an occurrence because
- * the last one was never read.
- */
+function activeOccurrenceAt(entry: MemberReminderPlanEntry): number | undefined {
+  if (entry.state !== 'active' || (entry.memberState !== 'enabled' && entry.memberState !== 'suspended')) return undefined
+  if (entry.schedule.kind === 'once') {
+    if (entry.lastOccurrenceAtMs !== undefined) return undefined
+    const at = Date.parse(entry.schedule.at)
+    return Number.isFinite(at) ? at : undefined
+  }
+  // Consumption does not set the cadence: a new occurrence can replace an unread one.
+  return nextOccurrenceAt(entry.schedule, entry.lastOccurrenceAtMs ?? entry.createdAtMs)
+}
+
 export function planMemberReminders(input: MemberReminderPlanInput): readonly MemberReminderCandidate[] {
   const candidates: MemberReminderCandidate[] = []
   for (const entry of input.reminders) {
-    if (entry.state !== 'active') continue
-    if (entry.memberState !== 'enabled' && entry.memberState !== 'suspended') continue
-    const baseline = entry.lastOccurrenceAtMs ?? entry.createdAtMs
-    if (entry.schedule.kind === 'once') {
-      const at = Date.parse(entry.schedule.at)
-      if (!Number.isFinite(at) || at > input.nowMs || entry.lastOccurrenceAtMs !== undefined) continue
-      candidates.push({ reminderRef: entry.reminderRef, memberId: entry.memberId, scheduledAt: new Date(at).toISOString() })
-      continue
-    }
-    const dueAt = nextOccurrenceAt(entry.schedule, baseline)
-    if (dueAt === undefined || dueAt > input.nowMs) continue
-    candidates.push({ reminderRef: entry.reminderRef, memberId: entry.memberId, scheduledAt: new Date(input.nowMs).toISOString() })
+    const at = activeOccurrenceAt(entry)
+    if (at === undefined || at > input.nowMs) continue
+    // Missed recurring fires collapse to one occurrence at the current time, avoiding catch-up bursts.
+    const scheduledAt = new Date(entry.schedule.kind === 'once' ? at : input.nowMs).toISOString()
+    candidates.push({ reminderRef: entry.reminderRef, memberId: entry.memberId, scheduledAt })
   }
   return Object.freeze(candidates)
 }
 
-/**
- * Structural validity of one schedule, with no clock in it: replay must reach the
- * same verdict for the same record forever, so the time-dependent policy (a cron
- * that never fires, a gap under the floor) is enforced at creation instead.
- */
+/** Replay checks cron against a fixed epoch; the minimum cron gap is enforced on creation. */
 export function reminderScheduleIsSound(schedule: unknown): boolean {
   if (typeof schedule !== 'object' || schedule === null) return false
   const shape = schedule as Record<string, unknown>
@@ -400,14 +377,10 @@ export function reminderScheduleIsSound(schedule: unknown): boolean {
 export function nextReminderWakeAt(reminders: readonly MemberReminderPlanEntry[], nowMs: number): number | undefined {
   let soonest: number | undefined
   for (const entry of reminders) {
-    if (entry.state !== 'active') continue
-    if (entry.memberState !== 'enabled' && entry.memberState !== 'suspended') continue
-    const baseline = entry.lastOccurrenceAtMs ?? entry.createdAtMs
-    const at = entry.schedule.kind === 'once'
-      ? (entry.lastOccurrenceAtMs === undefined ? Date.parse(entry.schedule.at) : undefined)
-      : nextOccurrenceAt(entry.schedule, baseline)
+    const at = activeOccurrenceAt(entry)
     if (at === undefined || !Number.isFinite(at)) continue
     if (soonest === undefined || at < soonest) soonest = at
   }
+  // If a reminder is already due, the Host must reconcile it before arming another timer.
   return soonest === undefined || soonest <= nowMs ? undefined : soonest
 }

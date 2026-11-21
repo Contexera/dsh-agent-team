@@ -2,19 +2,29 @@
 
 [English](host-authority.md) | 中文
 
-Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是 Member、Workspace、Project、Message、独立 Thread aggregate、可选 Task overlay、Claim、Thread Attention、Inbox 和 Activity facts 的 durable authority。
+本文说明 Host 的决策及失败边界：持久提交、运行时效果，以及从中派生的投影。先读 ledger 规则，再用生命周期与恢复章节区分「事实已经提交」和「效果仍待完成」。
+
+每个 DSH home 只有一个 Team 协作域。只追加的 ledger 保存 Member、Workspace 参与关系、Project、Message、Thread、可选 Task、Claim、Attention、Inbox 与 Activity 等 Team 事实。Workspace 是否存在及 Session 如何存储仍由 Harness 决定，见 [存储复用](workspace-session-storage.zh.md)。
 
 修改 Host capability 时，先阅读 package source/tests，再阅读匹配的 Harness capability contract。导航表见 [`harness-navigation.zh.md`](../harness-navigation.zh.md)。导航表把 Host 改动映射到 `deepseek-harness/docs/subsystems/` 和 source packages。
 
 ## Ledger 权威与提交
+
+### 规则版本与重放
+
 - 当前 Session 上下文可满足 [Thread 阅读条件](../team-collaboration/boundaries.zh.md#mutation-fences)，但不确认未读，也不建立第二份权威；只有显式读取才提交已读状态变化。
 - Agent 的 Thread 与 Main stream read 在 ledger 结果上增加[按上下文调整的呈现](../team-collaboration/tools.zh.md#team_thread)：缺失的近期 Message 背景与已可见正文的省略说明。工具按输出上限选出能渲染的前缀，Thread receipt 以 `selectedThroughSequence` 记录这个界限，旧 receipt 仍按缺省 batch 解释；Host 只提交该前缀。Human read、Remote 参数与 replay 语义均不变，重放不依赖 Session。
 - mutation 进入 Host authority，并提交一条 durable operation。
 - 重放会重算每条记录应有的 Inbox delta 并逐项比较，所以改变既有 kind 校验规则的版本要先写一条 `team/rules-version-adopted`（Host actor，`{ version }`）。每条记录按它之前最新的标记校验；没有标记的 ledger 为版本 1。标记由 `initialize` 在它自己排队的提交里追加，因此早于之后的所有写入，包括启动恢复。标记只升不降，每个版本至多一条；ledger 采用的版本高于本构建实现的版本时拒绝打开。
-- 当前构建实现版本 8。挂载时若 ledger 的最新标记低于它，只追加一次版本 8 标记；全新 ledger 在 `team/initialized` 之后立即写入该标记，已经处于版本 8 的 ledger 重新打开不会再写。下面关于版本 2 规则的内容仍只描述各自的记录段，而不是当前标记。
+- 当前构建实现版本 9。打开旧 ledger 时只追加一次版本 9 标记；全新 ledger 在 `team/initialized` 之后立即写入，已经处于版本 9 时不再追加。下面关于版本 2 规则的内容仍只描述各自的记录段，而不是当前标记。
+- 版本 9 以 Workspace 参与关系取代 Project 成员关系门槛：enabled Member 可以写入，suspended Member 仍可读取，inactive 或 archived Member 不可读取。新 Project 不保存成员关系列表，旧记录段继续遵循原规则。ownership 仍是独立权限。
 - 版本 8 新增 `team/project-owner-responsibility-updated`，并给 `team/project-owner-added` 增加可选的 `responsibility`。两者在版本 8 以下的记录段内都被拒绝，因此更早的构建写下的 ledger 仍逐字节重放，其 owner 记录继续读作未说明；只实现到版本 7 的 build 会在解析这两种形状之前先被版本 8 标记拒绝。所以升级不需要数据迁移——由标记本身决定哪些记录段可以携带新字段。
 - 规则版本 2 起，Host 还会提交 `team/main-message-posted`、`team/main-stream-read` 和 `team/thread-started`，它们在版本 1 的记录段内会被拒绝，而 `team/message-sent` 在版本 2 的记录段内被拒绝。Host 不再写 `team/message-sent`（开 Thread 用 `startThread`），它只在版本 1 的记录段内重放。
-- 0.2.5 预览开关打开过的 ledger 正是落在这条拒绝上：它带版本 2 标记，而它当年开 Thread 走的 `sendMessage` 仍无守卫地写版本 1 的 `team/message-sent`，因此只有当该段内没有这条记录时才能打开。该开关本就只用于一次性的 `DSH_HOME`。
+- 版本 2 记录段内出现 `team/message-sent` 就会被拒绝，带有这种组合的 preview ledger 也不例外。
+
+> TODO: 使用版本标签诊断文件前，先核实历史 0.2.5 preview 的来源；决定重放的是标记与 operation kind，不是 release 标签。
+### Inbox 增量与回复引用
+
 - inbox delta 可带可选的 `mainMarkers` 列表，使用独立的 marker 形状（`projectRef` 加 `messageRef` 或 `activityRef`）。它只在确有变化时出现，所以版本 1 的记录保持存储字节不变；离开的 Member 的 Main stream marker 随同一 operation 与其他 inbox 状态一起清除。
 - inbox delta 还可带可选的 `mainAttention` 列表（`set` 是 Main stream Attention 行，`removed` 是它们的键），同样只在确有变化时出现，因此 Main stream Attention 出现之前写下的 delta 保持存储字节不变。显式 follow/unfollow 由 `team/main-attention-changed` 写入；owner 授权写入它起始的那一行，撤回则移除该行。这一行按 Member × Project 键控，永不进入 Thread 索引。
 - Agent 通过与 Thread marker 相同的 direct 通知路径被 Main stream marker 唤醒；Attention 覆盖的普通 Main stream 更新同样立即投递。每条未读事实都会打断，因此 Thread 的普通更新只因读者 follow 了该 Thread 才到达：没有任何身份——owner 或 accountable——被放进更慢的等级，也没有任何东西在通知发出前先累积计数。`covered` 是保存在进程内的签名，用于阻止同一批 durable facts 的重复派生花掉第二次尝试；已入队但尚未读取的通知会被替换，而不是叠加。
@@ -42,7 +52,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 - 一次提交影响至少 8 个身份时，通知 effect 延迟到 durable commit 和 Client invalidation 之后执行。同一 Member 按序处理；后续小批次遇到未完成队列时也加入，不能插队。不同 Member 独立调度。关闭时跳过尚未开始的 effect，activation 再从持久未读事实派生。队列排空只表示派发结束，不代表 Agent 已读取或回复通知。
 - 同步执行的 invariant divergence 仍会让调用方收到 reject；延迟通知中的 divergence 因 commit 已经返回，只记 error 级日志。失败的 Inbox wake 清掉这个 wake 记录的 notice state。因此，下一次触及该 Member 的 commit 重新推导同一批 durable Inbox facts 并重试，不追加第二次操作。DM 保留显式的 recorded-but-not-delivered 错误。
 
-## 哪些操作会唤醒 Member，以及成员卡住时怎么选
+## 哪些操作会唤醒 Member，以及 Member 卡住时怎么选
 
 唤醒是 Host 经四种 cause 之一投递的一条**有界合并通知**，每条都带上产生它的持久事实：
 
@@ -74,7 +84,9 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 ## 变更流与 Projection
 - `changes()` 是流式 Remote，可声明一个 scope（workspace/project/thread/presence）。省略 scope 时观察共享 Team 投影变化，不包含 presence。Host 先注册监听，再发送当前基线，之后只发送匹配的变更通知。消费者暂停期间，只保留最新待发送版本。取消或 Host 释放时关闭订阅。
 - Thread read 与 `team/dm-sent` 不改变共享投影：既不推进版本，也不唤醒订阅者。私有 reminder 会使其 Task Thread scope 失效，从而让已打开的 Human Inbox 得知提醒；它不会因此成为公开 Thread 历史。Presence 使用进程内 epoch，其他 scope 使用最近一次共享投影提交的 ledger sequence。版本只在同一 scope 和 Host 生命周期内有意义。Host 只为受 operation 影响的 Members 重算 Inbox hints。
-- `TeamChangeStream` 在每个页面内通过 `ctx.remote.$stream()` 按 scope 共享一个逻辑流。Harness 管理共享的 `/api/remote.mux` WebSocket 和连接恢复。每次开场基线都会触发重新读取 Host，包括重连后的相同或更低版本。开场基线既补上首次读取与订阅之间的变化，也在没有新提交时恢复失败的读取。最后一个 listener 离开时释放这个 scope，插件释放时关闭所有 scope。传输失败在恢复前只报告一次。终止性错误直接报告，不走 Team 自有重试循环。没有长轮询回退、跨页面主从选举或单活跃页面限制。并发的补充读取合并通知。读取期间再收到通知，保留后续一轮读取，不用旧版本过滤重连基线。Human Inbox 徽标订阅无 scope 通知。订阅经 debounce 重拉 Inbox 合计，在本页 Thread read 后刷新。Presence 订阅更新 Member 可用状态，不唤醒 Inbox。通知只是重新读取的提示，不是第二份事实存储。
+- `TeamChangeStream` 在每个页面内通过 `ctx.remote.$stream()` 按 scope 共享一个逻辑流。Harness 管理共享的 `/api/remote.mux` WebSocket 和连接恢复。每次开场基线都会触发重新读取 Host，包括重连后的相同或更低版本。开场基线既补上首次读取与订阅之间的变化，也在没有新提交时恢复失败的读取。最后一个 listener 离开时释放这个 scope，插件释放时关闭所有 scope。传输失败在恢复前只报告一次。终止性错误直接报告，不走 Team 自有重试循环。没有长轮询回退、跨页面主从选举或单活跃页面限制。
+
+  并发的补充读取合并通知。读取期间再收到通知，保留后续一轮读取，不用旧版本过滤重连基线。Human Inbox 徽标订阅无 scope 通知。订阅经 debounce 重拉 Inbox 合计，在本页 Thread read 后刷新。Presence 订阅更新 Member 可用状态，不唤醒 Inbox。通知只是重新读取的提示，不是第二份事实存储。
 - `contextContinuity` unit 经 Harness projection registry 增量折叠活动 Session 事件，只保留恢复所需的旧 intent、checkpoint、continuation 与未答复输入。激活与退休 Session 恢复也可全量折叠被检视日志。
 - Member clock baseline 经 `session-event-cursor.ts` 只消费追加事件。Session 身份、继承前缀、日志长度或锚点事件变化时从头重折。守卫依赖日志只追加的契约；同一 sequence、同一事件类型的就地替换不在检测范围内。
 - 读取投影按用途定界。`view` 只回答它自己那一页 fact 加上请求点名的 Thread：catalog 字段带的是这一页的 Task、Thread、显示序号与 Claim。只有 `includeCatalog` 才返回整个请求 scope 的 Task/Thread/Claim catalog，也就是模型侧 `team_view` 渲染的 address book 投影。
@@ -97,21 +109,50 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - Host 激活 Member 时，通过 session-title service 用这个 Member 的 handle 命名没有标题的 Member session。这样普通 Session list 就会显示 Member identity。显式 rename 或任何已有 title 始终优先。命名失败不会导致 activation 失败。
 - Member 上下文的两个机制都在 Host 侧，模型没有对应工具（见 Tools and preset）：Team 通过 preset 中的适配层控制请求预算，Harness 的 `BasicCompactionEngine` 把过大的 Session 就地缩短；换代协调器在唤醒边界换掉冷下来的一代，并以 Host actor 记录 `team/member-session-recycled`。压力与唤醒阈值归 [`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md)。
 - 换代窗口内的这一代报告 unavailable，并带 `rollover` diagnostic，直到新代激活。所以跟随该行的 Client 绝不会打开一个尚不存在的 Session。
-- 换代携带的是输入，不是上下文：commit 记下退役日志的偏移，新代只重放该边界及其之后的输入，并按 Message id 去重；即使输入已被 claim，也使用最初的 durable inbox 插入记录。不经过进程内存拷贝（见 [Tools and preset](tools-and-preset.zh.md)）。
+- 换代携带输入而非上下文；具体边界与去重规则统一见下文。
 - Pending/error bookkeeping 只在进程内维护。只有进入 transaction 的 compactions 才会写入 durable Session history，绝不写入 Team ledger。
 - 终止回合的恢复先读 Harness 的结构化失败，再看措辞。稳定的 code 单独决定结果。`RATE_LIMIT` 是 rate limiting，`TRANSPORT`/`TIMEOUT` 是 transient network，显式 429/503 响应是 rate limiting。其他任何 code（quota、auth、context、请求状态）无论 message 写什么都保持 manual。只有无 code 可用的错误才回落到窄 message 签名。
 - `agent/error` 负责终止回合恢复及其连续错误上限。无论走哪条路，失败都保留已记录的 Member diagnostic。
 - 在任何 `turn/start` 之前被丢弃的 Team 唤醒，是唯一一类背后没有 `agent/error` 的 error diagnostic。当一条 Team 自己的 Inbox 或 recovery 通知在 Agent 开启回合前离开队列、且不是 Host 自己做的替换或 dispose 时，Host 记一条 `runtime` 类 diagnostic，带上 `source: 'agent/inbox/discarded'`、该 Member 的 `sessionId` 和 `occurredAt`。Host 有意替换或拆除的通知不触发任何东西，所以普通的通知替换从不显示 error。被取消的 splice 不带 durable 原因，因此它和所有 runtime diagnostic 一样只在进程内维护。重启后，在下一次唤醒真正运行或再次取消之前什么都不显示。
 
+### 换代与输入重放
+
+换代归 `team-context-management.ts`，Team 自己的协调器。它从 Host 的唤醒决定出发，而不是从 durable 意图出发，走串行 lifecycle queue 执行，并让新代身份从被退役的 Session 派生，因此崩溃后收敛到同一个后继：
+
+1. 等真正 idle；
+2. 在 commit seam 复查 owned-jobs guard 与普通输入队列——排队中的普通消息会让这次换代延后；
+3. 在 `agent.runMaintenance` 内以 Host actor 提交幂等的 `team/member-session-recycled` operation，并在存在 live 代时记下 `inputFromSeq`（退役日志的偏移）；
+4. retire 旧代：它的 pre-step gate reject 该 step，不发旧代模型请求；随后 dispose + 归档，绝不删除；即使输入已经被 claim，最初的 inbox 插入记录仍在日志中；
+5. 激活新 Session，lineage 由 ledger 的 transition 记录承载（它的 header 不写 `parentSession`，那个字段专指 subagent 的创建者）；
+6. 从 `inputFromSeq` 起折叠退役日志，按 message id 剔掉新代已经持有的消息，其余用 followup 投递，再从 ledger 重导出 Inbox。
+
+maintenance 是这次 commit 能安全面对换窗中途新输入的原因：loop 停在那里，新消息留在 durable inbox，不会落到正在被退役的那一代。commit 失败则 maintenance 放行，旧代继续运行；commit 成功就退役它，崩溃则留给启动或恢复补完尚未重放的换代。
+
+新代首先收到身份、Project ownership、Workspace 参与和私有记忆索引，加上唤醒它的消息。后续步骤只追加变化或缺失的类别；记忆更新与恢复规则见 [Member 上下文注入](../team-collaboration/memory-and-context.zh.md#member-上下文注入)。不提供 handoff 信封或换代公告。
+
+折叠是 Team 自己的 `contextContinuity` projection unit，在 Team service init 时按 host 注册一次。`context-projection.ts` 拥有 durable checkpoint ref 命名、Team notice 规则、fork cut，以及一代读回的那份折叠状态：带 turn-end 投递状态的 checkpoints、至多一条 legacy rollover 意图、continuation 投递记录，以及被退役那代从未消费的非 Team 输入。它仍然解码的工具名（`context_rollover`、`new_context`、`context_checkpoint`）是给早先版本日志用的解码器，不是 tool alias。
+
+`context-codec.ts` 只写当前构建还产出的那一个信封：quiet checkpoint continuation。识别它、以及识别早先版本写下的两种形状，都在 `context-source.ts`；handoff 的写者只作为那些 legacy 形状的测试 helper 保留。
+
+崩溃恢复从日志派生。被中断的换代按已记录的绑定与被退役的 Session 补完；旧日志里所属 turn 从未 durable 结束的 pending 意图视为 spent 直接丢弃，不会让该代永久无法换窗。
+
+carried-input 重放有界，且以 message id 为准。换代在 commit 时记下 `inputFromSeq`，即退役日志的偏移；折叠只计该边界及其之后的输入。唯一来源是退役 Session 的日志——不出于搬运而把消息内容留在内存里。新代即使已经跑过自己的 turn 也不因此跳过：由边界、新代自己的日志和 inbox 队列决定它还缺哪些消息。只有不带 `inputFromSeq` 的 legacy transition 就沿其已开始的代直接跳过重放。`agent-instructions` 消息由新代重新生成，不作为独立回合重放。
+
+取消的 inbox splice 不记录由谁移除消息。重放必须保住 dispose 清空的输入，因此换代期间显式删除或替换的排队消息也可能被重放。普通 Session cancel 按设计保留待处理输入；这项限制只涉及换代期间编辑队列。
+
+上一代 Session 读不出来时，看问题属于哪一类。两类都走 warn 放行。第一类是日志损坏（`corrupt session log`，Host 会修复 torn tail）。第二类是确定性格式拒绝（`SessionFormatUnsupportedError`，重试无法改变结果）。缺失、IO 和未知原因仍 fail-closed。带输入边界的 wake 换代即使新代已经运行，也仍执行这项检查。Member Session 有没有 durable 持久内容，看 session-persistence inspection 的判定。判定会等进行中的 retirement drain。绝不使用会与 suspend 终末 flush 竞争的裸元数据列表。
+
+唤醒判定本身是 `wake-recycle.ts` 里的一条纯 gate 阶梯：未启用、没有上一代、活动时刻读不出来、缓存可能还热、context 未到水位线，每一档都答 resume，只有冷得够久且 context 够大才换代。[`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md) 拥有阈值与那个配置组。
+
 ## 私有记忆、归档与身份效应
 - Member preset 根据当前 Host facts 与当前 Session surface 派生身份、Project ownership、Workspace 参与及私有记忆上下文。分类和记忆更新规则见 [Member 上下文注入](../team-collaboration/memory-and-context.zh.md#member-上下文注入)，不建立第二份持久状态。
 - `$DSH_HOME/agent-team/members/` 下的 private-memory directories 是 Member identity 的 Host-owned effects，不是第二权威。Member activation 确保 private-memory directory、`notes/` 和缺失的 `memory.md` 存在。startup 不会清理 ledger 不知道的 `member:` directories。显式 Member removal 会归档这个 Member 的 Session，并移除这个 Member 的 private-memory directory。Team removal path 之外的 entries 保持不动。
 - 这项删除，以及 activation 时对旧式 colon 目录的改名，都限定在当前进程自己的 members root 之内。记录里的 `privateMemoryPath` 是一条 durable 绝对事实，指向「当初添加这个 Member 的那个 DSH home」里的目录。因此解析到另一个 home 的进程会拒绝搬移或删除这个目录（并告警），而不是把 Member 的真实私有记忆搬出 Member 自己的 home。
-- Member 与 Project 的归档是介于 suspend 与 remove 之间的可逆第三态。`archiveMember` 提交 `team/member-archived`。dispose live session，私有 memory 与 Session log 留在磁盘，并把 Session 从分组 surface 归档。`archiveMember` 再以公开 `claims_released` Activity 加上 Attention/marker 清理，释放这个 Member 的 active Claims。被隐藏的 Member 不得让 Task 卡在 in progress，也不得留下幻影 unread 计数。`archiveProject` 提交 `team/project-archived`，对 Project 上所有 Thread 的 owner 施加同样的释放形态。两种归档形态下，更早规则版本派生的 Project 成员关系都作为已存事实保留（隐藏态，非退出）。
+- 归档隐藏 Member 或 Project，但保留完整事实，不等于 remove。目前没有 restore 入口。`archiveMember` 提交 `team/member-archived`。dispose live session，私有 memory 与 Session log 留在磁盘，并把 Session 从分组 surface 归档。`archiveMember` 再以公开 `claims_released` Activity 加上 Attention/marker 清理，释放这个 Member 的 active Claims。被隐藏的 Member 不得让 Task 卡在 in progress，也不得留下幻影 unread 计数。`archiveProject` 提交 `team/project-archived`，对 Project 上所有 Thread 的 owner 施加同样的释放形态。两种归档形态下，更早规则版本派生的 Project 成员关系都作为已存事实保留（隐藏态，非退出）。
 
   局部的 Project 编辑在账本的串行段落内合并：请求没写的名字或描述，`updateProject` 保留已存的值；重放只比较它自己写明的字段，所以排在并发编辑之后的写，不会把调用方入队前读到的快照写回去。
 
-  Archived 实体从所有 Team API surface 消失：
+  Archived 实体不再出现在活跃协作界面和操作中：
   - projection：view projects/threads/tasks/members、mention 候选、Project join、编辑。
   - ref 解析：`resolveTaskRefs`/`resolveThreadRefs` 跳过 Archived 实体，message 正文渲染为纯文本。
   - ref-addressed read：`readThread`、`threadHistory`、`threadObservations`、`listClaims` 以明确的 archived 错误拒绝，绝不伪装成 unknown-ref。
@@ -119,6 +160,9 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
   事实则完整保留在 ledger 中，供重放与未来恢复。这条边界就是 archival 与 remove 的分界。从 archived 状态 Remove 仍可作为数据清理路径。本轮刻意不提供 restore 入口，与 dsh 的 archived session 对齐。Project 归档之前写入的 ledger 省略 `project.state`。记录 schema 在 load 时把 `project.state` 归一化为 `active`。
 
 ## Member capabilities 与 skills
+
+### 持久意图与回合边界效果
+
 - Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。`model` 是例外，不可清除，见下面的模型契约。
 - Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留 Team tools（`team_worker` 视开关）与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查、回退与限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。
 
@@ -141,18 +185,24 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - 配置编辑把「效果」与「提交」分开回报：`updateMember` 返回 `effect`，取值 `applied`、`already-applied`、`deferred:no-live-handle` 或 `deferred:generation-changed`（先落账、下次激活生效）。失败不进取值——保持响亮拒绝，同时按失败阶段留一条可路由的 `model-apply` 或 `capability-apply` diagnostic。`detail` 带 requestId、operationId、阶段与原因，Session 结构化放在 `sessionId`，日志用同一组关联 id。
 - manager 面对已提交但运行时应用失败的编辑给出不同答案：`member_update` 按失败阶段把 `failed:model-apply` 或 `failed:capability-apply` 作为 effect 答回，并在 `status` 里带上同类别的 Member 自身诊断——它的写已经提交，而调用者是模型、会把拒绝当成重试信号。已存的意图留给下次激活重试，重放同一请求也会重试：效果取自活代实际在跑的状态与当前 Member 行的比较，而不是这次请求出发时的那条记录。
 - 生命周期重放只补做自己这次操作欠下的效果：`suspendMember`、`resumeMember` 与 `archiveMember` 在写完之后读取当前 Member 行，并把运行态收敛到那个状态，所以晚到的 suspend 重放不会 dispose resume 刚激活的那一代，重放的 resume 也不会复活被后来的 suspend 停掉的 Member。答案报告同一行，回执仍是原来那一个。
-- Member 始终跑一条显式路由。创建必须给出一条，编辑只能替换、不能清除回 Host 默认；写入者只有两个：Human 的编辑（本节）与该 Member 自己的 Session（下条）。在此契约之前写入的账本记录没有 `model`，仍可读取，并按当时 Host 的默认选择唤醒。
+
+### 模型路由持久化
+
+- Member 始终使用一条显式路由。创建必须给出一条，编辑只能替换、不能清除回 Host 默认；写入者只有两个：Human 的编辑（本节）与该 Member 自己的 Session（下条）。在此契约之前写入的账本记录没有 `model`，仍可读取，并按当时 Host 的默认选择唤醒。
 - 模型编辑的落账与回报和其他编辑一样，但新路由是否生效由上游决定：切换后新窗口在压缩之后仍装不下当前 Session 时会被拒绝并保留原路由，pending 选择就等到换回兼容模型为止，而记录在案意图两种情况下都在。
 - composer 是另一个入口，且不靠选择事件落账。真正证明切换越过了 Host 的压缩检查、进入一次真实请求的是 Member Session 的 `request/header`，所以 Host 以 `header.config` 的路由写一条 Human 的 `team/member-updated`。只写路由：推理档位是 Session 日志里的事实，activation 对同一条路由重新读取。
 - 有三种请求什么都不写。一种是请求的路由与 Member 当前正在跑的路由一致，包括 Team 自己在 activation 时写回的那条，于是写回不会经账本自循环。另一种是被 Host 拒绝的切换：它根本不会记下 header，因此也从不写入。第三种是 Member 已经走过的 header：该 step 固定路由之后发生的选择更新，写回这条 header 的路由会把被替换掉的那条按回去。
 - 名册每行的 `capabilityState`（`applied` | `pending`）比较该 Member 存储的 `capabilities` 与运行时已应用的配置；没有运行时的 Member 报 `pending`。它与 `availability`、`presence` 分开，也不表示某个回合的 profile `extraToolGrants` 是否生效。
+
+### 隔离的 skill 目录
+
 - Team skills 使用各 Team preset 内部隔离的 registry。它唯一注册的 provider 是 Team router，由 router 选择确切 Agent 的 filesystem provider；Host 全局 provider 与 runtime skills 不会进入 Team 的发现、加载、显式 `/skill` 调用或模型目录。shipped Session skill catalog 与 `skill` 工具读取同一个 registry。普通 Session 继续使用 Host registry，以及其中配置的全部全局 skills。
 
   Host runtime 把自己拥有的 Team registry 显式传给 provider 挂载。两者同时存在时，经普通 `agent.ctx` 查找得到的是 Host registry，找不到 Team 的挂载。
 
-  每个 Member provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<memberId>/skills/`。
+  每个 Member provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<member-directory>/skills/`（Member id 中的 `:` 替换为 `-`）。
 
-  管理会话由自己的 runtime 提供同构的隔离结构与两处 root：只读的 `packages/agent-team/manager-skills/`（排前，并由同一个 `check:core-skills` 检查）与可写的 `$DSH_HOME/agent-team/manager/skills/`。Member 的 root 与 manager 的 root 互不进入。
+  manager Session 由自己的 runtime 提供同构的隔离结构与两处 root：只读的 `packages/agent-team/manager-skills/`（排前，并由同一个 `check:core-skills` 检查）与可写的 `$DSH_HOME/agent-team/manager/skills/`。Member 的 root 与 manager 的 root 互不进入。
 
   Member catalog 从内置集起始，内置集里有 `member-skill-manager` meta skill。全部 skill 写作/安装/credentials 引导都在这个 meta skill 里面。persona 只陈述私有空间物理事实。安装就是往 Member 自己的目录写。目录形态为 `skills/<name>/SKILL.md` 加可选 references/scripts，或平铺 `.md`。有意不提供上传 Remote，发现由 filesystem watcher 驱动。
 
@@ -160,7 +210,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Host 服务面（`ctx.agentTeam`）
 
-Host row 只发布一个服务 `ctx.agentTeam`，它被两类消费方以不同方式使用，稳定性承诺也不同。没有 CLI、没有 `bin`、也没有 loopback HTTP 入口。Web Client 是唯一的人类控制面，所有变更都经 typed Remote 下发到 Host。
+Host row 只发布一个服务 `ctx.agentTeam`，它被两类消费方以不同方式使用，稳定性承诺也不同。没有 CLI 或 `bin`。Web Client 是唯一的 Human 控制面，所有变更都经 typed Remote 下发。bundle 另有下文的 webhook HTTP 入口，只接收外部服务请求，不是 Human 控制面。
 
 - **Remote 方法**（带 `@Remote` 装饰的，如 `members`、`view`、`addMember`、`updateMember`、`sendMessage`、`readThread`、`inbox`、`humanProfile`）是 Client 契约。它们由声明生成 Typert 产物来定型，所以 Client、模型侧工具和其他消费方编译期对齐同一形状；改动其中任何一个都属契约变更。
 - **仅 Host 侧的服务方法**（如 `memberForAgent`、`membersForClient`、`status`，以及激活/生命周期内部实现）供进程内 Host 调用方使用——preset 行、commit listener、启动期的派生逻辑。它们没有兼容承诺，可能随版本调整。
@@ -171,104 +221,119 @@ preset 行必须在执行时解析 `ctx.agentTeam`，不能在声明期静态捕
 
 ## 订阅调度与无人值守执行
 
-每个订阅的定时器都由 Host 拥有。`SubscriptionScheduler`（`packages/agent-team/src/subscription-runtime.ts`）全局最多放行 4 个脚本运行——owner 手动触发的试运行也占其中一格——同一订阅的定时条目在等待队列中只保留一个并合并之后的到期时刻，同一订阅也不会同时跑两次，统计连续失败，并按每个订阅每分钟 20 条的花费发布额度。
+`SubscriptionScheduler`（`subscription-runtime.ts`）管理定时器与失败计数。全局最多同时运行四个脚本，owner 试运行也占名额；同一订阅串行执行，到期时间合并到唯一排队条目。每个订阅每分钟最多发布二十条事件。
 
-准入检查以账本为准：试运行或定时运行在排队期间遇到订阅被删除或 Project 被归档时，不执行脚本。终态不再发布，也不保留 checkpoint。准入读取失败时，调度器记日志，保留条目供后续检查；读取成功并判定拒绝时，才出队并给调用方结果。
+准入时重读 ledger，删除或 Project 归档后的试运行、定时运行不得启动。读取失败时记日志并保留排队条目；明确拒绝才出队并答复。终态不再发布，也不保留 checkpoint。
 
-下次到期时间、失败计数、发布窗口和最后成功时间保存在 `agent_team_subscriptions`。重启从已持久化的 checkpoint 继续。删除 checkpoint 不会改写已经提交的事件，但会改变调度和失败计数。
+### 私有历史与清理
 
-同一个 domain 还放四张没有任何账本事实依赖的表：`runs` 保留每个订阅最近 50 次运行，`deliveries` 保留自动重试用尽的 webhook 投递，`replays` 保留每个重放请求已经得到的答案，`admissions` 保留已接收但还欠一次运行、一次接受或一条可重放失败记录的 webhook 请求，连它到达时的订阅定义和队列满时暂存的批次一起。
+`subscription-store.ts` 维护私有 `agent_team_subscriptions` domain：
 
-一条运行记录带触发方式、开始时间、耗时、结构化类别、退出码或超时、事件数、两路输出各自末尾 8 KiB，以及解释它的身份——`subscriptionRevision`、`scriptHash`、`runRef`，投递运行再加 `deliveryRef` 和用尽重试的那次 attempt。
+| 状态 | 用途与保留规则 |
+| --- | --- |
+| checkpoint | 下次到期、连续失败、发布窗口和最后成功时间；重启从中继续。 |
+| `runs` | 每个订阅最近五十次运行。 |
+| `deliveries` | 自动重试耗尽的 webhook 投递。 |
+| `replays` | 每次重放请求的意图与答案。 |
+| `admissions` | 仍待执行、接受或记录可重放失败的 webhook，包含接收时的定义和队列满时暂存的批次。 |
 
-事件数是这次运行真正被账本接受的数量，绝不是脚本打印了多少：试运行什么都不发布，被拒的整批什么都不接受，订阅早已知道的 id 也不算新事件。
+这些行不是 Team ledger 事实。删除 checkpoint 不会改写事件，但会改变调度和失败计数。
 
-试运行同样记录，所以 owner 问“我这个修复过没过”读的是同一份历史；但 create 的草稿试运行不记录，因为账本从未存下这条记录该归属的订阅。删除订阅时，这四张表和 checkpoint 一起清掉：清理在调用报告删除之前就已完成，重启时再把中断的删除留下的行收敛掉。Project 归档时，它名下每个订阅的同一份私有状态在归档当下就清掉，不必等下一次重启。
+运行记录包含触发方式、开始时间、耗时、类别、退出码或超时、已接受事件数，以及两路输出各自末尾 8 KiB。摘要同时携带身份：`subscriptionRevision`、`scriptHash`、`runRef`；投递另带 `deliveryRef` 与重试次数。
 
-清理用的是与私有写入同一把写锁，所以它不可能落进某一段写入的中间：要么它先跑——那这段写入的终态重读会发现已经不可写，什么都不写、并如实报告没写成；要么它后跑，把这段写入的每一行都带走。每一段写入在真正写入前也会重新核一次终态，因此落在两段之间的删除同样留不下任何行。
+事件数只计算 ledger 真正接受的内容，不是脚本输出量。试运行、被拒批次和已知事件 id 都不增加计数。试运行也记历史，但 create 的草稿试运行没有已存订阅可归属，因此不记。
 
-读历史是 Project 级读取，但中间有一道切分：每个成员都能看到摘要，而输出——两段尾部，以及一次运行用来自述的那句话——只属于 Human 和 owner，因为脚本是在该 Project 的凭据下跑的。这道切分只切输出：成功的运行对 owner 同样展示输出，身份信息随摘要一起返回，于是一条投递、它到达时的 revision、以及它产生的那次运行能读成同一件事。`team_subscription` 的 `logs` 动作和 Remote 上的 `subscriptionLogs` 读的是同一批记录。
+删除会在答复前清空全部私有表和 checkpoint；启动时补完中断的清理。Project 归档立即清理同样状态。清理与私有写入共用锁，每段写入都重查终态：要么先写再被清理，要么清理后不写。删除落在两段之间也不会重建行。
 
-成功只有唯一线性化点：输出被账本持久接受的那一刻这次运行才算成功，而这也正是清零连续失败计数、推进最后成功时间的同一次提交。
+有权读取 Project 的人都能看摘要与身份。输出尾部和解释文本只给 Human 与 owner，无论运行成功还是失败，因为脚本使用 Project 凭据。`team_subscription logs` 与 Remote `subscriptionLogs` 读取同一份历史。
 
-接受与这次清零是订阅写锁下的**同一段**，所以之后才执行的 settle 步骤只推进下一次到期时间。让清零可信的正是这把锁：ingress 在运行旁边计出的失败，要么落在这段成功所结束的连败之内，要么完全在其之外，读计数与写计数之间没有任何东西能插进来。
+### 成功、失败与发布上限
 
-只有固定 revision 仍等于当前 revision 的接受或失败，才会改变连续失败数与最后成功时间。
-旧 revision 的迟到结果仍按该 revision 保留，但既不清零也不增加当前 revision 的连续失败。
+成功以输出被 ledger 持久接受为准。接受、连续失败清零与最后成功时间在同一锁内完成；后续结算只推进下次到期。exit 0 但没有新事件，仍走相同的零事件成功路径。
 
-脚本本身在锁外执行——把脚本也放进锁里，会让整个运行期间每条投递都被卡住。空输出的成功走同一段、同样清零，因为它本来就是同一件事：这次运行是好的。脚本 exit 0 但没有任何新事件，是一次“什么都没接受”的成功；一次运行自己就印出超过 500 条事件的整批拒绝，因为之后任何一趟都不可能再把它发布出去；会让未发布总量越过上限的记为失败，webhook 投递则是例外——它那份请求再也取不回来，所以把这一批留在自己那一行上等空位（见下面的入口）。
+脚本在锁外运行，不阻塞投递。checkpoint 每次都在锁内读—改—写，不把旧快照整行写回。因此并发失败不会丢在成功清零的读写之间：三条失败投递累计三次，第三次触发暂停。
 
-已经到上限的订阅在 admission 阶段就被跳过、脚本根本不启动，所以那种跳过不计数。只有定时运行和 webhook 运行计入，试运行既不计入也不清零，`resume` 只有提交成功才清零——试运行失败的 resume 两者都不改变。
+只有固定 revision 仍为当前 revision 的结果才改变失败计数与最后成功时间。旧结果按原 revision 留在历史中，不清零也不增加当前连续失败。
 
-重试用尽的投递成为 `deliveries` 里的一行：稳定的 `deliveryRef`、接收时的 revision 与 scriptHash 连同那个版本的脚本和凭据、脚本从 stdin 读到的请求体、最后一次错误，以及 7 天到期时间，每个订阅最多 10 条。它比解释它的运行记录活得更久，并且无论试了几次都只计 1 次连续失败——提供方重投同一个请求仍是同一条投递。
+未发布事件上限为五百条：
 
-每一笔 checkpoint 写入都是那把锁下的一次读—改—写：推进到期时间的 settle、计数的投递、成功清零、发布窗口，改的都是同一行的某一个字段，而用早先读到的记录拼出整行再去写的调用方会丢掉别人已提交的改动——而且是静默丢掉，因为最后写入的赢。投递正是经同一把锁逐条计数，所以三条同时到达会加 3 次而不是 1 次，第三条仍会暂停。
+- 已达上限的订阅在脚本启动前跳过，不计失败。
+- 单批超过五百条，永久拒绝。
+- 定时批次使当前队列溢出，记为失败。
+- webhook 批次本身未超限、但暂时放不进队列时，保留在 admission 等空位，因为无法重新抓取请求。
 
-入站入口是唯一不经调度准入的写入方，所以它写之前自己重读终态：投递给已删除订阅、或已归档 Project 的，直接丢弃，而不是把删除刚清掉的行重建出来。
+定时和 webhook 失败参与计数；试运行既不计数也不清零。resume 只有试运行成功且提交后才清零。连续三次失败由 Host 记录自动暂停，并向每个 owner 的 Main stream 发一个 marker，Human 也在内，不受关注状态影响。
 
-`replay` 动作会再跑一次——默认用当前定义，让修好的脚本能处理旧请求，也可以指定原版本——像任何一次运行那样发布脚本打印的内容，成功与否由同一段提交裁决：投递成功的那次会结束失败连败，而脚本本身失败的 replay 不计数。它是一次运行，所以按运行准入：同样 4 个运行位、同样的同订阅互斥、Host 停止时同样收敛；暂停、删除、Project 归档都会在入场时拒绝它。
+重试耗尽的投递保留稳定 ref、接收时的 revision 与 script hash、该版本脚本与凭据引用、stdin 请求体、最后错误及七天有效期。每个订阅最多十条，可比运行历史活得更久；无论重试或提供方重投多少次，都只计一次失败。
 
-`requestId` 命名的是完整意图，而 `replays` 在**任何执行之前**就把它记下来：先以 `running` 状态写入这次请求所指的投递与版本，运行结束后再落定答案。
+入站写入不经过 scheduler 准入，因此必须自行重查终态；迟到投递不能为已删除订阅或已归档 Project 重建私有行。
 
-当前构建写入的 create 与 update operation 还会保存调用方的脚本来源、触发选项和 create baseline。
-通过当前操作者与 Project 权限校验后，已提交请求的重试会先按这份意图返回；文件读取、origin 检查、凭据查找与脚本执行都只用于首次提交。
+### 重放回执与已提交重试
 
-没有这份意图的旧 operation 仍可读取和重试，并按已存的规范化字段比较。
-旧的内联脚本可以精确比较；旧记录无法验证的路径重试会被拒绝并返回已提交的 `subscriptionRef`，调用方应先读取已有订阅，再发起新请求。
+`replay` 默认使用当前定义，也可指定接收时的版本。它通过普通接受路径发布，同样占四个全局名额、按订阅互斥，并遵循关闭收敛。暂停、删除或 Project 归档都拒绝准入。成功重放清零，重放脚本失败不增加计数。
 
-写这笔记录是前置条件——记不下自己意图的调用会直接拒绝，而不是去跑一个届时无人能交代的脚本；一旦记录存在，这个 id 就被用掉了：同一个 id 指向另一条投递、或同一条投递的另一个版本，一律按请求碰撞拒绝，即使没有任何答案存活下来佐证也是如此；已经重放成功的投递也不会被新的 id 再跑一遍，因为那会把同一份输出发布两次。
+执行前，`replays` 先持久记录 `requestId`、投递、版本与 `running`。记不下意图就不执行。一经记录，id 即已使用：改投递或改版本都算碰撞，即使答案未落盘。已经投递成功的重放不能换新 id 再跑。
 
-仍是 `running` 的记录，是“答案没落地的尝试”。重试无法把它和“中途死掉的尝试”区分开，所以不会重跑：若账本里存着该 id 已接受的事件，就说明输出确实交付了，重试据此作答；否则如实告诉调用方上一次尝试从未记录答案，并让它换一个新的 requestId。答案与投递自己的墓碑属于同一段加锁写入，所以删除只会排在两者之前或之后，不会插在中间。
+重试仍为 `running` 的请求不会自动执行。ledger 已有接受记录就返回该结果；否则说明答案缺失，供调用方显式选择新 id。结算在同一锁内写答案与投递 tombstone，整体排在删除之前或之后。
 
-这两笔写入任一出存储故障都被记日志、调用照样按运行的实际情况作答：输出已经进了账本，一份私有副本写不进去，不能把一次已交付的重放变成无法把握的未知；保留期带走投递时，答案也随它一起走。
+结算存储失败只记日志，不隐瞒已经投递的结果。答案随投递一同过期。
 
-HTTP 入口是它自己的一台 WebServer：由本 bundle 自己的 `webhook-ingress` 一行以 `isolate: { webServer: true }` 挂载，所以它提供的东西与浏览器 API 用的监听器毫无共享。这一行自己挂载监听器，而不在组合里点名那台 WebServer，因为 Harness 把该模块列为受保护模块：一旦点名它，bundle 就无法再被禁用，而运行时开关正是运维对该 bundle 用的东西。它只注册 `/team/hooks` 一个前缀，并且只接受 `<前缀>/<token>`——嵌套或更长的路径都不是地址。
+当前 create/update operation 还保存原始脚本来源、触发选项与 create baseline。重试先校验当前操作者和 Project 权限，再按已存意图返回，不重新读取文件、检查 origin、查凭据或执行。
 
-监听器绑定 `127.0.0.1` 上 `DSH_TEAM_WEBHOOK_PORT`（默认 3081）指定的端口，发布它是部署决定——前面放隧道或反向代理，并把同一个公网地址写进 `webhook.publicOrigin`。
+旧 operation 按已存规范化字段比较。粘贴脚本仍可精确比较；无法核实的旧路径重试会带已提交的 `subscriptionRef` 拒绝，让调用方先检查再决定是否新建请求。
 
-token 在账本已武装的地址里解析（比对哈希，跨全部已武装订阅做常量时间比较），所以重置、丢掉触发方式、删除订阅、归档 Project 全都答 404，而已经入队的投递保留它那一行——重置移动的是地址，不是队列。
+### Webhook 入口与持久准入
 
-状态码表就是契约：行写进持久存储后才是 202；token 不存在、订阅已删除或 Project 已归档是 404；暂停中是 409；已有十条排队或重试中的投递时是 429 并带 `Retry-After`；请求体超过 256 KiB 是 413；header 超过 1 KiB 是 431；非 identity 的 `content-encoding` 是 415；请求体不是 UTF-8 是 400；非 POST 是 405；存储拒绝入队是 5xx。
+bundle 的 `webhook-ingress` 行在 `isolate: { webServer: true }` 下自行挂载独立 WebServer，不共享浏览器 API 监听器。不能在组合中点名 Harness 受保护的 WebServer 模块，否则 bundle 将无法禁用。
 
-单个 header 超过 1 KiB 会直接拒绝投递而不是截断，非 identity 的 `content-encoding` 同样拒绝——验签必须针对提供方签过的那些字节。
+监听地址为 `127.0.0.1`，端口取 `DSH_TEAM_WEBHOOK_PORT`，默认 3081。只接受 `/team/hooks/<token>`，不接受嵌套或更长路径。公开访问需部署隧道或反向代理，并配置一致的 `webhook.publicOrigin`。
 
-只有 `content-type`、`user-agent` 以及匹配 `x-*-event`、`x-*-delivery`、`x-*-signature*`、`x-*-timestamp` 的 header 会到达脚本且一律小写；`authorization`、`cookie`、`x-api-key` 与反向代理插入的 header 永远不会。
+入口对所有已启用地址以常量时间比较 token 哈希。重置地址、移除 trigger、删除订阅或归档 Project 后，旧地址返回 404。重置只改地址，不改已排队投递。
 
-入口只在那一行写完之后才答 202，因此在应答之前重启不会丢掉任何东西：队列是私有状态，下一趟补上它欠下的工作。运行从 stdin 读 `{headers, body}`，`DSH_TEAM_TRIGGER=webhook`，并把入队时分配的 id 作为 `DSH_TEAM_DELIVERY_ID`——同一条投递在多次重试和后来的重放中因此保持同一身份。
+| 响应 | 条件 |
+| --- | --- |
+| 202 | admission 行已经持久化。 |
+| 404 | token 未知、订阅已删除或 Project 已归档。 |
+| 409 | 订阅暂停。 |
+| 429 + `Retry-After` | 已有十条投递排队或重试。 |
+| 413 | 请求体超过 256 KiB。 |
+| 431 | 转发 header 的单个值超过 1 KiB，不静默截断。 |
+| 415 | 非 identity 的 `content-encoding`。 |
+| 400 | 请求体不是 UTF-8。 |
+| 405 | 非 POST。 |
+| 5xx | admission 存储失败。 |
 
-关闭时，Host 停止安排新的队列检查，排空调度器，再等待在途的 webhook 队列检查，最后关闭存储。尚未处理的工作保留在持久队列中，供下一次启动继续。
+大小与编码检查保留提供方签名的原始字节。脚本只收到小写的 `content-type`、`user-agent` 及匹配 `x-*-event`、`x-*-delivery`、`x-*-signature*`、`x-*-timestamp` 的 header；不转发 authorization、cookie、API key 或代理附加头。
 
-失败的运行保留那一行，按 1、5、30 分钟等待；第四次失败才把它变成 owner 可重放的 `deliveries` 行，而自己就超过上限的批次直接变成那一行，因为重试只会再打印同一份输出。重试成功的投递就此结束，不为它计一次失败。
+脚本从 stdin 读取 `{headers, body}`，环境带 `DSH_TEAM_TRIGGER=webhook`，并以 admission id 作为 `DSH_TEAM_DELIVERY_ID`。同一身份贯穿重试与重放。持久准入后、202 应答前重启，工作仍留在队列中。
 
-Host 先在接收记录中保存重试已耗尽以及这次投递是否属于当前连续失败，再写入可重放的失败记录。收尾中断时，下次处理队列会续办，无需再跑脚本。符合条件的投递只计一次；达到阈值时，ledger 只记录一次自动暂停。暂停不阻止收尾；删除订阅或归档 Project 会丢弃未完成的工作。
+关闭时先停止新队列检查，排空 scheduler，等待在途 webhook 检查，再关闭存储。未完成工作留给下次 Host。
 
-人工恢复一经提交，即使 checkpoint 写入需要重试，也开始新一轮计数。之后的成功或人工恢复会阻止旧收尾再次计数。编辑定义也会阻止旧收尾为新定义计数或暂停，已计入的失败仍保留。订阅还有失败计数或暂停待处理时，到期的定时运行会等待。
+失败后按一、五、三十分钟重试。第四次失败转为可重放的 `deliveries` 行；单批超限直接进入该行。重试成功结束投递，不计失败。
 
-重置为同一个订阅铸一个新 token，并把 `generation` 加一而不移动 revision：已接受的投递保留它到达时的版本，而调用方拿到的地址是明文里唯一的一份——账本只存哈希。
+Host 先记录重试耗尽与失败计数资格，再写可重放失败。结算中断后续办，不重跑脚本；有资格的投递只计一次，必要时只提交一次自动暂停。暂停允许结算，删除和 Project 归档则丢弃未完成工作。
 
-create、update 或 reset 的已提交重试，只有该 operation 自身确实武装了地址时才返回 `webhookAddressGone`。
-update 由 Host 比较该 operation 与前一 revision 的订阅状态；普通 update 保留已有地址时，即使两次写入落在同一毫秒，也不会返回该标志。
+已提交 resume 开始新一轮计数，即使 checkpoint 写入还需重试。之后的成功或 resume 阻止旧结算再次计数；定义编辑也阻止旧结算为新定义计数或暂停，但保留已计失败。定时器等待尚未完成的计数或暂停结算。
 
-调度器只通过 ports 触达外部，所以 runtime 测试可以用假时钟和假执行器驱动。定时运行经 `ctx.shell` 执行快照——与 Member 的 shell 工具是同一个执行器——但 policy 由 Host 自己从可信的 Workspace 记录构造：以该 Workspace 为根的 `workspace-write`、60 秒、65,536 字节 stdout 上限，且永不用提权模式，因为无人值守运行没有当场批准的人。当前挂载的 shell 家族靠行为探测一次并缓存；用另一个家族记录的快照会以该原因失败，而不会在它并非为其编写的 shell 下运行。
+reset 铸造新 token 并增加 `generation`，不改 revision。已接受投递保留接收版本。只有返回地址包含明文 token，ledger 只存哈希。
 
-运行以该 Workspace 目录为工作目录，绝不是 Host 进程自己的工作目录；把绝对 checkout 路径写死的脚本在搬迁后会失败，而不是读到旧树。
+create/update/reset 的已提交重试，只有原 operation 确实启用了地址才报告 `webhookAddressGone`。update 与前一 revision 比较，保留旧地址的普通更新不会误报，即使两次写入同在一毫秒。
 
-根本没有挂载执行器时，每次运行都在脚本启动前以 `executor-missing` 失败。执行器已挂载、却起不来钉死 policy 的探测——例如部署里没有可用的沙箱后端——则以 `spawn-failed` 失败，原因就是执行器自己给出的拒绝，这样被暂停的订阅会指向沙箱，而不是让人去找一个其实已挂载的执行器。所以没有可用沙箱后端的部署，任何订阅都跑不起来。
+### 脚本执行边界
 
-Team runner 对恢复后的原始脚本 stdout 限 65,536 字节；这不是工具或调用方可配置的字段。
-执行器收到的 `ShellExecSpec.stdoutMaxBytes=1` 只用于迫使 Harness 公共采集器发布 `spillPath`；Team 随后从 spill 恢复原始字节、按上限校验，并清理这次 spill。
-provider 默认 `maxSpillBytes` 是 64 MiB；spill 超限、缺失或不完整时一律拒绝，不回退为接受解码后的文本。
+运行时测试通过 ports 使用假时钟和假执行器。实际运行使用与 Member shell 工具相同的 `ctx.shell`，但 policy 由 Host 从可信 Workspace 构造：以该目录为根的 `workspace-write`、六十秒、65,536 字节 stdout，禁止提权。cwd 是 Workspace，不是 Host cwd；硬编码旧 checkout 路径会在迁移后失败。
 
-运行的 stdout 就是输出合同：每行一个 JSON 对象，由 Team 从恢复后的原始 spill 用字节级解析器校验。
-恢复出的原始字节必须完整、是合法 UTF-8，并落在 Team 上限内；解码后的尾部或看起来合法的尾部都不能冒充完整输出。
+Team 设置 `ShellExecSpec.stdoutMaxBytes=1`，促使公开 collector 给出 `spillPath`，再读取完整原始字节、检查上限并删除 spill。provider 的 `maxSpillBytes` 默认 64 MiB；缺失、超限或不完整的 spill 直接拒绝，不用解码文本拼补。
 
-新事件按运行固定的 revision 与 scriptHash 接受进账本，并按额度发布；连续三次运行失败会暂停订阅，账本记录这条时没有 Member actor，因为是 Host 自己做的，并且这次暂停为每个 owner（含 Human，无论是否还在关注）各带一个 Main stream marker，让该知道的人都知道。
+stdout 必须完整、为合法 UTF-8、不超过 65,536 字节，每行一个通过校验的 JSON 对象。这是 Team runner 的限制，不是工具或调用方选项。看似合法的尾部不能冒充完整输出。
 
-credential 值每次运行前经 `ctx.credentials` 解析，并在执行器自身环境清除之后合并。Host 从零构造这张表——托管 `DSH_TEAM_*` 事实加上订阅声明的引用——所以 Team 代码不会转发 Host 进程环境里的任何内容。
+当前 shell 家族按行为探测一次并缓存；另一家族的快照直接失败，不在错误 shell 中执行。未挂载执行器报 `executor-missing`；已挂载但 policy probe 无法启动报 `spawn-failed`，保留执行器自己的拒绝原因。没有可用 sandbox backend 就不运行任何订阅。
+
+接受固定 revision 与 script hash，发布遵守上述额度。每次运行通过 `ctx.credentials` 解析凭据，在执行器清理环境后合并。Team 只构造受控的 `DSH_TEAM_*` 信息与声明的凭据引用，不自行转发 Host 进程环境。
 
 ### 每个 DSH home 只允许一个 Host
 
-同一个 `$DSH_HOME` 最多只能运行一个 Host 进程。订阅的定时器与私有 checkpoint 都在这个 home 里；两个 Host 共用时会各自触发每一次到期、各自推进账本投影与序号，提交操作因此互相竞争。这是部署约束，不是 bundle 强制的锁：同时运行的 profile 要各用独立的 `DSH_HOME`，不要在别的 Host 正在使用的 home 上再启动一个 `dsh web`。
+每个 `$DSH_HOME` 最多运行一个 Host。定时器和私有 checkpoint 没有进程锁；两个 Host 会各自调度工作，并让 ledger 投影与 sequence 竞争。并发 profile 必须使用独立 home，不能向已占用的 home 再启动 `dsh web`。
 
 ## Worker 委派
 
@@ -276,9 +341,11 @@ credential 值每次运行前经 `ctx.credentials` 解析，并在执行器自�
 
 subagent 服务跟随 Host，而不是跟随 Member：Team 组合的是一处 `@deepseek-ai/dsh-subagent` 挂载加每个已启用引擎一行 provider，Member 的工具调用从它自己的 Agent context 抵达该服务，并把该 live Agent 作为激活的 `parent` 传入。按 Member 各挂一份 provider 会让同一个 projection 在每位 Member 处重复注册，并给每人一棵独立激活树，因此不是本设计。
 
-授权在调用时从 ledger 判定，不看当前页面或目录：目标必须存在且自身一致，调用者必须是它所属 Project 当前的 Agent owner 之一，并且 Host 设置行的 `worker` 组里开关与该引擎都已打开。Human 拥有每个 Project 但不调用 Team 工具，所以不存在 Human 入口。任何拒绝都发生在原生进程启动之前；已接纳的 `requestId` 只对开启它的成员与那次委派返回它自己的执行。
+授权在调用时从 ledger 判定，不看当前页面或目录：目标必须存在且自身一致，调用者必须是它所属 Project 当前的 Agent owner 之一，并且 Host 设置行的 `worker` 组里开关与该引擎都已打开。Human 拥有每个 Project 但不调用 Team 工具，所以不存在 Human 入口。任何拒绝都发生在原生进程启动之前；已接纳的 `requestId` 只对开启它的 Member 与那次委派返回它自己的执行。
 
-那个答案只属于开启该 id 的成员与那次委派：同一个 id 的两次并发调用只开一个引擎，换成员、换任务、换引擎或换目标复用该 id 会被拒绝，而不是被应答。
+那个答案只属于开启该 id 的 Member 与那次委派：同一个 id 的两次并发调用只开一个引擎，换 Member、换 Task、换引擎或换目标复用该 id 会被拒绝，而不是被应答。
+
+### 引擎策略与工具可见性
 
 provider 为每次委派打开一个 OAR 会话，使用操作者显式给出的引擎设置，并把设置行里的 Codex 权限模式带进那次打开：精确 pin 的 OAR 0.95.1 从 Host 进程自己的 `OAR_CODEX_SANDBOX` 读取它——会话的 `env` 只到子进程，库也没有逐会话的选项——所以这个值只在打开调用期间设置，到 app-server 握手返回后恢复——这是本 Host 里另一个 Codex 会话打开时可能看到它的唯一窗口。
 
@@ -302,7 +369,7 @@ provider 还保留引擎的原生 session 身份与工作目录，并把只读�
 
 `threadWorkerStates` 从执行记录读取状态，即使对应事实不在当前页。记录仍为 `running`、本 Host 却没有活跃执行时，读作 `unconfirmed`。Host 重启或终态尚未落账都可能出现这种情况。不会自动重跑或重试；该读时状态不写入事实，也不触发唤醒。
 
-停止只有一条事务：成员的 `team_worker` 带 `stop`，与 Human 的 `stopWorker` Remote，进入同一个 `WorkerRegistry.stop`。授权只看打开这次执行的身份——它的 `initiatedBy` 成员，或 Human——刻意不重新套用启动条件，所以 owner 变更、Task 转移或关掉开关都不会左右一次停止。事务先 abort 启动信号（发布之前唯一的取消通道），再 dispose 已发布的 activation，然后等引擎自己的证据决定那一次终态写入。`stopping` 是派生的进程内视图：账本仍只有 `running → 终态`，Thread 读取与 Human 列表在停止进行时加这个词，不为它写任何持久内容。
+停止只有一条事务：Member 的 `team_worker` 带 `stop`，与 Human 的 `stopWorker` Remote，进入同一个 `WorkerRegistry.stop`。授权只看打开这次执行的身份——它的 `initiatedBy` Member，或 Human——刻意不重新套用启动条件，所以 owner 变更、Task 转移或关掉开关都不会左右一次停止。事务先 abort 启动信号（发布之前唯一的取消通道），再 dispose 已发布的 activation，然后等引擎自己的证据决定那一次终态写入。`stopping` 是派生的进程内视图：账本仍只有 `running → 终态`，Thread 读取与 Human 列表在停止进行时加这个词，不为它写任何持久内容。
 
 终态由引擎的结果决定，而不是由请求决定。先到的自然完成或失败保留真实状态，停止回答的就是它。
 
@@ -330,7 +397,7 @@ Human 的入口是「编辑 Agent」弹窗。运行中和未确认的记录优�
 
 续跑出来的执行会先跳过前驱的 prompt 前缀；读取在本次执行拥有的全部 turn 完成后结束，或在下一条不是它提交的顶层 prompt 之前结束，所以日后被继续使用的原生会话不会把后续 turn 的模型或失败借给这次执行。
 
-报告是分层的。公开 Thread 保持原有摘要；详细答案——失败发生的阶段、原生标识、有界片段，或记录无法回答的那一个原因（`missing`、`unreadable`、`unpersisted`、`unsupported`、`unmatched`）——只给发起成员与 Human。尚未结束的执行只回答摘要，并说明记录在结束后才读取；在记录会话之前就结束的执行如实说明这一点，而不会声称引擎从未打开会话。
+报告是分层的。公开 Thread 保持原有摘要；详细答案——失败发生的阶段、原生标识、有界片段，或记录无法回答的那一个原因（`missing`、`unreadable`、`unpersisted`、`unsupported`、`unmatched`）——只给发起 Member 与 Human。尚未结束的执行只回答摘要，并说明记录在结束后才读取；在记录会话之前就结束的执行如实说明这一点，而不会声称引擎从未打开会话。
 
 ### 给 Worker 追加指令或续跑
 
@@ -370,6 +437,8 @@ Composer attachments 是有界 cache，不是 archive，也不是 ledger bytes�
 
 ## Human profile 与版本脚注
 
+### Profile 权威与迁移
+
 Human 的显示名与头像引用存放在 Team Host row 自己的 Config。settings namespace 就是这个 row 的 id，user layer。头像 bytes 存放在持久的 `$DSH_HOME/agent-team/human/v1/` store，从不进入带 TTL 的 attachment cache。
 
 改名前的 profile 把整个 row Config 存在旧 id `wowyuarm-agent-team-host` 下：显示名、头像引用，以及 `wakeRecycle`、`memberCompaction` 两组 operational 配置。那一行不再挂载，这些值全部悄悄回落到 schema 默认——运维关掉的 Member compaction 会自己回来。
@@ -380,6 +449,8 @@ Human 的显示名与头像引用存放在 Team Host row 自己的 Config。sett
 
 只有 Host row 有这条迁移路径：profile patch 用改名前的 id（`wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}`）覆盖其余五行之一的，会被跳过——没有 loader entry 认这个 id，Team 回落到该行的出厂值。手改过 Team preset 或 preset 注册表 `default` 的，升级后要重新应用一次。
 
+### 设置读取与写入
+
 设置页由五个 Agent Team typed Remote 服务。`humanProfile` 提供名字、头像引用与版本脚注 facts，以及绑定本次 Host 实例和设置版本的写入令牌。`putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` 只收图片，与 attachments 共用 10 MB 上限。已删除的条目读取时抛错，Client 回退到首字母。`toolCatalog` 提供 Host 全局与 live Member scope 注册的工具名发现视图，不读取普通 Agent scope。
 
 改名、更换和移除都要求令牌。旧窗口或重连到新 Host 的窗口须先重读。头像读取只接受存储生成的引用，且只读取头像目录内的普通文件。图片与附件共用 10 MB 上传上限。
@@ -389,6 +460,8 @@ Host 先保存完整图片，再提交替换引用。移除写入显式空值，
 许可编辑器经公开 settings Remote 读写 Team Host row 的 `extraToolGrants`，携带其 revision，并且只写该字段的一条 `set` operation。它为外部插件工具解除执行限制，不挂载插件或开启 DSH 内置能力；DSH 树内共享任务板的四个工具不作候选。它从不使用 `unset`，所以显式 `[]` 是真正撤销，而不是回落到下层。名单读取失败时不能按空名单保存。目录与 Human 身份读取互相独立：目录失败仍可移除已读取的名称，身份失败也不会收起许可组。
 
 settings 表单与运行时归一化共用 `member-tool-grants.ts` 的结构 schema：由保持确切拼写的非空字符串组成的数组。Team 不另加名称语法、长度上限或许可数量配额；消费者合并重复名称，目录不列保留名。schema 不含 transform 回调，因此 Host 重建可编辑 schema、再序列化给浏览器后仍保留校验，包括缺省与空名单。
+
+### 安装版本与更新检查
 
 脚注携带本 Host 实际运行的那份 bundle 的版本，以及 repository 链接。版本从已安装包自己的 manifest 读取，因此陈述的是 profile 真正装上的版本，而不是每次发版都得记得改的字符串。当后台检查观察到更新的已发布 release，再多一条点名这个版号的更新 tip。
 

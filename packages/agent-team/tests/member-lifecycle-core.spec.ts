@@ -807,7 +807,7 @@ describe('Agent Team Member lifecycle', () => {
       .rejects.toThrow('only enabled Members can be restarted')
   })
 
-  it('restores a Member when the previous owner releases its Session write handle', async () => {
+  it.each(['native', 'name-only'] as const)('restores a Member after a %s ownership error when the previous owner releases its Session write handle', async kind => {
     const { ctx, workspaceId, teamFiber } = await realHarness()
     const added = await ctx.agentTeam.addMember({ requestId: requestId('owned-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
     const memberId = added.status.member.memberId
@@ -817,6 +817,9 @@ describe('Agent Team Member lifecycle', () => {
     // A bundle reload can mount the new Team before the old Team has released
     // its Agents. Model that overlap with an ordinary owner of the same log.
     const foreign = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
+    const ownershipError = new Error('Session is owned by another Host')
+    ownershipError.name = 'SessionAlreadyOwnedError'
+    if (kind === 'name-only') vi.spyOn(ctx.agents, 'resume').mockRejectedValueOnce(ownershipError)
     await ctx.plugin(AgentTeam)
     const blocked = await waitFor(() => {
       const status = ctx.agentTeam.members().find(item => item.member.memberId === memberId)
@@ -824,6 +827,9 @@ describe('Agent Team Member lifecycle', () => {
     }, 20_000)
     expect(blocked.availability).toBe('unavailable')
     expect(blocked.member.sessionId).toBe(sessionId)
+    expect(ctx.agentTeam['handles'].has(memberId)).toBe(false)
+    expect(ctx.agentTeam['sessionOwnershipBlocked'].has(memberId)).toBe(true)
+    if (kind === 'name-only') expect(blocked.diagnostic?.detail).toContain(ownershipError.message)
 
     // The release, not another durable write or an operator recovery, is the
     // trigger: the new Team now owns the same Session and its complete history.
@@ -833,6 +839,8 @@ describe('Agent Team Member lifecycle', () => {
       return status?.availability === 'active' ? status : undefined
     }, 20_000)
     expect(restored.member.sessionId).toBe(sessionId)
+    expect(restored.diagnostic).toBeUndefined()
+    expect(ctx.agentTeam['sessionOwnershipBlocked'].has(memberId)).toBe(false)
     expect(ctx.agentPresets.composedPreset(ctx.agents.get(sessionId)!.ctx)).toBe('team-member')
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
   })

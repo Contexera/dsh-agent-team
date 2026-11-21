@@ -1,12 +1,11 @@
 import type { AgentTeamMemberId } from './types.ts'
 
-/** Error families automatic recovery may act on. Classification uses the Harness's structured data first (stable code, then HTTP status); only an error with no usable code falls back to conservative string signatures. Any other structured code without a 429/503 status (provider, credential, quota, context, or request state) stays manual, as does unstructured wording matching neither signature. */
 export type RecoverableErrorKind = 'transient network' | 'rate limiting'
 
 const TRANSIENT_NETWORK_PATTERNS = [/fetch failed/i, /econnreset/i, /etimedout/i, /socket hang up/i]
 const RATE_LIMIT_PATTERNS = [/\b429\b/, /rate limit/i, /\b503\b/, /overloaded/i]
 
-/** Reads the stable code/status off any Harness-shaped failure by own fields, since a cross-package copy of `dsh-llm` loses `instanceof`. */
+// A failure from another copy of the Harness still has usable fields, but not the same class identity.
 function structuredFailure(error: unknown): { readonly code?: string; readonly status?: number } {
   if (typeof error !== 'object' || error === null) return {}
   const root = error as { code?: unknown; status?: unknown; failure?: unknown }
@@ -21,7 +20,6 @@ function structuredFailure(error: unknown): { readonly code?: string; readonly s
   return { code, ...status === undefined ? {} : { status } }
 }
 
-/** The readable message of an arbitrary thrown value. */
 function failureMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   if (typeof error === 'object' && error !== null) {
@@ -39,9 +37,8 @@ export function failureDetail(error: unknown): string {
   return typeof code === 'string' && code.length > 0 ? `${error.name} code '${code}': ${message}` : `${error.name}: ${message}`
 }
 
-/** Classify one `agent/error` occurrence into the family automatic recovery may act on, or `undefined` when a wake cannot help. */
 export function classifyRecoverableError(error: unknown): RecoverableErrorKind | undefined {
-  // Structured data outranks wording: a Harness code decides alone, and message signatures run only when no usable code exists (`UNKNOWN` is a folded foreign error whose taxonomy Team must not trust).
+  // UNKNOWN can wrap a foreign error. Only then, or without a code, trust narrow text signatures.
   const { code, status } = structuredFailure(error)
   if (code !== undefined && code !== 'UNKNOWN') return kindFromProvenance(code, status)
   const message = failureMessage(error)
@@ -50,7 +47,6 @@ export function classifyRecoverableError(error: unknown): RecoverableErrorKind |
   return undefined
 }
 
-/** Classifies one Harness failure code: recoverable families map directly, any other code stays manual unless a matching HTTP status shows rate limiting. */
 function kindFromProvenance(code: string, status: number | undefined): RecoverableErrorKind | undefined {
   if (code === 'RATE_LIMIT') return 'rate limiting'
   if (code === 'TRANSPORT' || code === 'TIMEOUT') return 'transient network'
@@ -58,7 +54,6 @@ function kindFromProvenance(code: string, status: number | undefined): Recoverab
   return undefined
 }
 
-/** Why one Member's automatic recovery episode ended. */
 export type RecoveryClearReason =
   | 'clean-turn'
   | 'non-recoverable'
@@ -67,7 +62,7 @@ export type RecoveryClearReason =
   | 'manual'
   | 'host-disposed'
 
-/** One observable step of a Member's automatic recovery. Every decision is reported because none is reconstructible from `agent/error` events alone: terminal errors cancel pending wakeups, stood-down episodes suppress later ones, and a wake with a missing target ends tracking silently. */
+/** Report the episode decisions that cannot be reconstructed from `agent/error` alone. */
 export type RecoveryFact =
   | {
       readonly kind: 'scheduled'
@@ -121,7 +116,7 @@ interface EpisodeState {
 export const RECOVERY_DELAY_MS = 120_000
 export const RECOVERY_MAX_CONSECUTIVE_ERRORS = 3
 
-/** Per-member automatic recovery episodes. An episode is every recoverable `agent/error` until a clean turn end, regardless of text or family; each of the first two occurrences schedules its own wakeup. */
+/** One retry budget per Member, shared across recoverable error families. */
 export class RecoveryCoordinator {
   private readonly episodes = new Map<AgentTeamMemberId, EpisodeState>()
   private readonly wake: RecoveryCoordinatorOptions['wake']
@@ -136,11 +131,9 @@ export class RecoveryCoordinator {
     this.maxConsecutiveErrors = options.maxConsecutiveErrors ?? RECOVERY_MAX_CONSECUTIVE_ERRORS
   }
 
-  /** Observe one `agent/error` occurrence for a Member; `error` is the raw event payload. */
   onError(memberId: AgentTeamMemberId, error: unknown): void {
     const errorKind = classifyRecoverableError(error)
     if (errorKind === undefined) {
-      // A non-recoverable failure cancels anything pending: retrying cannot help.
       this.stopTracking(memberId, 'non-recoverable')
       return
     }
@@ -163,14 +156,17 @@ export class RecoveryCoordinator {
       return
     }
 
+    this.scheduleWake(memberId, episode, errorKind)
+  }
+
+  private scheduleWake(memberId: AgentTeamMemberId, episode: EpisodeState, errorKind: RecoverableErrorKind): void {
     const timer = setTimeout(() => {
-      episode!.timers.delete(timer)
-      this.emit({ kind: 'woke', memberId, consecutiveFailures: episode!.consecutiveFailures })
+      episode.timers.delete(timer)
+      this.emit({ kind: 'woke', memberId, consecutiveFailures: episode.consecutiveFailures })
       try {
         this.wake(memberId)
       } catch (error) {
-        // The target is gone: the operator gets the reason instead of a silent
-        // end, and the message is the only part of the failure worth keeping.
+        // Report why recovery stopped without copying the provider's stack into the fact.
         this.stopTracking(memberId, 'wake-failed', failureDetail(error))
       }
     }, this.delayMs)
@@ -181,12 +177,10 @@ export class RecoveryCoordinator {
     })
   }
 
-  /** A turn ended cleanly (running→idle without an error): the episode is over. */
   onCleanTurnEnd(memberId: AgentTeamMemberId): void {
     this.stopTracking(memberId, 'clean-turn')
   }
 
-  /** End one Member's episode; `reason` says who ended it, and only a live episode reports. */
   stopTracking(memberId: AgentTeamMemberId, reason: RecoveryClearReason, detail?: string): void {
     const episode = this.episodes.get(memberId)
     if (episode === undefined) return
@@ -203,8 +197,7 @@ export class RecoveryCoordinator {
   }
 
   dispose(): void {
-    // Snapshot first: `stopTracking` deletes the entry it clears, and each
-    // Member's clear must be reported before the next one is visited.
+    // Report callbacks can change the map; only clear Members tracked when disposal began.
     for (const memberId of Array.from(this.episodes.keys())) this.stopTracking(memberId, 'host-disposed')
   }
 

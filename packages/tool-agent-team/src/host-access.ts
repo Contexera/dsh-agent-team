@@ -3,17 +3,14 @@ import AgentTeam from '@contexera/dsh-agent-team/host'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
 
-/** The Agent shape every Team tool receives. */
 export type TeamToolAgent = NonNullable<Parameters<AgentTeam['memberForAgent']>[0]>
 
-/** Resolve the Team Host service, or reject the tool call. */
 export function service(agent: TeamToolAgent): AgentTeam {
   const host = agent.ctx.get('agentTeam') as AgentTeam | undefined
   if (host === undefined) throw new Error('Agent Team Host is unavailable')
   return host
 }
 
-/** Resolve the calling Team Member, or reject the tool call. */
 export function member(agent: TeamToolAgent) {
   const current = service(agent).memberForAgent(agent)
   if (current === undefined) throw new Error('team tool requires an active Team Member')
@@ -43,7 +40,7 @@ export function workspaceOf(args: { workspace?: string | undefined }, agent: Tea
   const requested = args.workspace
   const exact = workspaces.find(workspace => workspace.workspaceId === requested)
   if (exact !== undefined) return exact.workspaceId
-    // Only a well-formed hex tail of at least 6 characters may abbreviate, never a silently shortened match; the brand prefix is not part of the tail.
+  // Prefer an exact address above: abbreviations normalize their prefix and separators and may collide.
   const tail = requested.slice(requested.indexOf(':') + 1).replaceAll('-', '').toLowerCase()
   const isAbbreviation = tail.length >= MIN_WORKSPACE_PREFIX && /^[0-9a-f]+$/.test(tail)
   if (isAbbreviation) {

@@ -1,10 +1,3 @@
-/**
- * Team's Session projection: durable ref naming and the fold every Host registers.
- *
- * `context_rollover`, `new_context`, and `context_checkpoint` are log decoders only, not tools: existing Session logs still fold so a parked intent can finish or discard its swap.
- * @module @contexera/dsh-agent-team/context-projection
- */
-
 import { createHash } from 'node:crypto'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionHeader, SessionLogOffset } from '@deepseek-ai/dsh-session'
@@ -21,16 +14,12 @@ const CONTEXT_CHECKPOINT_TOOL_NAME = 'context_checkpoint'
 
 const NEW_CONTEXT_TOOL_NAME = 'new_context'
 
-const TEAM_ROLLOVER_TOOL_NAMES: readonly string[] = [CONTEXT_ROLLOVER_TOOL_NAME, NEW_CONTEXT_TOOL_NAME]
-
 export const TEAM_INBOX_NOTICE_SUMMARY = 'Team Inbox has unread work.'
 
 export const TEAM_RECOVERY_NOTICE_SUMMARY = 'Recovery: continue your interrupted work.'
 
-/** One-line account of the post-acceptance context reminder, read back by the wake guards. */
 export const TEAM_ACCEPTANCE_NOTICE_SUMMARY = 'Task accepted: record what is durable.'
 
-/** Whether a Team notice is the post-acceptance reminder rather than a wake the Host rederives. */
 export function isAcceptanceNotice(message: UserMessage): boolean {
   const source = message.source
   return isAgentTeamSource(source) && source.form === 'notice' && source.summary === TEAM_ACCEPTANCE_NOTICE_SUMMARY
@@ -187,153 +176,152 @@ function parseCheckpointName(raw: string): string | undefined {
   return parsed.success ? parsed.data.name : undefined
 }
 
-type TeamContextStep = (state: TeamContextProjectionState, event: SessionEvent) => TeamContextProjectionState
+// These names decode durable logs; the tools themselves are no longer offered.
+function isRolloverCall(name: string): boolean {
+  return name === CONTEXT_ROLLOVER_TOOL_NAME || name === NEW_CONTEXT_TOOL_NAME
+}
 
-function createStep(inputFromSeq?: number): TeamContextStep {
-  const isRolloverCall = (name: string): boolean => TEAM_ROLLOVER_TOOL_NAMES.includes(name)
-
-  const applyToolResult = (state: TeamContextProjectionState, event: SessionEvent & { type: 'tool/result' }): TeamContextProjectionState => {
-    const message = event.data.message
-    const index = state.openCalls.findIndex(call => call.callId === message.toolCallId)
-    if (index === -1) return state
-    const recorded = state.openCalls[index]!
-    const openCalls = state.openCalls.filter(call => call.callId !== recorded.callId)
-    if (message.isError === true || event.data.error !== undefined) return { ...state, openCalls }
-    const seq = event.seq
-    const turn = event.data.turn
-    if (isRolloverCall(recorded.name)) {
-      const parsed = parseRolloverArguments(recorded.arguments)
-      if (parsed === undefined) return { ...state, openCalls }
-      // One intent per unresolved turn; an intent whose turn already ended is
-      // ready, not spent, so a later-turn success can replace it once the
-      // in-process lock is gone — that is the retry path.
-      if (state.pending !== null && state.pending.turnEndSeq === -1) return { ...state, openCalls }
-      return {
-        ...state,
-        openCalls,
-        pending: {
-          handoff: parsed.handoff,
-          ...(parsed.checkpointRef === undefined ? {} : { checkpointRef: parsed.checkpointRef }),
-          relatedFiles: parsed.relatedFiles,
-          toolCallId: recorded.callId,
-          resultSeq: seq,
-          turn,
-          turnEndSeq: -1,
-        },
-      }
-    }
-    if (recorded.name === CONTEXT_CHECKPOINT_TOOL_NAME) {
-      const name = parseCheckpointName(recorded.arguments)
-      if (name === undefined) return { ...state, openCalls }
-      const entry: ContextCheckpointEntry = {
-        checkpointRef: checkpointRefFor(state.sessionId, recorded.callId),
-        name,
+function applyToolResult(state: TeamContextProjectionState, event: SessionEvent & { type: 'tool/result' }): TeamContextProjectionState {
+  const message = event.data.message
+  const recorded = state.openCalls.find(call => call.callId === message.toolCallId)
+  if (recorded === undefined) return state
+  const next = { ...state, openCalls: state.openCalls.filter(call => call.callId !== recorded.callId) }
+  if (message.isError === true || event.data.error !== undefined) return next
+  const seq = event.seq
+  const turn = event.data.turn
+  if (isRolloverCall(recorded.name)) {
+    const parsed = parseRolloverArguments(recorded.arguments)
+    if (parsed === undefined) return next
+    // A later turn can retry a failed swap, but not replace an intent whose turn still owns it.
+    if (state.pending !== null && state.pending.turnEndSeq === -1) return next
+    return {
+      ...next,
+      pending: {
+        handoff: parsed.handoff,
+        ...(parsed.checkpointRef === undefined ? {} : { checkpointRef: parsed.checkpointRef }),
+        relatedFiles: parsed.relatedFiles,
+        toolCallId: recorded.callId,
         resultSeq: seq,
         turn,
         turnEndSeq: -1,
-      }
-      return { ...state, openCalls, checkpoints: [...state.checkpoints, entry] }
+      },
     }
-    return { ...state, openCalls }
   }
-
-  const applyInboxSpliced = (state: TeamContextProjectionState, inserted: readonly UserMessage[], seq: number): TeamContextProjectionState => {
-    const wakeBoundary = inputFromSeq !== undefined && seq >= inputFromSeq
-    if ((state.pending === null && !wakeBoundary) || inserted.length === 0) return state
-    const fresh: CarriedCandidate[] = []
-    for (const message of inserted) {
-      if (wakeBoundary) {
-        const source = message.source
-        if (matchesProducerKind(source.kind, 'agent-instructions') || isAgentTeamContextSource(message) || (isAgentTeamSource(source) && source.form === 'notice'
-          && (source.summary === TEAM_INBOX_NOTICE_SUMMARY || source.summary === TEAM_RECOVERY_NOTICE_SUMMARY || source.summary === TEAM_ACCEPTANCE_NOTICE_SUMMARY))) continue
-      } else if (isRedeliverableTeamNotice(message)) continue
-      if (state.carriedCandidates.some(candidate => candidate.messageId === message.id)) continue
-      if (fresh.some(candidate => candidate.messageId === message.id)) continue
-      fresh.push({ messageId: message.id, surfacedTurn: -1, consumed: false })
+  if (recorded.name === CONTEXT_CHECKPOINT_TOOL_NAME) {
+    const name = parseCheckpointName(recorded.arguments)
+    if (name === undefined) return next
+    const entry: ContextCheckpointEntry = {
+      checkpointRef: checkpointRefFor(state.sessionId, recorded.callId),
+      name,
+      resultSeq: seq,
+      turn,
+      turnEndSeq: -1,
     }
-    if (fresh.length === 0) return state
-    return { ...state, carriedCandidates: [...state.carriedCandidates, ...fresh] }
+    return { ...next, checkpoints: [...state.checkpoints, entry] }
   }
+  return next
+}
 
-  const applyUserMessage = (state: TeamContextProjectionState, event: SessionEvent & { type: 'user/message' }): TeamContextProjectionState => {
-    let next = state
-    // Surfaced is not consumed: the loop appends `user/message` before the step
-    // runs, so a cancellation can still land between them.
-    if (next.carriedCandidates.some(candidate => !candidate.consumed && candidate.messageId === event.data.id)) {
-      next = {
-        ...next,
-        carriedCandidates: next.carriedCandidates.map(candidate => candidate.messageId === event.data.id && !candidate.consumed
-          ? { ...candidate, surfacedTurn: next.lastTurn }
-          : candidate),
-      }
-    }
-    const continuationRef = continuationCheckpointRefOf(event.data)
-    if (continuationRef === undefined) return next
-    const existing = next.continuations.find(entry => entry.checkpointRef === continuationRef)
-    if (existing !== undefined) {
-      if (existing.deliveredSeq !== -1) return next
-      return {
-        ...next,
-        continuations: next.continuations.map(entry => entry.checkpointRef === continuationRef ? { ...entry, deliveredSeq: event.seq } : entry),
-      }
-    }
-    return { ...next, continuations: [...next.continuations, { checkpointRef: continuationRef, deliveredSeq: event.seq }] }
+function isWakeSwapInput(message: UserMessage): boolean {
+  const source = message.source
+  if (matchesProducerKind(source.kind, 'agent-instructions') || isAgentTeamContextSource(message)) return false
+  // The Host regenerates its notices after a swap; relays are real input and must survive it.
+  return !(isAgentTeamSource(source) && source.form === 'notice'
+    && (source.summary === TEAM_INBOX_NOTICE_SUMMARY
+      || source.summary === TEAM_RECOVERY_NOTICE_SUMMARY
+      || source.summary === TEAM_ACCEPTANCE_NOTICE_SUMMARY))
+}
+
+function applyInboxSpliced(state: TeamContextProjectionState, inserted: readonly UserMessage[], afterWakeBoundary: boolean): TeamContextProjectionState {
+  if ((state.pending === null && !afterWakeBoundary) || inserted.length === 0) return state
+  const seen = new Set(state.carriedCandidates.map(candidate => candidate.messageId))
+  const fresh: CarriedCandidate[] = []
+  for (const message of inserted) {
+    if (afterWakeBoundary ? !isWakeSwapInput(message) : isRedeliverableTeamNotice(message)) continue
+    if (seen.has(message.id)) continue
+    seen.add(message.id)
+    fresh.push({ messageId: message.id, surfacedTurn: -1, consumed: false })
   }
+  if (fresh.length === 0) return state
+  return { ...state, carriedCandidates: [...state.carriedCandidates, ...fresh] }
+}
 
-  const applyAssistantMessage = (state: TeamContextProjectionState, event: SessionEvent & { type: 'assistant/message' }): TeamContextProjectionState => {
-    if (state.carriedCandidates.length === 0 || event.data.interrupted === true) return state
-    let changed = false
-    const carriedCandidates = state.carriedCandidates.map(candidate => {
-      if (candidate.consumed || candidate.surfacedTurn !== event.data.turn) return candidate
-      changed = true
-      return { ...candidate, consumed: true }
-    })
-    return changed ? { ...state, carriedCandidates } : state
-  }
-
-  const applyTurnEnd = (state: TeamContextProjectionState, seq: number, turn: number): TeamContextProjectionState => {
-    let changed = false
-    // Only the turn that produced the call resolves it: a turn end from a later
-    // turn must never close an intent whose own turn never durably ended, or a
-    // spent intent would be revived by the next restart.
-    const checkpoints = state.checkpoints.map(entry => {
-      if (entry.turnEndSeq !== -1 || entry.turn !== turn) return entry
-      changed = true
-      return { ...entry, turnEndSeq: seq }
-    })
-    let pending = state.pending
-    if (pending !== null && pending.turnEndSeq === -1 && pending.turn === turn) {
-      pending = { ...pending, turnEndSeq: seq }
-      changed = true
+function applyUserMessage(state: TeamContextProjectionState, event: SessionEvent & { type: 'user/message' }): TeamContextProjectionState {
+  let next = state
+  // Surfaced is not consumed: the loop appends `user/message` before the step
+  // runs, so a cancellation can still land between them.
+  if (next.carriedCandidates.some(candidate => !candidate.consumed && candidate.messageId === event.data.id)) {
+    next = {
+      ...next,
+      carriedCandidates: next.carriedCandidates.map(candidate => candidate.messageId === event.data.id && !candidate.consumed
+        ? { ...candidate, surfacedTurn: next.lastTurn }
+        : candidate),
     }
-    return changed ? { ...state, checkpoints, pending } : state
   }
-
-  return (state, event) => {
-    // The ancestor's events are that generation's facts: folding them here would
-    // key its checkpoints to this Session and arm its intent as this one's.
-    if (event.seq < state.inheritedEventCount) return state
-    switch (event.type) {
-      case 'tool/call': {
-        const { name, arguments: raw } = event.data
-        if (!isRolloverCall(name) && name !== CONTEXT_CHECKPOINT_TOOL_NAME) return state
-        return { ...state, openCalls: [...state.openCalls, { callId: event.data.callId, name, arguments: raw }] }
-      }
-      case 'tool/result':
-        return applyToolResult(state, event)
-      case 'turn/start':
-        return event.data.turn === state.lastTurn ? state : { ...state, lastTurn: event.data.turn }
-      case 'turn/end':
-        return applyTurnEnd(state, event.seq, event.data.turn)
-      case 'user/message':
-        return applyUserMessage(state, event)
-      case 'assistant/message':
-        return applyAssistantMessage(state, event)
-      case 'agent/inbox/spliced':
-        return applyInboxSpliced(state, event.data.inserted, event.seq)
-      default:
-        return state
+  const continuationRef = continuationCheckpointRefOf(event.data)
+  if (continuationRef === undefined) return next
+  const existing = next.continuations.find(entry => entry.checkpointRef === continuationRef)
+  if (existing !== undefined) {
+    if (existing.deliveredSeq !== -1) return next
+    return {
+      ...next,
+      continuations: next.continuations.map(entry => entry.checkpointRef === continuationRef ? { ...entry, deliveredSeq: event.seq } : entry),
     }
+  }
+  return { ...next, continuations: [...next.continuations, { checkpointRef: continuationRef, deliveredSeq: event.seq }] }
+}
+
+function applyAssistantMessage(state: TeamContextProjectionState, event: SessionEvent & { type: 'assistant/message' }): TeamContextProjectionState {
+  if (state.carriedCandidates.length === 0 || event.data.interrupted === true) return state
+  let changed = false
+  const carriedCandidates = state.carriedCandidates.map(candidate => {
+    if (candidate.consumed || candidate.surfacedTurn !== event.data.turn) return candidate
+    changed = true
+    return { ...candidate, consumed: true }
+  })
+  return changed ? { ...state, carriedCandidates } : state
+}
+
+function applyTurnEnd(state: TeamContextProjectionState, seq: number, turn: number): TeamContextProjectionState {
+  let changed = false
+  // A later turn must not make an abandoned intent eligible for restart recovery.
+  const checkpoints = state.checkpoints.map(entry => {
+    if (entry.turnEndSeq !== -1 || entry.turn !== turn) return entry
+    changed = true
+    return { ...entry, turnEndSeq: seq }
+  })
+  let pending = state.pending
+  if (pending !== null && pending.turnEndSeq === -1 && pending.turn === turn) {
+    pending = { ...pending, turnEndSeq: seq }
+    changed = true
+  }
+  return changed ? { ...state, checkpoints, pending } : state
+}
+
+function applyContextEvent(state: TeamContextProjectionState, event: SessionEvent, inputFromSeq?: number): TeamContextProjectionState {
+  // The ancestor's events are that generation's facts: folding them here would
+  // key its checkpoints to this Session and arm its intent as this one's.
+  if (event.seq < state.inheritedEventCount) return state
+  switch (event.type) {
+    case 'tool/call': {
+      const { name, arguments: raw } = event.data
+      if (!isRolloverCall(name) && name !== CONTEXT_CHECKPOINT_TOOL_NAME) return state
+      return { ...state, openCalls: [...state.openCalls, { callId: event.data.callId, name, arguments: raw }] }
+    }
+    case 'tool/result':
+      return applyToolResult(state, event)
+    case 'turn/start':
+      return event.data.turn === state.lastTurn ? state : { ...state, lastTurn: event.data.turn }
+    case 'turn/end':
+      return applyTurnEnd(state, event.seq, event.data.turn)
+    case 'user/message':
+      return applyUserMessage(state, event)
+    case 'assistant/message':
+      return applyAssistantMessage(state, event)
+    case 'agent/inbox/spliced':
+      return applyInboxSpliced(state, event.data.inserted, inputFromSeq !== undefined && event.seq >= inputFromSeq)
+    default:
+      return state
   }
 }
 
@@ -341,15 +329,12 @@ export function foldTeamContextProjection(
   events: readonly SessionEvent[],
   target: ContextFoldTarget,
 ): TeamContextProjectionState {
-  const step = createStep(target.inputFromSeq)
   let state = emptyContextProjectionState(target)
-  for (const event of events) state = step(state, event)
+  for (const event of events) state = applyContextEvent(state, event, target.inputFromSeq)
   return state
 }
 
-/** Register once per Host: the framework keeps one unit per key for every Session. */
 export function createTeamContextProjectionDefinition(): ProjectionDefinition<typeof CONTEXT_CONTINUITY_PROJECTION_KEY, TeamContextProjectionState> {
-  const step = createStep()
   return {
     key: CONTEXT_CONTINUITY_PROJECTION_KEY,
     stateVersion: 3,
@@ -358,7 +343,7 @@ export function createTeamContextProjectionDefinition(): ProjectionDefinition<ty
       sessionId: header.id,
       inheritedEventCount: Number(inheritedEventCount),
     }),
-    apply: (state, event) => step(state, event),
+    apply: (state, event) => applyContextEvent(state, event),
   }
 }
 

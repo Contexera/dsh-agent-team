@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { teamTools } from './render-text.ts'
+import { renderText, teamTools } from './render-text.ts'
 
 /**
  * Execution-level tests for blank-parameter edge cases. The blanket
@@ -105,14 +105,20 @@ describe('start-only parameters keep their owning action', () => {
 
 describe('a read carrying a page size still returns its batch', () => {
   it('a Thread read with limit and beforeSequence reads one page instead of refusing the call', async () => {
-    const host = threadHost()
-    await call(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD, limit: 200, beforeSequence: 0, workspace: 'workspace:alpha' }, host)
-    const read = host.readThreadForAgent as ReturnType<typeof vi.fn>
+    const read = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => ({
+      ...READ_RESULT, readThroughSequence: 40, remainingUnreadCount: 57, earlierFactCount: 21,
+    }))
+    const host = threadHost({ readThreadForAgent: read })
+    const tool = teamTools().get('team_thread')!
+    const args = { action: 'read', threadRef: THREAD, limit: 200, beforeSequence: 0, workspace: 'workspace:alpha' }
+    const result = await call(tool, args, host)
     expect(read).toHaveBeenCalledTimes(1)
-    // The Host read request has no limit field, so the page size must not reach it.
     expect(read.mock.calls[0]![1]).toMatchObject({ threadRef: THREAD })
     expect(read.mock.calls[0]![1]).not.toHaveProperty('limit')
     expect(read.mock.calls[0]![1]).not.toHaveProperty('beforeSequence')
+    const text = renderText(tool, args, result)
+    expect(text).toContain('Read through sequence 40; 57 unread update(s) remaining')
+    expect(text).toContain('Earlier facts: 21 — read older ones with team_thread.history.')
   })
 
   it('a Main stream read with limit and beforeSequence reads one page instead of refusing the call', async () => {
@@ -124,20 +130,6 @@ describe('a read carrying a page size still returns its batch', () => {
     await call(teamTools().get('team_thread')!, { action: 'read', projectRef: PROJECT, limit: 200, beforeSequence: 0, workspace: 'workspace:alpha' }, host)
     expect(read).toHaveBeenCalledTimes(1)
     expect(read.mock.calls[0]![1]).not.toHaveProperty('limit')
-  })
-
-  it('the rendered page still names how much is left, so paging stays the way to get more', async () => {
-    const read = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => ({
-      thread: { threadRef: THREAD, revision: 20 },
-      anchor: { messageRef: 'message:anchor', sender: 'member:reeve', body: 'Can we unify the importers?', sequence: 1 },
-      anchorMentions: [], claims: [], facts: [], readThroughSequence: 40, remainingUnreadCount: 57,
-      earlierFactCount: 57, consumedDirectMarkers: [], reminders: [],
-    }))
-    const host = threadHost({ readThreadForAgent: read })
-    const result = await call(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD, limit: 200, workspace: 'workspace:alpha' }, host) as never
-    const blocks = teamTools().get('team_thread')!.output.render({ action: 'read', threadRef: THREAD, limit: 200 }, result)
-    const text = blocks.map(block => block.type === 'text' ? block.text : '').join('\n')
-    expect(text).toContain('57')
   })
 
   it('history still honors the page size, because its request really carries one', async () => {

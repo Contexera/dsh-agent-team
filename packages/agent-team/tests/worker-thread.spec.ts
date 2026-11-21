@@ -110,6 +110,12 @@ describe('a Worker run bound to a Thread', () => {
   it('writes its opening as one Thread fact carrying the binding', async () => {
     const team = await seed()
     const started = await startRun(team, { workerRef: 'worker:one', threadRef: team.threadRef })
+    const operation = team.ledger.getOperation(started.value.receipt.operationId)
+    expect(operation).toBeDefined()
+    expect(team.ledger.changeScopesOf(operation!)).toEqual([
+      { kind: 'project', projectRef: team.projectRef },
+      { kind: 'thread', threadRef: team.threadRef },
+    ])
     expect(started.value.activity).toMatchObject({ kind: 'worker_started', threadRef: team.threadRef,
       projectRef: team.projectRef, engine: 'codex', actor: team.memberId })
     expect(started.value.activity).not.toHaveProperty('taskRef')
@@ -128,6 +134,14 @@ describe('a Worker run bound to a Thread', () => {
   it('keeps a Project-only delegation out of every Thread', async () => {
     const team = await seed()
     const started = await startRun(team, { workerRef: 'worker:three' })
+    const position = team.ledger.projectionSequence()
+    const settled = await settleRun(team, 'worker:three')
+    for (const result of [started, settled]) {
+      const operation = team.ledger.getOperation(result.value.receipt.operationId)
+      expect(operation).toBeDefined()
+      expect(team.ledger.changeScopesOf(operation!)).toEqual([])
+    }
+    expect(team.ledger.projectionSequence()).toBe(position)
     expect(started.value.activity).toBeUndefined()
     const read = (await team.ledger.readThread({ requestId: requestId('read'), actor: human, workspaceId: alpha,
       threadRef: team.threadRef })).value
@@ -139,6 +153,12 @@ describe('a Worker run bound to a Thread', () => {
     await startRun(team, { workerRef: 'worker:four', threadRef: team.threadRef })
     const settled = await settleRun(team, 'worker:four', { output: 'the run fails at step 3',
       diagnostic: 'the engine exited before answering', nativeSessionId: 'session:worker' })
+    const operation = team.ledger.getOperation(settled.value.receipt.operationId)
+    expect(operation).toBeDefined()
+    expect(team.ledger.changeScopesOf(operation!)).toEqual([
+      { kind: 'project', projectRef: team.projectRef },
+      { kind: 'thread', threadRef: team.threadRef },
+    ])
     expect(settled.value.activity).toMatchObject({ kind: 'worker_settled', state: 'failed',
       reason: 'the engine exited before answering' })
     const read = (await team.ledger.readThread({ requestId: requestId('read'), actor: human, workspaceId: alpha,

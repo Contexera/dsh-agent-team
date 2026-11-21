@@ -1,7 +1,7 @@
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
+import { activityFact, activityText, type ActivityFact, type ThreadActivityFact } from './activity-facts.ts'
 import { TEAM_INBOX_NOTICE_SUMMARY } from './context-projection.ts'
-import type { InboxDeliveryPlan, InboxMemberReminder, InboxThreadUnread } from './inbox-delivery.ts'
+import type { InboxDeliveryPlan, InboxMemberReminder, InboxScopeRole, InboxThreadUnread } from './inbox-delivery.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID } from './ledger.ts'
 import {
   isFactOnSurface,
@@ -16,12 +16,14 @@ import { formatTeamTimestamp } from './time-format.ts'
 import type {
   AgentTeamActivity,
   AgentTeamClaimRef,
+  AgentTeamInboxReminder,
   AgentTeamMainTimelineEntry,
   AgentTeamMemberId,
   AgentTeamMessage,
   AgentTeamProject,
   AgentTeamProjectRef,
   AgentTeamSubscriptionActivity,
+  AgentTeamThreadReadFact,
   AgentTeamThreadRef,
   AgentTeamUnreadMemberReminder,
   AgentTeamWorkerAnswer,
@@ -68,15 +70,24 @@ interface NoticeScope {
   readonly threadRef?: AgentTeamThreadRef
 }
 
+const NOTICE_CHARACTERS = 32 * 1024
+const FOOTER_RESERVE = 2 * 1024
+const MAX_THREAD_SCOPES = 8
+const MAX_DETAILS = 20
 const ORDINARY_DIGEST_PER_SCOPE = 3
 const ORDINARY_DIGEST_TEXT_MAX = 240
 
+const MISSING_DIRECT = 0
+const IDENTITY = 1
+const REMINDER = 2
+const ORDINARY = 3
+
+type OrdinaryMainEntry = Extract<AgentTeamMainTimelineEntry, { kind: 'message' | 'activity' }>
+
 interface NoticeCandidate {
   readonly scope: NoticeScope
-  readonly priority: number
-  readonly order: number
+  readonly priority: typeof MISSING_DIRECT | typeof IDENTITY | typeof REMINDER | typeof ORDINARY
   readonly sequence: number
-  readonly detail: boolean
   readonly direct: boolean
   readonly text: () => string
   readonly message?: RenderedTeamMessage
@@ -84,23 +95,106 @@ interface NoticeCandidate {
   readonly reminder?: InboxMemberReminder
 }
 
-/** Render one bounded wake without changing its durable facts or delivery semantics. */
 export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice {
-  const { notifications, main, memberReminders, surface, lookup, readerId } = input
+  const candidates = input.memberReminders.map(memberReminderCandidate)
   const workerAnswers = new Map((input.workers ?? []).map(answer => [answer.workerRef, answer]))
-  const prefix = input.prefix ?? ''
-  const maxCharacters = 32 * 1024
+  for (const thread of input.notifications) collectThreadCandidates(candidates, input, thread, workerAnswers)
+  for (const main of input.main) collectMainCandidates(candidates, input, main)
+  // Missing direct facts and short identities sort newest-first; reminders and digests keep input order.
+  candidates.sort((left, right) => left.priority - right.priority
+    || (left.priority <= IDENTITY ? right.sequence - left.sequence : 0))
+  return assembleNotice(candidates, input.notifications.map(({ item }) => item.thread.threadRef),
+    input.main.length > 0, input.prefix?.length ?? 0)
+}
+
+function memberReminderCandidate(entry: AgentTeamUnreadMemberReminder): NoticeCandidate {
+  const scope: NoticeScope = { key: `member-reminder:${entry.reminder.reminderRef}`,
+    header: 'Team reminder, private to you' }
+  return { scope, priority: REMINDER, sequence: entry.sequence, direct: false,
+    text: () => memberReminderDetail(entry),
+    reminder: { reminderRef: entry.reminder.reminderRef, sequence: entry.sequence } }
+}
+
+function collectThreadCandidates(candidates: NoticeCandidate[], { deliveryPlan, lookup, surface, readerId }: InboxNoticeInput,
+  { item, facts, reminders }: InboxThreadUnread, workerAnswers: ReadonlyMap<AgentTeamWorkerAnswer['workerRef'], AgentTeamWorkerAnswer>): void {
+  const role = deliveryPlan?.threads.find(thread => thread.threadRef === item.thread.threadRef)?.role
+  const scope = threadNoticeScope(item, role)
+  for (const reminder of reminders ?? []) {
+    candidates.push({ scope, priority: REMINDER, sequence: reminder.sequence, direct: true,
+      text: () => taskReminderDetail(reminder, item.thread.threadRef) })
+  }
+  for (const entry of facts) {
+    if (!entry.direct) continue
+    const { fact } = entry
+    const onSurface = isFactOnSurface(surface, entry, item.thread.threadRef)
+    const priority = onSurface ? IDENTITY : MISSING_DIRECT
+    if (fact.kind === 'message') {
+      // A shortened body or identity is not evidence for a later write.
+      const complete = !onSurface && characterLength(fact.message.body) <= NOTIFICATION_BODY_MAX_CHARACTERS
+      candidates.push({ scope, priority, sequence: fact.sequence, direct: true,
+        text: () => threadMessageDetail(item, fact, lookup, onSurface),
+        ...(complete ? { message: {
+          threadRef: item.thread.threadRef, messageRef: fact.message.messageRef, body: fact.message.body,
+        } } : {}) })
+    } else if (fact.kind === 'activity') {
+      const activity = activityFact(fact.activity)
+      candidates.push({ scope, priority, sequence: fact.sequence, direct: true,
+        text: () => threadActivityDetail(fact, activity, lookup, readerId, workerAnswers, onSurface),
+        ...(onSurface ? {} : { activity }) })
+    }
+  }
+  const ordinary = facts.filter(entry => !entry.direct)
+  if (ordinary.length > 0) {
+    const route = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef}`
+    candidates.push({ scope, priority: ORDINARY, sequence: ordinary.at(-1)!.fact.sequence, direct: false,
+      text: () => threadOrdinaryDigest(ordinary, route, lookup) })
+  }
+}
+
+function collectMainCandidates(candidates: NoticeCandidate[], { lookup, readerId, surface }: InboxNoticeInput,
+  { project, entries }: InboxMainProjectUnread): void {
+  const scope = mainNoticeScope(project, lookup, readerId)
+  for (const entry of entries) {
+    if (entry.kind === 'message' && entry.direct) {
+      const onSurface = isMainEntryOnSurface(surface, entry, project.projectRef)
+      candidates.push({ scope, priority: onSurface ? IDENTITY : MISSING_DIRECT, sequence: entry.sequence, direct: true,
+        text: () => mainNotificationDetail(entry, project, lookup, onSurface),
+        ...(onSurface || characterLength(entry.message.body) > NOTIFICATION_BODY_MAX_CHARACTERS ? {} : { message: {
+          projectRef: project.projectRef, messageRef: entry.message.messageRef, body: entry.message.body } }) })
+    } else if (entry.kind === 'activity' && entry.direct) {
+      const onSurface = isMainEntryOnSurface(surface, entry, project.projectRef)
+      candidates.push({ scope, priority: onSurface ? IDENTITY : MISSING_DIRECT, sequence: entry.sequence, direct: true,
+        text: () => mainNotificationDetail(entry, project, lookup, onSurface), ...(onSurface ? {} : { activity: activityFact(entry.activity) }) })
+    } else if (entry.kind === 'thread-card') {
+      candidates.push({ scope, priority: ORDINARY, sequence: entry.sequence, direct: false,
+        text: () => mainNotificationDetail(entry, project, lookup) })
+    } else if (entry.kind === 'subscription-event' && entry.direct) {
+      candidates.push({ scope, priority: IDENTITY, sequence: entry.sequence, direct: true,
+        text: () => mainNotificationDetail(entry, project, lookup) })
+    }
+  }
+  // An addressed event is never ordinary unread: its recipients get the
+  // direct detail above, and everyone else gets nothing at all.
+  const ordinary = entries.filter((entry): entry is OrdinaryMainEntry => !entry.direct && (entry.kind === 'message' || entry.kind === 'activity'))
+  if (ordinary.length > 0) {
+    const newest = ordinary.at(-1)!
+    candidates.push({ scope, priority: ORDINARY, sequence: newest.sequence, direct: false,
+      text: () => mainOrdinaryDigest(ordinary, project, lookup) })
+  }
+}
+
+function assembleNotice(candidates: readonly NoticeCandidate[], threadRefs: readonly AgentTeamThreadRef[],
+  hasMain: boolean, prefixLength: number): RenderedInboxNotice {
   // The recovery instruction shares this budget, and footers state what was
   // omitted; hold both back so a full notice still fits 32K of UTF-16.
-  const budget = prefix === '' ? maxCharacters : maxCharacters - prefix.length - 2
-  const footerReserve = 2 * 1024
-  const contentBudget = budget - footerReserve
+  const budget = prefixLength === 0 ? NOTICE_CHARACTERS : NOTICE_CHARACTERS - prefixLength - 2
+  const contentBudget = budget - FOOTER_RESERVE
   const sections: string[] = [TEAM_INBOX_NOTICE_SUMMARY]
   const messages: RenderedTeamMessage[] = []
   const activities: ActivityFact[] = []
   let characterCount = sections[0]!.length
   let detailedFactCount = 0
-  let omitted = notifications.length > 8
+  let omitted = threadRefs.length > MAX_THREAD_SCOPES
   const append = (section: string, limit = contentBudget): boolean => {
     if (characterCount + section.length + 2 > limit) {
       omitted = true
@@ -110,168 +204,41 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
     characterCount += section.length + 2
     return true
   }
-  const plan = input.deliveryPlan
-  const rendered = new Set<AgentTeamThreadRef>()
-  // The Member reminder occurrences this notice actually rendered. An
-  // occurrence the detail cap or the character budget dropped is not here, so
-  // the delivery that follows consumes only what the Member can read.
+  const renderedThreads = new Set<AgentTeamThreadRef>()
+  const emittedScopes = new Set<string>()
   const deliveredReminders: InboxMemberReminder[] = []
-  const roleText = { follower: 'follower of this Thread', member: 'mentioned here, not following' } as const
-  const candidates: NoticeCandidate[] = []
-  let order = 0
   let omittedDirectCount = 0
   const omittedDirectRoutes = new Set<string>()
-  // A Member reminder belongs to no Thread: it is the Member's own promise to
-  // itself, so it reads as its own private scope and is never a Thread route.
-  for (const entry of memberReminders) {
-    const scope: NoticeScope = { key: `member-reminder:${entry.reminder.reminderRef}`,
-      header: 'Team reminder, private to you' }
-    candidates.push({ scope, priority: 2, order: order++, sequence: entry.sequence, detail: true, direct: false,
-      text: () => memberReminderDetail(entry),
-      reminder: { reminderRef: entry.reminder.reminderRef, sequence: entry.sequence } })
+  const recordOmission = (candidate: NoticeCandidate): void => {
+    omitted = true
+    if (!candidate.direct) return
+    omittedDirectCount += 1
+    const { key, threadRef } = candidate.scope
+    omittedDirectRoutes.add(threadRef === undefined ? `Main stream ${key}` : `Thread ${threadRef}`)
   }
-  const scopeRoute = (scope: NoticeScope): string => scope.threadRef === undefined ? `Main stream ${scope.key}` : `Thread ${scope.threadRef}`
-  for (const { item, facts, reminders } of notifications) {
-    const scoped = plan?.threads.find(thread => thread.threadRef === item.thread.threadRef)
-    const scopeText = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef} (Thread ${item.thread.threadRef})`
-    // The role states why this Thread is in scope at all; with one delivery
-    // class it no longer says anything about how fast the notice arrived.
-    const deliveryText = scoped === undefined ? [] : [`Your role: ${roleText[scoped.role]}`,
-      // A mention or a reply wakes a non-follower once; the hint says how to
-      // keep hearing the Thread it arrived from.
-      ...(scoped.role === 'member' ? [`You do not follow this Thread: later ordinary updates will not wake you; to keep participating, team_attention follow with threadRef ${item.thread.threadRef}`] : [])]
-    const scope: NoticeScope = { key: item.thread.threadRef, threadRef: item.thread.threadRef,
-      header: [`Workspace: ${item.workspaceId}`, `Project: ${item.projectRef}`, `Scope: ${scopeText}`, ...deliveryText,
-        `Read: team_thread read with workspace ${item.workspaceId} and threadRef ${item.thread.threadRef}`].join('\n') }
-    for (const reminder of reminders ?? []) {
-      const detail = reminder.kind === 'review-backlog'
-        ? 'Team Task reminder\nThis Task has been waiting for acceptance for at least 30 minutes. Review the work and accept it, or record what still needs to change.'
-        : 'Team Task reminder\nThis Task has stalled: its public Thread has had no progress for 24 hours, or an active Claim owner has been idle for more than 24 hours. Check the current state and move it forward.'
-      candidates.push({ scope, priority: 2, order: order++, sequence: reminder.sequence, detail: true, direct: true,
-        text: () => `${detail}\nOccurred at: ${formatTeamTimestamp(reminder.occurredAt)}\nTask: ${reminder.taskRef}\nThread: ${item.thread.threadRef}` })
-    }
-    for (const entry of facts) {
-      const { fact, direct } = entry
-      if (direct && fact.kind === 'message') {
-        const onSurface = isFactOnSurface(surface, entry, item.thread.threadRef)
-        candidates.push({ scope, priority: onSurface ? 1 : 0, order: order++, sequence: fact.sequence, detail: true, direct: true,
-          text: () => {
-            const sender = lookup.printableSender(fact.message.sender)
-            const repliesTo = lookup.repliesToLine(fact.message, item.workspaceId)
-            if (onSurface) {
-              return ['Direct Team mention — already in current context; still unread', `From: ${sender}`, `Project: ${item.projectRef}`,
-                ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]), `Thread: ${item.thread.threadRef}`,
-                `Message ref: ${fact.message.messageRef}`,
-                ...(repliesTo === undefined ? [] : [repliesTo])].join('\n')
-            }
-            return ['Direct Team mention', `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`, `From: ${sender}`, `Project: ${item.projectRef}`,
-              ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]),
-              `Thread: ${item.thread.threadRef}`, `Message ref: ${fact.message.messageRef}`,
-              ...(repliesTo === undefined ? [] : [repliesTo]),
-              `Message: ${boundedNotificationBody(fact.message.body)}`].join('\n')
-          },
-          ...(onSurface || characterLength(fact.message.body) > NOTIFICATION_BODY_MAX_CHARACTERS ? {} : { message: {
-            threadRef: item.thread.threadRef, messageRef: fact.message.messageRef, body: fact.message.body } }) })
-      } else if (direct && fact.kind === 'activity') {
-        const activity = activityFact(fact.activity)
-        const onSurface = isFactOnSurface(surface, entry, item.thread.threadRef)
-        candidates.push({ scope, priority: onSurface ? 1 : 0, order: order++, sequence: fact.sequence, detail: true, direct: true,
-          text: () => {
-            if (onSurface) {
-              return ['Team Task update', `${activity.activityRef} (Task ${activity.taskRef}, Thread ${activity.threadRef}) — already in current context; still unread`].join('\n')
-            }
-            const acceptance = acceptanceNotification(fact.activity, readerId, lookup)
-            const handover = handoverNotification(fact.activity, readerId)
-            const answer = fact.activity.kind === 'worker_settled'
-              ? workerAnswers.get(fact.activity.workerRef)
-              : undefined
-            return ['Team Task update', activityText(activity), `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`,
-              ...(acceptance === undefined ? [] : [acceptance]),
-              ...(handover === undefined ? [] : [handover]),
-              ...(answer === undefined ? [] : [workerAnswerText(answer)])].join('\n')
-          },
-          ...(onSurface ? {} : { activity }) })
-      }
-    }
-    const ordinary = facts.filter(entry => !entry.direct)
-    if (ordinary.length > 0) {
-      const route = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef}`
-      candidates.push({ scope, priority: 3, order: order++, sequence: ordinary.at(-1)!.fact.sequence, detail: true, direct: false,
-        text: () => threadOrdinaryDigest(ordinary, route, lookup) })
-    }
-  }
-  for (const { project, entries } of main) {
-    const owner = readerId !== undefined && lookup.isProjectOwner(readerId, project.projectRef)
-    const followingMain = readerId !== undefined && (owner || lookup.isFollowingMain?.(readerId, project.projectRef) === true)
-    const mainRole = owner ? 'owner of this Project' : followingMain ? 'follower of this Main stream' : 'mentioned here, not following'
-    const scope: NoticeScope = { key: project.projectRef,
-      header: [`Workspace: ${project.workspaceId}`, `Project: ${project.projectRef} — Main stream`, 'Scope: Main stream',
-        ...(readerId === undefined ? [] : [`Your role: ${mainRole}`]),
-        ...(readerId === undefined || owner || followingMain ? [] : [`You do not follow this Main stream: later ordinary updates will not wake you; to keep participating, team_attention follow with projectRef ${project.projectRef}`]),
-        `Read: team_thread read with workspace ${project.workspaceId} and projectRef ${project.projectRef}`].join('\n') }
-    for (const entry of entries) {
-      if (entry.kind === 'message' && entry.direct) {
-        const onSurface = isMainEntryOnSurface(surface, entry, project.projectRef)
-        candidates.push({ scope, priority: onSurface ? 1 : 0, order: order++, sequence: entry.sequence, detail: true, direct: true,
-          text: () => mainNotificationDetail(entry, project, lookup, onSurface),
-          ...(onSurface || characterLength(entry.message.body) > NOTIFICATION_BODY_MAX_CHARACTERS ? {} : { message: {
-            projectRef: project.projectRef, messageRef: entry.message.messageRef, body: entry.message.body } }) })
-      } else if (entry.kind === 'activity' && entry.direct) {
-        const onSurface = isMainEntryOnSurface(surface, entry, project.projectRef)
-        candidates.push({ scope, priority: onSurface ? 1 : 0, order: order++, sequence: entry.sequence, detail: true, direct: true,
-          text: () => mainNotificationDetail(entry, project, lookup, onSurface), ...(onSurface ? {} : { activity: activityFact(entry.activity) }) })
-      } else if (entry.kind === 'thread-card') {
-        candidates.push({ scope, priority: 3, order: order++, sequence: entry.sequence, detail: true, direct: false,
-          text: () => mainNotificationDetail(entry, project, lookup) })
-      } else if (entry.kind === 'subscription-event' && entry.direct) {
-        candidates.push({ scope, priority: 1, order: order++, sequence: entry.sequence, detail: true, direct: true,
-          text: () => mainNotificationDetail(entry, project, lookup) })
-      }
-    }
-    // An addressed event is never ordinary unread: its recipients get the
-    // direct detail above, and everyone else gets nothing at all.
-    const ordinary = entries.filter(entry => !entry.direct && (entry.kind === 'message' || entry.kind === 'activity'))
-    if (ordinary.length > 0) {
-      const newest = ordinary.at(-1)!
-      candidates.push({ scope, priority: 3, order: order++, sequence: newest.sequence, detail: true, direct: false,
-        text: () => mainOrdinaryDigest(ordinary, project, lookup) })
-    }
-  }
-  // Missing direct mentions, replies, and responsibility changes come first
-  // across every scope, newest first; facts already on the surface follow as
-  // short identities. Ordinary digests and cards wait behind them.
-  candidates.sort((left, right) => left.priority - right.priority
-    || (left.priority <= 1 ? right.sequence - left.sequence : left.order - right.order))
-  const emittedScopes = new Set<string>()
+
   for (const candidate of candidates) {
-    const scopeFull = candidate.scope.threadRef !== undefined && !rendered.has(candidate.scope.threadRef) && rendered.size >= 8
-    if (scopeFull || (candidate.detail && detailedFactCount >= 20)) {
-      omitted = true
-      if (candidate.direct) {
-        omittedDirectCount += 1
-        omittedDirectRoutes.add(scopeRoute(candidate.scope))
-      }
+    const { key, header, threadRef } = candidate.scope
+    const threadCapReached = threadRef !== undefined && !renderedThreads.has(threadRef) && renderedThreads.size >= MAX_THREAD_SCOPES
+    if (threadCapReached || detailedFactCount >= MAX_DETAILS) {
+      recordOmission(candidate)
       continue
     }
-    if (!emittedScopes.has(candidate.scope.key)) {
-      if (!append(candidate.scope.header)) {
-        if (candidate.direct) {
-          omittedDirectCount += 1
-          omittedDirectRoutes.add(scopeRoute(candidate.scope))
-        }
+    if (!emittedScopes.has(key)) {
+      if (!append(header)) {
+        recordOmission(candidate)
         continue
       }
-      emittedScopes.add(candidate.scope.key)
-      if (candidate.scope.threadRef !== undefined) rendered.add(candidate.scope.threadRef)
+      // A scope can still give the reader a route even if its first detail cannot fit.
+      emittedScopes.add(key)
+      if (threadRef !== undefined) renderedThreads.add(threadRef)
     }
     if (!append(candidate.text())) {
-      if (candidate.direct) {
-        omittedDirectCount += 1
-        omittedDirectRoutes.add(scopeRoute(candidate.scope))
-      }
+      recordOmission(candidate)
       continue
     }
-    if (candidate.detail) detailedFactCount += 1
+    // Only emitted details can attest facts or consume a private reminder occurrence.
+    detailedFactCount += 1
     if (candidate.reminder !== undefined) deliveredReminders.push(candidate.reminder)
     if (candidate.message !== undefined) messages.push(candidate.message)
     if (candidate.activity !== undefined) activities.push(candidate.activity)
@@ -282,13 +249,75 @@ export function renderInboxNotice(input: InboxNoticeInput): RenderedInboxNotice 
     append(`Direct Team signal${omittedDirectCount === 1 ? '' : 's'} not expanded: ${omittedDirectCount} in ${location}. Use team_inbox to find their workspace and Thread/Main address, then team_thread read for the full facts.`, budget)
   }
   if (omitted) append('More unread work remains in team_inbox; the automatic context is bounded.', budget)
-  if (notifications.length > 0) append('Use team_thread read with workspace and threadRef for missing context and to acknowledge unread updates. Complete Message facts shown here need not be fetched again just to reconsider a write; complete Activity facts shown here are equally sufficient. Use team_inbox to triage remaining Threads.', budget)
-  if (main.length > 0) append('Use team_thread read with the relevant workspace and projectRef for missing Main stream context and to acknowledge updates. Complete facts shown here can support a post, but do not mark them read.', budget)
-  // The Threads this notice named nothing of, because the section cap or the
-  // character budget dropped them. Their facts were never delivered, so the
-  // next plan must keep them out of `covered`.
-  const undelivered = notifications.map(({ item }) => item.thread.threadRef).filter(threadRef => !rendered.has(threadRef))
-  return { text: sections.join('\n\n'), messages, activities, renderedThreads: rendered, undelivered, deliveredReminders }
+  if (threadRefs.length > 0) append('Use team_thread read with workspace and threadRef for missing context and to acknowledge unread updates. Complete Message facts shown here need not be fetched again just to reconsider a write; complete Activity facts shown here are equally sufficient. Use team_inbox to triage remaining Threads.', budget)
+  if (hasMain) append('Use team_thread read with the relevant workspace and projectRef for missing Main stream context and to acknowledge updates. Complete facts shown here can support a post, but do not mark them read.', budget)
+  const undelivered = threadRefs.filter(threadRef => !renderedThreads.has(threadRef))
+  return { text: sections.join('\n\n'), messages, activities, renderedThreads, undelivered, deliveredReminders }
+}
+
+const roleText = { follower: 'follower of this Thread', member: 'mentioned here, not following' } as const
+
+function threadNoticeScope(item: InboxThreadUnread['item'], role: InboxScopeRole | undefined): NoticeScope {
+  const scopeText = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef} (Thread ${item.thread.threadRef})`
+  const deliveryText = role === undefined ? [] : [`Your role: ${roleText[role]}`,
+    ...(role === 'member' ? [`You do not follow this Thread: later ordinary updates will not wake you; to keep participating, team_attention follow with threadRef ${item.thread.threadRef}`] : [])]
+  return { key: item.thread.threadRef, threadRef: item.thread.threadRef,
+    header: [`Workspace: ${item.workspaceId}`, `Project: ${item.projectRef}`, `Scope: ${scopeText}`, ...deliveryText,
+      `Read: team_thread read with workspace ${item.workspaceId} and threadRef ${item.thread.threadRef}`].join('\n') }
+}
+
+function mainNoticeScope(project: AgentTeamProject, lookup: InboxNoticeLookup, readerId: AgentTeamMemberId | undefined): NoticeScope {
+  const owner = readerId !== undefined && lookup.isProjectOwner(readerId, project.projectRef)
+  const followingMain = readerId !== undefined && (owner || lookup.isFollowingMain?.(readerId, project.projectRef) === true)
+  const mainRole = owner ? 'owner of this Project' : followingMain ? 'follower of this Main stream' : 'mentioned here, not following'
+  return { key: project.projectRef,
+    header: [`Workspace: ${project.workspaceId}`, `Project: ${project.projectRef} — Main stream`, 'Scope: Main stream',
+      ...(readerId === undefined ? [] : [`Your role: ${mainRole}`]),
+      ...(readerId === undefined || owner || followingMain ? [] : [`You do not follow this Main stream: later ordinary updates will not wake you; to keep participating, team_attention follow with projectRef ${project.projectRef}`]),
+      `Read: team_thread read with workspace ${project.workspaceId} and projectRef ${project.projectRef}`].join('\n') }
+}
+
+function taskReminderDetail(reminder: AgentTeamInboxReminder, threadRef: AgentTeamThreadRef): string {
+  const detail = reminder.kind === 'review-backlog'
+    ? 'Team Task reminder\nThis Task has been waiting for acceptance for at least 30 minutes. Review the work and accept it, or record what still needs to change.'
+    : 'Team Task reminder\nThis Task has stalled: its public Thread has had no progress for 24 hours, or an active Claim owner has been idle for more than 24 hours. Check the current state and move it forward.'
+  return `${detail}\nOccurred at: ${formatTeamTimestamp(reminder.occurredAt)}\nTask: ${reminder.taskRef}\nThread: ${threadRef}`
+}
+
+type ThreadFact = AgentTeamThreadReadFact['fact']
+
+function threadMessageDetail(item: InboxThreadUnread['item'], fact: Extract<ThreadFact, { kind: 'message' }>,
+  lookup: InboxNoticeLookup, onSurface: boolean): string {
+  const sender = lookup.printableSender(fact.message.sender)
+  const repliesTo = lookup.repliesToLine(fact.message, item.workspaceId)
+  if (onSurface) {
+    return ['Direct Team mention — already in current context; still unread', `From: ${sender}`, `Project: ${item.projectRef}`,
+      ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]), `Thread: ${item.thread.threadRef}`,
+      `Message ref: ${fact.message.messageRef}`,
+      ...(repliesTo === undefined ? [] : [repliesTo])].join('\n')
+  }
+  return ['Direct Team mention', `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`, `From: ${sender}`, `Project: ${item.projectRef}`,
+    ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]),
+    `Thread: ${item.thread.threadRef}`, `Message ref: ${fact.message.messageRef}`,
+    ...(repliesTo === undefined ? [] : [repliesTo]),
+    `Message: ${boundedNotificationBody(fact.message.body)}`].join('\n')
+}
+
+function threadActivityDetail(fact: Extract<ThreadFact, { kind: 'activity' }>, activity: ThreadActivityFact, lookup: InboxNoticeLookup,
+  readerId: AgentTeamMemberId | undefined, workerAnswers: ReadonlyMap<AgentTeamWorkerAnswer['workerRef'], AgentTeamWorkerAnswer>,
+  onSurface: boolean): string {
+  if (onSurface) {
+    return ['Team Task update', `${activity.activityRef} (Task ${activity.taskRef}, Thread ${activity.threadRef}) — already in current context; still unread`].join('\n')
+  }
+  const acceptance = acceptanceNotification(fact.activity, readerId, lookup)
+  const handover = handoverNotification(fact.activity, readerId)
+  const answer = fact.activity.kind === 'worker_settled'
+    ? workerAnswers.get(fact.activity.workerRef)
+    : undefined
+  return ['Team Task update', activityText(activity), `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`,
+    ...(acceptance === undefined ? [] : [acceptance]),
+    ...(handover === undefined ? [] : [handover]),
+    ...(answer === undefined ? [] : [workerAnswerText(answer)])].join('\n')
 }
 
 function threadOrdinaryDigest(entries: InboxThreadUnread['facts'], route: string, lookup: InboxNoticeLookup): string {
@@ -304,15 +333,13 @@ function threadOrdinaryDigest(entries: InboxThreadUnread['facts'], route: string
     }, entry => entry.fact.occurredAt)
 }
 
-function mainOrdinaryDigest(entries: readonly AgentTeamMainTimelineEntry[], project: AgentTeamProject,
+function mainOrdinaryDigest(entries: readonly OrdinaryMainEntry[], project: AgentTeamProject,
   lookup: InboxNoticeLookup): string {
   const count = entries.length
   const newestAt = formatTeamTimestamp(entries.at(-1)!.occurredAt)
   return ordinaryDigestSection(`Main stream: ${count} unread update${count === 1 ? '' : 's'} · Project ${project.projectRef} · newest at ${newestAt}.`, entries,
     entry => {
       if (entry.kind === 'message') return `${lookup.printableSender(entry.message.sender)}: ${notificationDigestText(entry.message.body)}`
-      if (entry.kind === 'thread-card') throw new Error('a Thread card is not an ordinary digest entry')
-      if (entry.kind === 'subscription-event') throw new Error('an addressed subscription event is not an ordinary digest entry')
       const { activity } = entry
       if (!('memberId' in activity)) return subscriptionActivitySentence(activity, lookup)
       const actor = lookup.printableSender(activity.actor)
@@ -407,7 +434,6 @@ function subscriptionActivitySentence(activity: AgentTeamSubscriptionActivity, l
   return `${actor} ${action} Subscription ${activity.subscriptionName} (${activity.subscriptionRef})${reason}.`
 }
 
-/** One due Member reminder as the notice renders it: the note the Member wrote for itself, and when it came due. */
 function memberReminderDetail(entry: AgentTeamUnreadMemberReminder): string {
   const { reminder, scheduledAt } = entry
   const schedule = reminder.schedule.kind === 'once' ? `once at ${formatTeamTimestamp(reminder.schedule.at)}`
@@ -437,11 +463,6 @@ function workerAnswerText(answer: AgentTeamWorkerAnswer): string {
   return lines.join('\n')
 }
 
-/**
- * The prompt a handover owes its new accountable. A transfer is the one Task change that hands somebody work they
- * did not choose, and version 3 lets that Member be a plain Project member who can verify it: the wake says what the
- * Task now asks of them, and who verifies when they worked on it themselves.
- */
 function handoverNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined): string | undefined {
   if (activity.kind !== 'transfer' || readerId === undefined || activity.to !== readerId) return undefined
   return `You are the accountable for Task ${activity.taskRef} now: review what this Thread holds and accept it when the work stands, or say what still needs to change. Claims stay with their owners, so acceptance completes their work instead of moving it; if you worked on this Task yourself, another Project owner or the Human verifies it.`
@@ -450,8 +471,6 @@ function handoverNotification(activity: AgentTeamActivity, readerId: AgentTeamMe
 function acceptanceNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined,
   lookup: InboxNoticeLookup): string | undefined {
   const actor = lookup.printableSender(activity.actor)
-  // An acceptance concludes the reader's own Claims two ways: already finished before the accept (work stands), or still open and completed atomically by it.
-  // Both must be said, or the owner keeps working on a done Task or never learns its contribution was accepted.
   if (activity.kind === 'accept' && activity.actor === AGENT_TEAM_HUMAN_MEMBER_ID && readerId !== undefined) {
     const acceptedOwn = (activity.acceptedClaimRefs ?? []).filter(claimRef => lookup.claimOwner(claimRef) === readerId)
     const completedOwn = (activity.completedClaimRefs ?? []).filter(claimRef => lookup.claimOwner(claimRef) === readerId)

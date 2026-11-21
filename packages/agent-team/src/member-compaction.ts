@@ -30,7 +30,6 @@ export const DEFAULT_MEMBER_COMPACTION: MemberCompactionConfig = Object.freeze({
 
 export function memberCompactionThreshold(tokens: number, contextWindow: number | undefined): number | undefined {
   if (contextWindow === undefined) return tokens
-  // Too small for the fixed reserves: the Agent's own limits apply instead.
   if (contextWindow < MEMBER_CONTEXT_RESERVE + MEMBER_OUTPUT_RESERVE) return undefined
   return Math.floor(Math.min(tokens, contextWindow * MEMBER_WINDOW_RATIO, contextWindow - MEMBER_CONTEXT_RESERVE))
 }
@@ -69,19 +68,12 @@ export function measureMemberInput(ctx: Context, agent: Agent, config: LlmCallCo
   const stepHeader: EpochHeader | undefined = header !== undefined && assembly !== undefined && stepTools !== undefined
     ? { ...header, tools: [...stepTools] }
     : header
-  // The meter reuses the provider's own prompt count only for the header that
-  // request was sent with, and it keeps two headers at most. This hook clamps
-  // `maxTokens` per request, so the header carrying the proposed config never
-  // matches, and a failed or aborted attempt logs a header with no usage — the
-  // latest header is then not the one the count belongs to either. Resolve the
-  // header in force when the newest usage settled and price that one.
+  // Clamp changes spoil a header match, so price the settled request under its original header.
   const anchor = anchorHeaderOf(agent.session)
   const comparable = anchor !== undefined
     && anchor.config.provider === config.provider && anchor.config.model === config.model
   const anchored = comparable ? meter.measure(agent.session, anchor) : undefined
-  // A provider count already holds the anchored request's tools, so only a set
-  // this step declares beyond them is added; the fixed density heuristic prices
-  // a long Session well below that count and cannot stand in for it.
+  // Never discount a provider count for tools that are no longer declared.
   const measurement = anchored !== undefined && anchored.baseline?.kind === 'usage'
     ? { totalTokens: anchored.totalTokens + Math.max(0, estimateToolsTokens(stepHeader) - estimateToolsTokens(anchor)) }
     : meter.measure(agent.session, {
@@ -94,7 +86,6 @@ export function measureMemberInput(ctx: Context, agent: Agent, config: LlmCallCo
     const head = agent.session.surface.nodes[0]
     const event = head === undefined ? undefined : agent.session.eventAt(head)
     const previous = event?.type === 'system/message' ? meter.estimateMessage(event.data.message) : 0
-    // renderPrompt reads sections and variables only; tool declarations left the waterfall, so the presentation carries none.
     inputTokens += Math.max(0, meter.estimateMessage(createSystemMessage(renderPrompt({ ...assembly, tools: [] }))) - previous)
   }
   return inputTokens
@@ -104,6 +95,86 @@ export function measureMemberInput(ctx: Context, agent: Agent, config: LlmCallCo
 export interface MemberUnreachableCompaction {
   readonly escalate: (failure: LlmFailure) => void
   readonly clear: () => void
+}
+
+interface OutputClamp {
+  readonly provider: string
+  readonly model: string
+  readonly applied: number
+  readonly requested: number | undefined
+}
+
+async function requestModelInfo(ctx: Context, request: LlmCallConfig, signal: AbortSignal): Promise<LlmResolvedModelInfo | undefined> {
+  const llm = ctx.get('llm')
+  if (llm === undefined) throw new Error('agent-team: LLM runtime unavailable')
+  try {
+    return await llm.resolveModelInfo(request.provider, request.model, signal)
+  } catch (error) {
+    // Middleware can serve a virtual route that has no adapter in the directory.
+    if (!(error instanceof LlmError) || error.code !== 'NO_ADAPTER') throw error
+    return undefined
+  }
+}
+
+function pruneMemberInput(ctx: Context, agent: Agent, measure: () => number, measured: number): number {
+  const prune = (ctx.get('agentPresets')?.serviceFor(agent, 'toolResultPruner') as ToolResultPruner | undefined)
+    ?? ctx.get('toolResultPruner')
+  if (prune === undefined) return measured
+  try {
+    prune.pruneSession(agent.session)
+    return measure()
+  } catch {
+    // A failed best-effort prune still leaves the summary path available.
+    return measured
+  }
+}
+
+async function compactMemberInput({
+  ctx, agent, request, signal, engineFor, threshold, measure, measured,
+}: {
+  readonly ctx: Context
+  readonly agent: Agent
+  readonly request: LlmCallConfig
+  readonly signal: AbortSignal
+  readonly engineFor: () => CompactionEngine | undefined
+  readonly threshold: number
+  readonly measure: () => number
+  readonly measured: number
+}): Promise<number> {
+  const engine = engineFor()
+  if (engine === undefined) throw new Error('agent-team: Member reached its context budget without a compaction engine')
+  const member = memberEngineFor(engineFor)
+  // A paused summary route still has to pass the request's output-space check.
+  if (member !== undefined && member.degraded(agent, request)) {
+    ctx.logger.warn(`agent-team: ${request.provider}/${request.model} summarized nothing after a bounded attempt; passing this request through without a checkpoint (${measured} tokens) until its route or summary configuration changes`)
+    return measured
+  }
+
+  let inputTokens = pruneMemberInput(ctx, agent, measure, measured)
+  if (!(inputTokens >= threshold)) return inputTokens
+  let summaryFailed = false
+  try {
+    await engine.compactIfNeeded(agent, 'context-overflow', signal)
+  } catch (error) {
+    signal.throwIfAborted()
+    if (member === undefined || !member.takeSummaryFailure(agent)) throw error
+    summaryFailed = true
+    ctx.logger.warn(`agent-team: summarization failed for ${request.provider}/${request.model} (${error instanceof Error ? error.message : String(error)}); passing this request through without a checkpoint and stopping further attempts for this route`)
+  }
+  signal.throwIfAborted()
+  inputTokens = measure()
+  if (!summaryFailed && inputTokens >= threshold) {
+    throw new Error(`agent-team: context still exceeds the Member budget after compaction (${inputTokens} >= ${threshold}); shorten the input or increase memberCompaction.tokens`)
+  }
+  return inputTokens
+}
+
+function memberEngineFor(engineFor: () => CompactionEngine | undefined): MemberCompactionEngine | undefined {
+  // Structural, not instanceof: a preset isolate loads the engine module with
+  // its own identity, so the shipped composition fails a class test while the
+  // object is still the Member engine.
+  const engine = engineFor() as MemberCompactionEngine | undefined
+  return engine !== undefined && typeof engine.degraded === 'function' ? engine : undefined
 }
 
 export function installMemberCompaction(
@@ -118,7 +189,6 @@ export function installMemberCompaction(
   let claimed: readonly UserMessage[] = []
   let assembly: PromptPresentation | undefined
   let stepTools: readonly ToolSchema[] | undefined
-  type OutputClamp = { readonly provider: string; readonly model: string; readonly applied: number; readonly requested: number | undefined }
   let loggedClamp: OutputClamp | undefined
   let preparedClamp: OutputClamp | undefined
   let stepRoute: MemberStepRoute | undefined
@@ -128,16 +198,9 @@ export function installMemberCompaction(
   /** Provider overflows in a row while the route's summaries are paused, and whether the operator was already told. */
   const unreachable = { overflows: 0, reported: false }
 
-  const memberEngine = (): MemberCompactionEngine | undefined => {
-    // Structural, not instanceof: a preset isolate loads the engine module with
-    // its own identity, so the shipped composition fails a class test while the
-    // object is still the Member engine.
-    const engine = engineFor() as MemberCompactionEngine | undefined
-    return engine !== undefined && typeof engine.degraded === 'function' ? engine : undefined
-  }
   const bindStepRoute = (route: MemberStepRoute | undefined): void => {
     stepRoute = route
-    memberEngine()?.useStepRoute(agent, route)
+    memberEngineFor(engineFor)?.useStepRoute(agent, route)
     if (route === undefined) return
     // The step's route changing is the same moment the circuit forgets a paused
     // route: an escalation pinned to it no longer names this generation.
@@ -175,7 +238,7 @@ export function installMemberCompaction(
   })
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     assembly = await next()
-    // 0.2.2 moved tool declarations out of the waterfall: the step's admitted set arrives on the context, and `schemas` projects it the way the request's own provider does.
+    // Price the admitted tool set through the same schema projection as the request.
     stepTools = context.toolSet === undefined ? undefined : ctx.tools.schemas(context.scope, context.toolSet)
     return assembly
   }, { prepend: true })
@@ -212,58 +275,16 @@ export function installMemberCompaction(
     }
     const settings = config()
     if (!settings.enabled) return request
-    const llm = ctx.get('llm')
-    if (llm === undefined) throw new Error('agent-team: LLM runtime unavailable')
-    let info: LlmResolvedModelInfo | undefined
-    try {
-      info = await llm.resolveModelInfo(request.provider, request.model, signal)
-    } catch (error) {
-      if (!(error instanceof LlmError) || error.code !== 'NO_ADAPTER') throw error
-    }
+    const info = await requestModelInfo(ctx, request, signal)
     signal.throwIfAborted()
     const window = info?.context?.contextWindow
     const threshold = memberCompactionThreshold(settings.tokens, window)
-    // No room to act: the Agent's own upstream limits still apply.
+    // Windows smaller than the reserves stay under the Agent's upstream policy.
     if (threshold === undefined) return request
     const measure = (): number => measureMemberInput(ctx, agent, request, offered, assembly, stepTools)
-    let inputTokens = measure()
-    if (inputTokens >= threshold) {
-      const engine = engineFor()
-      if (engine === undefined) throw new Error('agent-team: Member reached its context budget without a compaction engine')
-      const member = memberEngine()
-      // No checkpoint this request; the clamp below still refuses an unholdable window.
-      let passedThrough = member !== undefined && member.degraded(agent, request)
-      if (passedThrough) {
-        ctx.logger.warn(`agent-team: ${request.provider}/${request.model} summarized nothing after a bounded attempt; passing this request through without a checkpoint (${inputTokens} tokens) until its route or summary configuration changes`)
-      } else {
-        const prune = (ctx.get('agentPresets')?.serviceFor(agent, 'toolResultPruner') as ToolResultPruner | undefined)
-          ?? ctx.get('toolResultPruner')
-        if (prune !== undefined) {
-          try {
-            prune.pruneSession(agent.session)
-            inputTokens = measure()
-          } catch {
-            // Pruning is an optional saving: its failure must not cost the step.
-          }
-        }
-        if (inputTokens >= threshold) {
-          try {
-            await engine.compactIfNeeded(agent, 'context-overflow', signal)
-          } catch (error) {
-            signal.throwIfAborted()
-            if (member === undefined || !member.takeSummaryFailure(agent)) throw error
-            // Bounded: the engine tried the step's route and one alternative.
-            passedThrough = true
-            ctx.logger.warn(`agent-team: summarization failed for ${request.provider}/${request.model} (${error instanceof Error ? error.message : String(error)}); passing this request through without a checkpoint and stopping further attempts for this route`)
-          }
-          signal.throwIfAborted()
-          inputTokens = measure()
-        }
-      }
-      if (!passedThrough && inputTokens >= threshold) {
-        throw new Error(`agent-team: context still exceeds the Member budget after compaction (${inputTokens} >= ${threshold}); shorten the input or increase memberCompaction.tokens`)
-      }
-    }
+    const measured = measure()
+    const inputTokens = measured >= threshold
+      ? await compactMemberInput({ ctx, agent, request, signal, engineFor, threshold, measure, measured }) : measured
     if (window === undefined) return request
     const requested = request.maxTokens ?? info?.defaultMaxTokens
     const outputTokens = memberOutputTokens(inputTokens, window, requested)
@@ -283,7 +304,7 @@ export function installMemberCompaction(
   ctx.on('agent/request-error', ({ failure }, next) => {
     if (failure.code !== CONTEXT_WINDOW_EXCEEDED_CODE) return next()
     const route = agent.session.requestHeader()?.config
-    const member = memberEngine()
+    const member = memberEngineFor(engineFor)
     if (route === undefined || member === undefined || !member.degraded(agent, route)) {
       unreachable.overflows = 0
       unreachable.reported = false

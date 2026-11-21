@@ -105,7 +105,7 @@ describe('Member compaction through real requests', () => {
     expect(agent.session.snapshotEvents().filter(event => event.type === 'compaction/end')).toHaveLength(1)
   })
 
-  it('lets 272K models pass 78K and compacts at the window ratio', async () => {
+  it('compacts a 272K model only once input reaches the window ratio', async () => {
     const { agent, adapter } = await fixture('small')
     await send(agent, 100_000)
     await send(agent, 90_000)
@@ -145,6 +145,16 @@ describe('Member compaction through real requests', () => {
     await engine.compactNow(agent, new AbortController().signal)
     await send(agent, 1_000)
     expect(adapter.requests[1]!.maxTokens).toBe(128_000)
+  })
+
+  it('restores an explicit output allowance after temporarily clamping it', async () => {
+    const { agent, adapter, engine } = await fixture('small', { ...DEFAULT_MEMBER_COMPACTION }, 100_000)
+    await send(agent, 190_000)
+    expect(adapter.requests[0]!.maxTokens).toBeLessThan(100_000)
+    await engine.compactNow(agent, new AbortController().signal)
+    await send(agent, 1_000)
+    expect(adapter.requests[1]!.maxTokens).toBe(100_000)
+    expect(agent.session.requestHeader()?.config.maxTokens).toBe(100_000)
   })
 
   it('does not raise an explicit smaller output cap when a larger default exists', async () => {

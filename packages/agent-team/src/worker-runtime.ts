@@ -388,12 +388,314 @@ async function disposeSession(session: Session, spec: WorkerRunSpec): Promise<vo
   }
 }
 
+type RootRecord = ReturnType<Session['records']>[number]
+type FrameEvent = FrameBody['events'][number]
+type AwaitTurnEnd = Awaited<ReturnType<typeof awaitTurnEndOf>>
+type RunPhase = 'running' | 'closing' | 'cancelled' | 'timeout' | 'settled'
+
+/** This session's root-agent records after `afterSeq`: a subagent's or another session's records never describe this run. */
+function rootRecordsAfter(session: Session, afterSeq: number): RootRecord[] {
+  return session.records().filter(record => record.seq > afterSeq && record.sessionId === session.id
+    && record.agentPath.length === 0)
+}
+
+/** The first turn end after `afterSeq` owned by `inputId`, matched by input id or by the turn the input landed in. */
+function turnEndFor(session: Session, afterSeq: number, inputId: string, turnId: string | undefined):
+  { readonly seq: number; readonly outcome: TurnOutcome } | undefined {
+  for (const record of rootRecordsAfter(session, afterSeq)) {
+    if (record.kind !== 'frame') continue
+    for (const event of record.body.events) {
+      if (event.kind !== 'turn_ended') continue
+      if (event.inputId === inputId || event.inputIds?.includes(inputId) === true
+        || (turnId !== undefined && record.spanId === turnId)) {
+        return { seq: record.seq, outcome: event.outcome }
+      }
+    }
+  }
+  return undefined
+}
+
+function lastTurnEndSeq(session: Session, afterSeq: number): number | undefined {
+  let found: number | undefined
+  for (const record of rootRecordsAfter(session, afterSeq)) {
+    if (record.kind === 'frame' && record.body.events.some(event => event.kind === 'turn_ended')) found = record.seq
+  }
+  return found
+}
+
+/** Why the native session ended after `afterSeq` without a turn frame, if it did. */
+function nativeEndReason(session: Session, afterSeq: number): string | undefined {
+  for (const record of rootRecordsAfter(session, afterSeq)) {
+    if (record.kind !== 'response') continue
+    if (record.body.kind === 'released') return 'the native session was released'
+    if (record.body.kind === 'exited') return record.body.reason ?? 'the native runtime exited'
+  }
+  return undefined
+}
+
+interface AcceptedInput {
+  readonly landed: 'steered' | 'queued' | 'prompted'
+  readonly turnId?: string | undefined
+}
+
+/**
+ * The inputs one execution submitted. The public record stream is the evidence
+ * for which of them a native turn actually consumed, so a steer that landed in
+ * the running turn and one that opened a later turn leave the same receipt.
+ */
+class ExecutionInputs {
+  readonly owned: string[] = []
+  /** Accepted follow-ups whose native turn has not been seen to end. */
+  readonly pending = new Map<string, AcceptedInput>()
+  /** The latest turn that consumed a follow-up; it, not the prompt's turn, is how the execution ended. */
+  latestOutcome: TurnOutcome | undefined
+  /** The first loss of an accepted follow-up, which turns the execution's result into an error. */
+  failure: string | undefined
+  private readonly turnIds = new Map<string, string>()
+
+  constructor(private readonly session: Session) {}
+
+  own(inputId: string): void {
+    if (!this.owned.includes(inputId)) this.owned.push(inputId)
+  }
+
+  accept(inputId: string, accepted: AcceptedInput): void {
+    this.own(inputId)
+    this.pending.set(inputId, accepted)
+  }
+
+  noteFailure(reason: string): void {
+    this.failure ??= reason
+  }
+
+  /** Read the evidence after `afterSeq` and return the last root seq it covered. */
+  consumeEvidence(afterSeq: number): number {
+    let through = afterSeq
+    for (const record of rootRecordsAfter(this.session, afterSeq)) {
+      through = Math.max(through, record.seq)
+      if (record.kind !== 'frame') continue
+      for (const event of record.body.events) this.consumeEvent(event, record.spanId)
+      this.consumeNativeCancellation(record.body.native)
+    }
+    return through
+  }
+
+  /** The native turn an input opened or landed in, once the record stream names it. */
+  turnIdFor(inputId: string): string | undefined {
+    const known = this.turnIds.get(inputId)
+    if (known !== undefined) return known
+    for (const record of rootRecordsAfter(this.session, -Infinity)) {
+      if (record.kind !== 'frame') continue
+      for (const event of record.body.events) {
+        if (event.kind !== 'user_message' || event.inputId !== inputId) continue
+        const turnId = event.turnId ?? record.spanId
+        if (turnId !== undefined) {
+          this.turnIds.set(inputId, turnId)
+          return turnId
+        }
+      }
+    }
+    return undefined
+  }
+
+  private consumeEvent(event: FrameEvent, spanId: string | undefined): void {
+    if (event.kind === 'user_message' && event.inputId !== undefined) {
+      const turnId = event.turnId ?? spanId
+      if (turnId === undefined) return
+      this.turnIds.set(event.inputId, turnId)
+      const accepted = this.pending.get(event.inputId)
+      if (accepted !== undefined) this.pending.set(event.inputId, { ...accepted, turnId })
+      return
+    }
+    if (event.kind === 'input_dropped') {
+      if (event.inputId !== undefined) this.pending.delete(event.inputId)
+      this.noteFailure('The native session dropped an accepted follow-up instruction.')
+      return
+    }
+    if (event.kind !== 'turn_ended') return
+    let consumed = event.inputId !== undefined && this.pending.delete(event.inputId)
+    for (const inputId of event.inputIds ?? []) {
+      if (this.pending.delete(inputId)) consumed = true
+    }
+    if (spanId !== undefined) {
+      for (const [inputId, accepted] of this.pending) {
+        if (accepted.turnId !== spanId) continue
+        this.pending.delete(inputId)
+        consumed = true
+      }
+    }
+    if (consumed) this.latestOutcome = event.outcome
+  }
+
+  /**
+   * Claude reports command lifecycles as native frames even when OAR's
+   * prompt-input projection does not recognize a steer UUID.
+   */
+  private consumeNativeCancellation(native: unknown): void {
+    if (native === null || typeof native !== 'object') return
+    const lifecycle = native as { readonly type?: unknown; readonly command_uuid?: unknown; readonly state?: unknown }
+    if (lifecycle.type === 'command_lifecycle' && lifecycle.state === 'cancelled'
+      && typeof lifecycle.command_uuid === 'string' && this.pending.delete(lifecycle.command_uuid)) {
+      this.noteFailure('The native session cancelled an accepted follow-up instruction.')
+    }
+  }
+}
+
+/**
+ * Waits for one input's native turn to end. The cursor only moves forward, so a
+ * later wait never re-reads an ending an earlier wait already consumed.
+ */
+class TurnEndWaiter {
+  constructor(
+    private readonly session: Session,
+    private readonly inputs: ExecutionInputs,
+    private readonly awaitTurnEnd: AwaitTurnEnd,
+    private cursor: number,
+  ) {}
+
+  async next(inputId: string): Promise<TurnOutcome> {
+    const already = this.recordedEnd(inputId)
+    if (already !== undefined) {
+      this.cursor = already.seq
+      return already.outcome
+    }
+    let outcome = await this.awaitTurnEnd(this.session, this.cursor, inputId)
+    // A native handled receipt is not a turn end: keep waiting for the turn it belongs to.
+    while (outcome.kind === 'handled') {
+      this.cursor = Math.max(this.cursor, outcome.seq)
+      outcome = await this.awaitTurnEnd(this.session, this.cursor, inputId)
+    }
+    const matched = this.recordedEnd(inputId)
+    if (matched !== undefined) this.cursor = matched.seq
+    else {
+      // Release/exited can end a wait without a native turn frame. Advance over
+      // the last recorded end only when there is no input-scoped match; never
+      // skip a later owned end that was already in the retained log.
+      this.cursor = lastTurnEndSeq(this.session, this.cursor)
+        ?? Math.max(this.cursor, this.session.records().at(-1)?.seq ?? this.cursor)
+    }
+    return outcome
+  }
+
+  private recordedEnd(inputId: string): { readonly seq: number; readonly outcome: TurnOutcome } | undefined {
+    return turnEndFor(this.session, this.cursor, inputId, this.inputs.turnIdFor(inputId))
+  }
+}
+
+/** The answer one run streamed: the last non-empty message when the engine names messages, else every delta. */
+class StreamedAnswer {
+  private text = ''
+  private readonly messages = new Map<string, string>()
+
+  append(text: string, messageId: string | undefined): void {
+    this.text += text
+    if (messageId !== undefined) this.messages.set(messageId, (this.messages.get(messageId) ?? '') + text)
+  }
+
+  blocks(): readonly ContentBlock[] {
+    let answer = this.text
+    for (const text of this.messages.values()) {
+      if (text.length > 0) answer = text
+    }
+    return answer.length === 0 ? [] : [{ type: 'text', text: answer }]
+  }
+}
+
+/** Deliveries still in flight, counting Host holds across durable steer admission. */
+class DeliveryGate {
+  private open = 0
+  private readonly waiters = new Set<() => void>()
+
+  get busy(): boolean {
+    return this.open > 0
+  }
+
+  enter(): void {
+    this.open += 1
+  }
+
+  leave(): void {
+    this.open -= 1
+    if (this.open !== 0) return
+    for (const wake of this.waiters) wake()
+    this.waiters.clear()
+  }
+
+  async drained(): Promise<void> {
+    if (this.open === 0) return
+    await new Promise<void>(resolve => { this.waiters.add(resolve) })
+  }
+}
+
+/**
+ * OAR's public delivery chooses steer, queue or a new prompt from the native
+ * status and retries across the status race. Team supplies its own UUID because
+ * the Team request id is not a native identity, and records every accepted id
+ * so the monitor knows which later turn still belongs to this execution.
+ */
+function runSteer(session: Session, running: () => boolean, deliveries: DeliveryGate,
+  inputs: ExecutionInputs): WorkerSteer {
+  const steer: WorkerSteer = async (instruction, inputId) => {
+    if (!running()) {
+      return { kind: 'unavailable', code: 'no_active_turn', delivery: 'rejected', reason: 'the run is no longer running' }
+    }
+    deliveries.enter()
+    try {
+      const answer = await session.deliver(instruction, { inputId, when: 'now', origin: { kind: 'user' } })
+      if (answer.landed === 'rejected') {
+        return { kind: 'unavailable', code: answer.code, delivery: 'rejected', reason: answer.reason }
+      }
+      const turnId = answer.result.kind === 'accepted'
+        ? steeredTurnId(answer.result.response.body.kind === 'accepted' ? answer.result.response.body.native : undefined)
+        : undefined
+      inputs.accept(inputId, { landed: answer.landed, ...(turnId === undefined ? {} : { turnId }) })
+      return { kind: 'submitted', inputId, landed: answer.landed, ...(turnId === undefined ? {} : { turnId }) }
+    } catch (error: unknown) {
+      return { kind: 'unavailable', code: 'error', delivery: 'unknown',
+        reason: error instanceof Error ? error.message : String(error) }
+    } finally {
+      deliveries.leave()
+    }
+  }
+  // The Host holds the gate open across its durable steer admission, so the run
+  // cannot close between admitting an instruction and delivering it.
+  Object.defineProperty(steer, 'hold', { enumerable: false, value: () => {
+    if (!running()) return undefined
+    deliveries.enter()
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      deliveries.leave()
+    }
+  } })
+  return steer
+}
+
+/**
+ * The Harness preserves the result even if its later teardown fails. Confirm
+ * cleanup before every terminal result, including natural completion, so a
+ * resumed execution can never trust an ending whose old process may be alive.
+ */
+async function withConfirmedCleanup(outcome: SubagentResult, dispose: () => Promise<void>): Promise<SubagentResult> {
+  try {
+    await dispose()
+    return outcome
+  } catch {
+    return { output: outcome.output, stopReason: 'error',
+      diagnostic: outcome.diagnostic === undefined
+        ? WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC
+        : `${outcome.diagnostic} ${WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC}` }
+  }
+}
+
 function publishRun(session: Session, prompt: string, request: ResolvedSubagentStartRequest, spec: WorkerRunSpec,
   cwd: string): SubagentRun {
   const stopped = Promise.withResolvers<SubagentResult>()
-  const messages = new Map<string, string>()
-  let streamedText = ''
-  let phase: 'running' | 'closing' | 'cancelled' | 'timeout' | 'settled' = 'running'
+  const answer = new StreamedAnswer()
+  const inputs = new ExecutionInputs(session)
+  const deliveries = new DeliveryGate()
+  let phase: RunPhase = 'running'
   let disposal: Promise<void> | undefined
   // The anchors this run owns, captured while its session is still open: an
   // engine closes its record stream as it tears down, so a capture taken after
@@ -404,98 +706,17 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
   // record stream is empty or a later capture fails. Turn and storage evidence
   // still comes only from `anchorsOf`; neither is guessed from the external id.
   let anchors: WorkerAnchors | undefined = Object.freeze({ nativeSessionId: session.id })
-  const ownedInputIds: string[] = []
-  const acceptedInputs = new Map<string, { readonly landed: 'steered' | 'queued' | 'prompted'
-    readonly turnId?: string | undefined }>()
-  const inputTurnIds = new Map<string, string>()
-  let latestAcceptedTurnOutcome: TurnOutcome | undefined
-  let followUpFailure: string | undefined
-  let deliveriesInFlight = 0
-  const deliveryWaiters = new Set<() => void>()
   // The environment this run's engine was opened with, read once: the anchors
   // derive Claude's record directory from it after the session is gone.
   const childEnv = effectiveEnvironment(spec.env)
   const captureAnchors = (): void => {
     try {
-      anchors = anchorsOf(session, inputSeq, spec.engine, cwd, promptInputId, ownedInputIds, childEnv)
+      anchors = anchorsOf(session, inputSeq, spec.engine, cwd, promptInputId, inputs.owned, childEnv)
     } catch {
       // A session that cannot answer costs the look-up, never the run's ending.
     }
   }
-  const noteDeliverySettled = (): void => {
-    deliveriesInFlight -= 1
-    if (deliveriesInFlight !== 0) return
-    for (const wake of deliveryWaiters) wake()
-    deliveryWaiters.clear()
-  }
-  const waitForDeliveries = async (): Promise<void> => {
-    if (deliveriesInFlight === 0) return
-    await new Promise<void>(resolve => { deliveryWaiters.add(resolve) })
-  }
-  /**
-   * The public stream is the evidence for which of this execution's inputs the
-   * native turn actually consumed. A steer that landed in the running turn and
-   * one that opened a later turn therefore leave the same kind of receipt.
-   */
-  const consumeInputEvidence = (afterSeq: number): number => {
-    let through = afterSeq
-    for (const record of session.records()) {
-      if (record.seq <= afterSeq || record.sessionId !== session.id || record.agentPath.length !== 0) continue
-      through = Math.max(through, record.seq)
-      if (record.kind !== 'frame') continue
-      for (const event of record.body.events) {
-        if (event.kind === 'user_message' && event.inputId !== undefined) {
-          const accepted = acceptedInputs.get(event.inputId)
-          const turnId = event.turnId ?? record.spanId
-          if (turnId !== undefined) {
-            inputTurnIds.set(event.inputId, turnId)
-            if (accepted !== undefined) acceptedInputs.set(event.inputId, { ...accepted, turnId })
-          }
-          continue
-        }
-        if (event.kind === 'input_dropped') {
-          if (event.inputId !== undefined) acceptedInputs.delete(event.inputId)
-          followUpFailure ??= 'The native session dropped an accepted follow-up instruction.'
-          continue
-        }
-        if (event.kind === 'turn_ended') {
-          let consumedAccepted = false
-          if (event.inputId !== undefined && acceptedInputs.delete(event.inputId)) consumedAccepted = true
-          for (const inputId of event.inputIds ?? []) {
-            if (acceptedInputs.delete(inputId)) consumedAccepted = true
-          }
-          if (record.spanId !== undefined) {
-            for (const [inputId, accepted] of acceptedInputs) {
-              if (accepted.turnId === record.spanId) {
-                acceptedInputs.delete(inputId)
-                consumedAccepted = true
-              }
-            }
-          }
-          if (consumedAccepted) latestAcceptedTurnOutcome = event.outcome
-        }
-      }
-      // Claude reports command lifecycles as native frames even when OAR's
-      // prompt-input projection does not recognize a steer UUID.
-      const native = record.body.native
-      if (native !== null && typeof native === 'object') {
-        const lifecycle = native as { readonly type?: unknown; readonly command_uuid?: unknown; readonly state?: unknown }
-        if (lifecycle.type === 'command_lifecycle' && lifecycle.state === 'cancelled'
-          && typeof lifecycle.command_uuid === 'string' && acceptedInputs.delete(lifecycle.command_uuid)) {
-          followUpFailure ??= 'The native session cancelled an accepted follow-up instruction.'
-        }
-      }
-    }
-    return through
-  }
-
-  const collectOutput = (): readonly ContentBlock[] => {
-    let answer = streamedText
-    for (const text of messages.values()) {
-      if (text.length > 0) answer = text
-    }
-    return answer.length === 0 ? [] : [{ type: 'text', text: answer }]
-  }
+  const collectOutput = (): readonly ContentBlock[] => answer.blocks()
   const dispose = (): Promise<void> => disposal ??= disposeSession(session, spec)
   const interrupt = (reason: 'cancelled' | 'timeout'): void => {
     if (phase !== 'running') return
@@ -512,57 +733,17 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     void dispose().catch(() => {})
   }
   const onAbort = (): void => { interrupt('cancelled') }
-  /**
-   * OAR's public delivery chooses steer, queue or a new prompt from the native
-   * status and retries across the status race. Team supplies its own UUID because
-   * the Team request id is not a native identity, and records every accepted id
-   * so the monitor knows which later turn still belongs to this execution.
-   */
-  const steer: WorkerSteer = async (instruction, inputId) => {
-    if (phase !== 'running') {
-      return { kind: 'unavailable', code: 'no_active_turn', delivery: 'rejected', reason: 'the run is no longer running' }
-    }
-    deliveriesInFlight += 1
-    try {
-      const answer = await session.deliver(instruction, { inputId, when: 'now', origin: { kind: 'user' } })
-      if (answer.landed !== 'rejected') {
-        if (!ownedInputIds.includes(inputId)) ownedInputIds.push(inputId)
-        const turnId = answer.result.kind === 'accepted'
-          ? steeredTurnId(answer.result.response.body.kind === 'accepted' ? answer.result.response.body.native : undefined)
-          : undefined
-        acceptedInputs.set(inputId, { landed: answer.landed, ...(turnId === undefined ? {} : { turnId }) })
-        return { kind: 'submitted', inputId, landed: answer.landed,
-          ...(turnId === undefined ? {} : { turnId }) }
-      }
-      return { kind: 'unavailable', code: answer.code, delivery: 'rejected', reason: answer.reason }
-    } catch (error: unknown) {
-      return { kind: 'unavailable', code: 'error', delivery: 'unknown',
-        reason: error instanceof Error ? error.message : String(error) }
-    } finally {
-      noteDeliverySettled()
-    }
-  }
-  Object.defineProperty(steer, 'hold', { enumerable: false, value: () => {
-    if (phase !== 'running') return undefined
-    deliveriesInFlight += 1
-    let released = false
-    return () => {
-      if (released) return
-      released = true
-      noteDeliverySettled()
-    }
-  } })
+  const steer = runSteer(session, () => phase === 'running', deliveries, inputs)
   const unsubscribe = session.events((event) => {
     if (event.sessionId !== session.id || event.agentPath.length !== 0 || event.kind !== 'text_delta') return
-    streamedText += event.text
-    if (event.messageId !== undefined) messages.set(event.messageId, (messages.get(event.messageId) ?? '') + event.text)
+    answer.append(event.text, event.messageId)
   }, { cursor: { sessionId: session.id, afterSeq: -1 } })
   request.signal.addEventListener('abort', onAbort, { once: true })
   if (request.signal.aborted) onAbort()
   const timer = spec.timeoutMs === undefined ? undefined : setTimeout(() => { interrupt('timeout') }, spec.timeoutMs)
   const runTurn = async (): Promise<SubagentResult> => {
     promptInputId = randomUUID()
-    ownedInputIds.push(promptInputId)
+    inputs.own(promptInputId)
     const admitted = await session.prompt(prompt, { inputId: promptInputId })
     if (admitted.kind === 'rejected') {
       return { output: collectOutput(), stopReason: 'error', diagnostic: new WorkerFailure('turn', admitted.code).message }
@@ -570,117 +751,42 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     // The turn this run drives is the one after its own input, so the capture
     // reads the record from here on and never another root turn's span.
     inputSeq = admitted.seq
-    const awaitTurnEnd = await awaitTurnEndOf()
-    let waitAfter = admitted.seq
+    const turnEnds = new TurnEndWaiter(session, inputs, await awaitTurnEndOf(), admitted.seq)
     let evidenceAfter = admitted.seq
-    const turnIdFor = (inputId: string): string | undefined => {
-      const known = inputTurnIds.get(inputId)
-      if (known !== undefined) return known
-      for (const record of session.records()) {
-        if (record.sessionId !== session.id || record.agentPath.length !== 0 || record.kind !== 'frame') continue
-        for (const event of record.body.events) {
-          if (event.kind === 'user_message' && event.inputId === inputId) {
-            const turnId = event.turnId ?? record.spanId
-            if (turnId !== undefined) {
-              inputTurnIds.set(inputId, turnId)
-              return turnId
-            }
-          }
-        }
-      }
-      return undefined
-    }
-    const matchingTurnEnd = (afterSeq: number, inputId: string):
-      { readonly seq: number; readonly outcome: TurnOutcome } | undefined => {
-      const turnId = turnIdFor(inputId)
-      for (const record of session.records()) {
-        if (record.seq <= afterSeq || record.sessionId !== session.id || record.agentPath.length !== 0
-          || record.kind !== 'frame') continue
-        for (const event of record.body.events) {
-          if (event.kind !== 'turn_ended') continue
-          if (event.inputId === inputId || event.inputIds?.includes(inputId) === true
-            || (turnId !== undefined && record.spanId === turnId)) {
-            return { seq: record.seq, outcome: event.outcome }
-          }
-        }
-      }
-      return undefined
-    }
-    const lastTurnEndSeq = (afterSeq: number): number | undefined => {
-      let found: number | undefined
-      for (const record of session.records()) {
-        if (record.seq <= afterSeq || record.sessionId !== session.id || record.agentPath.length !== 0
-          || record.kind !== 'frame') continue
-        if (record.body.events.some(event => event.kind === 'turn_ended')) found = record.seq
-      }
-      return found
-    }
-    const nativeEndReason = (): string | undefined => {
-      for (const record of session.records()) {
-        if (record.seq <= (inputSeq ?? 0) || record.sessionId !== session.id || record.agentPath.length !== 0
-          || record.kind !== 'response') continue
-        if (record.body.kind === 'released') return 'the native session was released'
-        if (record.body.kind === 'exited') return record.body.reason ?? 'the native runtime exited'
-      }
-      return undefined
-    }
-    const awaitEnd = async (inputId: string): Promise<TurnOutcome> => {
-      const already = matchingTurnEnd(waitAfter, inputId)
-      if (already !== undefined) {
-        waitAfter = already.seq
-        return already.outcome
-      }
-      let outcome = await awaitTurnEnd(session, waitAfter, inputId)
-      // A native handled receipt is not a turn end: keep waiting for the turn it belongs to.
-      while (outcome.kind === 'handled') {
-        waitAfter = Math.max(waitAfter, outcome.seq)
-        outcome = await awaitTurnEnd(session, waitAfter, inputId)
-      }
-      const matched = matchingTurnEnd(waitAfter, inputId)
-      if (matched !== undefined) waitAfter = matched.seq
-      else {
-        // Release/exited can end a wait without a native turn frame. Advance over
-        // the last recorded end only when there is no input-scoped match; never
-        // skip a later owned end that was already in the retained log.
-        waitAfter = lastTurnEndSeq(waitAfter) ?? Math.max(waitAfter, session.records().at(-1)?.seq ?? waitAfter)
-      }
-      return outcome
-    }
-    let outcome = await awaitEnd(promptInputId)
+    let outcome = await turnEnds.next(promptInputId)
     // Every accepted follow-up is part of this one execution. A turn may have
     // consumed some in-turn; anything left owns a later native turn.
     while (phase === 'running') {
       // Do not await a resolved "nothing in flight" promise here: the check and
       // the closing assignment below must be one synchronous window. A steer
-      // that starts in the preceding microtask has already incremented the
-      // counter, so it is either awaited or refused after the window closes.
-      if (deliveriesInFlight > 0) {
-        await waitForDeliveries()
+      // that starts in the preceding microtask has already entered the gate,
+      // so it is either awaited or refused after the window closes.
+      if (deliveries.busy) {
+        await deliveries.drained()
         continue
       }
       // Native events can precede their delivery acknowledgment. Do not advance
       // this cursor until every in-flight input is known: otherwise its ending
-      // could be consumed before acceptedInputs contains the input it completes.
-      evidenceAfter = consumeInputEvidence(evidenceAfter)
-      if (acceptedInputs.size === 0) break
-      const ended = nativeEndReason()
+      // could be consumed before it is pending.
+      evidenceAfter = inputs.consumeEvidence(evidenceAfter)
+      if (inputs.pending.size === 0) break
+      const ended = nativeEndReason(session, admitted.seq)
       if (ended !== undefined) {
-        acceptedInputs.clear()
-        followUpFailure ??= `The native session ended before confirming an accepted follow-up instruction (${ended}).`
+        inputs.pending.clear()
+        inputs.noteFailure(`The native session ended before confirming an accepted follow-up instruction (${ended}).`)
         break
       }
-      const nextInputId = acceptedInputs.keys().next().value
+      const nextInputId = inputs.pending.keys().next().value
       if (nextInputId === undefined) break
-      outcome = await awaitEnd(nextInputId)
+      outcome = await turnEnds.next(nextInputId)
     }
     // A closing window is the linearization point between the final accepted
     // turn and a later steer. Once it is taken, no input can be acknowledged
     // after this execution has decided it has nothing left to await.
     if (phase === 'running') phase = 'closing'
-    if (latestAcceptedTurnOutcome !== undefined) outcome = latestAcceptedTurnOutcome
-    const turn = completedTurn(outcome, collectOutput())
-    if (followUpFailure !== undefined && turn.stopReason !== 'aborted') {
-      return { output: turn.output, stopReason: 'error', diagnostic: followUpFailure }
+    const turn = completedTurn(inputs.latestOutcome ?? outcome, collectOutput())
+    if (inputs.failure !== undefined && turn.stopReason !== 'aborted') {
+      return { output: turn.output, stopReason: 'error', diagnostic: inputs.failure }
     }
     captureAnchors()
     return turn
@@ -710,20 +816,7 @@ function publishRun(session: Session, prompt: string, request: ResolvedSubagentS
     // still name. The cancel path captured earlier, and this is idempotent.
     captureAnchors()
   })
-  // The Harness preserves the result even if its later teardown fails. Confirm
-  // cleanup before every terminal result, including natural completion, so a
-  // resumed execution can never trust an ending whose old process may be alive.
-  const result = settled.then(async (outcome) => {
-    try {
-      await dispose()
-      return outcome
-    } catch {
-      return { output: outcome.output, stopReason: 'error' as const,
-        diagnostic: outcome.diagnostic === undefined
-          ? WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC
-          : `${outcome.diagnostic} ${WORKER_CLEANUP_UNCONFIRMED_DIAGNOSTIC}` }
-    }
-  })
+  const result = settled.then(outcome => withConfirmedCleanup(outcome, dispose))
   const handle = subprocessRunHandle({
     // Harness catalog identity belongs to this external execution, not to the
     // native conversation. A continuation reuses the latter as a new child.

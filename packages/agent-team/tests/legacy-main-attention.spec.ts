@@ -102,8 +102,17 @@ describe('pre-Main-stream-Attention records', () => {
     await team.ledger.postMainMessage({ requestId: requestId('post-1'), actor: team.actor, workspaceId: alpha, projectRef: team.projectRef, body: 'first update' })
     await team.ledger.postMainMessage({ requestId: requestId('post-2'), actor: team.actor, workspaceId: alpha, projectRef: team.projectRef, body: 'second update' })
     await team.ledger.readMainStream({ requestId: requestId('read'), actor: team.actor, workspaceId: alpha, projectRef: team.projectRef })
+    const expected = structuredClone([...team.table.entries()])
+    await rewrite(team, 'team/project-owner-added', stripMainAttention)
     await rewrite(team, 'team/main-stream-read', stripMainAttention)
+    const stored = structuredClone([...team.table.entries()])
     const reopened = await reopen(team)
+    const reopenedAgain = await reopen(team)
+    for (const [id, operation] of expected) {
+      expect(reopened.getOperation(id)).toEqual(operation)
+      expect(reopenedAgain.getOperation(id)).toEqual(operation)
+    }
+    expect([...team.table.entries()]).toEqual(stored)
     // The watermark survived the rewrite, so the read still holds.
     expect(standingOf(reopened, team.projectRef, team.actor).unreadCount).toBe(0)
     // Someone else's post is the only thing that can be ordinary unread here:
@@ -128,7 +137,13 @@ describe('pre-Main-stream-Attention records', () => {
 
   it('leaves an owner grant that already carries a row untouched', async () => {
     const team = await seed()
-    expect(standingOf(await reopen(team), team.projectRef, team.actor).following).toBe(true)
+    const stored = structuredClone([...team.table.entries()])
+    for (let load = 0; load < 2; load += 1) {
+      const reopened = await reopen(team)
+      expect(standingOf(reopened, team.projectRef, team.actor).following).toBe(true)
+      for (const [id, operation] of stored) expect(reopened.getOperation(id)).toEqual(operation)
+      expect([...team.table.entries()]).toEqual(stored)
+    }
   })
 
   it('leaves a current-format read that consumed only markers alone', async () => {
@@ -209,11 +224,26 @@ describe('records written before Attention recorded its source', () => {
     await team.ledger.postMainMessage({ requestId: requestId('one'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'one' })
     await team.ledger.changeAttention({ requestId: requestId('follow'), actor: reader, workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
     await team.ledger.readMainStream({ requestId: requestId('read'), actor: reader, workspaceId: alpha, projectRef: team.projectRef })
-    // The grant from a build that overwrote the row unconditionally.
-    await team.ledger.addProjectOwner({ requestId: requestId('own'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: readerId })
-    const reopened = new AgentTeamLedger(await stripSources(team), { rulesVersion: 2 })
+    const grant = await team.ledger.addProjectOwner({ requestId: requestId('own'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: readerId })
+    const expected = team.ledger.getOperation(grant.value.receipt.operationId)
+    if (expected?.kind !== 'team/project-owner-added') throw new Error('expected the owner grant')
+    await team.table.put(expected.operationId, { ...expected, data: { ...expected.data, inbox: {
+      ...expected.data.inbox,
+      mainAttention: { set: [{ memberId: readerId, projectRef: team.projectRef, startSequence: expected.sequence,
+        readThroughSequence: expected.sequence - 1, source: 'project-owner' }], removed: [] },
+    } } })
+    const table = await stripSources(team)
+    const stored = structuredClone([...table.entries()])
+    const reopened = new AgentTeamLedger(table, { rulesVersion: 2 })
     await reopened.initialize()
     reopened.validateAtMount()
+    const reopenedAgain = new AgentTeamLedger(table, { rulesVersion: 2 })
+    await reopenedAgain.initialize()
+    reopenedAgain.validateAtMount()
+    expect(reopened.getOperation(expected.operationId)).toEqual(expected)
+    expect(reopenedAgain.getOperation(expected.operationId)).toEqual(expected)
+    expect(standingOf(reopenedAgain, team.projectRef, reader)).toEqual(standingOf(reopened, team.projectRef, reader))
+    expect([...table.entries()]).toEqual(stored)
     // The overwriting row is recognised without its source and dropped, so the
     // reader's own watermark stands rather than the grant's: only the grant's
     // own owner-added marker is left, not the update the reader had already read.

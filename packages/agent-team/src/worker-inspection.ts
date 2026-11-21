@@ -274,10 +274,127 @@ interface Pass {
 }
 
 /**
- * Read the record in bounded chunks. The budget is spent on the read itself, so a
- * single oversized line is never buffered, never parsed, and never counted as
- * read: the loop stops at the bound whatever the file's shape.
+ * The line-by-line half of one pass: the identity check on the first line, this
+ * execution's own turn boundaries, and the fragment budget.
  */
+class RecordPass {
+  /** A boundary was reached; the lines after it belong to another execution. */
+  stopped = false
+  private first = true
+  private identified = false
+  private matched = false
+  private activeClaudeTurn: string | undefined
+  private pendingFailure: string | undefined
+  private withheld = 0
+  private omitted = false
+  private readonly fragments: AgentTeamWorkerInspectionFragment[] = []
+  private readonly endedOwnTurns = new Set<string>()
+  private readonly seenFragments = new Set<string>()
+
+  constructor(
+    private readonly engine: WorkerEngine,
+    private readonly nativeSessionId: string,
+    private readonly turnIds: ReadonlySet<string>,
+    private readonly inputIds: ReadonlySet<string>,
+  ) {}
+
+  /** Take one line; a returned reason refuses the whole record. */
+  take(line: string): string | undefined {
+    if (line.trim() === '') return undefined
+    const record = parseRecord(line)
+    if (this.first) {
+      this.first = false
+      if (!this.namesSession(record)) {
+        return `The file is not the record of native session ${this.nativeSessionId}, so this Team will not read it.`
+      }
+      this.identified = true
+    }
+    if (record === undefined || !this.ownsRecord(record)) return undefined
+    this.collect(record)
+    return undefined
+  }
+
+  /** End the pass, appending the one failure sentence it held back. */
+  finish(byteTruncated: boolean): Pass {
+    // One failure sentence per pass: retries repeat the same error, and the last
+    // one is the one the engine settled on. It is appended after the facts, so a
+    // report reads as session, turn, then what went wrong.
+    if (this.pendingFailure !== undefined) {
+      if (looksLikeCredential(this.pendingFailure)) this.withheld += 1
+      else {
+        if (this.fragments.length >= WORKER_HISTORY_MAX_FRAGMENTS) {
+          this.fragments.pop()
+          this.omitted = true
+        }
+        this.fragments.push(Object.freeze({ kind: 'failure',
+          text: truncateToCharacters(this.pendingFailure, WORKER_FRAGMENT_MAX_CHARACTERS) }))
+      }
+    }
+    return { identified: this.identified, matched: this.matched, fragments: Object.freeze(this.fragments),
+      withheld: this.withheld, truncated: byteTruncated || this.omitted }
+  }
+
+  /**
+   * The record has to name the session the settlement recorded. Anything else —
+   * another session's file, a hand-written path, a newer layout whose first line
+   * is not a header this Team reads — is refused before a single fragment is taken.
+   */
+  private namesSession(record: RawRecord | undefined): boolean {
+    if (record === undefined) return false
+    return this.engine === 'codex'
+      ? record.type === 'session_meta' && record.payload.session_id === this.nativeSessionId
+      : record.raw.sessionId === this.nativeSessionId
+  }
+
+  /** Whether a record falls inside this execution's own Claude turns; Codex records are matched by turn id later. */
+  private ownsRecord(record: RawRecord): boolean {
+    if (this.engine !== 'claude') return true
+    if (isClaudeRootPrompt(record)) {
+      const promptId = textOf(record.raw.uuid)
+      if (promptId !== undefined && this.inputIds.has(promptId)) this.activeClaudeTurn = promptId
+      else if (this.activeClaudeTurn !== undefined) {
+        // A later root prompt this execution did not submit is another
+        // controller's continuation. Stop before its model or failure facts;
+        // this is a boundary, not an incomplete read.
+        this.stopped = true
+        return false
+      }
+    }
+    // A resumed execution shares the native file with its predecessors: records
+    // before its first owned prompt, prompts included, are the historical prefix.
+    return this.activeClaudeTurn !== undefined
+  }
+
+  private collect(record: RawRecord): void {
+    const contribution = fragmentsOf(record, this.turnIds, this.activeClaudeTurn, this.engine)
+    if (contribution.matched) this.matched = true
+    if (contribution.failure !== undefined) this.pendingFailure = contribution.failure
+    if (contribution.completedTurnId !== undefined) this.endedOwnTurns.add(contribution.completedTurnId)
+    for (const fragment of contribution.fragments) this.keep(fragment)
+    if (this.turnIds.size > 0 && this.endedOwnTurns.size === this.turnIds.size) {
+      // All turns this execution drove are complete. Anything after them in
+      // the same file belongs to a later continuation, not this Worker.
+      this.stopped = true
+    }
+  }
+
+  private keep(fragment: AgentTeamWorkerInspectionFragment): void {
+    const key = `${fragment.kind}\0${fragment.text}`
+    if (this.seenFragments.has(key)) return
+    this.seenFragments.add(key)
+    if (looksLikeCredential(fragment.text)) {
+      this.withheld += 1
+      return
+    }
+    if (this.fragments.length >= WORKER_HISTORY_MAX_FRAGMENTS) {
+      this.omitted = true
+      return
+    }
+    this.fragments.push(Object.freeze({ kind: fragment.kind,
+      text: truncateToCharacters(fragment.text, WORKER_FRAGMENT_MAX_CHARACTERS) }))
+  }
+}
+
 /** One pass over the record: what it held, why it refused, or why it could not be read. */
 type ReadOutcome =
   | { readonly kind: 'pass'; readonly pass: Pass }
@@ -287,6 +404,11 @@ type ReadOutcome =
   | { readonly kind: 'unstable'; readonly reason: string }
   | { readonly kind: 'failed'; readonly reason: string }
 
+/**
+ * Read the record in bounded chunks. The budget is spent on the read itself, so a
+ * single oversized line is never buffered, never parsed, and never counted as
+ * read: the loop stops at the bound whatever the file's shape.
+ */
 async function readRecord(location: string, expected: { readonly dev: number; readonly ino: number },
   size: number, engine: WorkerEngine, nativeSessionId: string,
   turnIds: ReadonlySet<string>, inputIds: ReadonlySet<string>): Promise<ReadOutcome> {
@@ -300,129 +422,36 @@ async function readRecord(location: string, expected: { readonly dev: number; re
       return { kind: 'unstable', reason: 'The file that opened is not the file the recorded location names, so this Team will not read it.' }
     }
     if (!opened.isFile()) return { kind: 'refused', reason: 'The recorded location is not a file.' }
-    const fragments: AgentTeamWorkerInspectionFragment[] = []
+    const pass = new RecordPass(engine, nativeSessionId, turnIds, inputIds)
     const decoder = new StringDecoder('utf8')
     const chunk = Buffer.allocUnsafe(READ_CHUNK_BYTES)
     let remaining = WORKER_HISTORY_MAX_BYTES
     let position = 0
     let carry = ''
-    let identified = false
-    let matched = false
-    let activeClaudeTurn: string | undefined
-    let seenOwnedClaudePrompt = false
-    let stopped = false
-    let pendingFailure: string | undefined
-    let withheld = 0
-    let omitted = false
-    let first = true
-    const endedOwnTurns = new Set<string>()
-    const seenFragments = new Set<string>()
-    const take = (line: string): string | undefined => {
-      if (line.trim() === '') return undefined
-      const record = parseRecord(line)
-      if (first) {
-        first = false
-        // The record has to name the session the settlement recorded. Anything
-        // else — another session's file, a hand-written path, a newer layout whose
-        // first line is not a header this Team reads — is refused here, before a
-        // single fragment is taken from it.
-        const names = record !== undefined && (engine === 'codex'
-          ? record.type === 'session_meta' && record.payload.session_id === nativeSessionId
-          : record.raw.sessionId === nativeSessionId)
-        if (!names) {
-          return `The file is not the record of native session ${nativeSessionId}, so this Team will not read it.`
-        }
-        identified = true
-      }
-      if (record === undefined) return undefined
-      if (engine === 'claude' && isClaudeRootPrompt(record)) {
-        const promptId = textOf(record.raw.uuid)
-        if (promptId !== undefined && inputIds.has(promptId)) {
-          activeClaudeTurn = promptId
-          seenOwnedClaudePrompt = true
-        } else if (!seenOwnedClaudePrompt) {
-          // A resumed execution shares the native file with its predecessors.
-          // Their prompts are the historical prefix, not another controller
-          // taking over after this execution's own input.
-          return undefined
-        } else {
-          // A later root prompt this execution did not submit is another
-          // controller's continuation. Stop before its model or failure facts;
-          // this is a boundary, not an incomplete read.
-          stopped = true
-          return undefined
-        }
-      }
-      // Records before this execution's first owned prompt belong to an older
-      // turn in the resumed native conversation.
-      if (engine === 'claude' && activeClaudeTurn === undefined) return undefined
-      const contribution = fragmentsOf(record, turnIds, activeClaudeTurn, engine)
-      if (contribution.matched) {
-        matched = true
-      }
-      if (contribution.failure !== undefined) pendingFailure = contribution.failure
-      if (contribution.completedTurnId !== undefined) endedOwnTurns.add(contribution.completedTurnId)
-      for (const fragment of contribution.fragments) {
-        const key = `${fragment.kind}\0${fragment.text}`
-        if (seenFragments.has(key)) continue
-        seenFragments.add(key)
-        if (looksLikeCredential(fragment.text)) {
-          withheld += 1
-          continue
-        }
-        if (fragments.length >= WORKER_HISTORY_MAX_FRAGMENTS) {
-          omitted = true
-          continue
-        }
-        fragments.push(Object.freeze({ kind: fragment.kind, text: truncateToCharacters(fragment.text, WORKER_FRAGMENT_MAX_CHARACTERS) }))
-      }
-      if (turnIds.size > 0 && endedOwnTurns.size === turnIds.size) {
-        // All turns this execution drove are complete. Anything after them in
-        // the same file belongs to a later continuation, not this Worker.
-        stopped = true
-      }
-      return undefined
-    }
-    while (remaining > 0) {
+    while (remaining > 0 && !pass.stopped) {
       const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, remaining), position)
       if (bytesRead === 0) break
       position += bytesRead
       remaining -= bytesRead
       carry += decoder.write(chunk.subarray(0, bytesRead))
       let end: number
-      while ((end = carry.indexOf('\n')) >= 0) {
+      while (!pass.stopped && (end = carry.indexOf('\n')) >= 0) {
         const line = carry.slice(0, end)
         carry = carry.slice(end + 1)
-        const refusal = take(line)
+        const refusal = pass.take(line)
         if (refusal !== undefined) return { kind: 'refused', reason: refusal }
-        if (stopped) break
       }
-      if (stopped) break
     }
     // A record longer than the bound is not finished, so its trailing bytes are
     // not a line: parsing them would spend the whole budget on a fragment the
     // reader never claimed to read.
     const byteTruncated = remaining === 0 && position < size
     carry += decoder.end()
-    if (!stopped && !byteTruncated && carry.trim() !== '') {
-      const refusal = take(carry)
+    if (!pass.stopped && !byteTruncated && carry.trim() !== '') {
+      const refusal = pass.take(carry)
       if (refusal !== undefined) return { kind: 'refused', reason: refusal }
     }
-    // One failure sentence per pass: retries repeat the same error, and the last
-    // one is the one the engine settled on. It is appended after the facts, so a
-    // report reads as session, turn, then what went wrong.
-    if (pendingFailure !== undefined) {
-      if (looksLikeCredential(pendingFailure)) withheld += 1
-      else {
-        if (fragments.length >= WORKER_HISTORY_MAX_FRAGMENTS) {
-          fragments.pop()
-          omitted = true
-        }
-        fragments.push(Object.freeze({ kind: 'failure', text: truncateToCharacters(pendingFailure, WORKER_FRAGMENT_MAX_CHARACTERS) }))
-      }
-    }
-    return { kind: 'pass', pass: { identified, matched, fragments: Object.freeze(fragments), withheld,
-      truncated: byteTruncated || omitted } }
+    return { kind: 'pass', pass: pass.finish(byteTruncated) }
   } finally {
     await handle.close().catch(() => {})
   }

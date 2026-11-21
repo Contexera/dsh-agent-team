@@ -25,7 +25,8 @@ export function createInboxAndStreamDouble(options?: {
   let changeVersion = 0
   let changeFailure: string | undefined
   const generationListeners = new Set<() => void>()
-  const changeWaiters = new Set<{ request: AgentTeamChangesRequest; wake(): void }>()
+  const changeWaiters = new Set<{ request: AgentTeamChangesRequest; wake(): void; idle(): boolean }>()
+  const changeDispatchWaiters = new Set<() => void>()
   const changeWaiterRegistrations = new Set<() => void>()
   let changeRegistrations = 0
   let changeOpens = 0
@@ -37,6 +38,18 @@ export function createInboxAndStreamDouble(options?: {
       })
     }
     await Promise.resolve()
+  }
+
+  const notifyDispatch = (): void => {
+    for (const resolve of changeDispatchWaiters) resolve()
+    changeDispatchWaiters.clear()
+  }
+
+  const changeDispatchesReady = async (): Promise<void> => {
+    await changeSubscriptionsReady()
+    while ([...changeWaiters].some(waiter => !waiter.idle())) {
+      await new Promise<void>(resolve => { changeDispatchWaiters.add(resolve) })
+    }
   }
 
   const wakeAll = (): void => {
@@ -70,8 +83,9 @@ export function createInboxAndStreamDouble(options?: {
 
   const changesStream = async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
     let pending = false
+    let dispatching = true
     let resume: (() => void) | undefined
-    const waiter = { request, wake: () => { pending = true; resume?.() } }
+    const waiter = { request, wake: () => { pending = true; resume?.() }, idle: () => !pending && !dispatching }
     const abort = () => resume?.()
     changeWaiters.add(waiter)
     changeRegistrations += 1
@@ -81,16 +95,22 @@ export function createInboxAndStreamDouble(options?: {
     try {
       if (changeFailure !== undefined) throw new RemoteStreamCarrierError(changeFailure)
       yield { version: changeVersion }
+      dispatching = false
+      notifyDispatch()
       while (!signal?.aborted) {
         if (!pending) await new Promise<void>(resolve => { resume = resolve })
         resume = undefined
         if (signal?.aborted) return
         if (changeFailure !== undefined) throw new RemoteStreamCarrierError(changeFailure)
         pending = false
+        dispatching = true
         yield { version: changeVersion }
+        dispatching = false
+        notifyDispatch()
       }
     } finally {
       changeWaiters.delete(waiter)
+      notifyDispatch()
       signal?.removeEventListener('abort', abort)
     }
   }
@@ -221,6 +241,7 @@ export function createInboxAndStreamDouble(options?: {
     connection,
     changes,
     changeSubscriptionsReady,
+    changeDispatchesReady,
     wakeAll,
     publishPresence,
     publishWorkspaceUpdate,

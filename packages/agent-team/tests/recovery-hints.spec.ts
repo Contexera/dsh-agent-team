@@ -2,7 +2,6 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  RECOVERY_KINDS,
   RECOVERY_REGISTRY,
   assertRecoveryCoverage,
   forbidHandWrittenRecovery,
@@ -70,10 +69,6 @@ describe('the registry covers exactly the situations the Team produces', () => {
     // shape and stops producing that kind — the entry silently becomes a lie.
     expect(() => assertRecoveryCoverage(PRODUCED_KINDS.filter(kind => kind !== 'workspace_required'))).toThrow(/workspace_required/)
   })
-
-  it('the list is in the registry: a kind dropped from the registry is a coverage failure, not a missing word', () => {
-    for (const kind of PRODUCED_KINDS) expect(RECOVERY_KINDS).toContain(kind)
-  })
 })
 
 describe('every entry names an action and the value that action takes', () => {
@@ -112,8 +107,15 @@ describe('every entry names an action and the value that action takes', () => {
 })
 
 describe('a hand-written recovery route in model-facing source is refused', () => {
-  it('an imperative route sentence outside the registry fails, with its line', () => {
-    expect(() => forbidHandWrittenRecovery('throw new Error("copy the threadRef from team_view, then retry")', 'src/x.ts')).toThrow(/spells a recovery route by hand/)
+  it('ignores routes in comments and reports the source line of a hand-written route', () => {
+    const source = [
+      '/*',
+      ' * copy the threadRef from team_view, then retry',
+      ' */',
+      '// call team_view to find the threadRef',
+      'throw new Error("copy the threadRef from team_view, then retry")',
+    ].join('\n')
+    expect(() => forbidHandWrittenRecovery(source, 'src/x.ts')).toThrow(/src\/x\.ts:5 spells a recovery route by hand/)
   })
 
   it('the registry file itself is exempt, because that is where the routes live', () => {

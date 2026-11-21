@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentTeamAgentMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
-import { teamTools } from './render-text.ts'
+import { renderText, teamTools } from './render-text.ts'
 import {
   TEST_PROJECT,
   TEST_RUN,
@@ -163,6 +163,28 @@ describe('team_subscription arms and resets the webhook address', () => {
     const request = host.updateSubscriptionForAgent.mock.calls[0]![1]
     expect(request).toMatchObject({ intervalMinutes: 60 })
     expect(request, 'an edit that says nothing about the webhook must not disarm it').not.toHaveProperty('webhook')
+  })
+
+  it('explains a retried reset without reprinting the webhook address', async () => {
+    const host = {
+      ...fakeHost(),
+      resetSubscriptionWebhookForAgent: vi.fn(async () => ({
+        kind: 'changed' as const,
+        subscription: testSubscription({ name: 'hooks only', revision: 2, triggers: { webhook: true } }),
+        activity: testSubscriptionActivity(),
+        webhookAddressGone: true as const,
+      })),
+    }
+    const tool = teamTools().get('team_subscription')!
+    const args = { action: 'reset_webhook', projectRef: PROJECT, subscriptionRef: SUBSCRIPTION, expectedRevision: 1 }
+    const result = await call(tool, args, host)
+    expect(result).not.toHaveProperty('webhookAddress')
+    expect(renderText(tool, args, result)).toBe([
+      `Workspace: ${WORKSPACE} · Project: ${PROJECT}`,
+      `reset_webhook: hooks only (${SUBSCRIPTION}) · active · r2 · webhook`,
+      'The webhook address was shown once when this change committed and cannot be fetched again; call reset_webhook to arm a new one.',
+      'notify: nobody (published to the timeline only)',
+    ].join('\n'))
   })
 })
 

@@ -120,16 +120,6 @@ describe('stale_revision renders the increment it rejected against', () => {
     expect(occurrences(text, 'Next write — baseRevision:')).toBe(1)
   })
 
-  it('names the increment window so the model knows what the span covers', () => {
-    const text = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8387, body: 'x' }, {
-      kind: 'stale_revision', threadRef: THREAD, expectedRevision: 8387, revision: 8394,
-      facts: [messageFact(8388, 'first'), messageFact(8389, 'second'), messageFact(8394, 'third')],
-    })
-    expect(text).toContain('3')
-    expect(text).toContain('third')
-    expect(text).toContain('Next write — baseRevision: 8394')
-  })
-
   it('an empty increment still hands back the current revision', () => {
     // Nothing new to show, but the token must still move forward — otherwise
     // the retry repeats the same rejection forever.
@@ -138,6 +128,24 @@ describe('stale_revision renders the increment it rejected against', () => {
     })
     expect(text).toContain('Next write — baseRevision: 8394')
   })
+})
+
+it.each([8192, 8193])('only binds a rejection body in full and issues a token at %i UTF-16 units if it fits', length => {
+  const tool = teamTools().get('team_message')!
+  const args = { action: 'reply', threadRef: THREAD, baseRevision: 1, body: 'reply' }
+  const value = { kind: 'stale_revision', threadRef: THREAD, revision: 2, facts: [messageFact(2, 'x'.repeat(length - 1) + '!')] }
+  const text = renderText(tool, args, value)
+  const meta = tool.output.presentationMeta?.(args, value)
+  if (length === 8192) {
+    expect(text).toContain(value.facts[0]!.body)
+    expect(text).toContain('Next write — baseRevision: 2')
+    expect(meta).toMatchObject({ teamFacts: { messages: [{ messageRef: 'message:2' }] } })
+  } else {
+    expect(text).toContain('[Message body truncated; the full change is not shown here.]')
+    expect(text).not.toContain(value.facts[0]!.body)
+    expect(text).not.toContain('Next write — baseRevision:')
+    expect(meta).toMatchObject({ teamFacts: { messages: [] } })
+  }
 })
 
 describe('the claim mutation shares the same rejection shape', () => {

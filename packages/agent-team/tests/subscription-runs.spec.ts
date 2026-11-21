@@ -7,6 +7,7 @@
  * and reads the storage domain directly only to prove what was written or
  * dropped.
  */
+import './helpers/subscription-clock.ts'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -1410,7 +1411,7 @@ describe('replay', () => {
       subscriptionRef: subscription.subscriptionRef, expectedRevision: 1 })
     let settled = false
     void deleted.then(() => { settled = true }, () => { settled = true })
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await waitFor(() => [...operationsTable(booted).entries()].some(([, operation]) => operation.kind === 'team/subscription-deleted') ? true : undefined)
     // The tombstone is already on the medium; the cleanup waits for the segment
     // that owns it instead of deleting around a write it cannot see.
     expect(settled).toBe(false)
@@ -1446,7 +1447,7 @@ describe('replay', () => {
       subscriptionRef: subscription.subscriptionRef, expectedRevision: 1 })
     let settled = false
     void deleted.then(() => { settled = true }, () => { settled = true })
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await waitFor(() => [...operationsTable(booted).entries()].some(([, operation]) => operation.kind === 'team/subscription-deleted') ? true : undefined)
     expect(settled).toBe(false)
     release.resolve()
     await holding
@@ -1480,7 +1481,7 @@ describe('replay', () => {
       subscriptionRef: subscription.subscriptionRef, expectedRevision: 1 })
     let settled = false
     void deleted.then(() => { settled = true }, () => { settled = true })
-    await new Promise(resolve => setTimeout(resolve, 50))
+    await waitFor(() => [...operationsTable(booted).entries()].some(([, operation]) => operation.kind === 'team/subscription-deleted') ? true : undefined)
     // The cleanup waits for the segment that is writing this subscription's
     // private state, so the record cannot land behind it.
     expect(settled).toBe(false)

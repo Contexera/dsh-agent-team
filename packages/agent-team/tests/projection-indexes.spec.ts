@@ -37,6 +37,118 @@ function hostActor(): AgentTeamHostActor {
   return { kind: 'host', handle: 'agent-team' }
 }
 
+describe('view pagination boundaries', () => {
+  const directions: ('after' | 'before')[] = ['after', 'before']
+
+  async function seedView() {
+    const { ledger } = await openLedger()
+    await ledger.initialize()
+    const project = (await ledger.createProject({ requestId: requestId('view-project'), workspaceId: alpha,
+      name: 'view-pages', description: '', memberIds: [], actor: human })).value.project
+    const first = (await ledger.startThread({ kind: 'task', requestId: requestId('view-first'), workspaceId: alpha,
+      projectRef: project.projectRef, body: 'first', actor: human })).value
+    if (first.kind !== 'committed') throw new Error('expected first Thread')
+    const reply = (await ledger.reply({ requestId: requestId('view-reply'), workspaceId: alpha,
+      threadRef: first.thread.threadRef, body: 'reply', baseRevision: first.thread.revision, actor: human })).value
+    if (reply.kind !== 'committed') throw new Error('expected first reply')
+    const middle = (await ledger.startThread({ kind: 'discussion', requestId: requestId('view-middle'), workspaceId: alpha,
+      projectRef: project.projectRef, body: 'middle', actor: human })).value
+    if (middle.kind !== 'committed') throw new Error('expected middle Thread')
+    const last = (await ledger.startThread({ kind: 'task', requestId: requestId('view-last'), workspaceId: alpha,
+      projectRef: project.projectRef, body: 'last', actor: human })).value
+    if (last.kind !== 'committed') throw new Error('expected last Thread')
+    const tail = (await ledger.reply({ requestId: requestId('view-tail'), workspaceId: alpha,
+      threadRef: last.thread.threadRef, body: 'tail', baseRevision: last.thread.revision, actor: human })).value
+    if (tail.kind !== 'committed') throw new Error('expected last reply')
+    return { ledger, first, reply, middle, last, tail }
+  }
+
+  it.each([0, -1, 1.5, 101, NaN])('rejects limit %s before resolving access', async limit => {
+    const { ledger } = await openLedger()
+    expect(() => ledger.view({ workspaceId: alpha, limit, cursor: -1 }))
+      .toThrow('limit must be an integer between 1 and 100')
+  })
+
+  it.each([-1, 1.5, NaN])('rejects cursor %s before resolving access', async cursor => {
+    const { ledger } = await openLedger()
+    expect(() => ledger.view({ workspaceId: alpha, cursor }))
+      .toThrow('cursor must be a non-negative integer sequence')
+  })
+
+  it('accepts zero and unrecorded cursors and preserves the cursor on empty pages', async () => {
+    const { ledger } = await openLedger()
+    await ledger.initialize()
+    for (const direction of directions) {
+      for (const cursor of [0, 101]) {
+        const page = ledger.view({ workspaceId: alpha, cursor, direction })
+        expect(page).toMatchObject({ items: [], activities: [], tasks: [], threads: [], cursor, hasMore: false })
+        expect(Object.isFrozen(page)).toBe(true)
+        expect(Object.isFrozen(page.items)).toBe(true)
+      }
+    }
+    expect(ledger.view({ workspaceId: alpha, direction: 'before' }).cursor).toBe(0)
+  })
+
+  it.each(directions)('excludes all facts at a repeated-sequence cursor going %s', async direction => {
+    const { ledger, first, reply, middle, last, tail } = await seedView()
+    const cursor = last.message.sequence
+    const all = ledger.view({ workspaceId: alpha, limit: 100 })
+    expect(all.activities.map(activity => activity.sequence)).toEqual([first.message.sequence, last.message.sequence])
+    const page = ledger.view({ workspaceId: alpha, cursor, direction, limit: 100 })
+    expect(page.items.map(item => item.message.messageRef)).toEqual(direction === 'after'
+      ? [tail.message.messageRef] : [first.message.messageRef, reply.message.messageRef, middle.message.messageRef])
+    expect(page.activities.map(activity => activity.sequence)).toEqual(direction === 'after' ? [] : [first.message.sequence])
+    expect(page.cursor).toBe(direction === 'after' ? tail.message.sequence : first.message.sequence)
+    expect(page.hasMore).toBe(false)
+  })
+
+  it('includes the overflow sequence even when distinct, and can report hasMore before an empty page', async () => {
+    const { ledger, first, reply, middle, last, tail } = await seedView()
+    const firstPage = ledger.view({ workspaceId: alpha, limit: 1 })
+    expect(firstPage.items.map(item => item.message.messageRef)).toEqual([first.message.messageRef])
+    expect(firstPage.activities.map(activity => activity.sequence)).toEqual([first.message.sequence])
+    expect(firstPage).toMatchObject({ cursor: first.message.sequence, hasMore: true })
+    const overflow = ledger.view({ workspaceId: alpha, cursor: firstPage.cursor, limit: 1 })
+    expect(overflow.items.map(item => item.message.messageRef)).toEqual([reply.message.messageRef, middle.message.messageRef])
+    expect(overflow).toMatchObject({ cursor: middle.message.sequence, hasMore: true })
+    const backwards = ledger.view({ workspaceId: alpha, direction: 'before', limit: 1 })
+    expect(backwards.items.map(item => item.message.messageRef)).toEqual([last.message.messageRef, tail.message.messageRef])
+    expect(backwards.activities.map(activity => activity.sequence)).toEqual([last.message.sequence])
+    expect(backwards).toMatchObject({ cursor: last.message.sequence, hasMore: true })
+    const terminal = ledger.view({ workspaceId: alpha, cursor: first.message.sequence, topLevelOnly: true, limit: 1 })
+    expect(terminal.items.map(item => item.message.messageRef)).toEqual([middle.message.messageRef, last.message.messageRef])
+    expect(terminal).toMatchObject({ cursor: last.message.sequence, hasMore: true })
+    expect(ledger.view({ workspaceId: alpha, cursor: terminal.cursor, topLevelOnly: true, limit: 1 }))
+      .toMatchObject({ items: [], activities: [], cursor: terminal.cursor, hasMore: false })
+  })
+
+  it.each(directions)('filters top-level and activity facts across pages going %s', async direction => {
+    const { ledger, first, reply, middle, last, tail } = await seedView()
+    for (const filters of [{ topLevelOnly: true }, { includeActivities: false }]) {
+      const refs = []
+      let cursor: number | undefined
+      let hasMore = true
+      let pages = 0
+      while (hasMore && pages < 10) {
+        const page = ledger.view({ workspaceId: alpha, direction, ...(cursor === undefined ? {} : { cursor }),
+          limit: 1, ...filters })
+        const messages = page.items.map(item => item.message.messageRef)
+        if (direction === 'after') refs.push(...messages)
+        else refs.unshift(...messages)
+        expect(page.activities).toEqual([])
+        expect(page.items.every(item => !filters.topLevelOnly || item.message.topLevel)).toBe(true)
+        cursor = page.cursor
+        hasMore = page.hasMore
+        pages += 1
+      }
+      expect(hasMore).toBe(false)
+      expect(pages).toBeGreaterThan(1)
+      expect(refs).toEqual((filters.topLevelOnly ? [first, middle, last] : [first, reply, middle, last, tail])
+        .map(result => result.message.messageRef))
+    }
+  })
+})
+
 describe('large-ledger projection equivalence (issue #21)', () => {
   it('keeps inbox, view, taskNumbers and observations identical on a 100+ fact ledger and across replay', async () => {
     const { ledger, table } = await openLedger()

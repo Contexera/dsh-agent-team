@@ -4,27 +4,27 @@
 
 ## 用途
 
-本目录把 `scripts/e2e/*.e2e.ts` 的每条 lane 映射到真实 Web/Harness 契约、低层 Vitest 覆盖、触发条件与截图证据。行为权威仍是源码与测试；本页只负责路由测试选择与验收检查。
-
-开发期可用定向运行（`npm run test:browser -- <lane>`）快速验证局部表面，但会跳过全套 `[1440, 390]` 双宽度完整性门禁。默认无过滤运行包含短版 `team-journey` 冒烟；改动涉及完整跨表面旅程或大范围视觉断言时，再加 `--deep`。
+本目录说明组装后的 Web 场景能验证什么、可以先跑哪些底层测试，以及去哪里查看浏览器证据。完整的检查路径见[检查梯度](start-and-checks.zh.md#检查梯度)。
 
 ## 按风险选择测试
 
-| 改动接缝 | 首选检查 | 交付前必跑 |
-| --- | --- | --- |
-| Host、ledger、Remote、权限、订阅、Worker 状态 | `npx vitest run --project unit` 或对应 integration spec | `npm test` 与 `npm run typecheck` |
-| Client 状态机、DOM 交互、错误文案 | 对应 `packages/client-agent-team/tests/*.client.spec.tsx` | `npm test` 与 `npm run typecheck` |
-| slot、preset、bundle manifest、普通 DSH 恢复、几何、多页面 | 定向 `npm run test:browser -- <lane>` | 无过滤 `npm run test:browser` 与 `node scripts/audit-ui-parity.mjs` |
-| 跨表面流程、`scripts/run-browser-test.mjs`、`scripts/e2e/support.ts` | 无过滤 `npm run test:browser` | `npm test`、`npm run typecheck`、`npm run lint`、`npm run test:browser` |
-| 完整 Team 旅程、大范围 Shell/视觉回归、发布 | `npm run test:browser -- --deep` | `npm test`、`npm run typecheck`、`npm run lint`、`npm run test:browser -- --deep` |
+改动 slot、preset、布局或跨页行为时，先选对应的 lane。改动共用场景配置或 runner 时，直接跑全量。全量默认用简短的 `team-journey` 冒烟场景；要验收完整 Team 流程或准备发布，就加 `--deep`。
+
+```sh
+node scripts/run-browser-test.mjs --list
+npm run test:browser -- team-timeline-and-shell -t "four same-origin"
+npm run test:browser -- --deep
+```
+
+只想列出 lane 时，直接运行 Node 脚本，不必先构建。lane 参数匹配文件名，`-t` 再按测试名称过滤。定向执行仍会构建并检查已有截图，但不要求全套满足 `1440` 和 `390` 两个宽度。所跑的 lane、耗时和失败阶段见 `artifacts/browser/summary.json`。
 
 ## 全量运行调度
 
 无过滤 Runner 会先串行运行 `team-journey` 与 `team-manager`。这两条 lane 启动的完整 Harness 成本最高，与其他场景同时运行时曾出现 hook 超时。深度模式会用 `team-journey-deep` 替换 `team-journey`。
 
-其余 lane 随后使用最多两个 Worker 运行。定向运行或传入自定义 Vitest 参数时保留调用方参数，不会自动改成分组调度。
+其余 lane 随后运行，默认最多使用两个测试进程。定向运行或传入自定义 Vitest 参数时保留调用方参数，不会自动改成分组调度。
 
-资源受限时可设置 `DSH_E2E_SCHEDULING=serial` 强制全量串行；设置 `DSH_E2E_MAX_WORKERS` 可调整轻量批次的 Worker 数量。
+资源受限时可设置 `DSH_E2E_SCHEDULING=serial` 强制全量串行；设置 `DSH_E2E_MAX_WORKERS` 可调整轻量批次的测试进程数。
 
 ## Lane 目录
 
@@ -46,7 +46,7 @@
 - **触发条件：** Team Shell 大范围重设计、跨表面导航改动、深度视觉回归审查或发布验收。
 - **必需证据：** `artifacts/browser/ui-01/` 至 `ui-06/`（`1440` 与 `390` 视口）、零 console 警告/页面错误、普通 DSH 恢复干净。
 - **不负责证明：** 替代 Inbox、Manager、Worker、Settings、Subscription 或 Main/Board lane 的专门契约。
-- **规模与成本：** 1 个深度测试（当前单 lane 基线约 48s）。
+- **规模与成本：** 1 个深度测试。
 
 ### `team-inbox-and-recovery`
 
@@ -54,14 +54,14 @@
 - **真实 Web/Harness 契约：** Human Inbox 投递、离线重试/恢复、连续消息、过期附件与损坏图片区分及键盘导航。
 - **低层测试：** `packages/agent-team/tests/dm-delivery-lane.spec.ts`、`attachments.spec.ts` 及 Client Inbox spec。
 - **触发条件：** Inbox UI、附件渲染/降级、离线重试或 Inbox 键盘导航改动。
-- **必需证据：** `artifacts/browser/ui-07/`（`1440` 与 `390` 视口）、键盘焦点/导航校验。
+- **必需证据：** `artifacts/browser/ui-07/` 和 `ui-08/` 下的离线状态；键盘焦点与导航校验。
 - **不负责证明：** Host ledger 重放不变量或非 Inbox 表面。
-- **规模与成本：** 2 个测试（单 lane 历史记录约 12.42s）。
+- **规模与成本：** 2 个测试。
 
 ### `team-main-stream-and-board`
 
 - **文件与命令：** `scripts/e2e/team-main-stream-and-board.e2e.ts` — `npm run test:browser -- team-main-stream-and-board`
-- **真实 Web/Harness 契约：** Main stream 发消息、rules v2 下开讨论与 Task、Project owner 弹窗、Task 看板卡片焦点（键盘/鼠标）及无 Task thread 的 ref-chip 跳转。
+- **真实 Web/Harness 契约：** Main stream 发消息、创建讨论和 Task、Project owner 弹窗、Task 看板卡片焦点（键盘/鼠标）及无 Task thread 的 ref-chip 跳转。
 - **低层测试：** `packages/agent-team/tests/main-read-context.spec.ts`、`body-authored-mentions.spec.ts` 及 Client Main/Board spec。
 - **触发条件：** Main stream、Task board、ref-chip 跳转或 Project owner 弹窗 UI 改动。
 - **必需证据：** `artifacts/browser/main-stream/`、`ui-04/`、`ui-02/`（`1440` 与 `390` 视口）、焦点断言。
@@ -104,7 +104,7 @@
 - **真实 Web/Harness 契约：** Thread/Main 在加载历史与新消息到达时的滚动锚定、4 个同源 Team 页面并发订阅，以及全局快捷键（`Meta+Alt+T` 与三界面切换）。
 - **低层测试：** `packages/client-agent-team/tests/` 时间线滚动与快捷键 spec，以及 `packages/agent-team/tests/harness-lifecycle.spec.ts`（Host 卸载/重装持久化）。
 - **触发条件：** 时间线滚动锚定、多页面 Remote 同步或全局 shell 快捷键改动。
-- **必需证据：** `artifacts/browser/timeline-anchor/`、`ui-09/`（`1440` 与 `390` 视口）、滚动偏移稳定性探针。
+- **必需证据：** `artifacts/browser/timeline-anchor/`、`ui-09/` 和 `multi-web-{desktop,mobile}.png`；检查滚动偏移是否稳定。
 - **不负责证明：** 单页面 Inbox 或 Manager 流程，或 Host 插件卸载/重装持久化。
 - **规模与成本：** 3 个测试。
 
@@ -124,7 +124,7 @@
 - **真实 Web/Harness 契约：** 在 Team settings 配置 Worker 委派组，并在独立 Thread 中观察委派的 Worker 运行。
 - **低层测试：** `packages/client-agent-team/tests/team-worker-settings.client.spec.tsx` 与 Host Worker 委派 spec。
 - **触发条件：** Worker 委派设置 UI、`team_worker` thread 投影或 Worker 失败终态渲染改动。
-- **必需证据：** `artifacts/browser/worker-thread/`（`1440` 与 `390` 视口）。
+- **必需证据：** `artifacts/browser/worker-thread/`，以及 `ui-09/` 中的 Worker 设置截图。
 - **不负责证明：** Worker 诊断行上限或单停隔离（由 `team-worker-lifecycle` 覆盖）。
 - **规模与成本：** 2 个测试。
 
@@ -132,4 +132,4 @@
 
 | 选择词 | 目标 lane | 原因 |
 | --- | --- | --- |
-| `team-settings-nav-icon` | `team-settings-and-tools` | lane 合并后保留原选择词兼容性（`scripts/run-browser-test.mjs`） |
+| `team-settings-nav-icon` | `team-settings-and-tools` | lane 合并后保留原选择词兼容性（`scripts/browser-runner.mjs`） |

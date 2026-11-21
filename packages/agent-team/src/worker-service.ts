@@ -50,6 +50,7 @@ import {
   WorkerFailure,
   workerAnchorsOf,
   type WorkerRunSpec,
+  type WorkerSessionSink,
   type WorkerSteer,
 } from './worker-runtime.ts'
 import { readWorkerHistory } from './worker-inspection.ts'
@@ -250,6 +251,24 @@ interface DelegationShape {
   readonly cwd: string
 }
 
+interface InstructionRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly instruction: string
+}
+
+/** What `WorkerRegistry.open` needs once a start or continuation has been admitted. */
+interface OpeningAdmission {
+  readonly workerRef: AgentTeamWorkerRef
+  readonly engine: WorkerEngine
+  readonly cwd: string
+  readonly provider: TeamWorkerProvider
+  readonly subagents: SubagentRuntime
+  readonly delegation: DelegationShape
+  readonly continuedFrom?: AgentTeamWorkerRef | undefined
+  /** Re-runs the continuation's current admission after each asynchronous boundary while opening. */
+  readonly assertAdmitted?: (() => void) | undefined
+}
+
 const delegationOf = (caller: WorkerCaller, request: WorkerStartRequest,
   resolved: { readonly engine: WorkerEngine; readonly cwd: string }): DelegationShape => Object.freeze({
   initiator: caller.actor.memberId, workspaceId: request.workspaceId, projectRef: request.projectRef,
@@ -338,6 +357,10 @@ export class WorkerRegistry {
    * is left. Nothing outside this registry can reach an engine session.
    */
   private readonly sessions = new Map<SessionId, WorkerSteer | undefined>()
+  private readonly sessionSink: WorkerSessionSink = {
+    opened: (sessionId, steer) => { this.sessions.set(sessionId, steer) },
+    closed: (sessionId) => { this.sessions.delete(sessionId) },
+  }
   /** Durable writes still in flight, so unloading the Host waits for them. */
   private readonly writes = new Set<Promise<void>>()
   /**
@@ -447,20 +470,41 @@ export class WorkerRegistry {
   }
 
   /** Open one admitted run: the durable binding first, the engine process second. */
-  private async open(caller: WorkerCaller, request: WorkerStartRequest, admitted: {
-    readonly workerRef: AgentTeamWorkerRef
-    readonly engine: WorkerEngine
-    readonly cwd: string
-    readonly provider: TeamWorkerProvider
-    readonly subagents: SubagentRuntime
-    readonly delegation: DelegationShape
-    readonly continuedFrom?: AgentTeamWorkerRef | undefined
-    /** Re-runs the continuation's current admission after each asynchronous boundary while opening. */
-    readonly assertAdmitted?: (() => void) | undefined
-  }): Promise<AgentTeamWorkerRun> {
-    const { workerRef, engine, cwd, provider, subagents } = admitted
-    // Written before the process opens: a Host that dies here leaves a run the
-    // Thread reports as unconfirmed, not one nobody can see.
+  private async open(caller: WorkerCaller, request: WorkerStartRequest,
+    admitted: OpeningAdmission): Promise<AgentTeamWorkerRun> {
+    const entry = await this.bindOpening(caller, request, admitted)
+    let admissionFailureStage: AgentTeamWorkerStage | undefined
+    // A continuation's grant can lapse at any await while opening; that refusal
+    // ends the run at the startup stage rather than as an engine failure.
+    const assertStillAdmitted = (): void => {
+      try {
+        admitted.assertAdmitted?.()
+      } catch (error: unknown) {
+        admissionFailureStage = 'startup'
+        throw error
+      }
+    }
+    try {
+      assertStillAdmitted()
+      return await this.activate(caller, request, admitted, entry, assertStillAdmitted)
+    } catch (error: unknown) {
+      const stage = error instanceof WorkerFailure ? undefined : admissionFailureStage
+      await this.finishFromStartFailure(entry, error, stage)
+      // A start cancelled by its own stop answers with the run it recorded
+      // instead of an error: the caller asked for this ending and needs the ref.
+      if (entry.stopping && entry.run.state !== 'running') return entry.run
+      throw error
+    }
+  }
+
+  /**
+   * Write the opening record and hold the run live. Written before the process
+   * opens: a Host that dies here leaves a run the Thread reports as unconfirmed,
+   * not one nobody can see.
+   */
+  private async bindOpening(caller: WorkerCaller, request: WorkerStartRequest,
+    admitted: OpeningAdmission): Promise<RunEntry> {
+    const { workerRef, engine, cwd } = admitted
     const started = await this.deps.recordStarted({
       requestId: request.requestId, actor: caller.actor, workspaceId: request.workspaceId,
       execution: Object.freeze({ workerRef, projectRef: request.projectRef,
@@ -492,60 +536,53 @@ export class WorkerRegistry {
       this.seal(entry)
       throw new WorkerRefusal('worker_unavailable', 'The Team released this Worker before it opened its engine.')
     }
-    let admissionFailureStage: AgentTeamWorkerStage | undefined
-    try {
-      try {
-        admitted.assertAdmitted?.()
-      } catch (error: unknown) {
-        admissionFailureStage = 'startup'
-        throw error
-      }
-      const activation = await subagents.startActivation({
-        provider: provider.name,
-        label: `${engine} worker`,
-        parent: caller.parent, prompt: [{ type: 'text', text: request.task }], cwd,
-        // A stop asked for during startup cancels through this signal; once the
-        // activation is published, its own disposal is the channel.
-        signal: entry.startup.signal,
-        // A bound run's result belongs to its Thread and its initiator's Inbox,
-        // so the parent Session must not also receive a full copy of it.
-        delivery: entry.run.threadRef === undefined ? 'parent' : 'caller',
-      })
-      if (entry.sealed) {
-        // The Host released this run before its engine opened: clean the late
-        // handle up and never let it publish a start the Host no longer holds.
-        const disposal = entry.stopDisposal ??= activation.dispose()
-        void disposal.catch(() => {})
-        throw new WorkerRefusal('worker_unavailable', 'The Team released this Worker while it was still starting.')
-      }
-      entry.activation = activation
-      try {
-        admitted.assertAdmitted?.()
-      } catch (error: unknown) {
-        admissionFailureStage = 'startup'
-        await this.discardActivationBeforeStart(entry, activation, error)
-      }
-      // Live controls belong to this external activation. The native conversation
-      // identity is separate evidence carried by its result, including on resume.
-      entry.sessionId = activation.childId
-      if (entry.stopping) {
-        const disposal = entry.stopDisposal ??= activation.dispose()
-        void disposal.catch(() => {})
-      }
-      void activation.result.then(
-        (result) => this.finish(entry, result),
-        (error: unknown) => this.finish(entry, { output: [], stopReason: 'error',
-          diagnostic: error instanceof WorkerFailure ? error.message : 'The Worker ended with an unreported failure.' }),
-      )
-      return this.require(workerRef)
-    } catch (error: unknown) {
-      const stage = error instanceof WorkerFailure ? undefined : admissionFailureStage
-      await this.finishFromStartFailure(entry, error, stage)
-      // A start cancelled by its own stop answers with the run it recorded
-      // instead of an error: the caller asked for this ending and needs the ref.
-      if (entry.stopping && entry.run.state !== 'running') return entry.run
-      throw error
+    return entry
+  }
+
+  /**
+   * Start the engine for a bound run and publish it. Nothing awaits between the
+   * engine answering and the run publishing it, so a stop or unload sees either
+   * no activation or a fully published one.
+   */
+  private async activate(caller: WorkerCaller, request: WorkerStartRequest, admitted: OpeningAdmission,
+    entry: RunEntry, assertStillAdmitted: () => void): Promise<AgentTeamWorkerRun> {
+    const activation = await admitted.subagents.startActivation({
+      provider: admitted.provider.name,
+      label: `${admitted.engine} worker`,
+      parent: caller.parent, prompt: [{ type: 'text', text: request.task }], cwd: admitted.cwd,
+      // A stop asked for during startup cancels through this signal; once the
+      // activation is published, its own disposal is the channel.
+      signal: entry.startup.signal,
+      // A bound run's result belongs to its Thread and its initiator's Inbox,
+      // so the parent Session must not also receive a full copy of it.
+      delivery: entry.run.threadRef === undefined ? 'parent' : 'caller',
+    })
+    if (entry.sealed) {
+      // The Host released this run before its engine opened: clean the late
+      // handle up and never let it publish a start the Host no longer holds.
+      const disposal = entry.stopDisposal ??= activation.dispose()
+      void disposal.catch(() => {})
+      throw new WorkerRefusal('worker_unavailable', 'The Team released this Worker while it was still starting.')
     }
+    entry.activation = activation
+    try {
+      assertStillAdmitted()
+    } catch (error: unknown) {
+      await this.discardActivationBeforeStart(entry, activation, error)
+    }
+    // Live controls belong to this external activation. The native conversation
+    // identity is separate evidence carried by its result, including on resume.
+    entry.sessionId = activation.childId
+    if (entry.stopping) {
+      const disposal = entry.stopDisposal ??= activation.dispose()
+      void disposal.catch(() => {})
+    }
+    void activation.result.then(
+      (result) => this.finish(entry, result),
+      (error: unknown) => this.finish(entry, { output: [], stopReason: 'error',
+        diagnostic: error instanceof WorkerFailure ? error.message : 'The Worker ended with an unreported failure.' }),
+    )
+    return this.require(admitted.workerRef)
   }
 
   /**
@@ -593,7 +630,7 @@ export class WorkerRegistry {
    * resent request id answers with the receipt the first call produced.
    */
   async steer(workerRef: AgentTeamWorkerRef, steerer: AgentTeamActor,
-    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string }): Promise<AgentTeamWorkerSteerResult> {
+    request: InstructionRequest): Promise<AgentTeamWorkerSteerResult> {
     const instruction = request.instruction.trim()
     if (instruction === '') throw new WorkerRefusal('worker_steer_required', 'A steer needs the instruction the Worker should take on.')
     // The idempotency answer comes before the state checks: a resend answers with
@@ -618,7 +655,7 @@ export class WorkerRegistry {
   }
 
   private async steerNew(entry: RunEntry, steerer: AgentTeamActor,
-    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
+    request: InstructionRequest,
     instruction: string): Promise<AgentTeamWorkerSteerResult> {
     const workerRef = entry.run.workerRef
     const opening = entry.sessionId === undefined ? this.continuationOpenings.get(workerRef) : undefined
@@ -670,7 +707,7 @@ export class WorkerRegistry {
    * an instruction in a later linked execution.
    */
   async steerReceipt(workerRefs: readonly AgentTeamWorkerRef[], steerer: AgentTeamActor,
-    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string }): Promise<AgentTeamWorkerSteerResult | undefined> {
+    request: InstructionRequest): Promise<AgentTeamWorkerSteerResult | undefined> {
     const instruction = request.instruction.trim()
     const pending = this.steeringByRequest.get(request.requestId)
     if (pending !== undefined) {
@@ -709,7 +746,7 @@ export class WorkerRegistry {
    * the ledger and never reads native history or reaches an engine.
    */
   async steerTextAlias(steerer: AgentTeamActor,
-    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
+    request: InstructionRequest,
     query: { readonly workerRef?: AgentTeamWorkerRef | undefined; readonly initiatedBy: AgentTeamMemberId
       readonly continuedFrom?: AgentTeamWorkerRef | undefined; readonly allowSubmitted: boolean
     }): Promise<AgentTeamWorkerSteerResult | undefined> {
@@ -739,7 +776,7 @@ export class WorkerRegistry {
    * make a fresh canonical admission under its own id.
    */
   private async joinPendingText(steerer: AgentTeamActor,
-    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
+    request: InstructionRequest,
     canonicalRequestId: AgentTeamRequestId, outcome: Promise<AgentTeamWorkerSteerResult>): Promise<AgentTeamWorkerSteerResult | undefined> {
     try {
       await outcome
@@ -756,7 +793,7 @@ export class WorkerRegistry {
 
   /** Reserve a same-text request id as a durable alias; this path never reaches the engine. */
   private async aliasDurable(workspaceId: WorkspaceId, steerer: AgentTeamActor,
-    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
+    request: InstructionRequest,
     canonical: AgentTeamWorkerSteerAdmission): Promise<AgentTeamWorkerSteerResult> {
     let alias: AgentTeamWorkerSteerAdmission
     try {
@@ -791,7 +828,7 @@ export class WorkerRegistry {
    * it rechecks every current permission instead of inheriting the old grant.
    */
   async continueFrom(caller: WorkerCaller, source: AgentTeamWorkerExecution,
-    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string }): Promise<AgentTeamWorkerSteerResult> {
+    request: InstructionRequest): Promise<AgentTeamWorkerSteerResult> {
     this.assertContinuationAllowed(caller, source)
     const resumeAnchors = this.deps.workerResumeAnchors(source.workerRef)
     if (resumeAnchors.length === 0) {
@@ -855,39 +892,12 @@ export class WorkerRegistry {
   }
 
   private async continueFromAdmitted(caller: WorkerCaller, source: AgentTeamWorkerExecution,
-    request: { readonly requestId: AgentTeamRequestId; readonly instruction: string },
-    workerRef: AgentTeamWorkerRef, resumeAnchors: readonly WorkerResumeAnchor[]): Promise<AgentTeamWorkerSteerResult> {
-    let resumeAnchor: WorkerResumeAnchor | undefined
-    let historyKind: string | undefined
-    for (const anchor of resumeAnchors) {
-      const history = await readWorkerHistory({ engine: source.engine, ...anchor })
-      historyKind = history.kind
-      if (history.kind === 'read') {
-        resumeAnchor = anchor
-        break
-      }
-    }
-    if (resumeAnchor === undefined) {
-      throw new WorkerRefusal('worker_continuation_unavailable', `Worker '${source.workerRef}' has no readable native record with `
-        + `the expected session and turn (${historyKind ?? 'unpersisted'}).`)
-    }
-    const nativeSessionId = resumeAnchor.nativeSessionId
+    request: InstructionRequest, workerRef: AgentTeamWorkerRef,
+    resumeAnchors: readonly WorkerResumeAnchor[]): Promise<AgentTeamWorkerSteerResult> {
+    const { nativeSessionId } = await this.readableResumeAnchor(source, resumeAnchors)
     this.assertContinuationAllowed(caller, source)
-    const existingRequest = this.deps.workerStartedByRequest(request.requestId)
-    if (existingRequest !== undefined) {
-      if (existingRequest.continuedFrom !== source.workerRef || existingRequest.task !== request.instruction
-        || existingRequest.initiatedBy !== caller.actor.memberId) {
-        throw new WorkerRefusal('worker_steer_conflict', `Request id '${request.requestId}' already started another execution; `
-          + 'use a new request id for this instruction.')
-      }
-      const live = this.runs.get(existingRequest.workerRef)
-      if (live === undefined && existingRequest.state === 'running') {
-        throw new WorkerRefusal('worker_unconfirmed', `Worker '${existingRequest.workerRef}' was started by a Host that no longer `
-          + 'holds its handle, so it cannot be steered.')
-      }
-      return Object.freeze({ workerRef: existingRequest.workerRef, engine: existingRequest.engine, state: 'started' as const,
-        continuedFrom: source.workerRef, runState: live === undefined ? existingRequest.state : this.liveState(existingRequest.workerRef) ?? existingRequest.state })
-    }
+    const replayed = this.replayedContinuation(caller, source, request)
+    if (replayed !== undefined) return replayed
 
     const workspaceId = this.deps.projectWorkspace(source.projectRef)
     if (workspaceId === undefined) {
@@ -895,34 +905,18 @@ export class WorkerRegistry {
     }
     const subagents = this.subagents()
     if (subagents === undefined) throw new WorkerRefusal('worker_unavailable', 'The Harness subagent service is not mounted, so no Worker can continue.')
-    // No await may separate this final admission from registering the provider
-    // and publishing the opening promise, so unload sees one or the other.
     this.assertContinuationAllowed(caller, source)
-    let admission: AgentTeamWorkerSteerAdmission
-    try {
-      admission = await this.admitSteer({
-        requestId: request.requestId, actor: caller.actor, workspaceId, workerRef, instruction: request.instruction,
-        initiatedBy: caller.actor.memberId, continuedFrom: source.workerRef,
-      })
-    } catch (error) {
-      if (error instanceof WorkerRefusal) throw error
-      throw this.admissionFailure(request.requestId, request.instruction, workerRef, caller.actor.memberId,
-        `Request id '${request.requestId}' could not be admitted durably, so the native session was not resumed.`)
-    }
+    const admission = await this.admitContinuation(caller, source, request, workspaceId, workerRef)
     if (this.stopped) {
       await this.recordSteerRefusal(admission.requestId, 'worker_unavailable',
         'The Team began unloading before the native session could be resumed; nothing was delivered.')
     }
-    let provider: TeamWorkerProvider
-    let providerRelease: () => void
+    let resume: { readonly provider: TeamWorkerProvider; readonly release: () => void }
     try {
+      // No await may separate this final admission from registering the provider
+      // and calling `open`, so unload sees either a refusal or an opening.
       this.assertContinuationAllowed(caller, source)
-      const providerName = `${WORKER_PROVIDER_NAMES[source.engine]}:resume:${randomUUID()}`
-      provider = new TeamWorkerProvider(providerName,
-        () => ({ ...workerRunSpec(source.engine, this.deps.config(), this.deps.warn), resume: nativeSessionId }),
-        { opened: (sessionId, steer) => { this.sessions.set(sessionId, steer) },
-          closed: (sessionId) => { this.sessions.delete(sessionId) } })
-      providerRelease = subagents.registerProvider(provider)
+      resume = this.registerResumeProvider(source.engine, nativeSessionId, subagents)
     } catch (error) {
       const code = error instanceof WorkerRefusal ? error.code : 'worker_unavailable'
       const message = error instanceof Error
@@ -934,34 +928,100 @@ export class WorkerRegistry {
       projectRef: source.projectRef, ...(source.threadRef === undefined ? {} : { threadRef: source.threadRef }),
       ...(source.taskRef === undefined ? {} : { taskRef: source.taskRef }), engine: source.engine,
       task: request.instruction, cwd: source.cwd }
-    const delegation: DelegationShape = { initiator: caller.actor.memberId, workspaceId, projectRef: source.projectRef,
-      ...(source.threadRef === undefined ? {} : { threadRef: source.threadRef }),
-      ...(source.taskRef === undefined ? {} : { taskRef: source.taskRef }), engine: source.engine,
-      task: request.instruction, cwd: source.cwd }
     const opened = this.open(caller, startRequest, { workerRef, engine: source.engine, cwd: source.cwd,
-      provider, subagents, delegation, continuedFrom: source.workerRef,
+      provider: resume.provider, subagents,
+      delegation: delegationOf(caller, startRequest, { engine: source.engine, cwd: source.cwd }),
+      continuedFrom: source.workerRef,
       assertAdmitted: () => this.assertContinuationAllowed(caller, source),
-    }).finally(providerRelease)
-    const started = opened.then(async run => {
-        const result = Object.freeze({ workerRef: run.workerRef, engine: run.engine, state: 'started' as const,
-          continuedFrom: source.workerRef, runState: this.liveState(run.workerRef) ?? run.state })
-        await this.recordSteerOutcome(admission.requestId, { kind: 'submitted', result })
-        return result
-      }, async error => {
-        const message = error instanceof Error
-          ? truncateToCharacters(error.message, 2000)
-          : 'The resumed Worker did not confirm whether its opening instruction was delivered.'
-        await this.recordSteerOutcome(admission.requestId, { kind: 'ambiguous',
-          refusal: { code: 'worker_steer_unconfirmed', message } })
-        throw error
-      })
+    }).finally(resume.release)
+    const started = this.recordContinuationOutcome(admission.requestId, source, opened)
     this.continuationOpenings.set(workerRef, started)
     try {
-      const result = await started
-      return result
+      return await started
     } finally {
       if (this.continuationOpenings.get(workerRef) === started) this.continuationOpenings.delete(workerRef)
     }
+  }
+
+  /** The first anchor whose native record still reads back with the expected session and turn. */
+  private async readableResumeAnchor(source: AgentTeamWorkerExecution,
+    resumeAnchors: readonly WorkerResumeAnchor[]): Promise<WorkerResumeAnchor> {
+    let historyKind: string | undefined
+    for (const anchor of resumeAnchors) {
+      const history = await readWorkerHistory({ engine: source.engine, ...anchor })
+      if (history.kind === 'read') return anchor
+      historyKind = history.kind
+    }
+    throw new WorkerRefusal('worker_continuation_unavailable', `Worker '${source.workerRef}' has no readable native record with `
+      + `the expected session and turn (${historyKind ?? 'unpersisted'}).`)
+  }
+
+  /**
+   * The continuation a resent request id already started, answered from the
+   * ledger. The same id with another source, instruction or initiator is refused.
+   */
+  private replayedContinuation(caller: WorkerCaller, source: AgentTeamWorkerExecution,
+    request: InstructionRequest): AgentTeamWorkerSteerResult | undefined {
+    const existing = this.deps.workerStartedByRequest(request.requestId)
+    if (existing === undefined) return undefined
+    if (existing.continuedFrom !== source.workerRef || existing.task !== request.instruction
+      || existing.initiatedBy !== caller.actor.memberId) {
+      throw new WorkerRefusal('worker_steer_conflict', `Request id '${request.requestId}' already started another execution; `
+        + 'use a new request id for this instruction.')
+    }
+    const live = this.runs.get(existing.workerRef)
+    if (live === undefined && existing.state === 'running') {
+      throw new WorkerRefusal('worker_unconfirmed', `Worker '${existing.workerRef}' was started by a Host that no longer `
+        + 'holds its handle, so it cannot be steered.')
+    }
+    return Object.freeze({ workerRef: existing.workerRef, engine: existing.engine, state: 'started' as const,
+      continuedFrom: source.workerRef,
+      runState: live === undefined ? existing.state : this.liveState(existing.workerRef) ?? existing.state })
+  }
+
+  /** Durably admit the continuation's opening instruction before any native session resumes. */
+  private async admitContinuation(caller: WorkerCaller, source: AgentTeamWorkerExecution, request: InstructionRequest,
+    workspaceId: WorkspaceId, workerRef: AgentTeamWorkerRef): Promise<AgentTeamWorkerSteerAdmission> {
+    try {
+      return await this.admitSteer({
+        requestId: request.requestId, actor: caller.actor, workspaceId, workerRef, instruction: request.instruction,
+        initiatedBy: caller.actor.memberId, continuedFrom: source.workerRef,
+      })
+    } catch (error) {
+      if (error instanceof WorkerRefusal) throw error
+      throw this.admissionFailure(request.requestId, request.instruction, workerRef, caller.actor.memberId,
+        `Request id '${request.requestId}' could not be admitted durably, so the native session was not resumed.`)
+    }
+  }
+
+  /**
+   * A provider for this one resume. Its name is unique so concurrent
+   * continuations never share a registration, and each opening releases its own.
+   */
+  private registerResumeProvider(engine: WorkerEngine, nativeSessionId: string,
+    subagents: SubagentRuntime): { readonly provider: TeamWorkerProvider; readonly release: () => void } {
+    const provider = new TeamWorkerProvider(`${WORKER_PROVIDER_NAMES[engine]}:resume:${randomUUID()}`,
+      () => ({ ...workerRunSpec(engine, this.deps.config(), this.deps.warn), resume: nativeSessionId }),
+      this.sessionSink)
+    return { provider, release: subagents.registerProvider(provider) }
+  }
+
+  /** Store the steer outcome of a continuation's opening: submitted when it opened, ambiguous when it did not. */
+  private recordContinuationOutcome(admissionRequestId: AgentTeamRequestId, source: AgentTeamWorkerExecution,
+    opened: Promise<AgentTeamWorkerRun>): Promise<AgentTeamWorkerSteerResult> {
+    return opened.then(async run => {
+      const result = Object.freeze({ workerRef: run.workerRef, engine: run.engine, state: 'started' as const,
+        continuedFrom: source.workerRef, runState: this.liveState(run.workerRef) ?? run.state })
+      await this.recordSteerOutcome(admissionRequestId, { kind: 'submitted', result })
+      return result
+    }, async error => {
+      const message = error instanceof Error
+        ? truncateToCharacters(error.message, 2000)
+        : 'The resumed Worker did not confirm whether its opening instruction was delivered.'
+      await this.recordSteerOutcome(admissionRequestId, { kind: 'ambiguous',
+        refusal: { code: 'worker_steer_unconfirmed', message } })
+      throw error
+    })
   }
 
   /**
@@ -1367,10 +1427,7 @@ export class WorkerRegistry {
     // The row is read when a session opens, not when the provider registers: a
     // saved executable, engine switch, or policy must reach the next delegation.
     const provider = new TeamWorkerProvider(WORKER_PROVIDER_NAMES[engine],
-      () => workerRunSpec(engine, this.deps.config(), this.deps.warn), {
-        opened: (sessionId, steer) => { this.sessions.set(sessionId, steer) },
-        closed: (sessionId) => { this.sessions.delete(sessionId) },
-      })
+      () => workerRunSpec(engine, this.deps.config(), this.deps.warn), this.sessionSink)
     const release = subagents.registerProvider(provider)
     this.providers.set(engine, { release, provider })
     return provider

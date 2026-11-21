@@ -13,11 +13,7 @@ import { bodyMentionsHuman, formatAbsoluteTime, formatClockTime, formatMessageTi
 import { useAvatarImage } from './avatar-image.ts'
 import css from './conversation.module.css'
 
-/**
- * A Thread chip shares its line with prose, so the title it cites is bounded
- * tighter than a card's; the projection happens first, so the cut never lands
- * inside a marker pair.
- */
+/** Bound inline Thread titles more tightly than cards; strip Markdown before truncating. */
 const THREAD_CHIP_TITLE_MAX_CHARACTERS = 40
 
 export interface TeamMessageProps {
@@ -36,10 +32,7 @@ export interface TeamMessageProps {
   readonly readerName?: string
   /** Resolved quote context from the Host, never the body, so a quote cannot drift from the Message it points at. */
   readonly replyTo?: { readonly senderName: string; readonly excerpt: string; readonly messageRef: AgentTeamMessageRef } | undefined
-  /**
-   * Opens the Message as the composer's quote target; the ref travels as the argument so one identity-stable
-   * callback serves every row and the memo holds. Absent surfaces offer no quote action.
-   */
+  /** Pass the ref as an argument so every memoized row can share one stable quote callback. */
   readonly onReply?: ((messageRef: AgentTeamMessageRef) => void) | undefined
   /** Jumps to the Message this one quotes, which travels as the argument; absent keeps the quote inert. */
   readonly onOpenReplyTo?: ((messageRef: AgentTeamMessageRef) => void) | undefined
@@ -51,7 +44,7 @@ export interface TeamMessageProps {
   readonly showGroupedTime?: boolean
   /** Actions open on a surface without hover; the hosting page owns the flag so only one row holds it. */
   readonly cardOpen?: boolean
-  /** Opens or closes this row's actions; absent surfaces offer none. */
+  /** Touch-card toggle; absent leaves hover/focus visibility to CSS. */
   readonly onToggleCard?: ((messageRef: AgentTeamMessageRef) => void) | undefined
   /**
    * Whether the surface offers row actions (copy, the reader's mention notice). `inherit` offers them when a quote is
@@ -63,35 +56,34 @@ export interface TeamMessageProps {
   readonly avatarUrl?: string | undefined
   /** Cache readback for thumbnails; absent on surfaces without the remotes. */
   readonly loadAttachment?: TeamConversationProps['getAttachment'] | undefined
-  /** Native open/reveal of one cached attachment; absent keeps chips and inline-code mentions inert. */
+  /** Native open/reveal; image zoom remains available without it. */
   readonly openAttachment?: TeamConversationProps['openAttachment']
   /** Current OS handlers for the attachment menu; absent omits "Open with". */
   readonly loadAttachmentApplications?: TeamConversationProps['loadAttachmentApplications']
   readonly t?: TeamConversationProps['t'] | undefined
-  /** Resolve a branded ref found in the body; absent surfaces render refs as plain text. */
+  /** Navigate resolved body refs; also enables the rich-Markdown chip pass. */
   readonly onOpenRef?: ((ref: string) => void) | undefined
-  /** Host lookup turning task refs into human-facing numbers; absent keeps raw refs. */
+  /** Host lookup for Task numbers not already cached. */
   readonly onResolveTaskRefs?: ((taskRefs: readonly AgentTeamTaskRef[]) => Promise<readonly ResolvedTaskRef[]>) | undefined
-  /** Host lookup turning thread refs into titled chips; absent keeps raw refs. */
+  /** Host lookup for Thread titles not already cached. */
   readonly onResolveThreadRefs?: ((threadRefs: readonly AgentTeamThreadRef[]) => Promise<readonly ResolvedThreadRef[]>) | undefined
   /** Roster name for one authored project ref; absent or unknown keeps plain text. */
   readonly projectNameOf?: ((ref: AgentTeamProjectRef) => string | undefined) | undefined
   /** Roster facts for one authored member ref; absent or unknown keeps plain text. */
   readonly memberOf?: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined
-  /** Agent-card session jump for member chips; absent renders them as plain text. */
+  /** Agent-card session jump; absent keeps known Member chips labelled but inert. */
   readonly onOpenMemberSession?: ((sessionId: SessionId) => void) | undefined
   readonly children?: ReactNode
 }
 
 /**
- * One chat message row. Memoized: the Task-ref subscription lives inside this component, so a skipped render never
- * detaches it. Callers must keep per-render props (mention names, ref callbacks) identity-stable.
+ * Ref-cache subscriptions live in the memoized row so cache updates can render it independently.
+ * Callers must keep mention names and ref callbacks identity-stable.
  */
 export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, readerName, replyTo, onReply, onOpenReplyTo, rowActions, messageRef, replyTarget, replyFlash, showGroupedTime, cardOpen, onToggleCard, attachments, loadAttachment, openAttachment, loadAttachmentApplications, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, projectNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
   const avatarStyle = human ? undefined : { '--team-avatar-hue': memberHue(memberId) } as CSSProperties
   const identityImage = useAvatarImage(human ? avatarUrl : undefined)
   // The stored body carries machine-facing `[attachment] <path>` prompt lines; the attachment strip renders from message metadata instead.
-  // Literal bodies chip mentions inline; rich Markdown keeps unmatched structured mentions in the trailing row.
   const plan = planMessageBody(body, { human, ...(mentionNames === undefined ? {} : { mentionNames }), canOpenRefs: onOpenRef !== undefined })
   // The chip names what the body names, not what the Host delivered to: a Thread reaches its Human in every row.
   const mentionedInBody = bodyMentionsHuman(body, readerName)
@@ -99,40 +91,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   const quoteAuthor = replyTo === undefined ? undefined : replyTo.senderName.replace(/^@/, '')
   const fallbackNames = unshownMentionNames(plan.fallbackNames, readerName, quoteAuthor)
   const displayBody = plan.displayBody
-  const [attachmentMenu, setAttachmentMenu] = useState<{ readonly attachment: AgentTeamMessageAttachment; readonly x: number; readonly y: number }>()
-  const [attachmentStatus, setAttachmentStatus] = useState<string>()
-  const runAttachmentAction = useCallback(async (attachment: AgentTeamMessageAttachment, action: 'open' | 'reveal', application?: string): Promise<void> => {
-    if (openAttachment === undefined) return
-    setAttachmentStatus(t?.('openingFile', { name: attachment.name }) ?? `Opening ${attachment.name}`)
-    try {
-      const result = await openAttachment({
-        attachmentId: attachment.attachmentId,
-        action,
-        ...(application === undefined ? {} : { application }),
-      })
-      if (!result.ok) {
-        setAttachmentStatus(t?.('openFileFailed', { name: attachment.name }) ?? 'Could not open the file')
-      } else if (!result.value.opened) {
-        setAttachmentStatus(t?.('openFileUnavailable', { name: attachment.name }) ?? 'The Host has no desktop file opener')
-      } else {
-        setAttachmentStatus(undefined)
-      }
-    } catch {
-      setAttachmentStatus(t?.('openFileFailed', { name: attachment.name }) ?? 'Could not open the file')
-    }
-  }, [openAttachment, t])
-  const openAttachmentNow = useCallback((attachment: AgentTeamMessageAttachment): void => {
-    void runAttachmentAction(attachment, 'open')
-  }, [runAttachmentAction])
-  const revealAttachment = useCallback((attachment: AgentTeamMessageAttachment): void => {
-    void runAttachmentAction(attachment, 'reveal')
-  }, [runAttachmentAction])
-  const openAttachmentWith = useCallback((attachment: AgentTeamMessageAttachment, application: string): void => {
-    void runAttachmentAction(attachment, 'open', application)
-  }, [runAttachmentAction])
-  const openAttachmentMenu = useCallback((attachment: AgentTeamMessageAttachment, x: number, y: number): void => {
-    setAttachmentMenu({ attachment, x, y })
-  }, [])
+  const { attachmentMenu, setAttachmentMenu, attachmentStatus, openAttachmentNow, revealAttachment, openAttachmentWith, openAttachmentMenu } = useAttachmentActions(openAttachment, t)
   const fileMentions = useMemo<MarkdownFileMentions | undefined>(() => {
     if (attachments === undefined || attachments.length === 0 || openAttachment === undefined) return undefined
     return {
@@ -178,12 +137,11 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
     const timer = setTimeout(() => { setCopyState('idle') }, 1200)
     return () => { clearTimeout(timer) }
   }, [copyState])
-  // Copy the stored Markdown, not the rendered text. A refused write is reported on the card: silence would read as
-  // an untouched button, which is the one thing a reader cannot tell apart from a copy that never happened.
+  // Copy authored Markdown, not rendered text; report refusal so it cannot look like an untouched button.
   const copyMessage = useCallback((): void => {
     void copyText(body).then(copied => { setCopyState(copied ? 'copied' : 'failed') })
   }, [body])
-  // A touch surface has no hover, so a tap opens the card; a press on the card itself never toggles it.
+  // Links and card controls must not also toggle touch actions.
   const toggleCard = useCallback((event: MouseEvent<HTMLElement>): void => {
     if (onToggleCard === undefined || messageRef === undefined) return
     const target = event.target
@@ -201,7 +159,6 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
     : plan.render === 'literal'
       ? <div className={css.messageText}>{onOpenRef === undefined ? displayBody : renderRefs(displayBody)}</div>
       : <div ref={markdownRef} className={css.messageMarkdown}><MarkdownText key={`${displayBody}:${onOpenRef === undefined ? 'literal' : 'refs'}`} text={displayBody} labels={markdownLabels} fileMentions={fileMentions} /></div>
-  // The action's own word is the outcome: copied, refused, or still offering the copy.
   const copyLabel = copyState === 'copied'
     ? (t?.('copiedMessage') ?? 'Copied')
     : copyState === 'failed' ? (t?.('copyMessageFailed') ?? 'Copy failed') : (t?.('copyMessage') ?? 'Copy')
@@ -210,7 +167,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
       {identityImage.image.kind === 'initial'
         ? <div className={css.messageIdentity} data-avatar="initial" style={avatarStyle} aria-hidden="true">{identityInitial(senderName)}</div>
         : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.image.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
-      {/* A continuation row shows time of day only in the avatar seat (34px, no clip); the date lives on the run's identity line and the day separator. */}
+      {/* Use time of day in continuation seats; the date already lives on the identity line and day separator. */}
       {grouped === true && showGroupedTime === true && occurredAt !== undefined && <span className={css.gutterTime} data-gutter-time="" aria-hidden="true" title={formatAbsoluteTime(occurredAt)}>{formatClockTime(occurredAt)}</span>}
       <div className={css.messageBody}>
         {!grouped && (
@@ -219,7 +176,6 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
             {occurredAt !== undefined && <span className={css.messageTime}>{formatMessageTime(occurredAt)}</span>}
           </div>
         )}
-        {/* The quote is one muted line that jumps to the original, so a long parent is never pasted twice. */}
         {replyTo !== undefined && (onOpenReplyTo === undefined
           ? <span className={css.quoteLine} data-quote-line="">
               <span className={css.quoteLineBar} aria-hidden="true" />
@@ -236,8 +192,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
                 <span className={css.quoteLineText}>{quoteExcerpt}</span>
               </span>
             </button>)}
-        {/* The wrapper stays mounted for every clampable body and only swaps its class: remounting the Markdown subtree would wipe
-            the post-render ref/mention chips. It also carries data-document, the same >600-character rule that folds the body. */}
+        {/* Keep Markdown mounted while toggling the clamp, or its post-render ref/mention chips are lost. */}
         {clampable ? <div data-document="" className={clamped ? css.messageClamp : undefined}>{bodyNode}</div> : bodyNode}
         {clampable && (
           <button type="button" className={css.messageExpand} data-message-expand="true" aria-expanded={expanded} onClick={() => { setExpanded(value => !value) }}>
@@ -274,7 +229,6 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
         {/* A feed's entry line is the row's own chrome, outside any per-message surface. */}
         {children}
       </div>
-      {/* The actions float beside the Message, shown only under the pointer or caret; the card is the only raised surface in a row. */}
       {(rowActions !== 'never' && (rowActions === 'always' || onReply !== undefined)) && <div className={css.messageCard} data-message-card="">
         {mentionedInBody && <span className={css.cardMention} data-mentions-you="">{t?.('mentionsMe') ?? 'Mentioned you'}</span>}
         <button type="button" className={css.cardAction} data-copy-message="" onClick={copyMessage}
@@ -291,7 +245,44 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   )
 })
 
-/** Kept inside the component so the Task-ref subscription of a memoized row never detaches. */
+function useAttachmentActions(openAttachment: TeamMessageProps['openAttachment'], t: TeamMessageProps['t']) {
+  const [attachmentMenu, setAttachmentMenu] = useState<{ readonly attachment: AgentTeamMessageAttachment; readonly x: number; readonly y: number }>()
+  const [attachmentStatus, setAttachmentStatus] = useState<string>()
+  const runAttachmentAction = useCallback(async (attachment: AgentTeamMessageAttachment, action: 'open' | 'reveal', application?: string): Promise<void> => {
+    if (openAttachment === undefined) return
+    setAttachmentStatus(t?.('openingFile', { name: attachment.name }) ?? `Opening ${attachment.name}`)
+    try {
+      const result = await openAttachment({
+        attachmentId: attachment.attachmentId,
+        action,
+        ...(application === undefined ? {} : { application }),
+      })
+      if (!result.ok) {
+        setAttachmentStatus(t?.('openFileFailed', { name: attachment.name }) ?? 'Could not open the file')
+      } else if (!result.value.opened) {
+        setAttachmentStatus(t?.('openFileUnavailable', { name: attachment.name }) ?? 'The Host has no desktop file opener')
+      } else {
+        setAttachmentStatus(undefined)
+      }
+    } catch {
+      setAttachmentStatus(t?.('openFileFailed', { name: attachment.name }) ?? 'Could not open the file')
+    }
+  }, [openAttachment, t])
+  const openAttachmentNow = useCallback((attachment: AgentTeamMessageAttachment): void => {
+    void runAttachmentAction(attachment, 'open')
+  }, [runAttachmentAction])
+  const revealAttachment = useCallback((attachment: AgentTeamMessageAttachment): void => {
+    void runAttachmentAction(attachment, 'reveal')
+  }, [runAttachmentAction])
+  const openAttachmentWith = useCallback((attachment: AgentTeamMessageAttachment, application: string): void => {
+    void runAttachmentAction(attachment, 'open', application)
+  }, [runAttachmentAction])
+  const openAttachmentMenu = useCallback((attachment: AgentTeamMessageAttachment, x: number, y: number): void => {
+    setAttachmentMenu({ attachment, x, y })
+  }, [])
+  return { attachmentMenu, setAttachmentMenu, attachmentStatus, openAttachmentNow, revealAttachment, openAttachmentWith, openAttachmentMenu }
+}
+
 function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSession, onResolveTaskRefs, onResolveThreadRefs, projectNameOf, memberOf, t }: {
   readonly plan: PlannedMessageBody
   readonly mentionNames?: readonly MentionHandle[] | undefined
@@ -320,14 +311,13 @@ function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSessio
     if (onResolveThreadRefs !== undefined && bodyThreadRefKey !== '') void resolveUnknownThreadRefs(bodyThreadRefs, onResolveThreadRefs)
   }, [onResolveTaskRefs, onResolveThreadRefs, bodyTaskRefKey, bodyThreadRefKey, taskRefVersion, threadRefVersion])
   const taskLabel = useCallback((taskNumber: number): string => t?.('taskLabel', { number: taskNumber }) ?? `Task #${taskNumber}`, [t])
-  // Unresolvable refs never reach this label; they stay plain text (see renderRefs).
   const threadChipLabel = useCallback((title: string): string => {
     const base = t?.('threadLabel') ?? 'Thread'
     const projected = plainGist(title, THREAD_CHIP_TITLE_MAX_CHARACTERS)
     return projected === '' ? base : `${base} · ${projected}`
   }, [t])
-  // Member chips use a handle, deliberately distinct from `@mention` chips, which notify.
   const projectChipLabel = useCallback((name: string): string => t?.('projectLabel', { name }) ?? `Project · ${name}`, [t])
+  // A Member ref names a session destination, not an authored @mention.
   const memberChipLabel = useCallback((name: string): string => t?.('memberLabel', { name }) ?? `Member · @${name}`, [t])
   // Stable per locale revision: a fresh object per render would rebuild the component table every chunk.
   const markdownLabels = useMemo<MarkdownLabels>(() => ({
@@ -467,7 +457,6 @@ function renderResolvedMarkdownCodeRef(code: HTMLElement, taskLabel: (taskNumber
   const segment = segments.length === 1 ? segments[0]! : undefined
   const ref = segment?.ref
   if (ref === undefined) return
-  // Task and Thread refs need Host resolution; Project and Member refs resolve against loaded rosters; unknown refs stay plain text.
   if (ref.startsWith('task:')) {
     const resolved = cachedResolvedTaskRef(ref as AgentTeamTaskRef)
     if (resolved === undefined) return
@@ -493,7 +482,6 @@ function renderResolvedMarkdownCodeRef(code: HTMLElement, taskLabel: (taskNumber
   }
 }
 
-/** Replace resolved Task/Thread/Project/Member refs and structured mention handles in one prose text node without changing Markdown structure. */
 function renderResolvedMarkdownText(node: Text, mentionNames: readonly MentionHandle[], taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, projectChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, projectNameOf: ((ref: AgentTeamProjectRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): void {
   let changed = false
   const fragment = document.createDocumentFragment()
@@ -620,7 +608,6 @@ function TeamAttachmentStrip({ attachments, loadAttachment, onOpen, onMenu, t }:
   </div>
 }
 
-/** One cursor-seated menu for a cached attachment: default open, the Host's handlers, and file-manager reveal. */
 function TeamAttachmentMenu({ attachment, point, loadApplications, onOpen, onOpenWith, onReveal, onClose, t }: {
   readonly attachment: AgentTeamMessageAttachment
   readonly point: { readonly x: number; readonly y: number }

@@ -3,59 +3,36 @@
 [English](environments-and-install.md) | 中文
 
 ## 沙箱与 CI 环境
-测试与类型系统不是自包含的。40+ 个 `@deepseek-ai/dsh-*` 包全部从相邻 Harness checkout 解析。`src/` 与已构建的 `lib/` 都要在。沙箱 agent 与 CI runner 必须复刻这个布局，而不是自行发明。
 
-这适用于任何全新环境：新 clone **或 `git worktree`**。worktree 不携带主 checkout 中被 gitignore 的 `node_modules/` 与 `lib/`。下面的步骤在那里同样要从头执行。跳过步骤 4（链接与构建）不会在启动时报缺模块，而是稍后以 host 测试中大面积 preset 解析假失败的形式出现。
+Host 测试、类型检查和构建都需要相邻的 `../deepseek-harness`。新 worktree 也要安装自己的依赖并生成构建产物；它会在自己的上一级目录寻找 Harness。只改文档时，请直接看[检查梯度](start-and-checks.zh.md#检查梯度)。
 
-**checkout 目录名就是契约。** Harness 必须 clone 为相邻的 `../deepseek-harness`，并 checkout 最新认证 release tag。这个目录名是所有脚本的默认 fallback 名。带 tag 后缀的相邻 checkout 只属于隔离认证环境。形态是 `../deepseek-harness-<tag>/`。见 [dsh-release-compatibility.zh.md](../dsh-release-compatibility.zh.md) 3.2 节。把工具指向它是大面积假挂的根因。非默认名的 checkout 必须显式设置 `DSH_HARNESS_DIR`。
+Node 和 Corepack 需满足已认证 Harness 的 manifest 要求。首次配置按以下顺序操作：
 
-**按顺序准备：**
+1. 将 Harness 克隆到相邻的 `../deepseek-harness`，检出最新认证标签，当前是 `dsh-v0.2.2-rc.2`。执行 `corepack enable pnpm` 启用 shim，因为 Harness 构建脚本会直接调用 `pnpm`。Corepack 按各仓库的 `packageManager` 选择版本，两个版本不必相同。
+2. 在 Harness 目录执行 `corepack pnpm install`、`corepack pnpm build:lib` 和 `corepack pnpm build:native-system`。Team 直接运行 Vitest，不会调用 Harness 的测试脚本来构建原生扩展。原生构建使用 `--host-addon-only`，会跳过不支持的平台。要跑浏览器测试或任一预览，再执行 `corepack pnpm build:web`。
+3. 在 Team 仓库执行 `corepack pnpm install`。不要用 `npm install`，它可能破坏 pnpm 的链接。若遇到 `ERR_PNPM_IGNORED_BUILDS`，审查依赖的构建脚本，在引入依赖的同一次改动中用 `pnpm-workspace.yaml` 的 `allowBuilds` 明确允许或禁止。
+4. 仍在 Team 仓库执行 `node scripts/link-harness-packages.mjs` 和 `npm run build`。这些链接和构建后的导出不只供 TypeScript 使用；Host 测试也从仓库根目录解析 preset。
+5. 执行 `node scripts/sync-paths.mjs`，重新生成 TypeScript 路径映射，其中包括 locale 源码的通配路径。`npm run check:facades` 只对比，不会修复不一致。
+6. 要完整验证环境，运行 `npm run typecheck && npm test`；日常改动按[检查梯度](start-and-checks.zh.md#检查梯度)选更有针对性的检查。
 
-1. 先 `corepack enable pnpm` 落地 shim。再 clone `../deepseek-harness`，checkout 最新认证 release tag。当前 tag 是 `dsh-v0.2.2-rc.2`，随认证前进。然后 `corepack pnpm install`（workspace 全量一次到位）、`corepack pnpm build:lib` 与 `corepack pnpm build:native-system`。 shim 是必需的。认证 Harness 自身的 script 内部会调裸 `pnpm`（`build:lib`、`build:web`）。`corepack pnpm` 只在自己进程内解析。缺了 shim 这些步骤会以 `pnpm: not found` 失败。 两个仓库的 `packageManager` 都锁 `pnpm@11.7.0`。shim 因此解析到该版本，而非环境预装的任意版本。
+在可丢弃的沙箱中，可用 [`sh scripts/hoplite-setup.sh`](../../scripts/hoplite-setup.sh) 完成第 1–5 步并构建 Web。它会在已有的相邻 Harness 中强制检出认证标签，也可能清理构建残留；如果其中有需要保留的工作，不要运行。[Hoplite 配置](../../.hoplite/settings.json) 单独提供第 6 步作为 `check`。
 
-   native 这一步是独立的构建，不会由别处替我们完成。host addon 被 gitignore。Harness 的 `test` script 会在自己的 Vitest 之前用 `build:native-system` 构建它。本仓库是直接对那个 checkout 跑 Vitest。全新 clone 缺了它会表现为宿主 Team 激活失败（`Agent is not an active Team Member`），而不是缺模块报错。 它在所有平台都安全：`--host-addon-only` 在非 Linux/macOS 上直接退出、不构建。 不要复用上一次构建遗留的 `lib/` 或 `node_modules/`——旧产物可能掩盖声明或运行时不兼容。
-2. 工作流需要 `test:browser` 时，用 `corepack pnpm build:web` 构建 Harness `apps/web` dist。workspace install 已备好它的依赖。
-3. 在本仓库内用 `corepack pnpm install` 安装依赖。绝不能运行 `npm install`。它会静默破坏指向相邻 checkout vendor 包的 workspace 符号链接。故障随后才以误导性的 `Cannot find module 'zod'` 暴露。
+| 环境变量 | 何时设置 |
+| --- | --- |
+| `DSH_HARNESS_DIR` | 选择其他 checkout 时设置，常用于[隔离认证](../dsh-release-compatibility.zh.md)；日常留空。 |
+| `NODE_OPTIONS` | 需要覆盖沙箱 setup 默认的 `--max-old-space-size=4096` 时设置。 |
+| `CHROME_PATH` | 如果浏览器不在 `/usr/bin/google-chrome`，在跑浏览器测试时指定。沙箱 setup 可用 Playwright Chromium 作备选。 |
+| `DEEPSEEK_API_KEY` | 只供实时 `npm run preview` 使用；`preview:ui` 和 `test:browser` 不需要。 |
 
-   pnpm 11 的 `strictDepBuilds` 默认为 true。声明了生命周期脚本的依赖会让安装以 `ERR_PNPM_IGNORED_BUILDS` 失败，直到 `pnpm-workspace.yaml` 的 `allowBuilds` 为它做出决定：仓库会用到该脚本的产物时写 `true`，用不到时写 `false`。因此引入带构建步骤的传递依赖时，要在同一笔改动里给出这个决定，否则每次全新安装和两条 CI 车道都会停在这一步。
-4. 用 `node scripts/link-harness-packages.mjs` 链接两样东西进本仓库 `node_modules`：Harness 的 workspace 与它的 vendor 包。再 `npm run build` 构建 bundle。宿主测试从本仓库根按真实 `node_modules` 查找解析 preset row 与 bundle 自身的未发布 row（如 `@contexera/dsh-agent-team/member-context`）。它与已发布 bundle 的 profile 安装布局一致。
-5. 用 `node scripts/sync-paths.mjs` 对准全新 checkout 重新生成 TypeScript path facades。全新 clone 不能信任仓库里已提交的 facades。没有任何 npm script 会重写它们。跳过这一步，facades 指向的仍是生成时固化的旧路径。`npm test` 里那道只读门 `check:facades` 正是对这种不一致报错。`sync-paths` 同时生成测试 harness 需要的 `@deepseek-ai/dsh-client-locale/src/*` 通配映射。
-6. 冒烟验证：`npm run typecheck && npm test`。全绿 = 环境正确。大面积假挂（见下）= 环境不对。先修环境，再查 diff。
+**先排查环境，再改代码。**
 
-**环境变量：**
+- **Harness checkout 不对：**共用解析器的脚本按顺序读取 `DSH_HARNESS_DIR`、`sync-paths` 写入的 `.generated-harness` 标记、默认相邻目录。找不到所选目录会立即报错。认证结束后，取消环境变量覆盖，清除仍指向旧 checkout 的标记，再按日常相邻目录重新生成映射。
+- **Host 或 preset 测试成片失败：**先核对认证标签、Harness 的 `lib/` 和受支持平台上的原生扩展，再检查 Team 的链接和构建产物。`Agent is not an active Team Member` 或从未定义值读取 `UNLOADING` 都只是线索，不能单凭它们定因。
+- **缺少 `zod`，或 React 类型和 lockfile 对不上：**先检查 pnpm 安装和链接。生成时报错则看 [Typert 暂存步骤](generated-and-seams.zh.md)。如果编译器找到了 lockfile 中没有的类型，检查祖先目录是否留有 `node_modules/@types`。
 
-| 变量 | 何时需要 | 说明 |
-| --- | --- | --- |
-| `NODE_OPTIONS` | 沙箱 setup（可选） | 未设或为空时，`hoplite-setup.sh` 默认使用 `--max-old-space-size=4096`，让 Harness Client 编译可超过 Node 默认堆上限；显式值保持不变 |
-| `CHROME_PATH` | `test:browser`（可选） | 默认 `/usr/bin/google-chrome`；仅当沙箱 Chrome 不在默认位置时设置 |
-| `DSH_HARNESS_DIR` | 仅认证场景 | 指向带 tag 后缀的相邻 checkout；日常保持未设——默认名即契约 |
-| `DEEPSEEK_API_KEY` | `npm run preview` | 真实模型预览缺它即刻失败；测试与浏览器路径从不需要 |
+[CI](../../.github/workflows/ci.yml) 在 pull request、推送到 `master` 或手动触发时执行静态检查和 lint，无需 Harness。代码变动或手动触发还会运行 Linux 和 Windows 任务：缓存 pnpm store 和已认证的 Harness 构建，链接并构建 Team，重新生成映射，检查类型并执行 `test:ci`。Linux 还核验发布包、精简后的 Desktop 启动及 UI 一致性。CI 不运行浏览器验收。
 
-**环境错误而非代码错误的症状**。大面积 `TypeError ... reading 'UNLOADING'` / `FiberState` undefined 失败 = Vitest 解析到了缺失或过期的 Harness checkout。`Cannot find module 'zod'` = npm 破坏了 pnpm 链接：但若来自 `generate:typert`，那是它自己配置的那条链接出了问题（见 生成文件）。先修环境，再查 diff。
-
-**工作树上方不得有遗留 `node_modules`。** TypeScript `typeRoots` 与 Node 模块解析都会沿祖先目录上爬。home 目录下一次误跑 `npm install` 留下的 `node_modules\@types`，会把它的类型静默注入每次编译。实测表现为 harness 构建报出 lockfile 解释不了的 React 19 类型错误（实际锁的是 18）。全新 checkout typecheck 报出 lockfile 无法解释的类型错误时，先逐级检查祖先目录有无遗留 `node_modules`。确认没有再查代码。
-
-**checkout 指针集中化且 fail-fast。** `scripts/harness-dir.mjs` 是所有消费方（Vitest、`sync-paths`、`build-client`、`generate-typert`、浏览器/预览 runner）共同解析的单一事实源。`DSH_HARNESS_DIR` 设定时优先。其次读 `sync-paths` 写下的 `.generated-harness` 标记。测试自动跟随 facade 生成时的同一 checkout。认证轮生成后忘了带 env，两者也不会劈叉。最后落到默认相邻名。解析出的目录不存在时立即中止。中止时列出相邻真实存在的 Harness checkout 与修复指引，而不是等到跑测才炸出上面那些远端症状。
-
-**本 bundle 自己的 dependencies 就是全部外部面。** 按名字解析的包只剩 host 闭包与本仓库自身：根 manifest 只声明 `yaml` 与 `zod`，两者都由 `generate-typert.mjs` 从本仓库自己的安装链接进 Typert 分析包。profile 安装因此不再多带任何包，CI 也不需要额外的准备步骤。
-
-**CI lanes。** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) 在 pull request、push 到 `master` 和手动 `workflow_dispatch` 时运行。快速 `checks` job 在不检出 Harness 的情况下于 `ubuntu-latest` 运行静态与卫生检查（`check:docs`、`check:e2e-docs`、`check:core-skills`、`check:boundaries`、`check:versions`、`check:comments`、`check:scratch`、`lint`），并判定是否改动了代码或包文件。
-
-仅当代码、包文件或 CI 本身改动（或手动 `workflow_dispatch`）时，`linux`（`ubuntu-latest`）与 `windows`（`windows-latest`）才并行运行。两条 lane 按 runner OS 与 `DSH_HARNESS_TAG` 缓存 pnpm store 及 Harness 构建产物，完成链接构建、`sync-paths`、typecheck 与 `npm run test:ci`。
-
-`test:ci` 只保留依赖 Harness 的 facades 检查和完整 Vitest。前面的 build 与 typecheck 已经生成 Typert，共享静态门禁已经由 `checks` job 运行。`linux` 额外运行 `check:artifact`、`verify-desktop-strip-boot.mjs` 与 `audit-ui-parity.mjs`，`windows` 经 git bash（`shell: bash`）以目录 junction 运行。
-
-范围护栏：无 coverage matrix、无发布自动化、无 `test:browser`——浏览器验收始终是本地步骤。Windows lane 是文件系统标识符类 bug（issue #7/#8）的回归防线。唯一可调变量是 `DSH_HARNESS_TAG`；认证推进该 tag 时，workflow 的 env、本文档与 DSH peer 区间一起更新，`npm run check:versions` 拒绝不一致。
-
-三个 job 都只报告、不设门：`master` 没有 required status checks，没有 rulesets，`enforce_admins` 也是关的。因此一次绿的 run 不会挡住合并，也没有任何服务端会拒绝一次红的。绿色 workflow 是证据，不是许可——某个改动是否等 CI，仍然取决于纪律。
-
-**Hoplite 沙箱。** [`.hoplite/settings.json`](../../.hoplite/settings.json) 在每个新 thread 里运行 [`scripts/hoplite-setup.sh`](../../scripts/hoplite-setup.sh) 完成第 1–5 步，第 6 步作为 `check` 脚本提供，不在 setup 期间运行。脚本 checkout DSH peer 区间下限对应的 `dsh-v<下限>`，peer 移动时无需另改。Hoplite 项目级 setup 覆盖优先于仓库文件，应保持未设置。
-
-若该次 tag 推进同时移动了 DSH peers，必须在同一改动里提交 `pnpm-lock.yaml`。CI 以 `frozen-lockfile` 安装。本地装一次就会就地重写 lockfile，把这个不一致一直掩盖到 CI 上才暴露。
-
-**提交 lockfile 前先确认两组原生绑定还在。** `@rolldown/binding-*` 与 `jscpd-*` 只从 lockfile 进入依赖树，丢失后安装仍然成功，问题只在跑测时暴露：Vitest 5 启动即加载 rolldown，每个测试都以 `Cannot find native binding` 中止；`npm run duplication` 会报 jscpd 平台包未安装。manifest 没变时 pnpm 会沿用 lockfile 里记录的解析，因此重解析（无论加不加 `--force`）都不会补回丢掉的那组。提交前 grep 一下 lockfile，确认两组都还在。
-
-开发脚本（`build-client`、`run-browser-test`、`run-preview`、`run-ui-preview`）已做 Windows 硬化，在该平台经 git bash 运行。本地 Windows 开发遵循同一环境契约。
+认证升级时，同时更新 CI 标签、文档、peer 版本范围和 lockfile；CI 使用 `--frozen-lockfile` 安装。修改 lockfile 后，若 Vitest 或 `npm run duplication` 在启动时报错，分别检查 `@rolldown/binding-*` 或 `jscpd-*` 对应的平台条目是否还在。安装成功并不能证明这些条目齐全。
 
 ## 外部安装验证
 发布形态是根 bundle：
@@ -65,14 +42,15 @@ dsh plugin --profile web add @contexera/dsh-agent-team
 dsh web
 ```
 
-本地目录安装：
+本地链接开发请先构建 Team，单独使用开发 profile。以下命令在 Harness checkout 中执行。第一条只用于**新建** `web-dev`；重复运行会替换该 profile 原有的依赖和补丁。
 
 ```sh
-dsh plugin --profile web add /absolute/path/to/dsh-agent-team
-dsh web
+corepack pnpm dsh --profile web-dev --from-default-profile web --dump-default-config
+corepack pnpm dsh plugin --profile web-dev add link:/absolute/path/to/dsh-agent-team
+corepack pnpm dsh --profile web-dev
 ```
 
-`cordis.patch.yml` 是 bundle patch 的入口。它将 Host、Client 和 invariant rows 加入 opt-in profile。它在隔离的 `agentPresets` scope 中挂载 `team-member` roster。普通 Session 的 shipped/user preset roster 不应被 Team bundle 改写。
+`cordis.patch.yml` 是 bundle patch 的入口。它将 Host、Client 和 invariant rows 加入 opt-in profile。它在隔离的 `agentPresets` scope 中挂载 `team-member` 和 `team-manager` 的工具清单。普通 Session 的 shipped/user preset roster 不应被 Team bundle 改写。
 
 插件页会把这个 scope 容器渲染成一个组件行并显示「已关闭」；这是预期现象，无需在这里做任何操作。容器是组合载体而不是功能插件。它自身没有可匹配的 live entry，而 Loader 对 group 条目一律按启用处理。真正在运行的是它内部列出的那几行。web 与桌面构建的渲染一致。
 
@@ -84,7 +62,7 @@ dsh web
 
 ### Profile 模式与发布节奏
 
-日常自用与开发验收使用两个并存 profile，互不干扰：
+日常使用和开发验收分别使用两个 profile：
 
 - **稳定模式**（`--profile web`）：依赖 npm 发布版，pnpm lockfile 锁定已装版本。发布后需按**精确版本号**安装 `dsh plugin --profile web add @contexera/dsh-agent-team@X.Y.Z`。直接 `update` 可能在 lockfile 仍钉着旧解析的情况下报「Already up to date」。见 [`release-runbook.md`](../release-runbook.md) §6。
 - **开发模式**（`--profile web-dev`）：依赖 `link:` 本地检出，rebuild + 重启即用最新代码。注意宿主加载的是构建产物 `packages/*/lib/`。改完源码只重启而不 `npm run build`，Member Session 仍会拿到旧工具清单。工具清单在激活时从当前运行代码派生。先 build 再重启才生效。
@@ -93,25 +71,17 @@ dsh web
 
 发布节奏是批量的。两次发布之间，操作者将本地构建日常自用，作为轻量验收渠道。日常使用反馈等同有效验证。agent 与贡献者按检查梯度选择最窄检查即可，不必为每个小改动要求完整验收。累积若干修复与优化、在日常使用中稳定后，再批量发新版。发布流程本身有五段：前置检查、检查阶梯、发布材料、打 tag 与发布、发布后核验。见 [`release-runbook.md`](../release-runbook.md)。
 
-每次发布后随即把稳定 profile 装到该版本（按精确版本号，理由见上）。稳定 profile 与开发 profile 共享全局 ledger 存储（`$DSH_HOME/storages/`）。稳定 profile 停留在旧版，而 ledger 已被新版写入。这时启动会因记录 schema 校验失败而崩溃。一旦该 ledger 已采用更新的规则版本，旧构建就不是「可能校验失败」，而是一定拒绝打开。因此顺序是：先备份 `agent_team.sqlite`，把新构建装到共享该存储的每个 profile，然后才在任何一个地方首次打开 Team。备份做法见 [`release-runbook.md`](../release-runbook.md) §2 第 7 步。2026-08 的 0.1.1 即是这种"写得出、读不回"的中间版本。
+使用同一 `$DSH_HOME` 的 profile 共享 `storages/`。新版写入后，旧版读取 ledger 时可能无法通过记录校验。当前 Host 采用规则版本 9（见 [`ledger.ts`](../../packages/agent-team/src/ledger.ts) 的 `AGENT_TEAM_RULES_VERSION`）；ledger 采用该版本后，不支持它的旧构建会拒绝打开。
+
+在新构建中打开 Team 之前，先按[发布手册](../release-runbook.zh.md)备份 `agent_team.sqlite`，再升级共享该数据库的每个 profile。
 
 本 bundle 的最低兼容版本是 DSH `0.2.2-rc.2`。DSH 的 JSONL Session persistence 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4）。旧格式 Session 数据无需手动处置。不要为 Team ledger 或 Member Session 添加迁移、读取旧格式或静默回退逻辑。
 
 ### 重写与推送历史
 
-本地 ref 可能是 `master` 上不存在的内容的唯一副本。`backup-pre-*` 分支与钉住它们的本地-only tag 就是这样一族，删除不可逆。反方向同样不可逆——本仓库是公开的，push 出去的历史收不回来。
+重写历史前，给需要保留的 commit 建立持久的本地引用。如果连引用也要删，先备份为 Git bundle。检查重写结果时，核对每个 commit 的内容，不要凭它在 rebase 列表里的位置判断。
 
-重写历史之前，先把当前 tip 存成 `backup-pre-<说明>-<YYYYMMDD>` 分支。重写指对已提交内容 `reset --hard`、`rebase`，或会丢弃独占内容的 amend。若这一族 ref 本身要被删除，则先 `git bundle` 成单个文件。没有备份时，被弃 commit 的唯一锚点只剩 `git reflog`，而 `git gc` 会清掉不可达对象。2026-09-12 那次 0.1.11 打磨轮的重写没有建 backup ref。被替换的 commit 只在 reflog 里。
-
-用脚本挑选步骤的 rebase 会静默出错。`GIT_SEQUENCE_EDITOR='sed -i …'` 按行号改 todo，而某个 commit 在那里的行号只取决于这段范围有多少笔——所以按当时形状写下的脚本，换个范围就会标到另一个 commit 上，而 rebase 照样成功。本想把第四笔并进上一笔，实际把第三笔并进了第二笔，退出码是零，产出的历史看着也合理。按 subject 选行，不要按位置选，并按内容验结果：每个 commit 的 diff 必须仍只属于它自己。
-
-push 之前对确切 refspec 跑一次 dry-run，并要求输出里只有你打算发布的 ref：
-
-```sh
-git push --dry-run origin master    # 发布版再加版本 tag
-```
-
-出现第三个 ref，就说明有本地-only ref 会进公开仓库——停下先处理。`git push --all` 与 `git push --tags` 会绕过这道闸门，永远不是发布命令。发布时的 push 就是这条栅栏再加上版本 tag。它前后的完整顺序见 [`release-runbook.md`](../release-runbook.md) §5。
+推送前对确切的 refspec 做 dry-run，确认只包含要发布的分支或标签。发布时不要用 `git push --all` 或 `git push --tags`，具体步骤见[发布手册](../release-runbook.zh.md)。
 
 ## 容器里的无人值守工作
 

@@ -2,7 +2,10 @@
 
 English | [中文](client-and-remote.zh.md)
 
+This page owns the wire contract, Client activation, and the boundary between Host facts and browser presentation. [Host authority](host-authority.md) owns durable decisions; [storage reuse](workspace-session-storage.md#team-manager-session) owns the manager Session pointer.
+
 ## Typed Remote
+
 `@Remote` annotations on the Team service are inputs to `scripts/generate-typert.mjs`, which uses Harness `WorkspaceAnalyzer` and `FaceModelEmitter` to emit Host and Client artifacts under `packages/agent-team/lib/`.
 
 ```text
@@ -20,8 +23,8 @@ Read requests state their purpose instead of sharing one projection shape. `view
 ## Remote failure vocabulary
 Generated Remote methods resolve a `RemoteResult`: `{ ok: true, value }` carries the business result, `{ ok: false, error }` carries a failure whose stable `code` discriminates and whose `details` the code narrows without a cast.
 
-- Business rejections — `unread_required`, `stale_revision` — stay result unions: they are the normal control flow the Client already models, not Remote errors. They are also the whole rejection vocabulary of a version-2 write: a mention or an answer delivers directly, so no write asks the caller to send it again.
-- An expected cross-Remote failure that needs its own Client branch is thrown as a `RemoteError`; the owner declares its code by merging it into `RemoteErrorDetailsMap`, and Team merges its codes into the public types entry both faces compile against. Team's first code is `team/attachment-not-found`: only a confirmed absent cache entry uses it. Invalid UUIDs, out-of-cache paths, missing metadata or payload, malformed metadata, I/O, and payload read failures remain generic Host errors.
+- Business rejections such as `unread_required`, `stale_revision`, and `main_unread_required` remain typed result unions, not Remote errors. Mentions and linked replies deliver directly; there is no invitation-and-resend step.
+- An expected cross-Remote failure that needs its own Client branch is thrown as a `RemoteError`; the owner declares its code by merging it into `RemoteErrorDetailsMap`, and Team merges its codes into the public types entry both faces compile against. Team declares `team/attachment-not-found`: only a confirmed absent cache entry uses it. Invalid UUIDs, out-of-cache paths, missing metadata or payload, malformed metadata, I/O, and payload read failures remain generic Host errors.
 - Clients branch on `code`, never on message text — the message is a human diagnostic, not contract. Unknown codes and unclassified Host exceptions arrive as `gateway/internal`, so each branch keeps a generic fallback.
 - The attachment preview caches successful image bytes. A confirmed miss shows the expired state for that mount without a negative cache, so a later mount can reread the same id. Other read failures and browser decode failures keep the file name, expose an explicit retry, and never open an empty preview.
 - `openAttachment` and `attachmentApplications` resolve the payload path from the same verified cache entry, then hand it to the serving desktop's own opener or handler list. Neither accepts a Client-supplied path, so an attachment action cannot open an arbitrary Host file; a headless Host answers `opened: false` and no handlers instead of failing a Client that cannot open anything.
@@ -40,7 +43,13 @@ settings.section.icon       Team mark on that page's nav row
 
 Activation mounts `agentTeamRemote`, waits for `remote.agentTeam`, then registers the Team panel, its rail row, and the mode shadows. `dsh.client.inject` describes the module graph but does not guarantee apply order or service readiness; use `ctx.slots.inject()` when a declaration may appear later.
 
-The panel row and Team mode are one fact: the row is the shell's own rail button, selecting it enters the mode, and another panel taking the column leaves it. A null selection is left alone — an embedded Member Session view clears the panel to own the column and the mode has to survive that — while the mode's own foot row clears the panel itself. A restored mode re-selects its panel unless a panel was already selected at mount, in which case that panel keeps the column and the mode stands down.
+### Panel ownership and restoration
+
+Selecting the shell's Team rail row enters Team mode; selecting another panel leaves it. A null selection does not leave Team mode, because an embedded Member Session clears the panel while keeping the mode active. Team's exit row clears the panel explicitly.
+
+Restoration reselects the Team panel unless another panel was already selected at mount. In that case the selected panel keeps the column and Team mode stands down.
+
+### Manager navigation
 
 The manager destination is a gate, not a Team conversation surface. While `manager: true` has no resolved id, the `main` conversation shadow renders a thin loading or error state. It calls `managerSession({})`; on `ready` it opens that Session through the shipped workspace controller, records the runtime id, and stands down so the shipped Conversation owns the main seat with its ordinary composer. A late resolution after the reader leaves is ignored.
 
@@ -50,22 +59,30 @@ The shipped session header replaces its preset label with a new-conversation act
 
 Explicit Team navigation closes the manager destination; leaving restores the captured ordinary Session when it still exists. If cold restoration found the manager already seated, the return target is the newest visible ordinary, non-Team Session in the Host-returned Workspace. With no surviving target, leaving uses the shipped new-Session flow with its default preset and Workspace choice.
 
+### Ordinary Session reuse and manager controls
+
 The create-time guard wraps the public `ISessions.create` boundary. For an implicit-preset blank candidate it reads exact Host ownership; a Team-owned id is omitted before the shipped creation continues, while ordinary blanks and explicit-preset requests pass through unchanged. A failed ownership read does not retry the unsafe candidate. Disposal during the read rejects the pending creation; it neither creates a Session nor leaves the caller waiting forever.
 
-This guard excludes only blank reuse. A successful replacement automatically archives the retired manager, so its retained history appears in the Workspace's archive view rather than its active Session list; an archival failure does not roll back the successor. A current manager viewed in the ordinary list still keeps its fixed composition.
+This guard excludes only blank reuse. [Manager archival](workspace-session-storage.md#publication-and-archival) keeps retired history out of the active list. A current manager viewed in the ordinary list still keeps its fixed composition.
 
 While a manager is displayed, temporary slot replacements remove its hero preset picker, header preset label, and permission control. They release on every other Session so the shipped controls return. This is presentation only, not a grant or authorization lock; [Tools and preset](tools-and-preset.md#team-manager-preset) owns the Host composition and execution guard.
+
+### Slot declaration authority
 
 A slot parent's `children` declaration is both render site and authority. Team's `sidebar.workspaces` shadow must not redeclare shipped `sidebar.workspaces.directoryFlow`; Harness SlotCore rejects duplicate live declarations. Do not copy private WorkspaceBrowser, ConversationRoot, Shell, or private CSS. Use public Harness services and exports, such as `ctx.workspaces.pickDirectory()`, and record limitations rather than depending silently on private implementation.
 
 ## Client data and presentation boundary
-Client components do not reach into `ctx`, the operation ledger, or Host classes. Data and callbacks arrive through slot owner props, runtime props, declared stores, or injected faces. Presentation consumes Host projections and local navigation state and does not invent durable facts.
+Presentation components do not reach into `ctx`, the operation ledger, or Host classes. Data and callbacks arrive through slot owner props, runtime props, declared stores, or injected faces. Presentation consumes Host projections and local navigation state and does not invent durable facts.
 
-New Project composition defaults to taskless and exposes default-off 「作为任务」 for atomic Task creation. Taskless Threads retain reply/read/follow/Inbox behavior but gate status, Claims, and resolution controls until promotion. Promotion is non-optimistic and followed by rereading Thread and supplemental projections.
+### Threads and Inbox
+
+The Project composer defaults to taskless and exposes default-off 「作为任务」 for atomic Task creation. Taskless Threads retain reply/read/follow/Inbox behavior but gate status, Claims, and resolution controls until promotion. Promotion is non-optimistic and followed by rereading Thread and supplemental projections.
 
 The Human Client consumes the Host's Inbox projection, never keeps a parallel Inbox authority, and acknowledges nothing by opening the page. That projection is the 「收件箱 / Inbox」 queue: a merged per-Workspace badge and page covering each reader's whole unread slice, where mentions are counted inside it, never its admission rule.
 
 It also carries a second 「最近活跃」 slice that an Agent's Inbox never does — the Threads that reader has written a Message in, so a Thread they replied to is theirs whether or not they follow it. That slice is newest activity first, each Workspace's own slice bounded to ten while the merged page shows at most five.
+
+### Local navigation and settings
 
 Team navigation mode, Workspace selection, the last Project/Thread, the Inbox page position, and the manager destination token are browser-persisted. Unread and Attention are Host-owned; resolved Session ids and return targets remain runtime-only and are re-resolved through the Host.
 
@@ -77,6 +94,8 @@ The Team settings grant editor consumes `toolCatalog` for discovery over Host-gl
 
 Its accepted list, Human identity, and catalog have independent loading and failure states. A conflict keeps the local draft, rereads the latest committed list, and requires explicit review before another save; it never replays the stale draft. A failed accepted-list read cannot become `[]`.
 
-An embedded Member Session uses the shipped composer unmodified: the Team registers no member-session composer surface — no seat shadow, no trigger sources, no dock strip. rc.1 moved the trigger-menu overlay into `conversation.composer.bar`'s children, where a shadowing entry would inherit — and strand — the overlay. The Team's own command/member reference entry points carried no irreplaceable value over the shipped vocabulary, so they were removed together.
+### Shipped composer reuse
+
+An embedded Member Session uses the shipped composer unmodified: the Team registers no member-session composer surface — no seat shadow, no trigger sources, no dock strip. The trigger-menu overlay belongs to `conversation.composer.bar`'s children; shadowing that entry would also take responsibility for rendering the overlay. Team does not add separate command or Member-reference entry points.
 
 Ordinary and member sessions share the same composer and vocabulary. Reuse public primitives and `--dsw-*` tokens, keep CSS in CSS Modules, and preserve Team mode restoration and narrow layouts.

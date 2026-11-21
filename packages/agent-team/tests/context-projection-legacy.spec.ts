@@ -13,7 +13,6 @@ import { describe, expect, it } from 'vitest'
 import { createToolResultMessage, createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import {
-  CONTEXT_CONTINUITY_PROJECTION_KEY,
   isRedeliverableTeamNotice,
   checkpointRefFor,
   contextProjectionStateSchema,
@@ -246,7 +245,6 @@ describe('one registration and one cached-row shape', () => {
     const definition = createTeamContextProjectionDefinition()
     expect(definition.key).toBe('contextContinuity')
     expect(definition.stateVersion).toBe(3)
-    expect(CONTEXT_CONTINUITY_PROJECTION_KEY).toBe('contextContinuity')
     // The persisted row is the plain-JSON projection of this exact state.
     const state = foldTeamContextProjection(mixedEraLog(), { sessionId: 'agent-team-legacy-session' })
     expect(contextProjectionStateSchema.safeParse(JSON.parse(JSON.stringify(state))).success).toBe(true)

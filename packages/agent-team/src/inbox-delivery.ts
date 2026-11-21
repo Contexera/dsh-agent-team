@@ -1,16 +1,6 @@
 import type { AgentTeamProjectRef, AgentTeamReminderRef, AgentTeamThreadReadFact, AgentTeamThreadRef } from './types/entities.ts'
 import type { AgentTeamInboxItem, AgentTeamInboxReminder, AgentTeamMainTimelineEntry } from './types/requests-results.ts'
 
-/**
- * Every unread fact interrupts: there is one delivery class. An ordinary Thread
- * update reaches a reader only because it follows that Thread, a mention or a
- * reply carries a direct marker, and a responsibility Activity or live Task
- * reminder arrives through its own marker — so what decides whether ordinary
- * work exists at all is Attention, never how fast it travels. No identity
- * chooses a slower class here. `covered` is what keeps an unchanged
- * rederivation from spending a second attempt on the same durable facts.
- */
-
 /** The reader's role in one notice scope, as the notice states it. */
 export type InboxScopeRole = 'follower' | 'member'
 
@@ -34,11 +24,7 @@ export interface InboxMemberReminder {
 export interface InboxDeliveryInput {
   readonly threads: readonly InboxThreadUnread[]
   readonly main: readonly InboxMainUnread[]
-  /**
-   * Unconsumed Member reminders. Like a Task reminder, one is always delivered:
-   * it is the whole reason the notice exists when nothing else is unread, and
-   * its identity in the signature is what makes a replacement, not a stack.
-   */
+  /** Unconsumed Member occurrences may trigger a notice even when no other facts are unread. */
   readonly reminders?: readonly InboxMemberReminder[] | undefined
   /**
    * The reminders the notice actually rendered, when the detail cap or the
@@ -79,8 +65,7 @@ export function planInboxDelivery(input: InboxDeliveryInput): InboxDeliveryPlan 
   const undelivered = new Set(input.undelivered ?? [])
   for (const { item, facts, reminders = [] } of input.threads) {
     const threadRef = item.thread.threadRef
-    // A reminder is always delivered: it is the whole reason the notice exists
-    // when the Thread holds no ordinary unread.
+    // Task reminders use their own episode identity, even without any unread Thread facts.
     if (reminders.length > 0) {
       const reminderFacts = [threadRef, 'reminder', ...reminders.map(reminder => `${reminder.kind}:${reminder.baselineSequence}`)]
       immediate.push(reminderFacts)
@@ -101,10 +86,13 @@ export function planInboxDelivery(input: InboxDeliveryInput): InboxDeliveryPlan 
     delivered.push(['member-reminder', reminder.reminderRef, reminder.sequence])
   }
   for (const { projectRef, entries } of input.main) {
-    if (entries.length > 0) { immediate.push([projectRef, ...entries.map(entry => entry.sequence)]); delivered.push([projectRef, ...entries.map(entry => entry.sequence)]) }
+    if (entries.length === 0) continue
+    const mainFacts = [projectRef, ...entries.map(entry => entry.sequence)]
+    immediate.push(mainFacts)
+    delivered.push(mainFacts)
   }
   const signature = immediate.length === 0 ? '' : JSON.stringify(immediate)
-  const covered = delivered.length === 0 ? '' : JSON.stringify(delivered)
-  const trigger = signature !== '' && covered !== input.covered ? 'immediate' : undefined
-  return Object.freeze({ trigger, signature, delivered: covered, threads: Object.freeze(threads) })
+  const deliveredSignature = delivered.length === 0 ? '' : JSON.stringify(delivered)
+  const trigger = signature !== '' && deliveredSignature !== input.covered ? 'immediate' : undefined
+  return Object.freeze({ trigger, signature, delivered: deliveredSignature, threads: Object.freeze(threads) })
 }

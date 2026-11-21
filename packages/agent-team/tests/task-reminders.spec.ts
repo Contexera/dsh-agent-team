@@ -4,7 +4,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { openTestLedger } from './helpers/ledger-harness.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import { MemberIdleTracker } from '../src/member-idle.ts'
-import { planTaskReminders, REVIEW_BACKLOG_IDLE_MS, STALLED_PUBLIC_MS, type ReminderCandidate } from '../src/task-reminders.ts'
+import { planTaskReminders, REVIEW_BACKLOG_IDLE_MS, STALLED_IDLE_MS, STALLED_PUBLIC_MS, type ReminderCandidate } from '../src/task-reminders.ts'
 import { planInboxDelivery } from '../src/inbox-delivery.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamRequestId, AgentTeamTask } from '../src/types.ts'
 
@@ -134,7 +134,9 @@ describe('event-evaluated Task reminders', () => {
     const team = await seed()
     const started = await startTask(team, team.owner.actor)
     const active = await claim(team, started.task, team.reviewer.actor)
-    const before = evaluate(team, Date.parse(active.receipt.occurredAt))
+    const lastProgressAt = Date.parse(active.receipt.occurredAt)
+    expect(evaluate(team, lastProgressAt + STALLED_PUBLIC_MS, new Map([[team.reviewer.memberId, STALLED_IDLE_MS]]))).toEqual([])
+    const before = evaluate(team, lastProgressAt)
     const stalled = evaluate(team, NOW + STALLED_PUBLIC_MS + 1)
     expect(stalled).toEqual([{ taskRef: started.task.taskRef, kind: 'stalled', recipient: team.owner.memberId, baselineSequence: active.receipt.sequence }])
     await raise(team, stalled[0]!)

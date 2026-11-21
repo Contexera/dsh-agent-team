@@ -5,6 +5,7 @@
  * so this spec proves the Host's own decisions; what a real executor does with
  * the policy it is handed is the cross-platform enforcement probe's job.
  */
+import { subscriptionTickInterval } from './helpers/subscription-clock.ts'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -127,7 +128,8 @@ function gatedShell(stdout: string): GatedShell {
 const credentialValues: Record<string, string> = { GH_TOKEN: 'secret-value' }
 
 async function boot(pool: MemoryMediaPool, shell: Pick<FakeShell, 'service'>, workspaceRoot = process.cwd(),
-  config?: Readonly<Record<string, unknown>>) {
+  config?: Readonly<Record<string, unknown>>, tickIntervalMs = 1_000) {
+  subscriptionTickInterval(tickIntervalMs)
   return harness({
     pool,
     workspaceIds: [workspaceId],
@@ -320,7 +322,7 @@ describe('a timer run', () => {
     // The plugin opens the domain itself at boot; a seeded row must not hold it.
     await domain.close()
     await close()
-    const { ctx, fiber } = await boot(pool, runShell)
+    const { ctx, fiber } = await boot(pool, runShell, process.cwd(), undefined, 1)
     live.push({ dispose: async () => { await fiber.dispose() } })
 
     const published = await waitFor(() => {
@@ -353,13 +355,15 @@ describe('one admission for trials and timer runs', () => {
 
     // Five owners' worth of concurrent creates: every one of them runs a trial,
     // and a trial is a run slot, not a second kind of capacity.
+    let completed = 0
     const creates = Array.from({ length: 5 }, (_, index) => booted.ctx.agentTeam.createSubscription(
-      createRequest(projectRef, 'printf events\n', { requestId: requestId(`burst-${index}`), name: `burst ${index}` })))
+      createRequest(projectRef, 'printf events\n', { requestId: requestId(`burst-${index}`), name: `burst ${index}` }))
+      .then(result => { completed += 1; return result }))
     await waitFor(() => shell.running() === 4 ? true : undefined)
     expect(shell.peak()).toBe(4)
     for (let step = 0; step < 5; step += 1) {
       shell.release()
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await waitFor(() => completed > step ? true : undefined)
     }
     const results = await Promise.all(creates)
     expect(results.every(result => result.kind === 'changed')).toBe(true)
@@ -424,7 +428,7 @@ describe('the terminal barrier a queued trial obeys', () => {
     expect(deleted.subscription.state).toBe('deleted')
     for (let step = 0; step < 4; step += 1) {
       shell.release()
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await waitFor(() => shell.running() === 3 - step ? true : undefined)
     }
     expect(String(await refusal)).toMatch(/deleted while this trial waited/)
     // Refusing is not enough: the script itself never ran a second time.
@@ -452,7 +456,7 @@ describe('the terminal barrier a queued trial obeys', () => {
     await booted.ctx.agentTeam.archiveProject({ requestId: requestId('archive-alpha'), workspaceId, projectRef })
     for (let step = 0; step < 4; step += 1) {
       shell.release()
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await waitFor(() => shell.running() === 3 - step ? true : undefined)
     }
     expect(String(await refusal)).toMatch(/archived while this trial waited/)
     expect(executions(shell)).toBe(1)
@@ -481,7 +485,7 @@ describe('the terminal barrier a run in flight obeys', () => {
     await seedDomain.close()
 
     const shell = gatedShell('{"id":"c","title":"C"}\n')
-    const second = await boot(pool, shell)
+    const second = await boot(pool, shell, process.cwd(), undefined, 1)
     live.push({ dispose: async () => { await second.fiber.dispose() } })
     const seam = second.ctx.agentTeam as unknown as {
       subscriptionTable?: { get(ref: unknown): Promise<unknown> }
@@ -553,14 +557,22 @@ describe('the scheduler checkpoint and Host shutdown', () => {
       { subscriptionRef, dueAt: Date.now() - 1, consecutiveFailures: 0, publishedInWindow: 0 })
     await seedDomain.close()
     const shell = gatedShell('{"id":"c","title":"C"}\n')
-    const second = await boot(pool, shell)
+    const second = await boot(pool, shell, process.cwd(), undefined, 1)
     const seam = second.ctx.agentTeam as unknown as { checkpointFor(ref: unknown): { dueAt?: number } }
     expect(seam.checkpointFor(subscriptionRef).dueAt).toBeLessThan(Date.now())
     await waitFor(() => shell.running() === 1 ? true : undefined)
 
+    const scheduler = (second.ctx.agentTeam as unknown as { subscriptionScheduler: SubscriptionScheduler }).subscriptionScheduler
+    const stopping = Promise.withResolvers<void>()
+    const stop = scheduler.stop.bind(scheduler)
+    fakeTimers.spyOn(scheduler, 'stop').mockImplementation(async () => {
+      stopping.resolve()
+      await stop()
+    })
     let disposed = false
     const disposal = second.fiber.dispose().then(() => { disposed = true })
-    await new Promise(resolve => setTimeout(resolve, 100))
+    await stopping.promise
+    await expect.poll(() => scheduler.state().running.length).toBe(1)
     // The script still holds the slot, so shutdown has not converged yet.
     expect(disposed).toBe(false)
     shell.release()
@@ -1725,7 +1737,7 @@ describe('the webhook trigger', () => {
       await runtime.subscriptionScheduler.runTick()
       finishScript.resolve()
       await writingFailure.promise
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await runtime.subscriptionScheduler.runTick()
       expect(shell.requests.filter(request => request.env?.DSH_TEAM_TRIGGER === 'interval')).toHaveLength(0)
     } finally {
       finishScript.resolve()
@@ -1774,10 +1786,16 @@ describe('the webhook trigger', () => {
       && (write.value as { readonly kind?: string } | undefined)?.kind === 'team/subscription-paused'
       ? (pauseAtWrite.resolve(), releasePause.promise) : undefined
     const secondShell = fakeShell({ stdout: '{"id":"interval","title":"must not run"}\n' })
+    fakeTimers.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const second = await boot(pool, secondShell, process.cwd(), configured)
     live.push({ dispose: async () => { await second.fiber.dispose() } })
-    await pauseAtWrite.promise
-    await new Promise(resolve => setTimeout(resolve, 1_200))
+    try {
+      await pauseAtWrite.promise
+      await fakeTimers.advanceTimersByTimeAsync(1_000)
+    } finally {
+      fakeTimers.clearAllTimers()
+      fakeTimers.useRealTimers()
+    }
     expect(secondShell.requests.filter(request => request.env?.DSH_TEAM_TRIGGER === 'interval'),
       'the overdue interval waits until the Webhook pause is committed').toHaveLength(0)
     expect(second.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]?.subscription.state).toBe('active')

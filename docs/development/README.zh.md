@@ -2,13 +2,13 @@
 
 [English](README.md) | 中文
 
-如何上手、验证并交付一次改动——按主题维护在多个文件里：
+按改动范围查找环境准备、检查和交付要求。
 
-| Page | Owns |
+| 你要做什么 | 去哪里 |
 | --- | --- |
-| [start-and-checks.zh.md](start-and-checks.zh.md) | 适用范围、上手步骤，以及检查梯度与发布期门 |
-| [e2e-lanes.zh.md](e2e-lanes.zh.md) | E2E 浏览器 lane 目录、真实 Web/Harness 契约、低层测试与定向触发规则 |
-| [generated-and-seams.zh.md](generated-and-seams.zh.md) | UI 改动的浏览器证据、生成物、package 接缝，以及新增 Host operation 的清单 |
-| [environments-and-install.zh.md](environments-and-install.zh.md) | 沙箱与 CI 环境，以及外部安装的验证 |
-| [storage-and-delivery.zh.md](storage-and-delivery.zh.md) | Team ledger 存在哪、多页面通知回归，以及交付前核对清单 |
-| [team-performance.zh.md](team-performance.zh.md) | 可复用的 Team 性能场景、规模矩阵、Browser 加载、语义探针和当前性能约束 |
+| 配置 Harness、排查 CI 或安装 bundle | [环境与安装](environments-and-install.zh.md) |
+| 选择检查，或区分实时预览与无凭据验证 | [开始与检查](start-and-checks.zh.md) |
+| 选择真实 Web 场景或查找截图 | [E2E 浏览器 Lane 目录](e2e-lanes.zh.md) |
+| 重新生成 Remote 产物、修改包边界或新增 Host operation | [生成文件、包边界与 operation](generated-and-seams.zh.md) |
+| 排查 ledger 启动、验证跨页投递或检查交付内容 | [Ledger 存储、通知与交付](storage-and-delivery.zh.md) |
+| 测量性能或比较改动前后的结果 | [Team 性能评测](team-performance.zh.md) |

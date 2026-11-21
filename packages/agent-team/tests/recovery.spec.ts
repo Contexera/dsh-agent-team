@@ -142,17 +142,6 @@ describe('RecoveryCoordinator', () => {
     expect(wakeups).toEqual([])
   })
 
-  it('stops tracking when the wake target is gone', () => {
-    const coordinator = new RecoveryCoordinator({
-      wake: () => { throw new Error('member disposed') },
-    })
-    coordinator.onError(memberId, 'fetch failed')
-    vi.advanceTimersByTime(RECOVERY_DELAY_MS)
-    coordinator.onError(memberId, 'fetch failed')
-    vi.advanceTimersByTime(RECOVERY_DELAY_MS)
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
   it('notifies stand-down exactly once per error run', () => {
     const { coordinator, facts } = harness({ maxConsecutiveErrors: 2 })
     coordinator.onError(memberId, 'HTTP 429')
@@ -205,16 +194,21 @@ describe('RecoveryCoordinator', () => {
     })
   })
 
-  it('reports a wake whose target is gone instead of stopping silently', () => {
-    const { coordinator, facts } = harness({ wake: () => { throw new Error('member disposed') } })
+  it('reports why a wake failed, cancels the other wake, and starts the next episode at one', () => {
+    const wake = vi.fn(() => { throw new Error('member disposed') })
+    const { coordinator, facts } = harness({ wake })
     coordinator.onError(memberId, 'fetch failed')
+    coordinator.onError(memberId, 'HTTP 429')
     vi.advanceTimersByTime(RECOVERY_DELAY_MS)
 
+    expect(wake).toHaveBeenCalledTimes(1)
     expect(facts.at(-1)).toEqual({
-      kind: 'cleared', memberId, reason: 'wake-failed', consecutiveFailures: 1, pendingWakes: 0, stoodDown: false,
+      kind: 'cleared', memberId, reason: 'wake-failed', consecutiveFailures: 2, pendingWakes: 1, stoodDown: false,
       detail: 'Error: member disposed',
     })
     expect(vi.getTimerCount()).toBe(0)
+    coordinator.onError(memberId, 'fetch failed')
+    expect(facts.at(-1)).toMatchObject({ kind: 'scheduled', consecutiveFailures: 1 })
   })
 
   it('reports a non-recoverable error as a clear only when it cancels a live episode', () => {

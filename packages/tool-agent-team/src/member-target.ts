@@ -1,19 +1,7 @@
-/**
- * One Member named by a caller, read the same way everywhere.
- *
- * Every field that takes a Member — a Task's `target` or `accountable`, a
- * subscription's event recipients — accepts what an Agent actually sees: a
- * branded ref, an `@Handle`, a unique 6+ hex prefix of the id, or the Human's
- * own alias. Accepting only refs would force every caller to look up ids for
- * names it already knows, and a rejection would then read as "not a member"
- * when the real problem was the written form.
- * @module @contexera/dsh-agent-team-tools/member-target
- */
 import type { AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID } from '@contexera/dsh-agent-team/host'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
 
-/** Resolve one written Member into its id, refusing an unknown form and an ambiguous prefix differently. */
 export function memberTarget(host: AgentTeam, raw: string): AgentTeamMemberId {
   const trimmed = raw.trim()
   const handle = trimmed.replace(/^@/u, '').toLowerCase()
@@ -31,6 +19,7 @@ export function memberTarget(host: AgentTeam, raw: string): AgentTeamMemberId {
       throw new Error(`${trimmed} matches ${matches.length} Members (${candidates}) — ${recoveryFor('ambiguous_ref').sentence({ refused: trimmed })}`)
     }
   }
+  // Leave final validation of branded refs to the Host, which knows the operation's membership scope.
   if (trimmed.startsWith('member:')) return trimmed as AgentTeamMemberId
   throw new Error(`${trimmed} names no Member — pass a memberRef, an @Handle, a unique 6+ hex prefix, or 'human'. ${recoveryFor('unknown_ref').sentence({ refused: trimmed })}`)
 }

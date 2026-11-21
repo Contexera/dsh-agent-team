@@ -1,6 +1,4 @@
-/**
- * Registry of every model-facing recovery line the Team renders: one entry per situation, built from the values the rejection holds so the line names the refused value. It lives in the Host because both tools and the ledger reject, and tools import the Host, never the reverse. `assertRecoveryCoverage` refuses entries no situation reaches; `forbidHandWrittenRecovery` scans model-facing sources for route sentences outside the registry.
- */
+// The Host owns this copy because both the ledger and the tools reject, and tools import the Host.
 
 /** What a rejection hands the registry: the values the sentence should name. */
 export interface RecoveryContext {
@@ -219,7 +217,6 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
 ])
 
-/** Every kind the registry answers, for the coverage check below. */
 export const RECOVERY_KINDS: readonly string[] = Object.freeze(RECOVERY_REGISTRY.map(entry => entry.kind))
 
 /** Look one entry up by exact kind; an unregistered kind is a bug, never a silent fallback. */
@@ -263,7 +260,7 @@ export function forbidHandWrittenRecovery(source: string, fileName: string): voi
   }
 }
 
-/** Drop comments and their contents, preserving line numbering so a hit points at real code. */
+// Keep newlines so diagnostics point to the original source line.
 function stripComments(source: string): string {
   return source.replaceAll(/\/\*[\s\S]*?\*\//gu, match => match.replaceAll(/[^\n]/gu, ' '))
     .replaceAll(/(^|[^:])\/\/[^\n]*/gu, (match, lead: string) => `${lead}${' '.repeat(match.length - lead.length)}`)

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 import { describe, expect, it } from 'vitest'
 import { renderText, teamTools } from './render-text.ts'
 
@@ -162,32 +164,23 @@ describe('team_thread shows what a reply answers', () => {
     expect(text).toContain('(replies to @architect — "The stored schema never named the field")')
   })
 
-  it('prints the whole body for the message action, never a summary', () => {
+  it('prints the original body byte for byte and binds it to that exact output', () => {
+    const tool = teamTools().get('team_thread')!
+    const args = { action: 'message', threadRef: READ_BASE.threadRef, messageRef: 'message:parent' }
     const body = `First line is short\n第二行 @reviewer 提到别人\n${'z'.repeat(200)}`
-    const text = renderText(teamTools().get('team_thread')!, {}, {
+    const value = {
       ...READ_BASE,
       kind: 'message', facts: [],
       message: { messageRef: 'message:parent', sender: 'human', sequence: 1, body },
-    })
-    expect(text).toContain(body)
-    expect(text).not.toContain('…')
-    expect(text.length).toBeGreaterThan(200)
-  })
-
-  it('declares every field those renders read, because an undeclared value throws', () => {
-    const tool = teamTools().get('team_thread')!
-    const schema = tool.output.schema as Record<string, any>
-    // `additionalProperties: false` is enforced against the returned value, so a
-    // field a render reads and the schema does not name fails the whole call.
-    expect(schema.properties.message.required).toContain('body')
-    expect(schema.properties.message.required).toContain('messageRef')
-    expect(schema.properties.facts.items.properties.replyTo).toBeDefined()
-    expect(schema.properties.anchor.properties.replyTo).toBeDefined()
-    expect(schema.properties.anchor.properties.replyToMessageRef).toBeDefined()
-    // and the action is addressable at all (registered parameters are one
-    // JSON-Schema object, not the flat map the definition is written as)
-    const parameters = tool.parameters as Record<string, any>
-    expect(parameters.properties.action.enum).toContain('message')
-    expect(parameters.properties.messageRef).toBeDefined()
+    }
+    expect(validateJsonSchemaValue(tool.output.schema, value)).toEqual([])
+    const text = renderText(tool, args, value)
+    expect(text).toBe(`Workspace: ${READ_BASE.workspaceId} · Project: ${READ_BASE.projectRef}\nMessage message:parent\n1 [human]\n\n${body}`)
+    const digest = (text: string) => createHash('sha256').update(text).digest('hex')
+    expect(tool.output.presentationMeta?.(args, value)).toEqual({ teamFacts: {
+      textDigest: digest(text),
+      messages: [{ threadRef: READ_BASE.threadRef, messageRef: 'message:parent', bodyDigest: digest(body) }],
+      activities: [],
+    } })
   })
 })

@@ -244,10 +244,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const projectDialog = page.getByRole('dialog', { name: '新建项目' })
   await projectDialog.getByLabel('名称').fill('delivery')
   await projectDialog.getByLabel('说明').fill('M2 完整协作验收')
-  await projectDialog.getByRole('button', { name: '初始成员' }).click()
-  await page.getByRole('menuitem', { name: /builder/ }).click()
-  await page.getByRole('menuitem', { name: /reviewer/ }).click()
-  await expect.poll(async () => (await projectDialog.getByRole('button', { name: /初始成员/ }).textContent())?.trim() ?? '').toContain('已选 2 个成员')
+  // Rules v9 creates a Project without a member list: the dialog asks only for name and description.
+  expect(await projectDialog.getByRole('button', { name: /初始成员/ }).count()).toBe(0)
+  await settleAnimations(page)
   await page.screenshot({ path: join(UI03_SHOTS, 'project-create-modal.png'), fullPage: true })
   await projectDialog.getByRole('button', { name: '创建项目' }).click()
   // Reopen from the narrow-expanded sidebar after the collapse settles.
@@ -263,6 +262,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(dialogBox!.y).toBeGreaterThanOrEqual(0)
   expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(390)
   expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(844)
+  await settleAnimations(page)
   await page.screenshot({ path: join(UI03_SHOTS, 'project-create-modal-narrow.png'), fullPage: true })
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 1440, height: 960 })
@@ -327,17 +327,18 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       }
     }))
   expect(rampWide.length).toBeGreaterThan(0)
-  // A brand-new Project carries no Member yet, so every Workspace candidate is
-  // a peer a pick would enroll — the 'other' group, dimmed and named as such.
+  // Under rules v9 every Workspace Member reads a brand-new Project, so each
+  // candidate lands in the Workspace group at full weight and a pick enrolls nobody.
   for (const row of rampWide) {
-    expect(row.group).toBe('other')
-    expect(row.inside).toBe('false')
+    expect(row.group).toBe('project')
+    expect(row.inside).toBe('true')
   }
-  expect(await rampMenu.textContent()).toContain('选择后加入本项目')
+  expect(await rampMenu.textContent()).toContain('本 Workspace')
+  expect(await rampMenu.textContent()).not.toContain('加入本项目')
   // Resolve the alias the rule names so the expectation follows a theme swap.
-  const labelSecondary = await resolveAliasColor(page, '--dsw-alias-label-secondary')
-  expect([...new Set(rampWide.map(row => row.nameColor))]).toEqual([labelSecondary])
-  await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-outside.png'), fullPage: true })
+  const labelPrimary = await resolveAliasColor(page, '--dsw-alias-label-primary')
+  expect([...new Set(rampWide.map(row => row.nameColor))]).toEqual([labelPrimary])
+  await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-workspace.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   // Measure used values: the element never answers a container query about its
@@ -351,9 +352,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(rampNarrow.length).toBeGreaterThan(0)
   for (const row of rampNarrow) {
     expect(row.descriptionDisplay).toBe('none')
-    expect(row.nameColor).toBe(labelSecondary)
+    expect(row.nameColor).toBe(labelPrimary)
   }
-  await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-outside-narrow.png'), fullPage: true })
+  await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-workspace-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await page.keyboard.press('Escape')
   await expect.poll(projectOrder, { timeout: 20_000 }).toEqual(['delivery', 'engineering', 'ramp'])
@@ -2546,30 +2547,30 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => page.getByRole('textbox', { name: '消息内容' }).count()).toBe(0)
   await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread.png'), fullPage: true })
 
-  // The control stands on a closed Task, because the Human may transfer a finished one, but closing ended
-  // every Attention row on this Thread: the follower set is empty, and the dialog states that instead of
-  // inventing a target of its own.
+  // The control stands on a closed Task, because the Human may transfer a finished one. Under rules v9 the
+  // offer is the Workspace roster rather than the Thread's followers, so closing — which ended every Attention
+  // row here — leaves it intact: every enabled Member and the Human, except the reviewer that holds the Task.
   const mendTrigger = page.getByRole('button', { name: '转交负责人' })
   await mendTrigger.waitFor()
   await mendTrigger.click()
   const closedDialog = page.getByRole('dialog', { name: '转交负责人' })
   await closedDialog.waitFor()
-  expect(await closedDialog.locator('li button').count()).toBe(0)
-  expect(await closedDialog.getByRole('status').textContent()).toContain('没有关注者')
+  const rosterOffer = ['转交给 @builder', '转交给你自己']
+  await expect.poll(async () => (await closedDialog.locator('li button').allTextContents()).sort()).toEqual(rosterOffer)
+  expect(await closedDialog.getByRole('status').count()).toBe(0)
   await settleAnimations(page)
-  await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread-empty-dialog.png') })
+  await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread-transfer-dialog.png') })
   await page.keyboard.press('Escape')
   await expect.poll(() => closedDialog.count()).toBe(0)
 
-  // Following the closed Thread is the one write it still takes, and it is what puts the Human back in the
-  // offer: the reviewer is the accountable now, so it is never offered to itself and the Human is the one
-  // follower left. Mending back to the Human is the same move as any other handover.
+  // Following the closed Thread is the one write it still takes, and it leaves the roster offer unchanged.
+  // Mending back to the Human is the same move as any other handover.
   await page.getByRole('button', { name: '关注此 Thread' }).click()
   await page.getByRole('button', { name: '取消关注此 Thread' }).waitFor()
   await mendTrigger.click()
   const mendDialog = page.getByRole('dialog', { name: '转交负责人' })
   await mendDialog.waitFor()
-  await expect.poll(async () => await mendDialog.locator('li button').allTextContents()).toEqual(['转交给你自己'])
+  await expect.poll(async () => (await mendDialog.locator('li button').allTextContents()).sort()).toEqual(rosterOffer)
   await settleAnimations(page)
   await page.screenshot({ path: join(UI03_SHOTS, 'mended-dialog.png') })
   await mendDialog.getByRole('button', { name: '转交给你自己' }).click()

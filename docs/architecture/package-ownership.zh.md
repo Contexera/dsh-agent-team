@@ -1,36 +1,50 @@
-# Package ownership
+# 包职责
 
 [English](package-ownership.md) | 中文
 
+本文说明发布包的边界和依赖方向。运行时权威见 [Host 权威](host-authority.zh.md)，工具名单见 [工具与 preset](tools-and-preset.zh.md)。
+
+## 一个发布包，三个源码边界
+
+根目录的 `package.json` 只发布一个包：`@contexera/dsh-agent-team`。以下三个目录都没有独立的 manifest；它们划分构建与导出边界，不单独发布。
+
+| 目录 | 职责 | 入口 |
+| --- | --- | --- |
+| `packages/agent-team` | Host service、operation ledger、投影、Agent 生命周期、manager 运行时与 Remote 声明 | `src/index.ts` |
+| `packages/tool-agent-team` | 模型可见工具的声明与处理逻辑 | `src/index.ts`、`src/subscription.ts` |
+| `packages/client-agent-team` | Client 加载与浏览器展示 | Node：`src/index.ts`；浏览器：`src/client/` |
+
+下图的箭头表示「使用」，不表示导入对方的内部实现：
+
 ```text
-packages/agent-team
-  Host service + operation ledger + projections + Agent lifecycle
-  + Team manager Session + Remote declarations
-        │
-        ├── packages/tool-agent-team
-        │     team-member:  team_view / team_inbox / team_thread / team_message / team_task
-        │                   / team_attention / team_dm / team_subscription / team_reminder / team_worker
-        │     team-manager: team_overview / team_models / member_create / member_update / member_state
-        │                   / member_workspace / project_create / project_owner / project_update
-        │
-        └── packages/client-agent-team
-              typed Remote client + Team mode + manager destination + browser presentation
+tool-agent-team   → live Host service
+client-agent-team → typed Remote + public Team types
+agent-team       → neither tool nor Client implementation
 ```
 
-这三个目录是同一发布包 `@contexera/dsh-agent-team` 的构建与导出接缝，由根 `package.json` 声明；它们都没有自己的 manifest。依赖方向是单向的：Host 从不导入 Client 或 tools 的实现内部，tools 在执行时解析 live Host service，Client 只消费 typed Remote、公开类型与 Harness slots——绝不通过相对路径进入另一个接缝的生成 `lib/`。[`generated-and-seams.zh.md`](../development/generated-and-seams.zh.md) 负责接缝的具体机制、Host 模块布局与新增 operation 的清单。
+工具在执行时取得当前 Host service，既不另建 service，也不直接写入投影。浏览器通过 typed Remote 读取 Host 投影，并使用 Harness 的公开 slot 渲染。各边界之间不得用相对路径访问对方生成的 `lib/`。
 
-- `packages/agent-team` 拥有 Team capability。service 自身保留 ledger、handles、notifications 与 recovery orchestration，模块划分如下：
-  - `src/index.ts` 组装 service 并声明 Remote methods；
-  - `member-runtime.ts` 在只依赖三个依赖项（`ctx`、live member context、共享 running-agents set）的接缝之后持有 per-Member runtime state（tool-policy restriction、capability warning、私有 skill 挂载与选择、私有 memory 供给）；
-  - `ledger.ts` 提交 operations；
-  - `spec.ts` 定义 operation records；
-  - `types.ts` 把领域拆分（`types/entities.ts`、`types/operations.ts`、`types/requests-results.ts`）re-export 成唯一公开导入路径；
-  - `invariant.ts` 校验运行时关系。
-- `packages/tool-agent-team` 在 tools 执行时解析 live Team service。它不创建第二个 service，也不直接写入 projections。
-- `packages/client-agent-team` 分为 Node 部分（`src/index.ts`）和 browser 部分（`src/client/`）。browser 部分通过 typed Remote 读取 Host projections，并通过 public Client slots 渲染。
+构建机制与新增 operation 的清单统一维护在 [生成文件与模块边界](../development/generated-and-seams.zh.md)。
 
-接缝由第二个调用方、第二个 adapter 或独立持有的状态换来，绝不由行数换来。`index.ts` 与 `ledger.ts` 大，是因为它们承载 composition 与 authority，不是因为缺了一层；不要为了让单个文件变小而拆它们，也不要在真的出现第二份实现之前引入 `services/`、`utils/`、`adapters/` 目录。只做 re-export、只转发 props、只改名的模块不持有状态也不持有不变式：把调用内联，或删掉契约已经死掉的那一侧。
+## Host 模块分工
 
-一条被多个模块共同应用的规则——字符计数、截断边界、身份归一——只在一个模块实现，其余 import。再写一份内联副本，即使今天算得一模一样也是漂移：下一次改动就会分叉，而发现它的审查来得比漂移晚得多。
+`packages/agent-team/src/` 中的主要职责如下：
 
-字符计数与截断的实现在 `packages/agent-team/src/text.ts`：判定与切割必须同口径（码点），按 UTF-16 单元切割就是这条规则要防的缺陷。
+| 模块 | 职责 |
+| --- | --- |
+| `index.ts` | Host 组合、生命周期编排与 typed Remote 适配。 |
+| `member-runtime.ts` | 每个 Member 的工具限制、skill 挂载、能力警告与私有记忆目录准备。 |
+| `ledger.ts` | 持久提交、授权、重放校验与投影。 |
+| `spec.ts` | 已存 operation 的 schema 与 Team 存储 domain 定义。 |
+| `types.ts` | 公开类型入口，重新导出 `types/entities.ts`（id 与实体）、`types/operations.ts`（ledger 记录）和 `types/requests-results.ts`（请求、结果、回执与视图）。 |
+| `invariant.ts` | companion 插件，在挂载时校验 ledger，并在提交后复查。 |
+
+`MemberRuntimeDeps` 将运行时边界限定为三项依赖：Host `ctx`、`liveMemberContext` 解析函数，以及共享的只读 `runningAgents` 集合。ledger、Agent handle、通知与恢复编排仍由 Host 持有。
+
+## 何时引入新边界
+
+第二个调用方、第二种 adapter，或需要独立管理的状态，才足以支持拆分；行数本身不是理由。`index.ts` 承载组合，`ledger.ts` 承载权威。不要只为缩短文件而拆分，也不要在出现第二份真实实现前建立 `services/`、`utils/` 或 `adapters/`。
+
+如果新模块只转发 props、改名调用或重新导出，既不持有状态也不维护约束，就应保留内联调用。失效的转发契约应删除，而不是留下空层。
+
+多个模块共用的规则只能有一份实现。例如，`packages/agent-team/src/text.ts` 统一按 code point 计数和截断；按 code point 判断上限、却按 UTF-16 单元切片，会破坏这一规则。

@@ -4,7 +4,7 @@
  * recipient markers it freezes. Every case also proves replay still validates
  * the bytes it just wrote.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
@@ -98,6 +98,40 @@ function poolOf(records: Array<[string, unknown]>): MemoryMediaPool {
 }
 
 describe('the subscription lifecycle', () => {
+  it('leaves durable and projected state unchanged after a failed append, then commits and replays the retry', async () => {
+    const team = await seed()
+    const subscriptionRef = subscriptionRefOf(await team.create(team.owner.actor))
+    const id = requestId('pause-failed-append')
+    const pause = () => team.ledger.pauseSubscription({ requestId: id, actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, reason: 'manual' })
+    const subscription = team.ledger.subscription(subscriptionRef)
+    const status = team.ledger.status()
+    const projectionSequence = team.ledger.projectionSequence()
+    const records = [...team.table.entries()]
+    const failure = new Error('subscription append failed')
+    const put = vi.spyOn(team.table, 'put').mockRejectedValueOnce(failure)
+
+    await expect(pause()).rejects.toBe(failure)
+    expect(team.ledger.subscription(subscriptionRef)).toBe(subscription)
+    expect(team.ledger.status()).toEqual(status)
+    expect(team.ledger.projectionSequence()).toBe(projectionSequence)
+    expect(team.ledger.hasCommitted(id)).toBe(false)
+    expect([...team.table.entries()]).toEqual(records)
+    expect(() => team.ledger.validate()).not.toThrow()
+
+    const committed = await pause()
+    expect(committed.committed).toBe(true)
+    expect(Object.isFrozen(committed)).toBe(true)
+    expect(team.ledger.subscription(subscriptionRef)).toMatchObject({ state: 'paused', revision: 1 })
+    expect(team.ledger.projectionSequence()).toBe(committed.value.receipt.sequence)
+    const retried = await pause()
+    expect(retried.committed).toBe(false)
+    expect(retried.value).toEqual(committed.value)
+    expect(put).toHaveBeenCalledTimes(2)
+    put.mockRestore()
+    expect(() => replayed(team.table)).not.toThrow()
+  })
+
   it('creates, pauses, resumes, edits, and deletes through durable records a replay still accepts', async () => {
     const team = await seed()
     const created = await team.create(team.owner.actor)
@@ -183,10 +217,18 @@ describe('the deduplication waterline', () => {
   it('appends a re-baseline without clearing earlier ids or refusing an already accepted event', async () => {
     const team = await seed()
     const subscriptionRef = subscriptionRefOf(await team.create(team.owner.actor, { baselineIds: ['a'] }))
-    await team.ledger.acceptSubscriptionEvents({ requestId: requestId('accept'), actor: host, workspaceId: alpha,
+    const accepted = await team.ledger.acceptSubscriptionEvents({ requestId: requestId('accept'), actor: host, workspaceId: alpha,
       projectRef: team.projectRef, subscriptionRef, subscriptionRevision: 1, scriptHash: team.scriptHash, events: [{ id: 'b', title: 'B' }] })
-    await team.ledger.baselineSubscription({ requestId: requestId('baseline'), actor: team.owner.actor, workspaceId: alpha,
+    const history = team.ledger.mainStreamHistory(team.owner.actor, { workspaceId: alpha, projectRef: team.projectRef }).entries
+    const baseline = await team.ledger.baselineSubscription({ requestId: requestId('baseline'), actor: team.owner.actor, workspaceId: alpha,
       projectRef: team.projectRef, subscriptionRef, ids: ['c', 'd'] })
+    for (const receipt of [accepted.value.receipt, baseline.value]) {
+      const operation = team.ledger.getOperation(receipt.operationId)
+      expect(operation).toBeDefined()
+      expect(team.ledger.changeScopesOf(operation!)).toEqual([{ kind: 'project', projectRef: team.projectRef }])
+    }
+    expect(team.ledger.projectionSequence()).toBe(baseline.value.sequence)
+    expect(team.ledger.mainStreamHistory(team.owner.actor, { workspaceId: alpha, projectRef: team.projectRef }).entries).toEqual(history)
     expect([...team.ledger.subscriptionKnownIds(subscriptionRef)].sort()).toEqual(['a', 'b', 'c', 'd'])
     // The accepted, unpublished event survives the re-baseline and still publishes.
     expect(team.ledger.pendingSubscriptionEvents(subscriptionRef).map(entry => entry.event.id)).toEqual(['b'])
@@ -602,6 +644,26 @@ describe('the Workspace directory', () => {
 })
 
 describe('a request id means one payload', () => {
+  it('replays a pre-intent update after reload and rejects changed retained triggers', async () => {
+    const team = await seed()
+    const subscriptionRef = subscriptionRefOf(await team.create(team.owner.actor))
+    const id = requestId('legacy-update')
+    const updated = await team.ledger.updateSubscription({ requestId: id, actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, name: 'edited',
+      triggers: { interval: { minutes: 5 }, webhook: true }, script, credentials: [] })
+    const ledger = replayed(team.table)
+    const common = { requestId: id, actor: team.owner.actor, workspaceId: alpha, projectRef: team.projectRef,
+      subscriptionRef, expectedRevision: 1, name: 'edited', intervalMinutes: 5, script: { scriptContent: script.content } }
+    expect(ledger.subscriptionWriteReplay({ kind: 'update', ...common })?.value.receipt).toEqual(updated.value.receipt)
+    expect(ledger.subscriptionWriteReplay({ kind: 'update', ...common, webhook: true })?.value.receipt).toEqual(updated.value.receipt)
+    for (const change of [{ intervalMinutes: 10 }, { webhook: false }]) {
+      expect(() => ledger.subscriptionWriteReplay({ kind: 'update', ...common, ...change }))
+        .toThrow(/reused with a different operation or payload/)
+    }
+    expect(() => ledger.subscriptionWriteReplay({ kind: 'update', ...common, script: { scriptPath: 'unrecorded.sh' } }))
+      .toThrow(/cannot verify a legacy script path/)
+  })
+
   it('replays a legacy create with a pasted script and refuses a path it cannot verify', async () => {
     const team = await seed()
     const legacyRequestId = requestId('legacy-create')
