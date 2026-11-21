@@ -3,14 +3,16 @@
 [English](memory-and-context.md) | 中文
 
 ## Member memory 维护
-`memory.md` 是有界路由索引，不是仓库。索引只装四样东西：身份与职责、必须每步生效的长期规则、当前在手，以及每个主题簇一行。`notes/` 按需读取，从不注入。Member 把索引常态保持在 8 KiB 以内，硬顶 16 KiB。超过硬顶，索引整块不再注入。注入块始终自带用量说明。维护手艺（什么配得上一行、三层结构、压实与降级）归内置 `member-memory-manager` core skill。skill 写作归 `member-skill-manager`，两套手艺同源。persona 只常驻一条：索引必须有界，细节留在索引点名的那篇笔记里。Member 首次生成的 `memory.md` 脚手架陈述同样的小节。
+`memory.md` 是冷启动恢复索引，不是仓库，分三节：必须每步生效的长期规则、每个按需笔记簇一行路由、账本和 git 看不到的未收尾本地现场。身份、职责、Team 状态和共享规则都靠注入或现查，不写进索引。`notes/` 按需读取，从不注入。
+
+Member 把索引常态保持在 8 KiB 以内，硬顶 16 KiB；超过硬顶只注入预算内的完整开头行。注入块始终自带用量说明。维护手艺（什么配得上一行、三层结构、压实与降级）归内置 `member-memory-manager` core skill。skill 写作归 `member-skill-manager`，两套手艺同源。persona 常驻一张「信息归哪」地图（`AGENTS.md`、Workspace 规则、身份与 ownership 注入、账本、私有空间），外加一条：索引必须有界，细节留在索引点名的那篇笔记里。Member 首次生成的 `memory.md` 脚手架陈述同样的三节。职责更新唤醒和验收提醒都会要求 Member 删掉因此过时的 memory 行。
 
 ## Member 上下文注入
 Member 每一步的上下文由四个分类块组成：身份、Project ownership、Workspace 参与和私有记忆。[Workspace 规则](#workspace-规则)由另一行在旁注入。每个块都是独立的 surface message；同类的新块在语义上覆盖旧块——旧消息仍留在 Session 日志和 surface 中，直到压缩——没有变化的类别不追加内容。
 
 ownership 和参与始终给出完整列表，包括 ownership 撤销为空，以及参与从多个 Workspace 缩为一个。每行 ownership 都写明该负责人在这一个 Project 里负责什么；没有记录的责任读作未说明——这是授权本身的普通事实，不是 Member 需要补上的缺口。
 
-私有记忆有两种形态。完整索引是基线。`memory.md` 变化后，Member 只收到一条简短提示：先前副本已过时、文件位置和当前预算占用。判断以最新的 memory 事件对照文件当前状态，旧的匹配提示不能掩盖后来的变化。提示不是索引：压缩后只剩提示时，仍会补发最新的完整基线。索引缺失、不可读或超出预算时，说明当前状况及其路径，不再注入内容。
+私有记忆有两种形态。完整索引是基线。`memory.md` 变化后，Member 只收到一条简短提示：先前副本已过时、文件位置和当前预算占用。判断以最新的 memory 事件对照文件当前状态，旧的匹配提示不能掩盖后来的变化。提示不是索引：压缩后只剩提示时，仍会补发最新的完整基线。索引缺失或不可读时，说明当前状况及其路径，不注入内容。超出预算的索引仍算基线：只注入预算内的完整开头行，并警告去读文件其余部分；文件本身绝不裁剪或自动摘要。
 
 ## Workspace 规则
 每个 Workspace 可以有一份 Team 自有的规则文件 `$DSH_HOME/agent-team/workspaces/<workspaceId>/rules.md`，放在所有仓库之外。它只装这支 Team 在这个 Workspace 共享的内容：协作约定、共享 checkout 纪律和本机环境线索。公开工程规则仍放仓库的 `AGENTS.md`，实时状态仍以账本为准。
@@ -24,7 +26,7 @@ ownership 和参与始终给出完整列表，包括 ownership 撤销为空，�
 ## 管理会话的记忆与 skills
 团队管理会话在 `$DSH_HOME/agent-team/manager/` 下有自己的私有空间——`memory.md`、`notes/` 与 `skills/`——它不属于任何 Member。这个目录比任何一个管理会话都活得久：重启、归档后重开、「新开对话」读的都是同一批文件，所以 Human 教给 manager 的东西不会随教它的那次对话消失。
 
-它的记忆块是 Member 记忆块的同一套契约、换一套措辞：完整索引作为基线，文件变化后只给一条「旧副本已过期」的提示，同样 16 KiB 硬顶、同样的框架转义、同样的超限警告——超限时保留文件、不注入正文，绝不自动裁剪。只有 `memory.md` 进入上下文；`notes/` 按块里给出的路径按需读取。唯一的差别是位置那句话：manager 在某个 Workspace 里运行，所以块内按实际 cwd 说明私有 root 的位置，而不是断言它在所有 Workspace 之外。
+它的记忆块是 Member 记忆块的同一套契约、换一套措辞：完整索引作为基线，文件变化后只给一条「旧副本已过期」的提示，同样 16 KiB 硬顶、同样的框架转义、同样的超限处理——只注入预算内的开头并附警告，文件本身绝不自动裁剪。只有 `memory.md` 进入上下文；`notes/` 按块里给出的路径按需读取。唯一的差别是位置那句话：manager 在某个 Workspace 里运行，所以块内按实际 cwd 说明私有 root 的位置，而不是断言它在所有 Workspace 之外。
 
 这个目录遵循同一套有界索引与私有 skill 规则，只是换成 manager 的路径；具体做法由随包的 `manager-memory` skill 负责：什么值得写、三层结构、复查节点，以及绝不能保存什么。manager 自己的六份引导 skills 放在 `packages/agent-team/manager-skills/`；Member 的 core-skill root 不会挂进它的目录。
 

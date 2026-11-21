@@ -553,7 +553,7 @@ export class MemberRuntime {
     await mkdir(join(path, 'notes'), { recursive: true })
     await mkdir(join(path, 'skills'), { recursive: true })
     try {
-      await writeFile(join(path, 'memory.md'), '# Member memory\n\nBounded routing index. Writing, compaction, and demotion rules: the bundled `member-memory-manager` skill.\n\n## Identity and role\n- <scope>\n\n## Durable rules\n- <rule>\n\n## In hand\n- <work in hand>\n\n## Notes index\n- <cluster>: `notes/<cluster>/README.md`\n', { flag: 'wx' })
+      await writeFile(join(path, 'memory.md'), '# Member memory\n\nCold-start recovery index. Where knowledge belongs, writing, compaction, and demotion rules: the bundled `member-memory-manager` skill.\n\n## Durable rules\n- <rule>\n\n## On-demand notes\n- <scenario> → `notes/<cluster>/README.md`\n\n## Open local state\n- <unfinished local state> (<task, thread, or path>)\n', { flag: 'wx' })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }

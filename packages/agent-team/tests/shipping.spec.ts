@@ -383,8 +383,13 @@ describe('Agent Team shipping contract', () => {
     // Memory upkeep follows the same split: the persona carries only the
     // resident rule (bounded index, detail in the note it names) and routes
     // the craft to the bundled member-memory-manager core skill.
+    // One resident map says where each kind of knowledge lives, so a Member
+    // never copies ownership, ledger facts or shared rules into its memory.
+    expect(preset).toContain('# Where knowledge lives')
+    expect(preset).toContain('Each kind of knowledge has one home: read it there, write it only there, and keep no second copy.')
+    expect(preset).toContain('the ledger decides current state, and your memory is a clue to check, never evidence')
     expect(preset).toContain('Keep `memory.md` a bounded index, not a store')
-    expect(preset).toContain('past 16 KiB it is not injected at all')
+    expect(preset).toContain('past 16 KiB only its leading lines are injected')
     expect(preset).toContain('the bundled `member-memory-manager` skill')
     // The plugin's unconfigured default is the whole Team surface: every tool it
     // defines. Neither shipped preset relies on that default — each declares its

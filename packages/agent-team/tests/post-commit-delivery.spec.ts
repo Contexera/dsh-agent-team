@@ -506,6 +506,8 @@ describe('post-commit delivery', () => {
     const updated = state.calls.at(-1)?.content[0]
     expect(updated).toMatchObject({ type: 'text', text: expect.stringContaining('updated what you answer for in Project engineering') })
     expect(updated).toMatchObject({ text: expect.stringContaining('Your ownership is unchanged') })
+    // The responsibility is injected every turn, so the wake steers memory away from a copy of it.
+    expect(updated).toMatchObject({ text: expect.stringContaining('do not copy it into memory.md') })
     expect(updated).not.toMatchObject({ text: expect.stringContaining('removed you as an owner') })
 
     const posted = await ctx.agentTeam.postMainMessage({ requestId: requestId('main-post'), workspaceId: alpha, projectRef: project.project.projectRef,

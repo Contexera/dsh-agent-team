@@ -12,7 +12,7 @@ const index = (text: string): PrivateMemoryState => ({ kind: 'index', raw: Buffe
 
 describe('Team manager private memory context', () => {
   it('renders the index as the manager block with its own paths and framing', () => {
-    const rendered = renderManagerMemory(index('# Team manager memory\n\n## Identity and role\n- Team manager'), { root: ROOT, cwd: CWD })
+    const rendered = renderManagerMemory(index('# Team manager memory\n\n## Durable rules\n- Prefer the reversible option.'), { root: ROOT, cwd: CWD })
     expect(rendered.startsWith('<team-manager-private-memory>')).toBe(true)
     expect(rendered.endsWith('</team-manager-private-memory>')).toBe(true)
     expect(rendered).toContain('# Team manager memory')
@@ -47,11 +47,12 @@ describe('Team manager private memory context', () => {
     expect(rendered.match(/<\/team-manager-private-memory>/g)).toHaveLength(1)
   })
 
-  it('warns and withholds the body past the shared 16 KiB budget', () => {
-    const rendered = renderManagerMemory(index('x'.repeat(PRIVATE_MEMORY_MAX_BYTES + 1)), { root: ROOT, cwd: CWD })
+  it('warns and injects only the head within the shared 16 KiB budget', () => {
+    const rendered = renderManagerMemory(index(`${'x'.repeat(PRIVATE_MEMORY_MAX_BYTES - 1)}\nPAST THE BUDGET\n`), { root: ROOT, cwd: CWD })
     expect(rendered).toContain('exceeds the 16 KiB context budget')
-    expect(rendered).toContain('contents were not injected')
-    expect(rendered).not.toContain('x'.repeat(100))
+    expect(rendered).toContain('read the file for the rest')
+    expect(rendered).toContain('x'.repeat(100))
+    expect(rendered).not.toContain('PAST THE BUDGET')
   })
 
   it('keeps the exact budget boundary eligible and reports the gauge', () => {

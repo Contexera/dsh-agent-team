@@ -364,7 +364,7 @@ function mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: Agen
         ? `@human made you an owner of Project ${project.name} (${project.projectRef}). Owners answer for the Project: start its discussions and Tasks and keep its work moving.`
         : activity.kind === 'owner-removed'
           ? `@human removed you as an owner of Project ${project.name} (${project.projectRef}). You can still take part in it.`
-          : `@human updated what you answer for in Project ${project.name} (${project.projectRef}). Your ownership is unchanged; read the Main stream for the text it now records.`
+          : `@human updated what you answer for in Project ${project.name} (${project.projectRef}). Your ownership is unchanged; read the Main stream for the text it now records. That text reaches your context every turn, so do not copy it into memory.md; remove any memory line it makes stale.`
       return ['Team Project ownership changed', `Occurred at: ${formatTeamTimestamp(entry.occurredAt)}`, activityText(activityFact(activity)), text].join('\n')
     }
     const header = activity.kind === 'subscription-paused' ? 'Team subscription paused' : 'Team subscription update'

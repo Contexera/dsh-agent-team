@@ -203,8 +203,15 @@ describe('Agent Team member-private skills', () => {
     const loaded = await skillRegistryFor(ctx, agent).get('member-memory-manager', { scope: agent as never })
     expect(loaded?.content).toContain('## Three tiers')
     // The craft states the boundary the persona only points at.
-    expect(loaded?.content).toContain('past 16 KiB the index is not injected at all')
+    expect(loaded?.content).toContain('past 16 KiB only its leading lines are injected')
     expect(loaded?.content).toContain('Demote, do not delete')
+    // The index is a cold-start recovery index: triage first, three sections,
+    // and memory treated as a clue rather than live evidence.
+    expect(loaded?.content).toContain('## Where it belongs')
+    expect(loaded?.content).toContain('**Open local state**')
+    expect(loaded?.content).toContain('never copy it into memory')
+    expect(loaded?.content).toContain('## Memory is a clue, not evidence')
+    expect(loaded?.content).not.toContain('identity and role')
   })
 
   it('ships the bundled team-domain-model as stable rules without current state', async () => {

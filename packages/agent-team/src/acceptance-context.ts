@@ -47,7 +47,7 @@ const OPENING: Readonly<Record<AcceptancePerspective, string>> = Object.freeze({
 export function acceptanceReminderText(action: AcceptanceContextAction, perspective: AcceptancePerspective = 'contributor'): string {
   const lines = [
     '<system-reminder>',
-    `${OPENING[perspective]} This is a natural boundary: record what is durable and reusable before moving on. Put the conclusions that will matter again in your private memory.md index, and the detail behind them in the note that index names. Accepted work is not a reason to keep this conversation.`,
+    `${OPENING[perspective]} This is a natural boundary: record what is durable and reusable before moving on. Put the conclusions that will matter again in your private memory.md index, and the detail behind them in the note that index names; remove this Task's entries from Open local state. Accepted work is not a reason to keep this conversation.`,
   ]
   if (action === 'compact') {
     lines.push('', 'This context is over the Team acceptance budget, so it will be compacted once the Agent settles. Anything not written down by then is gone.')

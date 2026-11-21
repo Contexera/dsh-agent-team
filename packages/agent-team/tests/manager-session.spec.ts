@@ -247,7 +247,11 @@ describe('Team manager Session Host runtime', () => {
     expect(ctx.agentPresets.composedPreset(agent!.ctx)).toBe('team-manager')
     expect(ctx.sessionTitle.get(agent!.session)?.title).toBe('团队管理')
     expect(agent!.session.ownEvents().filter(event => event.type === 'sandbox/mode')).toHaveLength(1)
-    expect(await readFile(join(root, 'manager-private', 'memory.md'), 'utf8')).toContain('# Team manager memory')
+    const scaffold = await readFile(join(root, 'manager-private', 'memory.md'), 'utf8')
+    expect(scaffold).toContain('# Team manager memory')
+    // The same recovery-index sections a Member's scaffold carries.
+    for (const section of ['## Durable rules', '## On-demand notes', '## Open local state']) expect(scaffold).toContain(section)
+    expect(scaffold).not.toContain('## In hand')
     await runtime.dispose()
   })
 

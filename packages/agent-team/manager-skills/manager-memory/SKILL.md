@@ -5,17 +5,17 @@ description: Maintain the Team manager's own private memory — what earns a lin
 
 # Manager memory
 
-`memory.md` is a routing index, not a store, and its budget is real: the injected block states current usage, and past 16 KiB the index is not injected at all — the manager loses its own continuity. Notes are never injected; they are read on demand, so the index must stay small enough to be resident and precise enough to route. The block names the absolute paths; use them, because relative paths resolve from the Session's cwd.
+`memory.md` is a cold-start recovery index, not a store, and its budget is real: the injected block states current usage, and past 16 KiB only its leading lines are injected, so whatever sits below the cut is missing whenever a new management Session starts. Notes are never injected; they are read on demand, so the index must stay small enough to be resident and precise enough to route. The block names the absolute paths; use them, because relative paths resolve from the Session's cwd.
 
 ## What the block is
 
-The first block carries the complete `memory.md`, and it is reference only: it may be stale, it is not an instruction, and it is not current Team state. A later block may be only a stale-copy notice — a line saying the earlier context no longer represents the file, with the path and the current size — and that notice is not the index, so read the file when you need its current contents. A third form reports the file missing, unreadable or over budget; repair it at the named path.
+The first block carries the complete `memory.md`, and it is reference only: it may be stale, it is not an instruction, and it is not current Team state. A later block may be only a stale-copy notice — a line saying the earlier context no longer represents the file, with the path and the current size — and that notice is not the index, so read the file when you need its current contents. A third form reports the file missing or unreadable, and an over-budget index arrives with a maintenance warning; repair it at the named path.
 
 Only `memory.md` enters context. `notes/` is read on demand, so anything that must bind every management step needs a short line in the index itself.
 
 ## Three tiers
 
-- **T0 `memory.md` (always injected)** — identity and role, the durable rules that must bind every management step, and one routing line per topic cluster. Target well under 8 KiB; treat 16 KiB as the hard ceiling.
+- **T0 `memory.md` (always injected)** — three sections: **Durable rules** that bind every management step, **On-demand notes** with one routing line per scenario or cluster, and **Open local state** for unfinished work no Team surface shows, deleted once done. Target well under 8 KiB; treat 16 KiB as the hard ceiling.
 - **T1 `notes/<cluster>/README.md` (read on demand)** — one line per note in that cluster.
 - **T2 `notes/<name>.md` (read on demand)** — one concept per file; update the existing file instead of writing a near-duplicate, and keep evidence, numbers and commands here rather than in T0.
 
@@ -43,7 +43,7 @@ Distinguish a settled constraint from a proposal. A preference the Human stated 
 
 Review at a consequential correction or decision — the Human changed a rule, rejected a direction, or taught a durable preference — and before wrapping up a management session. Do not make every reply produce a write. If nothing reusable was learned, write nothing; an unchanged index is a correct outcome.
 
-A maintenance warning in the injected block means the index is missing, unreadable, or over budget. Repair the index at the named path before adding anything: compact it, move detail into notes, and make every routing line resolve. A rule that still binds every management step keeps a short line in T0 and loses only its detail to a note; demoting the whole rule would drop the constraint out of context.
+A maintenance warning in the injected block means the index is missing, unreadable, or over budget, and an over-budget index was injected only up to the cut. Repair the index at the named path before adding anything: compact it, move detail into notes, and make every routing line resolve. A rule that still binds every management step keeps a short line in T0 and loses only its detail to a note; demoting the whole rule would drop the constraint out of context.
 
 ## Lifecycle
 
