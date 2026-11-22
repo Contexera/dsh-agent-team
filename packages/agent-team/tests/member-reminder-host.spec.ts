@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
@@ -30,6 +30,43 @@ async function idleMember(tag: string) {
 }
 
 describe('a Member reminder reaches its own Member and is consumed when it does', () => {
+  it.each(['replacement', 'suspension'] as const)('forgets a removed reminder wake after expected %s without consuming its occurrence', async removal => {
+    const { ctx, workspaceId, memberId, agent } = await idleMember(`expected-${removal}`)
+    const team = ctx.agentTeam
+    const steer = vi.spyOn(agent, 'steer').mockImplementation(message => { agent.inbox.append('next-turn', message) })
+    try {
+      const reminderRef = `reminder:expected-${removal}` as AgentTeamReminderRef
+      await team.createMemberReminderForAgent(agent, { requestId: requestId('expected-first'), workspaceId, reminderRef,
+        schedule: { kind: 'once', at: new Date(Date.now() - 60_000).toISOString() }, note: 'Review the CI run' })
+      const first = (await waitFor(() => agent.inbox.nextTurn.find(message => team['memberReminderWakes'].has(message.id))))!
+      expect(team['pendingTeamWakes'].has(first.id)).toBe(true)
+      expect(team['memberReminderWakes'].get(first.id)?.reminders).toHaveLength(1)
+
+      if (removal === 'replacement') {
+        await team.createMemberReminderForAgent(agent, { requestId: requestId('expected-second'), workspaceId,
+          reminderRef: 'reminder:expected-replacement-second' as AgentTeamReminderRef,
+          schedule: { kind: 'once', at: new Date(Date.now() - 60_000).toISOString() }, note: 'Review the build' })
+        const successor = (await waitFor(() => agent.inbox.nextTurn.find(message => message.id !== first.id)))!
+        expect(team['pendingTeamWakes'].has(successor.id)).toBe(true)
+        expect(team['memberReminderWakes'].get(successor.id)?.reminders).toHaveLength(2)
+        expect(team.members().find(status => status.member.memberId === memberId)?.diagnostic).toBeUndefined()
+      } else {
+        await team.suspendMember({ requestId: requestId('expected-suspend'), memberId })
+        expect(agent.inbox.nextTurn).toHaveLength(0)
+        expect(team.members().find(status => status.member.memberId === memberId)?.availability).toBe('suspended')
+      }
+
+      const reminders = team.memberRemindersForClient({ requestId: requestId('expected-read'), workspaceId, memberId })
+      expect(reminders).toHaveLength(removal === 'replacement' ? 2 : 1)
+      expect(reminders.every(view => view.pendingOccurrenceAt !== undefined)).toBe(true)
+      expect(team['memberReminderWakes'].has(first.id)).toBe(false)
+      expect(team['expectedInboxDiscards'].has(first.id)).toBe(false)
+      expect(team['pendingTeamWakes'].has(first.id)).toBe(false)
+    } finally {
+      steer.mockRestore()
+    }
+  })
+
   it('wakes the idle Member with a private notice and records the occurrence consumed once it enters a turn', async () => {
     const { adapter, ctx, workspaceId, memberId, agent } = await idleMember('reminder-wake')
     const reminderRef = 'reminder:host-wake' as AgentTeamReminderRef

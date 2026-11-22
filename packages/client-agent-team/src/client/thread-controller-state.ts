@@ -40,12 +40,12 @@ function useSynchronousState<T>(initial: T) {
       setValue(next)
     }
   }, [])
-  return [value, set, ref, setValue] as const
+  return [value, set, ref] as const
 }
 
 export function useThreadControllerState(options: TeamThreadControllerOptions) {
   const { threadRef, drafts } = options
-  const [projection, setProjection, projectionRef, setProjectionState] = useSynchronousState<AgentTeamThreadReadResult | undefined>(undefined)
+  const [projection, setProjection, projectionRef] = useSynchronousState<AgentTeamThreadReadResult | undefined>(undefined)
   const [currentFacts, setCurrentFacts, currentFactsRef] = useSynchronousState<readonly AgentTeamThreadFact[]>([])
   const [taskCards, setTaskCards] = useState<readonly AgentTeamThreadTaskCard[]>([])
   const [olderFacts, setOlderFacts] = useState<readonly AgentTeamThreadFact[]>([])
@@ -114,7 +114,7 @@ export function useThreadControllerState(options: TeamThreadControllerOptions) {
 
   return {
     lifetime: { activeGenerationRef, mutationRequests, writes, uploads, isCurrentOpen, draftKey },
-    facts: { projection, setProjection, projectionRef, setProjectionState, currentFacts, setCurrentFacts, currentFactsRef, taskCards, setTaskCards, readFacts, setReadFacts, workerStates, setWorkerStates, mergeWorkerStates, updateProjection },
+    facts: { projection, setProjection, projectionRef, currentFacts, setCurrentFacts, currentFactsRef, taskCards, setTaskCards, readFacts, setReadFacts, workerStates, setWorkerStates, mergeWorkerStates, updateProjection },
     history: { olderFacts, setOlderFacts, historyCursor, setHistoryCursor, historyHasMore, setHistoryHasMore },
     feedback: { loading, setLoading, error, setError, pendingAction, setPendingAction, autoReadExhausted, setAutoReadExhausted, newFactsCount, setNewFactsCount },
     followers: { followerObservation, setFollowerObservation, followerReadSequenceRef, followerReadFloorRef, followerAppliedSequenceRef },

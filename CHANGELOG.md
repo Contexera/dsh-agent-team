@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+**Fixed**
+
+- A fresh Thread reply uses the revision returned by the previous committed reply or Task action, even before another read succeeds. This applies to both the Task page and discussion panel; uncertain retries still replay their original request.
+
 ## [0.2.9] - 2026-11-22
 
 **Added**

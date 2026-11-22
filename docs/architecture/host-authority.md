@@ -510,3 +510,32 @@ The footnote carries the version of the bundle this Host runs from — read from
 The check reads the public npm `latest` document in the background at most every 12 hours. A successful check replaces the previous result; a failure keeps it. `DSH_AGENT_TEAM_UPDATE_CHECK=0` stops new outbound checks. It does not hide the last confirmed result or cancel a check already in flight.
 
 The ledger reads the same profile for `team_view` and @ matching, so a rename reaches every surface at once. `human` stays a permanent alias for the Human and no agent handle may claim the literal, so `@human` keeps delivering across renames while chips render the current display name.
+
+## Replay and Inbox sequencing
+
+### Replay execution order
+
+1. `replayLocked` re-reads the live subscription with `runTarget` after admission, rather than running the queued snapshot.
+2. An existing request id with another delivery or version is rejected before any script execution.
+3. A settled intent returns its stored answer; its delivery must still exist and be unexpired.
+4. A running intent never reruns: ledger-accepted output repairs its answer; without acceptance it reports an unfinished attempt.
+5. A fresh request requires an unexpired delivery and rejects prior success found in a tombstone, replay answer, or running intent with ledger acceptance.
+6. The running intent is recorded before choosing the source or running the script; a failed intent write prevents execution.
+7. `current` uses the live definition; `received` substitutes the delivery's revision, script, and credentials.
+8. A run dropped after terminal state reports nothing delivered; accepted or empty output otherwise counts as success before settlement.
+9. Settlement writes the answer before the tombstone under the subscription write lock; storage faults log without hiding delivered output.
+10. If deletion wins settlement, ledger-accepted output is still reported as delivered; any other outcome reports nothing delivered.
+
+### Inbox delivery order
+
+1. `deliverInboxNotice` reads one durable notification snapshot, including Thread, Main, reminder, and Worker material.
+2. No unread Thread, Main, or reminder material drops coverage and returns without creating a notice.
+3. Already-queued ordinary next-turn input forces followup, preventing a steer from leapfrogging carried input.
+4. An unchanged covered fact set returns before queue mutation or attempt accounting.
+5. A pending recovery notice stays in place; newly arriving facts remain uncovered.
+6. An old Inbox notice is removed before rendering and tracking its replacement.
+7. The replacement message tracks only its rendered reminder occurrences; they are consumed on claim, not enqueue.
+8. Coverage records rendered facts, not all offered facts; omitted Threads and reminders remain owed.
+9. The attempt is counted before calling followup or steer.
+10. A followup or steer failure drops coverage but keeps the attempt count; invariant failures are then rethrown.
+11. Notice delivery does not roll back ledger commits; ordinary delivery failures log and leave durable unread facts recoverable.

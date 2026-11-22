@@ -28,7 +28,7 @@ export function useThreadWritePhase({
   const { workspaceId, threadRef, drafts, reply, putAttachment, t } = options
   const { readCurrent, drainUnread, refreshPassiveFacts } = reads
   const { activeGenerationRef, mutationRequests, writes, uploads, isCurrentOpen, draftKey } = lifetime
-  const { setProjectionState, projectionRef, setCurrentFacts } = facts
+  const { setProjection, projectionRef, setCurrentFacts } = facts
   const { replyTarget, pendingFiles, clearReplySelection } = composer
   const { timeline } = viewport
   const { setError, setPendingAction } = feedback
@@ -89,8 +89,7 @@ export function useThreadWritePhase({
   const applyTaskCommit = async (committed: CommittedTaskWrite): Promise<void> => {
     const generation = activeGenerationRef.current
     if (generation === undefined) return
-    // Keep the ref at the last read snapshot; a committed write updates only the rendered projection.
-    setProjectionState(current => current === undefined ? current
+    setProjection(current => current === undefined ? current
       : { ...current, task: committed.task, thread: committed.thread, ...(committed.claims === undefined ? {} : { claims: committed.claims }) })
     setCurrentFacts(current => mergeFacts(current, [{ kind: 'activity', sequence: committed.activity.sequence, activity: committed.activity, occurredAt: committed.receipt.occurredAt }]))
     await readCurrent(true)
@@ -123,8 +122,7 @@ export function useThreadWritePhase({
         // Hand-typed `@Handle` delivers directly; committed facts replace this row on arrival.
         const optimisticMentions = mentionedMemberIds(draft, options.workspaceMembers())
         setCurrentFacts(current => mergeFacts(current, [{ kind: 'message', sequence: committed.message.sequence, message: committed.message, mentions: optimisticMentions, occurredAt: committed.receipt.occurredAt }]))
-        // Keep the ref at the last read snapshot, as for committed Task writes.
-        setProjectionState(current => current === undefined || committed.thread.revision < current.thread.revision
+        setProjection(current => current === undefined || committed.thread.revision < current.thread.revision
           ? current
           : { ...current, ...(committed.task === undefined ? {} : { task: committed.task }), thread: committed.thread })
         if (settled.clearedDraft && drafts.getSnapshot(draftKey).draft === '') clearReplySelection()
