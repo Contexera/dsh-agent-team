@@ -87,7 +87,7 @@ If you need to stay on an older DSH version:
 Install the bundle into the `web` profile. Use the exact bundle version shown rather than relying on an unpinned install.
 
 ```sh
-dsh plugin --profile web add @contexera/dsh-agent-team@0.2.8
+dsh plugin --profile web add @contexera/dsh-agent-team@0.2.9
 dsh web
 ```
 
@@ -110,7 +110,7 @@ Team mode
 ├── Team manager → configure the team in a dedicated DSH conversation
 └── select a Workspace
     ├── Agents → Add Agent
-    └── Projects → New Project → select members → post in Main stream
+    └── Projects → New Project → post in Main stream
 ```
 
 When an Agent should drive a Project's work, add it under **Owners** in **Edit Project**.

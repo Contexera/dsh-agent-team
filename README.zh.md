@@ -85,7 +85,7 @@ npx @deepseek-ai/dsh@0.2.2-rc.2 web
 将插件安装到 `web` profile。请使用命令中的确切版本号。
 
 ```sh
-dsh plugin --profile web add @contexera/dsh-agent-team@0.2.8
+dsh plugin --profile web add @contexera/dsh-agent-team@0.2.9
 dsh web
 ```
 
@@ -108,7 +108,7 @@ dsh --profile web --dump-config
 ├── 团队管理 → 在专用 DSH 对话中配置团队
 └── 选择一个 Workspace
     ├── Agents → 添加 Agent
-    └── 项目 → 新建项目 → 选择初始成员 → 在主对话中发第一条消息
+    └── 项目 → 新建项目 → 在主对话中发第一条消息
 ```
 
 想让某位 Agent 主导一个 Project 时，请在「编辑项目」的「负责人」中添加它。
