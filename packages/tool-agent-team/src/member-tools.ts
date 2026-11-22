@@ -1,4 +1,5 @@
 import type AgentTeam from '@contexera/dsh-agent-team/host'
+import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamDmDeliveryError, markAgentTeamPreset, reminderRefForCallId } from '@contexera/dsh-agent-team/host'
 import { projectRefOf, service, workspaceOf, workspaceParam } from './host-access.ts'
 import { memberTarget } from './member-target.ts'
@@ -30,6 +31,13 @@ const CREATE_ONLY_REMINDER_CONTENT_KEYS = ['at', 'minutes', 'expression', 'note'
 function refuseNonDefaultScheduleKind(action: 'cancel' | 'list', scheduleKind: string | undefined): void {
   if (scheduleKind === undefined || scheduleKind === 'once') return
   throw new Error(recoveryFor('action_only_arguments').sentence({ action, parameter: 'scheduleKind', owner: 'create' }))
+}
+
+/** The Task ordinal a Thread answer carries when it has one. */
+function taskNumberOf(host: AgentTeam, workspaceId: WorkspaceId, task: { taskRef: AgentTeamTaskRef } | undefined): { taskNumber?: number } {
+  if (task === undefined) return {}
+  const resolved = host.resolveTaskRefs({ workspaceId, taskRefs: [task.taskRef] }).resolved[0]
+  return resolved === undefined ? {} : { taskNumber: resolved.taskNumber }
 }
 
 export const teamInbox = defineTool({
@@ -93,22 +101,17 @@ export const teamAttention = defineTool({
       return mainAttentionResult(args.action, base.workspaceId, result.project.projectRef, result.attention !== undefined, result.attention?.source)
     }
     const base = { workspaceId: workspaceOf(args, agent), ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as AgentTeamThreadRef }), ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as AgentTeamTaskRef }) }
-    const taskNumberOf = (task: { taskRef: AgentTeamTaskRef } | undefined): { taskNumber?: number } => {
-      if (task === undefined) return {}
-      const resolved = host.resolveTaskRefs({ workspaceId: base.workspaceId, taskRefs: [task.taskRef] }).resolved[0]
-      return resolved === undefined ? {} : { taskNumber: resolved.taskNumber }
-    }
     if (args.action === 'status') {
       const status = host.attentionStatusForAgent(agent, base)
       const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
-      return attentionResult('status', base.workspaceId, snapshot, status.attention, taskNumberOf(snapshot.task))
+      return attentionResult('status', base.workspaceId, snapshot, status.attention, taskNumberOf(host, base.workspaceId, snapshot.task))
     }
     const result = await host.changeAttentionForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action })
     const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
     // A Thread request can only answer with the Thread face; the Main stream
     // face is reached through projectRef above.
     if (!('thread' in result)) throw new Error('expected a Thread Attention result')
-    return attentionResult(args.action, base.workspaceId, snapshot, result.attention, taskNumberOf(snapshot.task))
+    return attentionResult(args.action, base.workspaceId, snapshot, result.attention, taskNumberOf(host, base.workspaceId, snapshot.task))
   },
 })
 
@@ -158,11 +161,6 @@ export const teamThread = defineTool({
     if (args.projectRef !== undefined) return mainStreamOutcome(host, agent, args, requestId(agent.id, exec.callId), capacity)
     if (args.threadRef === undefined && args.taskRef === undefined) throw new Error(`team_thread needs threadRef (or taskRef on a Taskful Thread) — ${recoveryFor('missing_thread_identity').sentence({})}`)
     const base = { workspaceId: workspaceOf(args, agent), ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as AgentTeamThreadRef }), ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as AgentTeamTaskRef }) }
-    const taskNumberOf = (task: { taskRef: AgentTeamTaskRef } | undefined): { taskNumber?: number } => {
-      if (task === undefined) return {}
-      const resolved = host.resolveTaskRefs({ workspaceId: base.workspaceId, taskRefs: [task.taskRef] }).resolved[0]
-      return resolved === undefined ? {} : { taskNumber: resolved.taskNumber }
-    }
     // The shared schema can't enforce action-specific fields; ignoring messageRef could return the whole Thread instead.
     if (args.action !== 'message' && args.messageRef !== undefined) {
       throw new Error(recoveryFor('action_only_arguments').sentence({ action: args.action, parameter: 'messageRef', owner: 'message' }))
@@ -172,7 +170,7 @@ export const teamThread = defineTool({
       const status = host.attentionStatusForAgent(agent, base)
       return threadResult('history', base.workspaceId, history, status.attention, history.facts.map(fact => fact.kind === 'message'
           ? { sequence: fact.sequence, kind: 'message', messageRef: fact.message.messageRef, body: fact.message.body, sender: fact.message.sender, mentions: [...fact.mentions], ...(fact.message.replyToMessageRef === undefined ? {} : { replyToMessageRef: fact.message.replyToMessageRef }), ...(fact.replyTo === undefined ? {} : { replyTo: fact.replyTo }), occurredAt: fact.occurredAt }
-          : activityFactView(fact.activity, undefined, fact.occurredAt)), { cursor: history.cursor, hasMore: history.hasMore, taskCards: (history.taskCards ?? []).map(taskCardView), ...taskNumberOf(history.task) })
+          : activityFactView(fact.activity, undefined, fact.occurredAt)), { cursor: history.cursor, hasMore: history.hasMore, taskCards: (history.taskCards ?? []).map(taskCardView), ...taskNumberOf(host, base.workspaceId, history.task) })
     }
     if (args.action === 'message') {
       if (args.messageRef === undefined) throw new Error(recoveryFor('missing_message_ref').sentence({ refused: 'for action message' }))
@@ -188,7 +186,7 @@ export const teamThread = defineTool({
       const status = host.attentionStatusForAgent(agent, base)
       const value = threadResult('message', base.workspaceId, snapshot, status.attention, [], {
         message: { messageRef: readBack.messageRef, sender: readBack.sender, sequence: readBack.sequence, ...(readBack.occurredAt === undefined ? {} : { occurredAt: readBack.occurredAt }), body: readBack.body, bodyOmitted: false },
-        ...taskNumberOf(snapshot.task),
+        ...taskNumberOf(host, base.workspaceId, snapshot.task),
       })
       return budgetReading(agent, value, (candidate): string => teamThread.output.render(args, candidate as never).map((part: { type: string; text?: string }) => part.type === 'text' ? part.text : '').join('\n'), capacity).value
     }
@@ -203,7 +201,7 @@ export const teamThread = defineTool({
         entry.fact.kind === 'message' && read.visibleMessageRefs.includes(entry.fact.message.messageRef),
         entry.fact.kind === 'activity' && read.visibleActivityRefs.includes(entry.fact.activity.activityRef))), {
         readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, reminders: [...read.reminders],
-        ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), taskCards: cards, ...taskNumberOf(read.task) })
+        ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), taskCards: cards, ...taskNumberOf(host, base.workspaceId, read.task) })
     }
     let selected: ReturnType<typeof view> | undefined
     // The Host advances only through facts that fit the same render we'll return to the model.

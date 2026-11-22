@@ -1362,16 +1362,7 @@ export class WorkerRegistry {
    * live immediately, then the durable fact. A failed write leaves the record
    * `running`, which is exactly what a later read reports as unconfirmed.
    */
-  private settle(entry: RunEntry, state: Exclude<AgentTeamWorkerRun['state'], 'running' | 'unconfirmed'>, facts: {
-    readonly nativeSessionId?: string | undefined
-    readonly nativeTurnId?: string | undefined
-    readonly nativeTurnIds?: readonly string[] | undefined
-    readonly nativeInputIds?: readonly string[] | undefined
-    readonly nativeStorage?: string | undefined
-    readonly stage?: AgentTeamWorkerStage | undefined
-    readonly output?: string | undefined
-    readonly diagnostic?: string | undefined
-  }): Promise<void> | undefined {
+  private settle(entry: RunEntry, state: Exclude<AgentTeamWorkerRun['state'], 'running' | 'unconfirmed'>, facts: Omit<AgentTeamWorkerSettlement, 'workerRef' | 'state' | 'settledAt'>): Promise<void> | undefined {
     if (entry.sealed) {
       entry.terminated.resolve()
       return undefined

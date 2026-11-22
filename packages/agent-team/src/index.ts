@@ -73,7 +73,7 @@ import { ManagerSessionStore, managerSessionDomainSpec } from './manager-session
 import { MANAGER_BUNDLED_SKILLS_DIRECTORY, ManagerSessionRuntime } from './manager-session.ts'
 import type { ManagerPrivateMemory } from './manager-context.ts'
 import { workspaceRulesFile, type WorkspaceRulesScope } from './workspace-rules-context.ts'
-import { MANAGER_SESSION_PRESET_ID, MEMBER_SESSION_PRESET_ID } from './manager-tool-policy.ts'
+import { MEMBER_SESSION_PRESET_ID } from './manager-tool-policy.ts'
 import { INITIAL_CHECKPOINT, SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
 import { baselineIdsOf, failureCategory, failureTail, missingCredentials, probeShellFamily, runSubscriptionScript, type ShellFamilyProbe, type SubscriptionCredentials, type SubscriptionRunCategory, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
 import { deliveryEntryOf, deliveryKey, deliveryKeysOf, deliveryRecordOf, evictedDeliveries, evictedRunKeys, failedDeliveries, replayKey, replayKeysOf, runRecordOf, runSummaryOf, subscriptionRunKey, subscriptionRunKeysOf, SUBSCRIPTION_DELIVERY_LIMIT, SUBSCRIPTION_RUN_HISTORY_LIMIT, type SubscriptionDeliveryInput, type SubscriptionDeliveryRecord, type SubscriptionReplayRecord, type SubscriptionRunRecord, type SubscriptionRunTrigger } from './subscription-runs.ts'
