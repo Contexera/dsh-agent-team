@@ -16,13 +16,13 @@
 - Agent 的 Thread 与 Main stream read 在 ledger 结果上增加[按上下文调整的呈现](../team-collaboration/tools.zh.md#team_thread)：缺失的近期 Message 背景与已可见正文的省略说明。工具按输出上限选出能渲染的前缀，Thread receipt 以 `selectedThroughSequence` 记录这个界限，旧 receipt 仍按缺省 batch 解释；Host 只提交该前缀。Human read、Remote 参数与 replay 语义均不变，重放不依赖 Session。
 - mutation 进入 Host authority，并提交一条 durable operation。
 - 重放会重算每条记录应有的 Inbox delta 并逐项比较，所以改变既有 kind 校验规则的版本要先写一条 `team/rules-version-adopted`（Host actor，`{ version }`）。每条记录按它之前最新的标记校验；没有标记的 ledger 为版本 1。标记由 `initialize` 在它自己排队的提交里追加，因此早于之后的所有写入，包括启动恢复。标记只升不降，每个版本至多一条；ledger 采用的版本高于本构建实现的版本时拒绝打开。
-- 当前构建实现版本 9。打开旧 ledger 时只追加一次版本 9 标记；全新 ledger 在 `team/initialized` 之后立即写入，已经处于版本 9 时不再追加。下面关于版本 2 规则的内容仍只描述各自的记录段，而不是当前标记。
+- 当前构建实现版本 10。挂载时若 ledger 的最新标记低于它，只追加一次版本 10 标记；全新 ledger 在 `team/initialized` 之后立即写入该标记，已经处于版本 10 的 ledger 重新打开不会再写。下面关于版本 2 规则的内容仍只描述各自的记录段，而不是当前标记。
+- 版本 10 改变 `team/thread-started` 与 `team/thread-promoted` 对 Task accountable 的校验：任何 transfer 接受的目标都合法。更早的记录段仍要求 Agent 创建者本人、Human start 的 enabled owner 或 Human、promotion 的 promoter，并按各自规则逐字节重放；只实现到版本 9 的 build 会停在版本 10 标记处。
 - 版本 9 以 Workspace 参与关系取代 Project 成员关系门槛：enabled Member 可以写入，suspended Member 仍可读取，inactive 或 archived Member 不可读取。新 Project 不保存成员关系列表，旧记录段继续遵循原规则。ownership 仍是独立权限。
 - 版本 8 新增 `team/project-owner-responsibility-updated`，并给 `team/project-owner-added` 增加可选的 `responsibility`。两者在版本 8 以下的记录段内都被拒绝，因此更早的构建写下的 ledger 仍逐字节重放，其 owner 记录继续读作未说明；只实现到版本 7 的 build 会在解析这两种形状之前先被版本 8 标记拒绝。所以升级不需要数据迁移——由标记本身决定哪些记录段可以携带新字段。
 - 规则版本 2 起，Host 还会提交 `team/main-message-posted`、`team/main-stream-read` 和 `team/thread-started`，它们在版本 1 的记录段内会被拒绝，而 `team/message-sent` 在版本 2 的记录段内被拒绝。Host 不再写 `team/message-sent`（开 Thread 用 `startThread`），它只在版本 1 的记录段内重放。
-- 版本 2 记录段内出现 `team/message-sent` 就会被拒绝，带有这种组合的 preview ledger 也不例外。
+- 版本 2 记录段内出现 `team/message-sent` 就会被拒绝，带有这种组合的 preview ledger 也不例外；决定重放的是标记与 operation kind，不是 release 标签。
 
-> TODO: 使用版本标签诊断文件前，先核实历史 0.2.5 preview 的来源；决定重放的是标记与 operation kind，不是 release 标签。
 ### Inbox 增量与回复引用
 
 - inbox delta 可带可选的 `mainMarkers` 列表，使用独立的 marker 形状（`projectRef` 加 `messageRef` 或 `activityRef`）。它只在确有变化时出现，所以版本 1 的记录保持存储字节不变；离开的 Member 的 Main stream marker 随同一 operation 与其他 inbox 状态一起清除。
@@ -146,6 +146,7 @@ carried-input 重放有界，且以 message id 为准。换代在 commit 时记�
 
 ## 私有记忆、归档与身份效应
 - Member preset 根据当前 Host facts 与当前 Session surface 派生身份、Project ownership、Workspace 参与及私有记忆上下文。分类和记忆更新规则见 [Member 上下文注入](../team-collaboration/memory-and-context.zh.md#member-上下文注入)，不建立第二份持久状态。
+- `workspaceRulesForAgent` 决定 Member 或当前 manager 读取哪些 [Workspace 规则](../team-collaboration/memory-and-context.zh.md#workspace-规则) 文件；这些文件归 Team 所有，不是账本事实，Host 只读取它们。
 - `$DSH_HOME/agent-team/members/` 下的 private-memory directories 是 Member identity 的 Host-owned effects，不是第二权威。Member activation 确保 private-memory directory、`notes/` 和缺失的 `memory.md` 存在。startup 不会清理 ledger 不知道的 `member:` directories。显式 Member removal 会归档这个 Member 的 Session，并移除这个 Member 的 private-memory directory。Team removal path 之外的 entries 保持不动。
 - 这项删除，以及 activation 时对旧式 colon 目录的改名，都限定在当前进程自己的 members root 之内。记录里的 `privateMemoryPath` 是一条 durable 绝对事实，指向「当初添加这个 Member 的那个 DSH home」里的目录。因此解析到另一个 home 的进程会拒绝搬移或删除这个目录（并告警），而不是把 Member 的真实私有记忆搬出 Member 自己的 home。
 - 归档隐藏 Member 或 Project，但保留完整事实，不等于 remove。目前没有 restore 入口。`archiveMember` 提交 `team/member-archived`。dispose live session，私有 memory 与 Session log 留在磁盘，并把 Session 从分组 surface 归档。`archiveMember` 再以公开 `claims_released` Activity 加上 Attention/marker 清理，释放这个 Member 的 active Claims。被隐藏的 Member 不得让 Task 卡在 in progress，也不得留下幻影 unread 计数。`archiveProject` 提交 `team/project-archived`，对 Project 上所有 Thread 的 owner 施加同样的释放形态。两种归档形态下，更早规则版本派生的 Project 成员关系都作为已存事实保留（隐藏态，非退出）。

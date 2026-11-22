@@ -44,6 +44,12 @@ describe('the acceptance context boundary', () => {
     expect(acceptanceReminderText('remind', 'accountable')).toContain('A Task you were accountable for was accepted.')
   })
 
+  it('asks the reader to clear the accepted Task from its open local state', () => {
+    for (const perspective of ['contributor', 'verifier', 'accountable'] as const) {
+      expect(acceptanceReminderText('remind', perspective)).toContain("remove this Task's entries from Open local state")
+    }
+  })
+
   it('keeps the compaction clause for every standing', () => {
     for (const perspective of ['contributor', 'verifier', 'accountable'] as const) {
       expect(acceptanceReminderText('remind', perspective)).not.toContain('compacted')

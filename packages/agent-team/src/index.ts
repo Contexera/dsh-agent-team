@@ -72,6 +72,7 @@ import { subscriptionDomainSpec } from './subscription-store.ts'
 import { ManagerSessionStore, managerSessionDomainSpec } from './manager-session-store.ts'
 import { MANAGER_BUNDLED_SKILLS_DIRECTORY, ManagerSessionRuntime } from './manager-session.ts'
 import type { ManagerPrivateMemory } from './manager-context.ts'
+import { workspaceRulesFile, type WorkspaceRulesScope } from './workspace-rules-context.ts'
 import { MANAGER_SESSION_PRESET_ID, MEMBER_SESSION_PRESET_ID } from './manager-tool-policy.ts'
 import { INITIAL_CHECKPOINT, SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
 import { baselineIdsOf, failureCategory, failureTail, missingCredentials, probeShellFamily, runSubscriptionScript, type ShellFamilyProbe, type SubscriptionCredentials, type SubscriptionRunCategory, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
@@ -1588,6 +1589,28 @@ export default class AgentTeam extends TypertRemoteService {
   managerMemoryForAgent(agent: Agent): ManagerPrivateMemory | undefined {
     if (this.managerRuntime === undefined || !this.managerRuntime.isCurrentManagerAgent(agent)) return undefined
     return Object.freeze({ root: dshHomePath('agent-team', 'manager'), cwd: agent.session.header.cwd })
+  }
+
+  /**
+   * Which Workspace rules files this Agent reads, or `undefined` for an
+   * ordinary Session or fork. A Member reads the Workspaces it participates in
+   * now; the manager, which curates them, reads every registered Workspace.
+   * The paths are the Host's own: no caller names a Workspace or a file.
+   */
+  workspaceRulesForAgent(agent: Agent): WorkspaceRulesScope | undefined {
+    const home = dshHomePath('agent-team')
+    const target = (workspaceId: WorkspaceId) => Object.freeze({
+      workspaceId,
+      title: this.ctx.workspaceRegistry.get(workspaceId)?.title,
+      file: workspaceRulesFile(home, workspaceId),
+    })
+    if (this.managerRuntime?.isCurrentManagerAgent(agent) === true) {
+      const ids = this.ctx.workspaceRegistry.list().map(workspace => workspace.id).sort()
+      return Object.freeze({ reader: 'manager', workspaces: Object.freeze(ids.map(target)) })
+    }
+    const member = this.memberForAgent(agent)
+    if (member === undefined) return undefined
+    return Object.freeze({ reader: 'member', workspaces: Object.freeze(this.requireLedger().workspacesOf(member.memberId).map(target)) })
   }
 
   members(): readonly AgentTeamAgentMemberStatus[] {

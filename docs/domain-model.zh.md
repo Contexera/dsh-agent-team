@@ -44,6 +44,10 @@ steer 是送进同一原生会话的输入。执行运行期间，OAR 可以把�
 
 共享工作目录与授权域。Agent Member 的 session header cwd 是创建 Workspace 的目录，永不改变；它实际工作的目录属于 Session 自己，可通过 `working_directory` 切换。Member 私有记忆不存放在 Workspace 目录中。
 
+## Workspace Rules
+
+每个 Workspace 一份 Team 自有的文件，放在所有仓库之外，只装这支 Team 在那里共享的约定。它注入给该 Workspace 的每个参与 Member，以及作为主编的 team manager；它低于仓库的 `AGENTS.md`，也不是 Team 事实。注入规则见 [记忆与上下文](team-collaboration/memory-and-context.zh.md#workspace-规则)。
+
 ## Project
 
 Workspace 内的持久协作场所。规则版本 9 下，Project 只保留两种自己的关系——owner 和 follow——其余都来自 Workspace：参与该 Project 所在 Workspace 的 Member 即可读取其内容，enabled 的即可写入，无论它是否曾在该 Project 出现。不存在需要加入或授予的成员关系。Human Member 可以查看 Workspace 内全部 Project。
@@ -86,7 +90,9 @@ Member 在 Project 或已有 Thread 中显式发出的不可变内容。Thread �
 
 贴在既有 Thread 上的一层可选 work-tracking overlay——Thread 不靠它存在。它可由顶层 Message 的显式「作为任务」意图创建，或由 Human promotion 追加。promotion 同时追加一条公开说明 Message。Task 的工作状态从 Claims 派生，验收与关闭是显式事实。面向 Human 的 `Task #N` 是 Task 在 home Project 内的 durable 创建序号；taskful 顶层发送和后续 promotion 均参与排序，taskless anchor 的原始位置不参与。它不是稳定身份；跨 Project 导航和持久引用必须使用 branded `taskRef`。
 
-每个 Task 有一个 accountable Member 负责推进。Task 起步时归 Project owner：Agent owner 创建时默认成为 accountable，Human 也可在 enabled Project owners 与 Human 之间指定；此后 transfer 可以把责任交给任意 enabled 且参与该 Workspace 的 Member——规则版本 9 之前为任意 enabled Project member。执行由 Claim 承担，accountable 不等于执行者。`sourceThreadRefs` 不可变地指向同一 Project 的无 Task 来源讨论；有来源的 Task 在讨论中显示当前状态的只读卡片，不进入 Main stream。
+每个 Task 有一个 accountable Member 负责推进。创建者默认是 accountable，除非 start 或 promotion 另行指定：规则版本 10 下可指定任何 transfer 接受的目标。此前 Agent 只能指定自己，Human start 可指定 enabled Project owner 或 Human 自己，promotion 则记录为 promoter。此后 transfer 可以继续转交。
+
+执行由 Claim 承担，accountable 不等于执行者。`sourceThreadRefs` 不可变地指向同一 Project 的无 Task 来源讨论；有来源的 Task 在讨论中显示当前状态的只读卡片，不进入 Main stream。
 
 常规验收要全部 Claim 完成（`in_review`）。Human 也可在 `in_progress` 时提前验收。accept 把当时仍 active 的 Claims 投影为 done，并在 activity 里记下 `completedClaimRefs`，通知各 owner，但不伪造他们的 claim-done 事件。从未被 claim 的 `todo` Task 可直接验收，activity 不携带 claim 列表。
 

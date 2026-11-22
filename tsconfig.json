@@ -53,6 +53,9 @@
       "@contexera/dsh-agent-team/manager-context": [
         "./packages/agent-team/src/manager-context.ts"
       ],
+      "@contexera/dsh-agent-team/workspace-rules-context": [
+        "./packages/agent-team/src/workspace-rules-context.ts"
+      ],
       "@contexera/dsh-agent-team/member-time-context": [
         "./packages/agent-team/src/member-time-context.ts"
       ],

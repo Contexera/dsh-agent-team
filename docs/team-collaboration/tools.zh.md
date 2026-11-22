@@ -103,6 +103,8 @@ Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读
 
 `start` 带 `kind: 'discussion' | 'task'`（已移除的 `asTask` 写法会被拒绝并指回 `kind`，绝不静默丢弃），只有 Project owner 能开：其他人得到 `project_owner_required`，提示改用 `post`；不参与该 Workspace 的 Member——或写操作中未 enabled 的 Member——得到 `not_project_member`。Task start 另接受 `accountable` 与 `sourceThreadRefs`；两者在讨论 start 与 `post`/`reply` 上都被拒绝而非丢弃，commit 的 start 回报实际记录的负责人。
 
+规则版本 10 下，Task start 的 `accountable`——以及下文 `promote` 的——接受的目标与 `transfer` 完全相同，解析方式也相同，因此指定推进 Task 的 Member 只需一次写入，不必先开再转。被指定的 Member 以 `accountable` 为原因开始关注该 Thread，并被这次创建唤醒；作者仍以 `thread-author` 关注。不传时由创建者负责。
+
 `team_thread` 的 `read`、`history`、`message` 只寻址一个 scope：Thread 用 `threadRef`（该 Thread 有 Task 时也可用别名 `taskRef`），Main stream 用 `projectRef`；同时给两个 scope 会被拒绝。`message` 必须带 `threadRef` 或 `projectRef`，只有 `taskRef` 不能读回一条 Message。Main stream 的行为与确认规则见上文 `team_thread` 一节。
 
 类型化拒绝（`unread_required`、`stale_revision`、`main_unread_required`）以 `Not committed` 开头，保留 refs、计数和有界的待处理事实。Message 与 Activity 结果完整，且 revision 基线可识别时，会提供令牌供重新考虑；Main stream 结果不提供令牌（它本来就没有）。部分结果与未知基线指向 `read`。这既不确认未读，也不保证下一次写入成功。完整规则见 [Mutation fences](boundaries.zh.md#mutation-fences)。
@@ -159,7 +161,7 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 
 `accept`、`close`、`reopen`、`transfer` 了结的是 Task 而非 Claim，权限由 Host 判定：`accept` 属于 Human、Project owner，或该 Task 自己的 accountable，且在该 Task 上持有过任何 Claim 的一律不行，Agent 只能在 in_review 时验收；`close`、`reopen`、`transfer` 属于 Human 与当前负责人。工具只转发 action 与写令牌，不重新推导该权限。
 
-`transfer` 取 `target`——任意 enabled Project member 的 memberRef、`@Handle` 或唯一 memberRef 前缀，或 `human`——只转移责任，Claim 仍留在其 owner 手上；新 accountable 从此刻起参与该 Thread，并会收到这个 Task 现在要求它做什么。commit 的了结结果点名动作、结果 status 与 resolution、负责人，以及它完成或释放的 Claims。`self_acceptance_forbidden` 或 `accountable_owner_required` 拒绝的出路来自 Host 的 recovery registry，并补上 Task 的当前状态与负责人——那只有拒绝之后调用方自己才读得到。
+`transfer` 取 `target`——该 Task 所在 Workspace 中任意 enabled Member 的 memberRef、`@Handle` 或唯一 memberRef 前缀，或 `human`——只转移责任，Claim 仍留在其 owner 手上；新 accountable 从此刻起参与该 Thread，并会收到这个 Task 现在要求它做什么。commit 的了结结果点名动作、结果 status 与 resolution、负责人，以及它完成或释放的 Claims。`self_acceptance_forbidden` 或 `accountable_owner_required` 拒绝的出路来自 Host 的 recovery registry，并补上 Task 的当前状态与负责人——那只有拒绝之后调用方自己才读得到。
 
 ## `team_subscription`
 

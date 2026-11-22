@@ -333,7 +333,9 @@ The transfer control opens a dialog rather than a menu, because the offer is a l
 
 Before it offers anyone, the dialog states what taking the Task on means: a transfer moves responsibility only, and responsibility includes accepting the Task as a party that did not do the work. A reader handing work away decides who will verify it, so that meaning belongs in the dialog rather than in the hover hint — the hint states the consequence of the verb, the dialog the consequence of the choice.
 
-The candidates are every enabled Member of the Workspace plus the Human — under rules version 9 the Host's transfer authority reaches any of them, and the dialog mirrors it rather than narrowing to this Thread's followers.
+The candidates are every enabled Member of the Workspace plus the Human — under rules version 9 the Host's transfer authority reaches any of them, and the dialog mirrors it rather than narrowing to this Thread's followers. One quiet line above the list names the current accountable, because the transfer the dialog proposes is theirs to lose.
+
+Each row draws the roster's own identity — the 34px avatar with its presence badge, the handle, and the Member's description — so the offer reads as people rather than one repeated verb, and the Human's seat stays pinned last where the return-to-you move always sits.
 
 The current accountable is never offered to itself, a departed or disabled member is filtered out, and with no candidate left the body states that in place of the list instead of drawing buttons that would fail. Focus enters the dialog, Tab walks the candidates, Escape closes it, and at 390×844 the list scrolls inside the card rather than pushing the footer out of reach.
 

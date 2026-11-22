@@ -3,21 +3,34 @@
 English | [中文](memory-and-context.zh.md)
 
 ## Member memory upkeep
-`memory.md` is a bounded routing index rather than a store: identity and role, durable rules that must bind every step, what is in hand, and one line per topic cluster, while `notes/` is read on demand and never injected. Members hold the index well under 8 KiB against the 16 KiB hard ceiling — past it the index is not injected at all, and the block always states its own usage.
+`memory.md` is a cold-start recovery index rather than a store, in three sections: durable rules that must bind every step, one routing line per on-demand note cluster, and open local state the ledger and git cannot show. Identity, ownership, Team state and shared rules are injected or read live, so they never belong in it, and `notes/` is read on demand and never injected. Members hold the index well under 8 KiB against the 16 KiB hard ceiling — past it only the leading whole lines within the budget are injected, and the block always states its own usage.
 
-Upkeep craft (what earns a line, the three tiers, compaction and demotion) is owned by the bundled `member-memory-manager` core skill, on the same pattern as skill craft in `member-skill-manager`. The persona carries only the resident rule that the index stays bounded and that detail lives in the note it names, and a Member's first-run `memory.md` scaffold states the same sections.
+Upkeep craft (what earns a line, the three tiers, compaction and demotion) is owned by the bundled `member-memory-manager` core skill, on the same pattern as skill craft in `member-skill-manager`.
+
+The persona carries a resident map of where each kind of knowledge lives — `AGENTS.md`, the Workspace rules, the identity and ownership context, the ledger, the private space — and the rule that the index stays bounded with detail in the note it names; a Member's first-run `memory.md` scaffold states the same three sections. An ownership-update wake and the acceptance reminder each ask the Member to drop the memory lines they make stale.
 
 ## Member context injection
-A Member's per-step context is assembled as four classified blocks: identity, Project ownership, Workspace participation, and private memory. Each block is a separate surface message; a later block of the same class supersedes the earlier one semantically — the earlier message stays in the Session log and surface until compaction — and an unchanged class appends nothing.
+A Member's per-step context is assembled as four classified blocks: identity, Project ownership, Workspace participation, and private memory. [Workspace rules](#workspace-rules) arrive through their own row beside them. Each block is a separate surface message; a later block of the same class supersedes the earlier one semantically — the earlier message stays in the Session log and surface until compaction — and an unchanged class appends nothing.
 
 Ownership and participation are always stated in full, including an empty ownership list and a participation list that shrank from several Workspaces to one. Each ownership line names what that owner answers for in the Project, and an unspecified responsibility is stated as unspecified — a neutral fact about the grant, not a gap the Member is expected to close.
 
-Private memory has two shapes. The complete index is the baseline. After `memory.md` changes, the Member gets one compact notice that the earlier copy is stale, where the file is, and its current budget use. The newest memory event is compared with the file's current state, so an older matching notice cannot hide a later change. A notice is not an index: a compaction that leaves only the notice still triggers the latest complete baseline. A missing, unreadable, or over-budget index states that condition and its path instead of injecting content.
+Private memory has two shapes. The complete index is the baseline. After `memory.md` changes, the Member gets one compact notice that the earlier copy is stale, where the file is, and its current budget use. The newest memory event is compared with the file's current state, so an older matching notice cannot hide a later change. A notice is not an index: a compaction that leaves only the notice still triggers the latest complete baseline.
+
+A missing or unreadable index states that condition and its path instead of injecting content. An over-budget index still counts as a baseline: its leading whole lines within the budget are injected with a warning to read the file for the rest, and the file itself is never trimmed or summarized.
+
+## Workspace rules
+Each Workspace can carry one Team-owned rules file, `$DSH_HOME/agent-team/workspaces/<workspaceId>/rules.md`, outside every repository. It holds what only this Team shares in this Workspace: collaboration conventions, shared-checkout discipline, and local environment clues. Public engineering rules stay in the repository's `AGENTS.md`; live state stays in the ledger.
+
+The `workspace-rules-context` row, mounted in both Team presets, injects one block per Workspace. A Member reads the Workspaces it participates in now; the Team manager reads every registered Workspace. Ordinary Sessions and forks read none. The Host never creates the file, so a missing file is stated with its path; only the manager is invited to start it, and a Member creates it only to record a rule its editing terms allow.
+
+The block names the file, states that it ranks below system, developer and user instructions and below `AGENTS.md`, and states who may edit what. The manager is told it is the primary curator. A Member may directly correct a stale fact or record a rule the Human already settled, citing date and ref, but proposes a new or overturned cross-Member rule to the Human instead.
+
+Unlike private memory, a changed file is injected in full again, because the reader is usually not the writer. An unchanged file appends nothing, and a compaction that drops the block brings it back. The budget is 8 KiB: past it, only whole leading lines up to the budget are injected, with a note to read the rest, and the file itself is never trimmed.
 
 ## Team manager memory and skills
 The Team manager Session keeps its own private space under `$DSH_HOME/agent-team/manager/` — `memory.md`, `notes/`, and `skills/` — and it is not a Member's. The directory outlives every manager Session: a restart, a reopen after archival, and "new conversation" all read the same files, so what the Human taught the manager survives the conversation that taught it.
 
-Its memory block is the Member block's contract with its own wording: one complete index as the baseline, one stale-copy notice after the file changes, the same 16 KiB ceiling, the same framing escape, and the same over-budget warning that withholds the body instead of trimming the file. Only `memory.md` enters context; `notes/` is read on demand from the paths the block names.
+Its memory block is the Member block's contract with its own wording: one complete index as the baseline, one stale-copy notice after the file changes, the same 16 KiB ceiling, the same framing escape, and the same over-budget head with a warning instead of trimming the file. Only `memory.md` enters context; `notes/` is read on demand from the paths the block names.
 
 The one difference is the location sentence. The manager runs inside a Workspace, so the block states where the private root actually sits relative to that cwd instead of asserting it is outside every Workspace.
 

@@ -3,7 +3,7 @@
 [English](attention-and-messaging.md) | 中文
 
 ## Thread Attention 与 Inbox
-Thread Attention 是一个 Member 对一个 Thread 的 durable private state。它记录当前 attention period 的开始位置、连续 read watermark，以及这个 period 由什么建立。创建顶层 Thread（作者随之关注）、在 taskful Thread 上创建 Claim、被指定为 accountable——由转交、promote 或 reopen——或显式 follow 都会开始 Attention；规则版本 1 的 mention 也会开始它，那是版本 2 不再产生的唯一来源。
+Thread Attention 是一个 Member 对一个 Thread 的 durable private state。它记录当前 attention period 的开始位置、连续 read watermark，以及这个 period 由什么建立。创建顶层 Thread（作者随之关注）、在 taskful Thread 上创建 Claim、被指定为 accountable——由 Task start、转交、promote 或 reopen——或显式 follow 都会开始 Attention；规则版本 1 的 mention 也会开始它，那是版本 2 不再产生的唯一来源。
 
 source 是这一行里唯一不涉及权限也不涉及进度的字段：它让结果能说出读者为什么 follow，而不是猜。每个结果渲染什么由 [tools.zh.md](tools.zh.md) 负责；字段存在之前写下的行，其原因由写入它的 operation 推导，规则记录在 [host-authority.zh.md](../architecture/host-authority.zh.md)。
 

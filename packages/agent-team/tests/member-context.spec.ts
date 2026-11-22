@@ -14,11 +14,18 @@ describe('Team Member private memory context', () => {
     expect(rendered).not.toContain('Maintenance warning')
   })
 
-  it('warns explicitly without injecting any body when the index exceeds its context budget', () => {
-    const rendered = renderMemberMemory(Buffer.alloc(16 * 1024 + 1, 'x'))
+  it('injects only the leading whole lines within the budget, with a warning, when the index exceeds it', () => {
+    const line = `${'x'.repeat(63)}\n`
+    const raw = Buffer.from(`${line.repeat(16 * 1024 / line.length)}LAST LINE PAST THE BUDGET\n`)
+    const rendered = renderMemberMemory(raw)
     expect(rendered).toContain('exceeds the 16 KiB context budget')
-    expect(rendered).toContain('contents were not injected')
-    expect(rendered).not.toContain('x'.repeat(100))
+    expect(rendered).toContain('only its leading lines within the budget; read the file for the rest')
+    expect(rendered).toContain('x'.repeat(63))
+    expect(rendered).not.toContain('LAST LINE PAST THE BUDGET')
+    // The head ends on a whole line and stays within the budget.
+    const body = rendered.slice(rendered.indexOf(line), rendered.indexOf('\n\n[Maintenance warning'))
+    expect(Buffer.byteLength(body)).toBeLessThanOrEqual(16 * 1024)
+    expect(body.endsWith(line)).toBe(true)
   })
 
   it('keeps the exact 16 KiB boundary eligible for injection', () => {
@@ -36,7 +43,9 @@ describe('Team Member private memory context', () => {
     const over = renderMemberMemory(Buffer.alloc(20 * 1024, 'q'))
     expect(over).toContain('Private memory index: 20.0 KiB / 16 KiB (125%).')
     expect(over).toContain('exceeds the 16 KiB context budget')
-    expect(over).not.toContain('q'.repeat(100))
+    // One line longer than the budget is cut on a character boundary at the budget, not dropped.
+    expect(over).toContain('q'.repeat(16 * 1024))
+    expect(over).not.toContain('q'.repeat(16 * 1024 + 1))
   })
 })
 

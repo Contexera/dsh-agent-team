@@ -17,9 +17,9 @@ describe('Agent Team private memory scaffold language (issue #43 #4)', () => {
     const scaffold = await readFile(memoryPath, 'utf8')
     // Structural labels, not English prose sentences: the writing rules live in
     // the bundled skill the scaffold points at.
-    expect(scaffold).toContain('- <scope>')
     expect(scaffold).toContain('- <rule>')
-    expect(scaffold).toContain('- <work in hand>')
+    expect(scaffold).toContain('- <scenario> → `notes/<cluster>/README.md`')
+    expect(scaffold).toContain('- <unfinished local state> (<task, thread, or path>)')
     expect(scaffold).not.toContain('what this Member owns')
     expect(scaffold).not.toContain('only rules that must bind')
 

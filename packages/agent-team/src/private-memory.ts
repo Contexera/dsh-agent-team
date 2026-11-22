@@ -10,8 +10,9 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { utf8HeadOnLineBoundary } from './text.ts'
 
-/** The context budget for one private memory index; past it the body is not injected at all. */
+/** The context budget for one private memory index; past it only the leading whole lines within it are injected. */
 export const PRIVATE_MEMORY_MAX_BYTES = 16 * 1024
 
 /** What one read of `memory.md` found; the three cases render differently on purpose. */
@@ -42,9 +43,13 @@ export function privateMemoryTextDigest(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
 
-/** Whether the index is small enough to inject its body; the gauge and warning still render when it is not. */
+/**
+ * Whether there is an index to inject at all. An over-budget index still
+ * counts: its head is injected with a warning, because withholding the whole
+ * body would make the Member lose its own continuity over one byte too many.
+ */
 export function privateMemoryAvailable(memory: PrivateMemoryState): boolean {
-  return memory.kind === 'index' && memory.raw.byteLength <= PRIVATE_MEMORY_MAX_BYTES
+  return memory.kind === 'index'
 }
 
 /** The gauge line, rendered at every size so the reader sees the budget before it is exceeded. */
@@ -57,8 +62,9 @@ export function privateMemoryUsage(memory: PrivateMemoryState): string {
 
 /**
  * The one maintenance sentence per abnormal state, or '' when the index is
- * ordinary. An over-budget index is reported, never trimmed: deleting or
- * summarizing the file automatically would destroy what the reader wrote.
+ * ordinary. An over-budget index is reported and only its head injected, never
+ * trimmed on disk: deleting or summarizing the file automatically would destroy
+ * what the reader wrote.
  */
 export function privateMemoryAnomaly(memory: PrivateMemoryState): string {
   if (memory.kind === 'absent') return 'memory.md is absent; the private memory index is empty.'
@@ -66,14 +72,14 @@ export function privateMemoryAnomaly(memory: PrivateMemoryState): string {
   if (memory.raw.byteLength > PRIVATE_MEMORY_MAX_BYTES) {
     const usedKiB = (memory.raw.byteLength / 1024).toFixed(1)
     const percent = Math.round((memory.raw.byteLength / PRIVATE_MEMORY_MAX_BYTES) * 100)
-    return `memory.md at ${memory.raw.byteLength} B (${usedKiB} KiB, ${percent}%) exceeds the ${PRIVATE_MEMORY_MAX_BYTES / 1024} KiB context budget. Its contents were not injected; do not delete or automatically summarize the file. Maintain a smaller index explicitly.`
+    return `memory.md at ${memory.raw.byteLength} B (${usedKiB} KiB, ${percent}%) exceeds the ${PRIVATE_MEMORY_MAX_BYTES / 1024} KiB context budget, so a full copy injects only its leading lines within the budget; read the file for the rest. Do not delete or automatically summarize the file; compact the index explicitly.`
   }
   return ''
 }
 
-/** The index body, or '' when it is over budget and therefore withheld. */
+/** The index body, cut to the leading whole lines within the budget when it is over it; '' when there is no index. */
 export function privateMemoryBody(memory: PrivateMemoryState): string {
-  return memory.kind === 'index' && privateMemoryAvailable(memory) ? memory.raw.toString('utf8') : ''
+  return memory.kind === 'index' ? utf8HeadOnLineBoundary(memory.raw, PRIVATE_MEMORY_MAX_BYTES) : ''
 }
 
 /**

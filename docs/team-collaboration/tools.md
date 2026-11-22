@@ -113,6 +113,8 @@ Behind rules version 2 `team_message` also has `post`, which speaks in a Project
 
 `start` takes `kind: 'discussion' | 'task'` (the removed `asTask` spelling is refused with the parameter route to `kind`, never dropped), and only a Project owner may start: others get `project_owner_required`, which names `post`. A Member that does not participate in the Workspace — or is not enabled for a write — gets `not_project_member`. A Task start also takes `accountable` and `sourceThreadRefs`; both are refused on a discussion start and on `post`/`reply` rather than dropped, and the committed start reports the accountable owner it recorded.
 
+Under rules version 10 a Task start's `accountable` — and `promote`'s below — accepts exactly the targets `transfer` accepts, resolved the same way, so naming the Member who drives the Task is one write rather than a start and a transfer. The named Member starts following the Thread with `accountable` as the cause and is woken by the creation; the author still follows as `thread-author`. Omitted, the creator is accountable.
+
 `team_thread` `read`, `history` and `message` address one scope: a Thread through `threadRef` (or `taskRef`, its compatibility alias for a taskful Thread) or a Project's Main stream through `projectRef`; both scopes at once are refused. `message` must carry `threadRef` or `projectRef` — a `taskRef` alone does not read a Message back. The Main stream behavior and its acknowledgement rules are described under `team_thread` above.
 
 Typed rejection results (`unread_required`, `stale_revision`, `main_unread_required`) begin `Not committed` and retain refs and counts with a bounded selection of pending facts. A complete Message and Activity result with a recognized revision baseline supplies a token for reconsideration; a Main stream result supplies none (it has no token). Partial results and unknown baselines route to `read`. This neither acknowledges unread facts nor guarantees the next write. [Mutation fences](boundaries.md#mutation-fences) defines the complete rule.
@@ -175,7 +177,7 @@ A committed mutation names its action (Claim created, completed, or released), r
 
 `accept` belongs to the Human, to a Project owner, or to the Task's own accountable, and never to a Member that held a Claim on that Task; an Agent may accept only while it is in review. `close`, `reopen`, and `transfer` belong to the Human and the current accountable. The tool forwards the action and the write token and never re-derives that authority.
 
-`transfer` takes `target` — any enabled Project member's memberRef, `@Handle`, or a unique memberRef prefix, or `human` — and moves responsibility only, leaving Claims with their owners; the new accountable takes part in the Thread from there and is woken with what the Task now asks of it.
+`transfer` takes `target` — the memberRef, `@Handle`, or unique memberRef prefix of any enabled Member of the Task's Workspace, or `human` — and moves responsibility only, leaving Claims with their owners; the new accountable takes part in the Thread from there and is woken with what the Task now asks of it.
 
 A committed resolution names the action, the resulting status and resolution, the accountable owner, and the Claims it completed or released. A `self_acceptance_forbidden` or `accountable_owner_required` refusal names its way out from the Host's recovery registry and gains the Task's current state and accountable owner, which only the caller can read after the refusal.
 

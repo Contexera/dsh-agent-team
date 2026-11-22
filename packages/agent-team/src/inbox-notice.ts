@@ -24,6 +24,7 @@ import type {
   AgentTeamProjectRef,
   AgentTeamSubscriptionActivity,
   AgentTeamThreadReadFact,
+  AgentTeamTask,
   AgentTeamThreadRef,
   AgentTeamUnreadMemberReminder,
   AgentTeamWorkerAnswer,
@@ -139,7 +140,7 @@ function collectThreadCandidates(candidates: NoticeCandidate[], { deliveryPlan, 
     } else if (fact.kind === 'activity') {
       const activity = activityFact(fact.activity)
       candidates.push({ scope, priority, sequence: fact.sequence, direct: true,
-        text: () => threadActivityDetail(fact, activity, lookup, readerId, workerAnswers, onSurface),
+        text: () => threadActivityDetail(item, fact, activity, lookup, readerId, workerAnswers, onSurface),
         ...(onSurface ? {} : { activity }) })
     }
   }
@@ -303,14 +304,14 @@ function threadMessageDetail(item: InboxThreadUnread['item'], fact: Extract<Thre
     `Message: ${boundedNotificationBody(fact.message.body)}`].join('\n')
 }
 
-function threadActivityDetail(fact: Extract<ThreadFact, { kind: 'activity' }>, activity: ThreadActivityFact, lookup: InboxNoticeLookup,
+function threadActivityDetail(item: InboxThreadUnread['item'], fact: Extract<ThreadFact, { kind: 'activity' }>, activity: ThreadActivityFact, lookup: InboxNoticeLookup,
   readerId: AgentTeamMemberId | undefined, workerAnswers: ReadonlyMap<AgentTeamWorkerAnswer['workerRef'], AgentTeamWorkerAnswer>,
   onSurface: boolean): string {
   if (onSurface) {
     return ['Team Task update', `${activity.activityRef} (Task ${activity.taskRef}, Thread ${activity.threadRef}) — already in current context; still unread`].join('\n')
   }
   const acceptance = acceptanceNotification(fact.activity, readerId, lookup)
-  const handover = handoverNotification(fact.activity, readerId)
+  const handover = handoverNotification(fact.activity, readerId, item.task, lookup)
   const answer = fact.activity.kind === 'worker_settled'
     ? workerAnswers.get(fact.activity.workerRef)
     : undefined
@@ -391,7 +392,7 @@ function mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: Agen
         ? `@human made you an owner of Project ${project.name} (${project.projectRef}). Owners answer for the Project: start its discussions and Tasks and keep its work moving.`
         : activity.kind === 'owner-removed'
           ? `@human removed you as an owner of Project ${project.name} (${project.projectRef}). You can still take part in it.`
-          : `@human updated what you answer for in Project ${project.name} (${project.projectRef}). Your ownership is unchanged; read the Main stream for the text it now records.`
+          : `@human updated what you answer for in Project ${project.name} (${project.projectRef}). Your ownership is unchanged; read the Main stream for the text it now records. That text reaches your context every turn, so do not copy it into memory.md; remove any memory line it makes stale.`
       return ['Team Project ownership changed', `Occurred at: ${formatTeamTimestamp(entry.occurredAt)}`, activityText(activityFact(activity)), text].join('\n')
     }
     const header = activity.kind === 'subscription-paused' ? 'Team subscription paused' : 'Team subscription update'
@@ -463,9 +464,23 @@ function workerAnswerText(answer: AgentTeamWorkerAnswer): string {
   return lines.join('\n')
 }
 
-function handoverNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined): string | undefined {
-  if (activity.kind !== 'transfer' || readerId === undefined || activity.to !== readerId) return undefined
-  return `You are the accountable for Task ${activity.taskRef} now: review what this Thread holds and accept it when the work stands, or say what still needs to change. Claims stay with their owners, so acceptance completes their work instead of moving it; if you worked on this Task yourself, another Project owner or the Human verifies it.`
+/**
+ * The prompt a handover owes its new accountable. A transfer, and a Task someone else created with the reader named
+ * accountable, are the two ways a Member is handed responsibility it did not choose; version 3 lets that Member be one
+ * who owns nothing yet can verify it, so the wake says what the Task now asks of them, and who verifies when they
+ * worked on it themselves. A creation is judged against the Task's current accountable, so a Task already handed on
+ * says nothing.
+ */
+function handoverNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined,
+  task: AgentTeamTask | undefined, lookup: InboxNoticeLookup): string | undefined {
+  if (readerId === undefined) return undefined
+  if (activity.kind === 'transfer' && activity.to === readerId) {
+    return `You are the accountable for Task ${activity.taskRef} now: review what this Thread holds and accept it when the work stands, or say what still needs to change. Claims stay with their owners, so acceptance completes their work instead of moving it; if you worked on this Task yourself, another Project owner or the Human verifies it.`
+  }
+  if (activity.kind === 'promote' && activity.actor !== readerId && task?.taskRef === activity.taskRef && task.accountable === readerId) {
+    return `You are the accountable for Task ${activity.taskRef}: ${lookup.printableSender(activity.actor)} created it and named you to drive it to acceptance. Claims carry the work, so nothing is owed until it is in review; then accept it if you never claimed it, or say what still needs to change. Unfollowing this Thread meanwhile still leaves the review wake reaching you.`
+  }
+  return undefined
 }
 
 function acceptanceNotification(activity: AgentTeamActivity, readerId: AgentTeamMemberId | undefined,

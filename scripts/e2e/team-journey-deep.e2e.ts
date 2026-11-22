@@ -244,7 +244,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const projectDialog = page.getByRole('dialog', { name: '新建项目' })
   await projectDialog.getByLabel('名称').fill('delivery')
   await projectDialog.getByLabel('说明').fill('M2 完整协作验收')
-  // Rules v9 creates a Project without a member list: the dialog asks only for name and description.
+  // v9 dropped initial-member selection from project creation; a new Project
+  // starts with only the Human and Members enter by owner grant or work.
   expect(await projectDialog.getByRole('button', { name: /初始成员/ }).count()).toBe(0)
   await settleAnimations(page)
   await page.screenshot({ path: join(UI03_SHOTS, 'project-create-modal.png'), fullPage: true })
@@ -327,8 +328,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       }
     }))
   expect(rampWide.length).toBeGreaterThan(0)
-  // Under rules v9 every Workspace Member reads a brand-new Project, so each
-  // candidate lands in the Workspace group at full weight and a pick enrolls nobody.
+  // Rules version 9 retired Project membership: a mention addresses any
+  // enabled Workspace Member, so every candidate here lands in the 'project'
+  // ('本 Workspace') group — none dimmed, none named as joining.
   for (const row of rampWide) {
     expect(row.group).toBe('project')
     expect(row.inside).toBe('true')
@@ -2307,8 +2309,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // The durable read clears the unread: the card drops the capsule.
   await expect.poll(async () => await taskEntryRow(page, 1).getAttribute('aria-label'), { timeout: 10_000 }).toBe('打开 Task #1')
   await expect.poll(async () => await entryUnreadCapsule(page, unreadLineSelector), { timeout: 10_000 }).toBeNull()
-  // reviewer has been replying through the Host without following; the transfer
-  // dialog below offers this Thread's followers, so reviewer follows first.
+  // reviewer has been replying through the Host without following; a follow write
+  // still lands on a taskful Thread, and the transfer beat below reads its effect.
   const reviewerFollow = await scaffold.ctx.agentTeam.changeAttentionForAgent(reviewerAgent, {
     requestId: 'm2-06-reviewer-follow' as never, action: 'follow', workspaceId: workspace.id, taskRef: task.taskRef,
   })
@@ -2459,10 +2461,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('button', { name: '重新打开' }).click()
   await page.getByRole('button', { name: '关闭任务' }).waitFor()
 
-  // The Human hands this open Task to the reviewer: the dialog offers this Thread's enabled followers,
-  // and the reviewer followed it earlier in this journey, so it is the one candidate once the current
-  // accountable — the Human — is excluded. The board is the only face that carries a Task's door, and
-  // the Project page restores whichever tab stood last.
+  // The Human hands this open Task to the reviewer: the dialog offers the enabled Workspace roster,
+  // and the reviewer is on it — the current accountable, the Human, is the one seat it never offers.
+  // The board is the only face that carries a Task's door, and the Project page restores whichever
+  // tab stood last.
   await page.getByRole('button', { name: '返回项目' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   if (await page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected') !== 'true') {
@@ -2500,13 +2502,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const transferDialog = page.getByRole('dialog', { name: '转交负责人' })
   await transferDialog.waitFor()
   // What taking it on means is stated where the choice is made: responsibility is independent acceptance, so a reader
-  // handing work away knows what they are handing over.
-  expect(await transferDialog.textContent()).toContain('由他作为独立的一方验收这条 Task')
-  // The follower set is the whole offer: builder and reviewer both follow this Thread, and the Human
-  // is its current accountable, which a transfer never offers back to itself. An owners-based menu
-  // would have listed neither builder nor this pair.
+  // handing work away knows what they are handing over — and the line above the list names whose responsibility it is.
+  expect(await transferDialog.textContent()).toContain('独立验收这条 Task')
+  expect(await transferDialog.textContent()).toContain('现负责人')
+  // The Workspace roster is the whole offer: builder and reviewer are both enabled, and the Human
+  // is its current accountable, which a transfer never offers back to itself. A row draws the roster
+  // identity, so the offer's own verb lives on each row's accessible name.
   const transferCandidates = transferDialog.locator('li button')
-  expect(await transferCandidates.allTextContents()).toEqual(['转交给 @builder', '转交给 @reviewer'])
+  expect(await transferCandidates.evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')))).toEqual(['转交给 @builder', '转交给 @reviewer'])
   await settleAnimations(page)
   await page.screenshot({ path: join(UI05_SHOTS, 'transfer-dialog.png') })
   // The same list at 390×844: the card stays inside the viewport and the page gains no horizontal scroll,
@@ -2547,30 +2550,31 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => page.getByRole('textbox', { name: '消息内容' }).count()).toBe(0)
   await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread.png'), fullPage: true })
 
-  // The control stands on a closed Task, because the Human may transfer a finished one. Under rules v9 the
-  // offer is the Workspace roster rather than the Thread's followers, so closing — which ended every Attention
-  // row here — leaves it intact: every enabled Member and the Human, except the reviewer that holds the Task.
+  // The control stands on a closed Task, because the Human may transfer a finished one. Closing ended every
+  // Attention row on this Thread, but the offer never read the followers: the Workspace roster stands, so the
+  // candidates are builder plus the Human — the reviewer is the accountable and is never offered to itself.
   const mendTrigger = page.getByRole('button', { name: '转交负责人' })
   await mendTrigger.waitFor()
   await mendTrigger.click()
   const closedDialog = page.getByRole('dialog', { name: '转交负责人' })
   await closedDialog.waitFor()
-  const rosterOffer = ['转交给 @builder', '转交给你自己']
-  await expect.poll(async () => (await closedDialog.locator('li button').allTextContents()).sort()).toEqual(rosterOffer)
+  expect(await closedDialog.locator('li button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))))
+    .toEqual(['转交给 @builder', '转交给你自己'])
   expect(await closedDialog.getByRole('status').count()).toBe(0)
   await settleAnimations(page)
   await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread-transfer-dialog.png') })
   await page.keyboard.press('Escape')
   await expect.poll(() => closedDialog.count()).toBe(0)
 
-  // Following the closed Thread is the one write it still takes, and it leaves the roster offer unchanged.
-  // Mending back to the Human is the same move as any other handover.
+  // Following the closed Thread is the one Attention write it still takes; the offer stays the same roster.
+  // Mending back to the Human is the same move as any other handover — the Human's seat closes the list.
   await page.getByRole('button', { name: '关注此 Thread' }).click()
   await page.getByRole('button', { name: '取消关注此 Thread' }).waitFor()
   await mendTrigger.click()
   const mendDialog = page.getByRole('dialog', { name: '转交负责人' })
   await mendDialog.waitFor()
-  await expect.poll(async () => (await mendDialog.locator('li button').allTextContents()).sort()).toEqual(rosterOffer)
+  await expect.poll(async () => await mendDialog.locator('li button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))))
+    .toEqual(['转交给 @builder', '转交给你自己'])
   await settleAnimations(page)
   await page.screenshot({ path: join(UI03_SHOTS, 'mended-dialog.png') })
   await mendDialog.getByRole('button', { name: '转交给你自己' }).click()

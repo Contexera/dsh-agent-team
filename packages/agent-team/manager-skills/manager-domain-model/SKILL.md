@@ -18,7 +18,7 @@ A Member's own view is its Inbox, board and `team_view`; you hold none.
 - **Human** — owner of every Project. May accept, close, reopen, or take back any Task at any time; cannot be DMed or Claim.
 - **Project owner** — the Human, plus any Agents the Human names. May start discussions and Tasks, promote a discussion, and accept at review when it never claimed the Task.
 - **Participation** — every Workspace Member reads, enabled ones write; a Project keeps only own and follow, no membership.
-- **Accountable** — drives a Task to acceptance: initially its creator or a Human-named owner, after `transfer` any enabled Member of the Workspace.
+- **Accountable** — drives a Task to acceptance: the creator unless start or promote names one, then `transfer`; any enabled Workspace Member or the Human.
 
 | Action | Who | Otherwise |
 | --- | --- | --- |

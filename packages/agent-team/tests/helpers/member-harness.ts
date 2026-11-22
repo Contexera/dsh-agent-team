@@ -357,6 +357,7 @@ export async function realHarness(
     // through the self-linked node_modules.
     const teamMemberPlugins: PresetDefinition['plugins'] = [
       { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
+      { id: 'workspace-rules-context', name: '@contexera/dsh-agent-team/workspace-rules-context' },
       { id: 'member-time-context', name: '@contexera/dsh-agent-team/member-time-context' },
       // The shipped `team-member` tools row, verbatim: the exact Member surface.
       // `team_worker` stays declared and is withdrawn by the Host Worker switch,
@@ -373,6 +374,7 @@ export async function realHarness(
       // The shipped `team-manager` context row, verbatim: the manager's own
       // private memory index, mounted independently of the Member context plugin.
       { id: 'manager-context', name: '@contexera/dsh-agent-team/manager-context' },
+      { id: 'workspace-rules-context', name: '@contexera/dsh-agent-team/workspace-rules-context' },
       { id: 'manager-tools', name: pathToFileURL(managerToolsStub).href },
       // The shipped `team-manager` tools row, verbatim: the real tools plugin
       // narrowed to the manager's own tools. The manager's surface under test is

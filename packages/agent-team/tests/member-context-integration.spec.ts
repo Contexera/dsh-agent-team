@@ -280,8 +280,10 @@ describe('Team Member private memory composition', () => {
     await writeFile(memoryFile, Buffer.alloc(16 * 1024 + 1, 'x'))
     const overBudget = texts(await step(ctx, agent))
     expect(overBudget).toHaveLength(1)
+    // An edit of an index already in context is still a stale-copy notice; the
+    // notice carries the over-budget warning instead of the gauge.
     expect(overBudget[0]).toContain('exceeds the 16 KiB context budget')
-    expect(overBudget[0]).toContain('contents were not injected')
+    expect(overBudget[0]).toContain('read the file for the rest')
     expect(overBudget[0]).toContain(`Memory index: ${join(root, 'memory.md')}`)
 
     await rm(memoryFile)
@@ -295,6 +297,33 @@ describe('Team Member private memory composition', () => {
     expect(unreadable).toHaveLength(1)
     expect(unreadable[0]).toContain('memory.md is currently unreadable')
     expect(unreadable[0]).toContain(`Memory index: ${join(root, 'memory.md')}`)
+    await ctx.fiber.dispose()
+  })
+
+  it('starts a Session over an over-budget index with its head as the baseline, not an empty block', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'team-member-context-'))
+    roots.push(root)
+    const line = `${'m'.repeat(63)}\n`
+    await writeFile(join(root, 'memory.md'), `# Member memory\n${line.repeat(16 * 1024 / line.length)}TAIL PAST THE BUDGET\n`)
+    const ctx = new Context()
+    const agent = surfaceAgent(ctx)
+    ctx.provide('agentTeam', {
+      memberForAgent: (subject: Agent) => subject === agent
+        ? { memberId: 'member:a', model: { provider: 'mock', model: 'mock' }, privateMemoryPath: root, handle: 'A', description: '' }
+        : undefined,
+      workspacesForAgent: () => [{ workspaceId: 'workspace:default', path: root, default: true }],
+      ownedProjectsForAgent: () => [],
+    } as never)
+    await mount(ctx)
+    const first = await step(ctx, agent)
+    const memory = first.find(message => (message.source as { memberContext?: { category: string } }).memberContext?.category === 'memory')!
+    expect((memory.source as { memberContext?: { variant?: string } }).memberContext?.variant).toBe('baseline')
+    const [text] = texts([memory])
+    expect(text).toContain('# Member memory')
+    expect(text).not.toContain('TAIL PAST THE BUDGET')
+    expect(text).toContain('[Maintenance warning:')
+    // The head is a complete baseline, so an unchanged file asks for nothing more.
+    expect(await step(ctx, agent)).toEqual([])
     await ctx.fiber.dispose()
   })
 

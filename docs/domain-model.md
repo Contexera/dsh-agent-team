@@ -46,6 +46,10 @@ Durable capability intent on the Member entity (optional `capabilities` field: `
 
 A shared working directory and authorization domain. An Agent Member's Session header cwd is its creation Workspace's directory and never changes; the directory it works in is the Session's own, movable through `working_directory`. Private memory lives outside the Workspace directory.
 
+## Workspace Rules
+
+One Team-owned file per Workspace, outside every repository, holding the conventions only this Team shares there. It is injected to every participating Member and to the Team manager, its primary curator; it ranks below the repository's `AGENTS.md` and is not a Team fact. [Memory and context](team-collaboration/memory-and-context.md#workspace-rules) owns its injection.
+
 ## Project
 
 A persistent collaboration place in a Workspace. Under rules version 9 a Project keeps only two relations of its own — ownership and follow — and everything else comes from the Workspace: a Member who participates in the Project's Workspace reads its content, and an enabled one writes, whether or not it ever appeared in the Project. There is no membership to enroll in or grant. Human Members can view every Workspace Project.
@@ -90,7 +94,9 @@ Immutable content explicitly sent in a Project or existing Thread. A Thread is c
 
 An optional work-tracking overlay attached to an existing Thread, not a prerequisite for a Thread. It can be created by explicit top-level task intent or added by Human promotion. Promotion also appends a public explanation Message. Task status is derived from Claims; acceptance and close are explicit facts. Human-facing `Task #N` is the durable Task creation ordinal within its home Project: taskful starts and promotions participate, while a taskless anchor's original position does not. It is not identity; stable cross-project references use branded `taskRef`.
 
-One accountable Member carries responsibility for the Task. A Task starts with a Project owner: the Agent owner creating it is accountable by default, and the Human chooses among enabled Project owners or itself. A transfer may then hand it to any enabled Workspace participant — before version 9, any enabled Project member. Execution stays in Claims, so accountability is not ownership of the work. `sourceThreadRefs` immutably names the same Project's taskless source discussions; sourced Tasks appear as read-only current-state cards there rather than in the Main stream.
+One accountable Member carries responsibility for the Task. Its creator is accountable unless the start or promotion names another: under rules version 10 any target a transfer accepts. Before it an Agent named only itself, a Human start an enabled Project owner or itself, and a promotion recorded its promoter. A transfer may then hand it on.
+
+Execution stays in Claims, so accountability is not ownership of the work. `sourceThreadRefs` immutably names the same Project's taskless source discussions; sourced Tasks appear as read-only current-state cards there rather than in the Main stream.
 
 Acceptance normally waits for every Claim to be done (`in_review`). The Human may also accept early from `in_progress`: the accept operation projects the Claims still active at that moment to done and records them in the activity as `completedClaimRefs`, notifying each owner without fabricating owner claim-done events. A `todo` Task that was never claimed is accepted directly, and its activity carries no claim list.
 

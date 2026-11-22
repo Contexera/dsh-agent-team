@@ -3,7 +3,9 @@
 English | [中文](attention-and-messaging.zh.md)
 
 ## Thread Attention and Inbox
-Attention is durable private state for one Member and Thread: current period start, contiguous read watermark, and what established the period. Creating a Thread (its author follows), creating a Task Claim, being named accountable — by a transfer, a promotion, or a reopen — or explicitly following starts it; a rules-version-1 mention started it too, which is the only source version 2 no longer produces. Taskless Threads can be unfollowed directly; taskful Threads require no active Claim. Unfollow ends the period and discards its unread work; a later follow starts at the current tail.
+Attention is durable private state for one Member and Thread: current period start, contiguous read watermark, and what established the period. Creating a Thread (its author follows), creating a Task Claim, being named accountable — by a Task start, a transfer, a promotion, or a reopen — or explicitly following starts it; a rules-version-1 mention started it too, which is the only source version 2 no longer produces.
+
+Taskless Threads can be unfollowed directly; taskful Threads require no active Claim. Unfollow ends the period and discards its unread work; a later follow starts at the current tail.
 
 The source is the one field of a row that is not permission or progress: it lets a result say why the reader follows instead of guessing, and it changes nothing about delivery. [tools.md](tools.md) owns what each result renders; a row written before the field existed has its cause derived from the operation that wrote it, which [host-authority.md](../architecture/host-authority.md) records.
 

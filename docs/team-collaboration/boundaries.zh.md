@@ -35,7 +35,7 @@ Project owner 才能发起或 promotion Thread。accountable 与执行分离，�
 ## Human Remote boundary
 Human Client 使用 `readThread`、`threadHistory`、`threadObservations` 和 `changes`。它消费 Host 的 Human Inbox 切片，作为「收件箱 / Inbox」队列。Attention 有两条入口，且都不是 model-facing 的：Agent 工具 `team_attention` 走 `changeAttentionForAgent`；`@Remote('changeAttention')` 是 Human Remote——两个 Thread 面都接到同一个共享关注控件上，Human 因此可以从 Web 面订阅一个 Thread 的普通更新。
 
-Task 责任转交走 Human `transferTask` Remote：Host 接受任意 enabled 且参与该 Workspace 的 Member 或 Human，Client 不复制这套规则；弹窗列出全部 enabled Workspace Member 加上 Human——一次移交能落到的完整集合。accept/close/reopen 权限同样留在 Host。该控件在已了结的 Task 上也留着，因为只有 Member actor 被限制在 open Task 上。accepted 的 Task 保留它 Thread 的关注者，负责人已失去 Project 参与的 Task 就在那一层补回责任。关闭会结束所有 Attention 行，所以 closed 的 Task 所在 Thread 没有关注者；它还接受的唯一一种写入就是关注，关注把人重新放回候选里——在此之前，弹窗直说没人能接手，而不是自己编一个目标。
+Task 责任转交走 Human `transferTask` Remote：Host 接受任意 enabled 且参与该 Workspace 的 Member 或 Human，Client 不复制这套规则；弹窗列出全部 enabled Workspace Member 加上 Human——一次移交能落到的完整集合。accept/close/reopen 权限同样留在 Host。该控件在已了结的 Task 上也留着，因为只有 Member actor 被限制在 open Task 上。accepted 的 Task 保留它 Thread 的关注者，负责人已失去 Project 参与的 Task 就在那一层补回责任。关闭会结束所有 Attention 行，所以 closed 的 Task 所在 Thread 没有关注者，它还接受的唯一一种 Attention 写入就是关注——但候选读的不是关注者而是 Workspace roster，所以同一批 enabled Member 加上 Human 仍然在列表里，这条 Task 照样可以转交。
 
 转交成功同样在控件所在处陈述：动作带用 Host 自己 committed 的结果印出新的负责人，一旦投影不再与它一致就把这行撤掉。Host 的 transfer 活动行仍然在 feed 里记录这次转移——带里的那行是同一个事实落在控件旁，不是对它的第二个权威。
 
@@ -52,6 +52,6 @@ Task 责任转交走 Human `transferTask` Remote：Host 接受任意 enabled 且
 
 Member 的 Session `cwd` 保持在 Workspace path，但它工作的目录可以移动：Harness 在 `dsh-base` 全局挂载 `working_directory`，位于任何 preset 之外，Host 把它并进任何 tool allow-list。Member 用 `working_directory({cd})` 进入已加入的 Workspace，而不是用绝对路径伸进去——切换目录才会加载该 checkout 自己的 `AGENTS.md`。目录切换不授予参与关系、Claim 或写权限；每次操作仍在选定的 Workspace 中鉴权。
 
-Harness `agent-instructions` 仍是加载 `AGENTS.md`/`CLAUDE.md` guidance 的唯一 loader。Team 不重新实现或迁移这套 discovery。 每个 Member 的 private root 包含三样东西：小写的 `memory.md` index、按需读取的 `notes/`、Member 私有 skill 的 `skills/`。 分类背景与 memory 基线更新见 [Memory 与上下文](memory-and-context.zh.md)。index 包装为 escaped、typed reference context；修改后的短提示不重新注入全文。 Index 上限为 16 KiB，注入块常驻用量刻度（已用 X. X KiB / 16 KiB 及百分比）。超出预算会产生 maintenance warning，而不是静默截断、删除或 summarization。 Notes 不会自动注入。 Suspend/resume 保留这些 files，永久 removal 删除 private root。
+Harness `agent-instructions` 仍是加载 `AGENTS.md`/`CLAUDE.md` guidance 的唯一 loader。Team 不重新实现或迁移这套 discovery。 每个 Member 的 private root 包含三样东西：小写的 `memory.md` index、按需读取的 `notes/`、Member 私有 skill 的 `skills/`。 分类背景与 memory 基线更新见 [Memory 与上下文](memory-and-context.zh.md)。index 包装为 escaped、typed reference context；修改后的短提示不重新注入全文。 Index 上限为 16 KiB，注入块常驻用量刻度（已用 X. X KiB / 16 KiB 及百分比）。超出预算时只注入预算内的完整开头行并附 maintenance warning，文件本身不会被删除或 summarization。 Notes 不会自动注入。 Suspend/resume 保留这些 files，永久 removal 删除 private root。
 
 persona 陈述私有空间的物理事实。事实有四样：注入的绝对路径、绝不 cwd 相对路径、memory/notes 纪律、可复用资产边界。它不讲上下文管理：压缩由 preset 的引擎做，换代由 Host 做，没有任何指令可供 Member 执行。值得跨代保留的东西，在工作过程中就写进私有 memory，而不是在换代前写一段告别。 全部 skill 写作指引都在内置的 `member-skill-manager` meta skill 里。指引管四样事：什么值得成为 skill、目录形态布局、写作质量、credentials 约定。它的 description 负责"涉及 skill 管理工作时先读我"。用不用任何 skill 由 Member 按任务自行判断。

@@ -214,15 +214,18 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const messageSender = (fact: AgentTeamThreadFact): AgentTeamMemberId | undefined =>
     fact.kind === 'message' ? fact.message.sender : undefined
 
-  // Transfers can target any enabled Workspace Member, not only followers; offering the current
-  // accountable would produce a refused no-op.
+  // The dialog offers every enabled Member of this Workspace plus the Human: under rules version 9 a
+  // handover lands on any enabled Workspace Member, so the offer reads the same roster the workspace
+  // directory lists rather than this Thread's follower set. The current accountable is never offered:
+  // a transfer it already holds is refused as a no-op. The Human's seat closes the list, pinned rather
+  // than sorted, so the return-to-you move always sits in the same place.
   const transferCandidates = useMemo(() => {
-    if (task === undefined) return []
-    const human = projectView?.humanMemberId
-    const candidates = members.filter(status => status.member.state === 'enabled').map(status => status.member.memberId)
-    return [human, ...candidates]
-      .filter((memberId): memberId is AgentTeamMemberId => memberId !== undefined && memberId !== task.accountable)
-      .sort((left, right) => memberName(left).localeCompare(memberName(right)))
+    if (task === undefined) return { members: [] as AgentTeamClientMemberStatus[], human: false }
+    const roster = members
+      .filter(status => status.member.state === 'enabled' && status.member.memberId !== task.accountable)
+      .sort((left, right) => `@${left.member.handle}`.localeCompare(`@${right.member.handle}`))
+    const human = projectView?.humanMemberId !== undefined && task.accountable !== projectView.humanMemberId
+    return { members: roster, human }
   }, [members, projectView?.humanMemberId, task?.accountable])
 
   // Resolve a discussion's own Project so cross-Project links do not reopen it beside this page's feed.
@@ -553,10 +556,20 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           <span title={full}><strong className={threadCss.riskClass}>{label}</strong> · {t(sentenceKey, { member: status.member.handle })} — {reason}</span>
         </p>)}
       </section>}
+      {/* The handover dialog: every enabled Member of this Workspace plus the Human, one roster row
+          each, and an empty state that says why nobody is offered. The header names the current
+          accountable, because the transfer it explains is theirs to lose. A candidate is a button, so
+          the list is reachable and dismissable by keyboard alone; the write stays on the page's own
+          hook, which keeps the Task's current accountable on screen until the Host commits, and
+          closes the dialog on that commit rather than on the click. */}
       {task !== undefined && <TeamTaskTransferDialog
         open={transferDialogOpen}
         pending={transfer.pending}
-        candidates={transferCandidates}
+        accountableName={memberName(task.accountable)}
+        members={transferCandidates.members}
+        human={transferCandidates.human}
+        humanName={humanName}
+        humanAvatarUrl={humanAvatarUrl}
         memberName={memberName}
         humanMemberId={projectView?.humanMemberId}
         failure={transferFailure}

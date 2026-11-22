@@ -778,6 +778,14 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* One quiet line naming who holds the Task today, between the dialog's description and the offer. */
+.transferAccountable {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0 0 8px;
+}
+
 .transferList {
   display: grid;
   gap: 4px;
@@ -789,11 +797,17 @@
 /* A candidate is one full-width row: the whole row is the hit target on touch and one tab stop on the way
    through the dialog, so the dialog stays usable at 390px and from the keyboard alone. A row offers a person,
    so it takes the ghost row the mention picker already uses for the same thing — no per-row border, the call
-   radius, the interactive fill under the pointer. Drawn as outlined buttons instead, the list stood level with
-   the footer's own outlined Cancel and read as five controls rather than one list. */
+   radius, the interactive fill under the pointer — and it borrows the roster row's geometry (34px avatar,
+   two-line copy) from .row in member-row.module.css so the offer reads as the same list the directory draws.
+   Drawn as outlined buttons instead, the list stood level with the footer's own outlined Cancel and read as
+   five controls rather than one list. */
 .transferCandidate {
+  align-items: center;
+  display: grid;
+  gap: 0 10px;
+  grid-template-columns: 34px minmax(0, 1fr);
   width: 100%;
-  min-height: 40px;
+  min-height: 50px;
   padding: 8px 10px;
   border: 0;
   border-radius: var(--dsw-radius-md, 8px);

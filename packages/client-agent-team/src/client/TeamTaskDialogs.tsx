@@ -1,13 +1,23 @@
-import type { AgentTeamClaim, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
+import type { CSSProperties } from 'react'
+import type { AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
+import { TeamMemberIdentity } from './TeamMemberRow.tsx'
+import { useAvatarImage } from './avatar-image.ts'
+import { HUMAN_MEMBER_ID, identityInitial, memberHue } from './team-formatters.ts'
 import css from './conversation.module.css'
+import rowCss from './member-row.module.css'
+import sidebarCss from './sidebar.module.css'
 
 // Choosing a candidate must not dismiss the dialog: the page keeps the current accountable until the Host commits.
-export function TeamTaskTransferDialog({ open, pending, candidates, memberName, humanMemberId, failure, onClose, onTransfer, t }: {
+export function TeamTaskTransferDialog({ open, pending, accountableName, members, human, humanName, humanAvatarUrl, memberName, humanMemberId, failure, onClose, onTransfer, t }: {
   readonly open: boolean
   readonly pending: boolean
-  readonly candidates: readonly AgentTeamMemberId[]
+  readonly accountableName: string
+  readonly members: readonly AgentTeamClientMemberStatus[]
+  readonly human: boolean
+  readonly humanName: string
+  readonly humanAvatarUrl: string | undefined
   readonly memberName: (memberId: AgentTeamMemberId) => string
   readonly humanMemberId: AgentTeamMemberId | undefined
   readonly failure: string | undefined
@@ -15,23 +25,41 @@ export function TeamTaskTransferDialog({ open, pending, candidates, memberName, 
   readonly onTransfer: (memberId: AgentTeamMemberId) => void
   readonly t: TeamConversationProps['t']
 }) {
+  const humanImage = useAvatarImage(humanAvatarUrl)
   return <Modal
     open={open}
     onClose={() => { if (!pending) onClose() }}
     title={t('transferTitle')}
+    description={t('transferBody')}
     closeLabel={t('cancel')}
     footer={<Button variant="outline" disabled={pending} onClick={onClose}>{t('cancel')}</Button>}
   >
-    <p className={css.confirmBody}>{t('transferBody')}</p>
-    {candidates.length === 0
+    <p className={css.transferAccountable}>{t('transferAccountable', { name: accountableName })}</p>
+    {members.length === 0 && !human
       ? <p className={css.transferEmpty} role="status">{t('transferEmpty')}</p>
       : <ul className={css.transferList}>
-          {candidates.map(memberId => <li key={memberId}>
+          {members.map(status => <li key={status.member.memberId}>
             <button type="button" className={css.transferCandidate} disabled={pending}
-              onClick={() => { onTransfer(memberId) }}>
-              {memberId === humanMemberId ? t('transferTargetYou') : t('transferTargetLabel', { name: memberName(memberId) })}
+              aria-label={t('transferTargetLabel', { name: memberName(status.member.memberId) })}
+              onClick={() => { onTransfer(status.member.memberId) }}>
+              <TeamMemberIdentity status={status} t={t} />
             </button>
           </li>)}
+          {human && humanMemberId !== undefined && <li>
+            <button type="button" className={css.transferCandidate} disabled={pending}
+              aria-label={t('transferTargetYou')}
+              onClick={() => { onTransfer(humanMemberId) }}>
+              <span className={sidebarCss.agentAvatar} style={{ '--team-avatar-hue': memberHue(HUMAN_MEMBER_ID), overflow: 'hidden' } as CSSProperties} aria-hidden="true">
+                {humanImage.image.kind === 'image'
+                  ? <img src={humanImage.image.src} alt="" width={34} height={34} onError={humanImage.failed} />
+                  : identityInitial(humanName)}
+              </span>
+              <span className={rowCss.copy}>
+                <strong>{humanName}</strong>
+                <small>{t('transferHumanHint')}</small>
+              </span>
+            </button>
+          </li>}
         </ul>}
     {/* While open, the dialog owns the failure line because the action band's line sits behind the modal. */}
     {failure !== undefined && <p className={css.actionError} role="alert">{failure}</p>}

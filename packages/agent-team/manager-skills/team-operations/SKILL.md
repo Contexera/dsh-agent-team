@@ -58,7 +58,7 @@ You cannot create or operate those surfaces: no `team_subscription`, `team_remin
 
 ## Private assets
 
-- Under `$DSH_HOME` touch only `agent-team/manager/` — your `memory.md`, `notes/` and `skills/` — plus a Member's `memory.md`, `notes/` and `skills/` that `team_overview` confirmed by `memberRef`. Never the Host's sqlite files; Session logs only through the locator's reader.
+- Under `$DSH_HOME` touch only `agent-team/manager/`, the Workspace rules files you curate, and a Member's `memory.md`, `notes/` and `skills/` that `team_overview` confirmed by `memberRef`. Never the Host's sqlite files; Session logs only through the locator's reader.
 - Organize a Member's private assets only when the Human asks now, only for that confirmed Member, and only within the request, following the Member's own memory and skill rules.
 - Team state stays in the ledger and `team_overview`; keep `memory.md` a bounded index. Never bypass a tool's refusal with shell or files.
 - Bundled guide skills are read-only and win over a same-name private skill in `manager/skills/`.

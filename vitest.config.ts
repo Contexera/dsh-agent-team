@@ -87,6 +87,8 @@ const integrationSpecs = [
   'packages/agent-team/tests/subscription-retry.spec.ts',
   'packages/agent-team/tests/subscription-runs.spec.ts',
   'packages/agent-team/tests/subscription-script-boundary.spec.ts',
+  // Real on-disk sqlite migrations: the windows lane measured a v3 skip at 5.9s against the unit budget.
+  'packages/agent-team/tests/subscription-storage-upgrade.spec.ts',
   'packages/agent-team/tests/surface-agreement.spec.ts',
   'packages/agent-team/tests/surface-exemption.spec.ts',
   'packages/agent-team/tests/surface-rejection-recovery.spec.ts',
@@ -102,6 +104,7 @@ const integrationSpecs = [
   'packages/agent-team/tests/worker-catalog-continuation.spec.ts',
   'packages/agent-team/tests/worker-steer.spec.ts',
   'packages/agent-team/tests/worker-stop-notice.spec.ts',
+  'packages/agent-team/tests/workspace-rules-host.spec.ts',
   // Integration specs (tool-agent-team): they boot a real Host runtime.
   'packages/tool-agent-team/tests/team-addressing.spec.ts',
   'packages/tool-agent-team/tests/team-view-directory.spec.ts',
