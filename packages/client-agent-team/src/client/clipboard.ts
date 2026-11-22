@@ -17,7 +17,7 @@ export async function copyText(text: string): Promise<boolean> {
 
 /** `execCommand('copy')` still lands where the async API is refused; it is the deprecated path, deliberately kept. */
 function legacyCopy(text: string): boolean {
-  /* oxlint-disable typescript/no-deprecated */
+  /* oxlint-disable typescript/no-deprecated -- Keep the legacy fallback when the async clipboard API refuses a write. */
   if (typeof document.execCommand !== 'function') return false
   const selection = document.createElement('textarea')
   selection.value = text

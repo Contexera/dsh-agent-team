@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 // Slow CI machines (windows lane) can stretch multi-generation rollover
 // chains past the default per-test budget. Every test here boots a real
 // Host harness and waits on asynchronous session transitions, so both this
@@ -6,6 +7,29 @@ import { describe, expect, it } from 'vitest'
 import { realHarness, ScriptedAdapter, requestId } from './helpers/member-harness.ts'
 
 describe('Agent Team model route rejection (issue #43 #6)', () => {
+  it('preserves an adapter refusal containing the unsupported-model category', async () => {
+    const { ctx, workspaceId } = await realHarness(new ScriptedAdapter())
+    const failure = new Error('model is not supported by this adapter')
+    vi.spyOn(ctx.llm, 'resolveModelInfo').mockRejectedValue(failure)
+    await expect(ctx.agentTeam.addMember({
+      requestId: requestId('unsupported-model'), workspaceId, handle: 'builder',
+      description: 'Builds the implementation', presetId: 'team-member', projectRefs: [],
+      model: { provider: 'mock', model: 'fine', reasoningEffort: ReasoningEffortId('high') },
+    })).rejects.toBe(failure)
+    expect(ctx.agentTeam.membersForClient({})).toEqual([])
+  })
+
+  it('defers an unclassified metadata lookup failure to the runtime', async () => {
+    const { ctx, workspaceId } = await realHarness(new ScriptedAdapter())
+    vi.spyOn(ctx.llm, 'resolveModelInfo').mockRejectedValue(new Error('metadata unavailable'))
+    const result = await ctx.agentTeam.addMember({
+      requestId: requestId('unavailable-metadata'), workspaceId, handle: 'builder',
+      description: 'Builds the implementation', presetId: 'team-member', projectRefs: [],
+      model: { provider: 'mock', model: 'fine', reasoningEffort: ReasoningEffortId('high') },
+    })
+    expect(result.status.member.handle).toBe('builder')
+  })
+
   it('rejects an unregistered provider at creation instead of deferring to the first turn', async () => {
     const { ctx, workspaceId } = await realHarness(new ScriptedAdapter())
     await expect(ctx.agentTeam.addMember({

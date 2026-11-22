@@ -16,10 +16,7 @@ export async function readingCapacity(agent: Agent, signal: AbortSignal): Promis
     return Math.max(0, Math.min(256 * 1024, (info.context?.contextWindow ?? 320_000) - 16_384))
   } catch (error) {
     signal.throwIfAborted()
-    // An abort is the caller's own cancellation and must surface. Anything else
-    // — a missing adapter, unusable model metadata, a transient connection —
-    // falls back to the conservative limit, because a reading action that does
-    // not need the model's capacity should not fail on it.
+    // A metadata outage must not block ordinary reads, but cancellation must stop before acknowledgement.
     if (error instanceof LlmError && error.code === 'ABORTED') throw error
     return 256 * 1024
   }
@@ -81,6 +78,7 @@ export function budgetReading<V extends Reading>(agent: Agent, value: V, render:
   }
   let selected = value.kind === 'message' ? [...source] : [...unread]
   let candidate = make(selected)
+  // Drop only from the tail: an acknowledgement cursor cannot skip an unread fact.
   while (!fits(candidate) && selected.length > 1) {
     selected.pop()
     candidate = make(selected)
@@ -93,10 +91,7 @@ export function budgetReading<V extends Reading>(agent: Agent, value: V, render:
   if (first?.kind === 'message' && first.body !== undefined && first.messageRef !== undefined && !first.bodyOmitted && !fits(candidate)) {
     const address = value.threadRef === undefined ? { projectRef: value.projectRef } : { threadRef: value.threadRef }
     const missing = missingMessageRange(surface, { ...address, messageRef: first.messageRef, body: first.body })
-    // The whole body is already on the live surface: there is nothing left to
-    // deliver, so this result says so instead of rendering a zero-length part
-    // where the body should be. A capacity check cannot help either, because
-    // the body reached the context once already.
+    // A complete body already in context needs neither another part nor a capacity check.
     if (missing === undefined) {
       const omitted = value.kind === 'message' && value.message !== undefined
         ? { message: { ...value.message, bodyOmitted: true } }
@@ -117,6 +112,7 @@ export function budgetReading<V extends Reading>(agent: Agent, value: V, render:
         else high = end - 1
       }
       let end = low
+      // A UTF-16 offset can split one character across tool results.
       if (end > start && end < first.body.length && /[\uD800-\uDBFF]/.test(first.body[end - 1]!)) end -= 1
       if (end === start) throw new Error('Message reading cannot fit its identity and one character in the output budget; nothing acknowledged.')
       candidate = make(selected, [{ messageRef: first.messageRef, start, end, complete: complete(end) }])

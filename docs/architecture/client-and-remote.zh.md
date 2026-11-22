@@ -2,40 +2,40 @@
 
 [English](client-and-remote.md) | 中文
 
-## Typed Remote
-Remote methods 通过 Team service 的 `@Remote` annotations 声明。`scripts/generate-typert.mjs` 使用 Harness `WorkspaceAnalyzer` 和 `FaceModelEmitter`，在 `packages/agent-team/lib/` 下生成 Host 和 Client artifacts。
+本文说明通信契约、Client 激活顺序，以及 Host 事实与浏览器展示的边界。持久决策见 [Host 权威](host-authority.zh.md)，manager Session 指针见 [存储复用](workspace-session-storage.zh.md#team-manager-session)。
 
-稳定流程如下：
+## Typed Remote
+
+Team service 上的 `@Remote` 声明是 `scripts/generate-typert.mjs` 的输入。脚本使用 Harness 的 `WorkspaceAnalyzer` 和 `FaceModelEmitter`，在 `packages/agent-team/lib/` 生成 Host 与 Client 产物。
 
 ```text
-Host face declaration
-        │ generate:typert
-        ▼
-Typert Host artifact + Remote client artifact
-        │ ctx.remote.$mount(...)
-        ▼
-Client remote service
+Host face declaration → generate:typert → Typert Host + Remote client → ctx.remote.$mount(...) → Client remote service
 ```
 
-`InvocationDescriptor` 是 local reflection metadata，不是 wire message。Wire request 和 response fields 保持为显式 typed values。修改 Remote 时更新 declaration 和 tests。重新生成，然后运行 typecheck/build。不要手工编辑 artifact。
+`InvocationDescriptor` 是本地反射元数据，不是线上消息；通信字段必须使用显式类型。修改声明与测试后重新生成，并运行 typecheck 和 build，不能手改生成文件。
 
-读取请求各自声明用途，不共用一种投影形状。只有当调用方要整个请求 scope 的 Task/Thread/Claim catalog（模型侧 `team_view` 渲染的 address book）时才传 `includeCatalog`。Client 的读取从不传它，只渲染自己请求的那一页。
+读取请求应明确用途。`view` 只有在需要整个请求范围的 Task、Thread、Claim 目录时才设置 `includeCatalog`，供模型侧 `team_view` 展示。Client 不请求该目录，只渲染当前页。
 
-`managerSession({})` 由 Host 解析 manager，不接受调用方指定的身份。`newManagerSession({expectedSessionId})` 只在调用方看到的 Session 仍是当前值时替换它；迟到的 id 会观察当前 Session，不再另建。两者返回同一种 union：`ready` 带 Session 与 Workspace id，`no-workspace` 是普通空态，`unavailable` 带结构化 Host diagnostic。
+`managerSession({})` 解析 Host 持有的 manager，不接受调用方指定身份。`newManagerSession({expectedSessionId})` 只替换调用方看到的那一代；id 过期时返回当前 Session，不另建一代。
 
-`sessionOwnership({sessionIds})` 把当前与保留的 Team Session 分类为 `manager` 或 `member`。权威来自私有 manager lineage 与 Member ledger，包含 archived 和 cold Session；id 前缀与 preset 标签不是 ownership 证据。
+两者共用结果联合：`ready` 带 Session 和 Workspace id，`no-workspace` 表示普通空状态，`unavailable` 带结构化 Host 诊断。
 
-## Remote failure vocabulary
-生成的 Remote methods resolve 为 `RemoteResult`。`{ ok: true, value }` 携带业务结果，`{ ok: false, error }` 携带失败：稳定的 `code` 是判别字段，`details` 随 `code` 收窄，无需 cast。
+`sessionOwnership({sessionIds})` 将当前和保留的 Team Session 分类为 `manager` 或 `member`，依据是私有 manager 历史与 Member ledger，涵盖已归档或尚未激活的 Session。id 前缀和 preset 标签都不是归属依据。
 
-- 业务拒绝（`unread_required`、`stale_revision`）保持 result union。它们是 Client 已经建模的正常控制流，不是 Remote error。它们也是版本 2 写入的全部拒绝词表：mention 与回复都直接送达，没有任何写入要求调用方再发一次。
-- 需要 Client 独立分支的预期跨 Remote 失败以 `RemoteError` 抛出。owner 通过向 `RemoteErrorDetailsMap` merge 声明自己的 code。Team 把 codes merge 进两个 face 共同编译的公开 types 入口。Team 的第一个 code 是 `team/attachment-not-found`，只用于确认整个 cache entry 已不存在。非法 UUID、cache 外路径、缺失 metadata 或 payload、非法 metadata、I/O 与 payload 读取失败都保持为通用 Host 错误。
-- Client 按 `code` 分支，绝不解析 message 文本。message 只是人类诊断，不是契约。未知 code 与未分类的 Host 异常以 `gateway/internal` 到达，因此每个分支都保留通用 fallback。
-- attachment preview 缓存成功读取的图片字节。确认缺失只在当前渲染显示过期状态，不写负缓存，后续挂载仍可重读同一 id。其它读取失败与浏览器解码失败保留文件名，提供显式重试，并且不会打开空预览。
-- `openAttachment` 与 `attachmentApplications` 从同一个已验证的 cache entry 解析 payload 路径，再交给 serving desktop 自己的 opener 或 handler 列表。两者都不接受 Client 传入的路径，因此 attachment 动作无法打开任意 Host 文件；headless Host 返回 `opened: false` 与空 handler 列表，而不是让无法打开任何东西的 Client 失败。
+## Remote 失败词汇
 
-## Client plugin 和 slot composition
-Team browser plugin 是 external Client plugin。Shipped Shell 继续拥有 outer layout。Team 增加一个全局 panel 与一个设置页，并在 Team mode 期间动态 shadow 两个 seats：
+生成的 Remote 方法返回 `RemoteResult`：`{ ok: true, value }` 携带业务结果，`{ ok: false, error }` 携带失败。稳定的 `code` 用于分支，`details` 随之收窄，无需类型断言。
+
+- `unread_required`、`stale_revision`、`main_unread_required` 等业务拒绝保留为类型化结果，不转成 Remote 错误。mention 与关联回复直接投递，不存在邀请后重发的步骤。
+- 需要 Client 单独处理的预期跨 Remote 失败使用 `RemoteError`，由所属模块扩展 `RemoteErrorDetailsMap`。Team 在两端共同编译的公开 types 入口声明 code。
+- `team/attachment-not-found` 只表示确认整个缓存条目已不存在。非法 UUID、越界路径、缺失或损坏的 metadata、缺失 payload、I/O 和 payload 读取失败仍是通用 Host 错误。
+- Client 按 code 分支，不解析供人阅读的 message。未知 code 和未分类 Host 异常以 `gateway/internal` 到达，各分支都要保留通用回退。
+- 附件预览缓存成功读取的图片字节。确认缺失只在本次挂载显示过期，不写负缓存；后续挂载可重读。其他读取失败或解码失败保留文件名并提供重试，不能打开空预览。
+- `openAttachment` 与 `attachmentApplications` 从同一份已验证缓存条目取得 payload 路径，再调用服务端桌面的 opener 或应用列表。它们不接受 Client 路径，不能借此打开任意 Host 文件。无桌面的 Host 返回 `opened: false` 和空应用列表。
+
+## Client 插件与 slot 组合
+
+外部 Client 插件不接管最外层布局，仍由 Harness Shell 持有。Team 增加全局面板和设置页，并在 Team mode 中替换两个位置：
 
 ```text
 sidebar.panellist           additive Team row, order 20
@@ -46,60 +46,74 @@ settings.section            additive Team settings page, order 5
 settings.section.icon       Team mark on that page's nav row
 ```
 
-Browser activation 顺序是：
+激活时先挂载 `agentTeamRemote`，等到 `remote.agentTeam` 可用后再注册面板、导航行和替换项。`dsh.client.inject` 描述模块依赖，不保证执行顺序或服务就绪；slot 声明可能稍后出现时，使用 `ctx.slots.inject()`。
 
-```text
-Client plugin apply
-  → ctx.remote.$mount(agentTeamRemote)
-  → ctx.inject(['remote.agentTeam'], ...)
-  → register Team panel, rail row, and mode shadows
-```
+### 面板归属与恢复
 
-`dsh.client.inject` 描述 client module graph；它不保证 apply order、service readiness 或 slot declaration order。如果 declaration 可能稍后出现，使用 `ctx.slots.inject()`。registration 跟随 declaration lifetime，并随 owning fiber disposal。
+选中 Shell 的 Team 导航行即进入 Team mode；选择其他面板则退出。selection 为 null 时不退出，因为嵌入 Member Session 时会清空面板，但必须保留 Team mode。Team 自己的退出行会显式清空面板。
 
-panel row 与 Team mode 是同一件事：这一行是 shell 自己的 rail button，选中它即进入 mode，另一个 panel 拿走中栏即离开 mode。selection 为 null 时 Team 不介入：嵌入的 Member Session 视图会清空 panel 来独占中栏，mode 必须活过这一段。离开 mode 则由 mode 自己的 foot row 清空 panel。恢复的 mode 会重新选中自己的 panel，除非挂载时已有 panel 被选中：那时那个 panel 保留中栏，mode 主动让位。
+恢复时重新选中 Team 面板；若挂载时已有其他面板被选中，就保留该面板并退出 Team mode。
 
-manager 目的地是一道 gate，不是 Team conversation surface。`manager: true` 还没有解析出的 id 时，`main` conversation shadow 只渲染轻量的 loading 或 error 状态。它调用 `managerSession({})`；得到 `ready` 后经 shipped workspace controller 打开该 Session，记下运行时 id 并让位，主区与普通 composer 都交给 shipped Conversation。读者离开后迟到的解析结果会被丢弃。
+### manager 导航
 
-`unavailable` 把 Host diagnostic 与重试留在 gate 内，不出现可发送的 Team composer。`no-workspace` 会离开 Team，进入 shipped 的选择或创建 Workspace 流程。manager 目的地本身只把 `manager: true` 持久化到浏览器；解析出的 `managerSessionId` 与普通 `returnToSessionId` 都只活在运行时，所以 cold restore 会重新问 Host。
+manager 目的地只负责进入 Session，不是另一套 Team 对话界面。`manager: true` 尚未解析出 id 时，`main` 的 conversation 替换项显示加载或错误状态，并调用 `managerSession({})`。
 
-只有当前 manager Session 在屏时，shipped session header 才用「新开对话」action 替换 preset 标签。它用该 Session id 调用 `newManagerSession({expectedSessionId})`，打开后继并更新运行时目的地。若 reload 并入的较早 catalog pull 还没有 Host 解析出的 id，打开时会进行有界的 catalog 重试。
+收到 `ready` 后，通过 Harness Workspace controller 打开 Session，记录运行时 id，再让出主区，由原生 Conversation 和 composer 接管。离开后才返回的结果会被丢弃。
 
-任何显式 Team 导航都会关闭 manager 目的地；离开时若捕获的普通 Session 仍存在就恢复它。cold restore 若发现 manager 已占据主区，就从 Host 返回的 Workspace 里选最新可见的普通非 Team Session 作为返回目标。没有仍存在的目标时，离开仍走 shipped 新建 Session 流程，保留其默认 preset 与 Workspace 选择。
+`unavailable` 保留 Host 诊断和重试，不显示可发送的 Team composer。`no-workspace` 退出 Team 并进入 Harness 的选择或创建 Workspace 流程。
 
-create 时的 guard 包装公开的 `ISessions.create` 边界。隐式 preset 的 blank candidate 先经 Host 查询精确 ownership；Team-owned id 会在继续 shipped 创建前省略，普通 blank 与显式 preset 请求原样通过。ownership 读取失败时不会重试不安全的 candidate。读取期间若插件销毁，待决创建会被拒绝，既不创建 Session，也不让调用方一直等待。
+浏览器只持久化 `manager: true`；`managerSessionId` 和 `returnToSessionId` 仅在运行时保留，冷启动必须重新向 Host 解析。
 
-guard 只排除 blank 复用。成功替换会自动归档旧 manager，因此保留的历史出现在所属 Workspace 的归档视图，而不是活跃 Session list；归档失败不会回滚后继。从普通列表打开当前 manager 时，固定 composition 保持不变。
+当前 manager Session 在屏时，Session header 用「新开对话」替换 preset 标签。它以当前 id 调用 `newManagerSession({expectedSessionId})`，打开后继并更新运行时目的地。若刷新并入的早先目录请求尚不包含 Host 返回的 id，打开时会做有界重试。
 
-manager 在屏时，临时 slot replacement 隐藏 hero preset picker、header preset label 与 permission control；切到其他 Session 就释放并恢复 shipped controls。这只是展示收口，不是授权或 authorization lock；Host composition 与执行 guard 归 [Tools and preset](tools-and-preset.zh.md#team-manager-preset)。
+显式 Team 导航会关闭 manager 目的地。退出时恢复仍然存在的普通 Session；冷启动若发现 manager 已占据主区，就从 Host 返回的 Workspace 选择最新可见的非 Team Session。没有返回目标时，走 Harness 默认 preset 和 Workspace 选择的新建流程。
 
-Slot parent 的 `children` declaration 同时是 render site 和 render authority。两个存活的 parent entries 不能声明同一个 child slot。特别是 Team 的 `sidebar.workspaces` shadow 不得重新声明 shipped `sidebar.workspaces.directoryFlow`。即使 Team entry priority 更高，Harness SlotCore 也会拒绝这个 duplicate。不要复制 private WorkspaceBrowser、ConversationRoot、Shell 或 private CSS 来规避它。
+### 普通 Session 复用与 manager 控件
 
-Team feature 需要现有 Harness capability 时，使用 public service 或 package export。对于 directory selection，先检查 `ctx.workspaces.pickDirectory()` 和 `host.pickDirectory` path，再考虑 Team-specific picker。如果 public contract 无法表达目标 composition，就记录这个 limitation。选择 Team-owned plugin 或新设计。不要静默依赖 private implementation details。
+创建守卫包装公开的 `ISessions.create`。隐式 preset 的空白候选先向 Host 查归属；Team-owned id 在继续创建前被排除，普通空白和显式 preset 请求保持不变。
 
-## Client data 和 presentation boundary
-`packages/client-agent-team/src/client/` 下的 components 不接触 `ctx`、operation ledger 或 Host classes。Data 与 callbacks 通过 Client slot contract 进入，包括 owner props、runtime props、declared store 或 inject face。Presentation layer 只消费 Host projections 和本地 navigation state。它不自行发明 durable facts。
+归属读取失败时不重试不安全候选；读取期间若插件销毁，创建被拒绝，既不创建 Session，也不让调用方一直等待。
 
-UI work 的边界如下：
+该守卫只阻止空白复用。[manager 归档](workspace-session-storage.zh.md#发布与归档) 将旧历史移出活跃列表。从普通列表查看当前 manager 时仍保持固定组合。
 
-- Project composer 默认创建 taskless Thread。它提供默认关闭的「作为任务」控件，以原子创建 Task。 taskless Thread 保留 normal read/reply/inbox behavior。promotion 之前隐藏 Task status、Claims 和 Task-resolution controls。 Promotion 是 durable、non-optimistic 的 Host mutation。成功后 Client 重新读取 Thread 和 supplemental projections。它不在本地合成 Task。
+manager 在屏时，临时 slot 替换隐藏 hero preset picker、header preset label 和 permission control；切到其他 Session 就释放，还原 Harness 控件。这只是展示，不是授权锁。Host 组合与执行守卫见 [工具与 preset](tools-and-preset.zh.md#team-manager-preset)。
 
-  Human Client 消费 Host 的 Inbox 投影，但绝不维护并行 Inbox authority。投影有两片。第一片是「收件箱 / Inbox」队列：合并各 Workspace 的徽标与页，覆盖读者的整片未读。mention 只在其中计数，绝不是准入条件。第二片是该读者写过 Message 的「最近活跃」段。回复过的 Thread 无论是否 follow 都算他的。按最新活跃降序，Host 侧每个 Workspace 上限 10，合并到页面上最多 5 条。第二片永不进入 agent 的 Inbox。打开页不确认任何内容。
+### Slot 声明权威
 
-  Thread reads 使用 Host projections（`readThread`、`threadHistory`）和 Host mutations（replies、promotion、Task actions）。 当前 Thread UI 不提供 Attention controls 或 observations。这些 controls 的 Host Remote methods 留给后续自有 UI。 Browser 会持久化 Team navigation mode、Workspace selection、最近选中的 Project 或 Thread、Inbox 页位置，以及 manager 目的地 token。unread 与 Attention 归 Host；解析出的 Session id 与返回目标只活在运行时，并重新经 Host 解析。回到 Team 时恢复位置。
+父 slot 的 `children` 同时决定渲染位置与声明权威。Team 的 `sidebar.workspaces` 替换项不得重新声明 `sidebar.workspaces.directoryFlow`，Harness SlotCore 会拒绝存活的重复声明。
 
-  Thread 页面或讨论侧栏每次打开都有独立的读取范围。切换时丢弃上一次打开尚未返回的历史、未读和关注者结果，即使之后回到同一个 Thread 也一样。
+不要复制私有 WorkspaceBrowser、ConversationRoot、Shell 或 CSS。使用公开服务与导出，例如 `ctx.workspaces.pickDirectory()`；公开契约无法满足需求时，应记录限制，而不是静默依赖内部实现。
 
-  Agent Inbox 仍由 Host 持有，并通过 `team_inbox` 提供。
-- 侧栏 Projects/Agents 排序存入 Team Host row 的 `sidebarOrder`，按浏览器缓存并与 Remote 默认顺序合并。每个列表按拖动顺序保存，已有保存请求时只保留最新待写顺序。浏览器丢失缓存后从 Host 读回。排序不进入 ledger，Agent 不读取这项偏好。
-- Team 设置的许可编辑器用 `toolCatalog` 发现 Host 全局与 live Member scope 中的名称，不读取普通 Agent scope；注入 `remote.settings` 读取已保存名单。它只写 `extraToolGrants`，并携带开始编辑时读到的 revision。它不使用共享配置表单的 mutation adapter，因为后者把所有失败压成一个 boolean；编辑器必须区分 `settings/conflict`、`settings/rejected` 与传输失败。已保存名单、Human 身份和目录各自拥有独立的加载与失败状态。冲突保留本地草稿、重读最新 committed 值，并要求显式核对后才能再次保存，绝不自动重放旧草稿。名单读取失败时不能变成 `[]`。
-- 嵌入的 Team Member Session 使用未修改的 shipped composer。Team 不注册任何成员会话的 composer 表面。它不接管 seat，没有 trigger sources，没有 dock 提示条。rc.1 把 trigger-menu overlay 移进了 `conversation.composer.bar` 的 children。接管者会一并继承渲染义务，并使 overlay 悬空。Team 自有的命令/成员引用入口相对 shipped 词汇表不再有不可替代的价值，因此一并移除。普通会话与 Member Session 共享同一 composer 与词汇表。
-- 有对应能力时复用 public Harness primitives 和 `--dsw-*` theme tokens。
-- CSS 保持在 CSS Modules 中；不要 import private Harness CSS。
-- Runtime presence 必须与 Claim 和 Task state 分离。
-- Task resolution controls 会修改 Task 和 Claim。Closed Task 拒绝 replies 和 Claim；follow 是它唯一还能新建的 Attention 行；Task 自身的 resolution 与 Human 对已结束 Task 的转交仍然合法。reopen 会恢复 open Task，但不会恢复此前的 Attention。
-- Message、Activity、Claim 和 Task 的 presentation 要保持区分且用户可读。不要暴露 opaque refs 或 internal enums。
-- Durable mutations 不做 optimistic update。失败时保留 input，并渲染下一份 Host projection。
-- 保持 Team mode enter/leave、refresh recovery、slot restoration 和 narrow layout behavior。
+## Client 数据与展示边界
 
-UI redesign 已完成。需要理解当时的取舍时，查 [`.scratch/archive/2026-08/ui-redesign/`](../../.scratch/archive/2026-08/ui-redesign/)。它是历史设计背景，不是当前实现权威。UI 改动的当前验收规则见 [`development/README.zh.md`](../development/README.zh.md)。
+展示组件不接触 `ctx`、operation ledger 或 Host class。数据与回调通过 slot owner props、运行时 props、声明的 store 或注入的 face 传入。展示只消费 Host 投影和本地导航状态，不自行创造持久事实。
+
+### Thread 与 Inbox
+
+Project composer 默认创建无 Task 的 Thread，用默认关闭的「作为任务」控件原子创建 Task。无 Task 的 Thread 保留回复、读取、关注和 Inbox 行为；提升为 Task 前不显示状态、Claim 和 resolution 控件。提升不做乐观更新，成功后重读 Thread 与补充投影。
+
+Human Client 读取 Host 的 Inbox 投影，不另建 Inbox 权威；打开页面不确认未读。「收件箱 / Inbox」合并各 Workspace 的完整未读队列与徽标，mention 只参与计数，不是准入条件。
+
+Human 另有 Agent Inbox 不包含的「最近活跃」：读者写过 Message 的 Thread，无论是否关注。按最新活动排序，每个 Workspace 最多十条，合并页最多五条。
+
+### 本地导航与设置
+
+浏览器持久化 Team mode、Workspace 选择、最近的 Project 或 Thread、Inbox 页位置及 manager 目的地 token。未读和 Attention 归 Host；解析后的 Session id 与返回目标仅在运行时保留，重新进入时向 Host 解析。
+
+Thread 页面或讨论侧栏的每次打开都有独立读取范围。切换时丢弃前一次打开尚未返回的历史、未读和关注者结果，即使之后回到同一 Thread 也一样。
+
+侧栏 Projects/Agents 顺序保存在 Team Host row 的 `sidebarOrder`，与 Remote 默认值合并并按浏览器缓存。按拖动顺序保存，写入期间只保留最新待写顺序；缓存丢失后从 Host 读回。
+
+设置许可编辑器通过 `toolCatalog` 发现 Host 全局与 live Member scope 的名称，不读取普通 Agent scope；通过 `remote.settings` 读取已保存名单。它只写 `extraToolGrants`，携带开始编辑时的 revision。
+
+编辑器不使用共享表单将失败压成 boolean 的适配器，因为必须区分 `settings/conflict`、`settings/rejected` 和传输失败。
+
+名单、Human 身份和目录各自有独立的加载与失败状态。冲突保留本地草稿，重读最新值，并要求核对后再次保存，不自动重放。名单读取失败不能变成 `[]`。
+
+### 复用 Harness composer
+
+嵌入的 Member Session 使用未经修改的 Harness composer。Team 不替换 composer 位置、不注册 trigger source，也不增加 dock 提示条。
+
+trigger-menu overlay 属于 `conversation.composer.bar` 的 children，替换该项也会接管 overlay 的渲染义务。Team 不另加命令或 Member 引用入口。
+
+普通 Session 与 Member Session 共用 composer 和词汇。复用公开 Harness primitives 与 `--dsw-*` token，使用 CSS Modules，并保持 Team mode 恢复和窄屏布局。

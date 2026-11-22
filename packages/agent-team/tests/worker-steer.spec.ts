@@ -574,6 +574,31 @@ describe('one instruction in the Worker native session', () => {
     expect(engine.sessions.filter(session => session.resume !== undefined)).toHaveLength(1)
   })
 
+  it('refuses a continuation request id reused for another instruction', async () => {
+    const { harness, ctx, agent, projectRef } = await setup()
+    const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'),
+      projectRef, task: 'refactor the parser', cwd: harness.checkout })
+    engine.release!.resolve()
+    await settledOf(ctx.agentTeam, run.workerRef)
+    await ctx.agentTeam.workerSteerForAgent(agent, { workerRef: run.workerRef, instruction: 'one more thing',
+      requestId: requestId('continue-reused') })
+    await expect(ctx.agentTeam.workerSteerForAgent(agent, { workerRef: run.workerRef, instruction: 'something else',
+      requestId: requestId('continue-reused') })).rejects.toThrow(/already carried another instruction/)
+    expect(engine.sessions.filter(session => session.resume !== undefined)).toHaveLength(1)
+  })
+
+  it('refuses to resume a run whose cleanup was never confirmed', async () => {
+    const { harness, ctx, agent, projectRef } = await setup()
+    const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'),
+      projectRef, task: 'refactor the parser', cwd: harness.checkout })
+    engine.disposeFails = true
+    engine.release!.resolve()
+    await settledOf(ctx.agentTeam, run.workerRef)
+    await expect(ctx.agentTeam.workerSteerForAgent(agent, { workerRef: run.workerRef, instruction: 'one more thing',
+      requestId: requestId('continue-unclean') })).rejects.toThrow(/did not confirm its cleanup/)
+    expect(engine.sessions.filter(session => session.resume !== undefined)).toHaveLength(0)
+  })
+
   it('joins concurrent continuations carrying the same text without appending it twice', async () => {
     const { harness, ctx, agent, projectRef } = await setup()
     const run = await ctx.agentTeam.workerStartForAgent(agent, { requestId: requestId('run'),

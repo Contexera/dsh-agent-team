@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   AgentTeamClientMemberStatus,
   AgentTeamThreadTaskCard,
@@ -12,18 +12,17 @@ import type {
   AgentTeamView,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { Button, IconChevronLeftOutlineRegular, Modal, Pill, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronLeftOutlineRegular, Pill, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
-import { TeamMemberIdentity } from './TeamMemberRow.tsx'
-import { useAvatarImage } from './avatar-image.ts'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { firstSentence, formatActivity, formatRiskClass, formatTaskStatus, HUMAN_MEMBER_ID, identityInitial, memberHue, plainGist, taskStatusDot } from './team-formatters.ts'
+import { firstSentence, formatActivity, formatRiskClass, formatTaskStatus, plainGist, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { TeamOwnerSeat } from './TeamOwnerSeat.tsx'
 import { TeamThreadCard } from './TeamThreadCard.tsx'
+import { TeamTaskEarlyAcceptDialog, TeamTaskTransferDialog } from './TeamTaskDialogs.tsx'
 import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { daySeparatorLabel, localDateKey } from './team-separators.ts'
 import { useTaskTransfer, useThreadFollow } from './thread-actions.ts'
@@ -34,8 +33,6 @@ import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread, resolvedThreadDestination } from './refs.ts'
 import { rosterAccountableOwner, rosterProjectName, rosterMember } from './refs.ts'
 import css from './conversation.module.css'
-import rowCss from './member-row.module.css'
-import sidebarCss from './sidebar.module.css'
 import threadCss from './thread.module.css'
 
 interface TeamThreadPageProps {
@@ -86,14 +83,9 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const threadRequest = { threadRef, ...(taskRef === undefined ? {} : { taskRef }) }
   const [projectView, setProjectView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
-  // Early acceptance: the Human may accept while Claims are still open; the
-  // confirm dialog lists exactly what will be completed with the Task.
   const [confirmingAccept, setConfirmingAccept] = useState(false)
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
-  // Label source for the promote/accept buttons only: a reply send also raises
-  // the shared `pending` gate, and must not retitle those buttons.
   const [transferDialogOpen, setTransferDialogOpen] = useState(false)
-  const humanImage = useAvatarImage(humanAvatarUrl)
   const mountedRef = useRef(false)
   const supplementalRef = useRef<Promise<void>>()
   const supplementalPendingRef = useRef(false)
@@ -131,6 +123,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     }
   }
 
+  // Coalesce change bursts without losing an update that arrives during the in-flight read.
   const refreshSupplemental = (): Promise<void> => {
     supplementalPendingRef.current = true
     if (supplementalRef.current !== undefined) return supplementalRef.current
@@ -185,7 +178,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         if (update.type === 'failed') { controller.reportError(update.message); return }
         void refreshSupplemental()
       }),
-      // Presence commits nothing: refresh the roster alone; the project view is reserved for workspace membership changes.
+      // Presence changes need only the roster, not another Project view read.
       subscribeChanges({ kind: 'presence', workspaceId }, update => {
         if (!mountedRef.current) return
         if (update.type === 'failed') { controller.reportError(update.message); return }
@@ -235,13 +228,12 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return { members: roster, human }
   }, [members, projectView?.humanMemberId, task?.accountable])
 
-  // Identity-stable: `openRef` feeds every row's props, so a fresh destination per render would re-render the timeline. The
-  // resolved ref carries its own Project, so a cross-Project discussion opens beside that Project's feed — this page's
-  // `projectRef` is the wrong answer, and a Thread page without one has no Project to substitute at all.
+  // Resolve a discussion's own Project so cross-Project links do not reopen it beside this page's feed.
+  // Keep the destination stable because it feeds every memoized Message row through `openRef`.
   const openThreadRef = useMemo(() => resolvedThreadDestination(selectThread, selectDiscussion), [selectThread, selectDiscussion])
 
-  // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here. Identity-stable: a fresh
-  // closure per render would defeat TeamMessage's memo.
+  // TeamMessage never links unresolvable refs, so only Host-confirmed refs reach here; no validation is needed.
+  // A fresh callback per render would defeat TeamMessage's memo.
   const openRef = useCallback((ref: string): void => {
     if (ref.startsWith('project:') && ref !== projectRef) {
       selectProject(ref as AgentTeamProjectRef)
@@ -350,10 +342,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return <p className={threadCss.activityRow} key={factKey(fact)}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{formatActivity(fact.activity, { t, actorName: memberName, claims: taskClaims, workerStates })}</span></p>
   }
 
-  /**
-   * One derived Task card: the discussion's own projection of work it spawned, jumping to the Task Thread. It renders the
-   * same component the Main stream and the side panel use, so the three faces cannot describe one Task differently.
-   */
   const renderTaskCard = (entry: AgentTeamThreadTaskCard): ReactNode => {
     const task = entry.card.task
     return <TeamThreadCard
@@ -368,7 +356,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     />
   }
 
-  /** One run = one same-sender reply turn; activities, derived Task cards, the unread boundary, and day changes break runs. */
+  // One run = one same-sender reply turn; activities, Task cards and day changes break runs.
   const renderFactBlocks = (facts: readonly AgentTeamThreadFact[], boundaryIndex: number | undefined, cards: readonly AgentTeamThreadTaskCard[] = []): ReactNode[] => {
     const nodes: ReactNode[] = []
     let run: AgentTeamThreadFact[] = []
@@ -420,15 +408,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return nodes
   }
 
-  // The follow control and the transfer menu share the same two hooks the discussion panel uses, so both
-  // faces display the Host's current observation and recover from a refusal the same way. The page's mount
-  // observation already answered the follower set, so the control starts from that answer instead of
-  // issuing a second read for the same state. That set is every Member's Attention, so the control is also
-  // told which id is the Human's: the Host projects it, and it is what keeps another Member's follow from
-  // reading as the Human's own.
-  // The page hands in the same follower set it refreshes for the composer, so a change another face or
-  // another client makes reaches the control: the set is re-read on every subscription tick, not only on
-  // the mount read that seeded it.
+  // Reuse the composer's live follower observation instead of issuing a duplicate read.
+  // It includes every Member, so the Human id distinguishes the reader's follow from anyone else's.
   const follow = useThreadFollow(
     changeAttention,
     threadObservations,
@@ -445,9 +426,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       setTransferDialogOpen(false)
       await applyTaskCommit(committed)
     },
-    // A fence re-reads through the page's own recovery path, exactly as accept, close, and reopen do:
-    // the unread gate drains, the stale revision re-projects the Thread, and the Task's current
-    // accountable stays on screen untouched while it happens.
+    // Recover through Host reads without optimistically changing the Task's accountable.
     onRefusal: async (refusal) => {
       setTransferDialogOpen(false)
       if (refusal.kind === 'unread_required') await refreshAfterFence()
@@ -475,8 +454,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const currentFactsWithAnchor = mergeFacts(activeProjection === undefined ? [] : [messageFact(activeProjection.anchor, activeProjection.anchorMentions)], currentFacts)
   const unreadBoundary = unreadIndex >= 0 ? unreadIndex : undefined
-  // One row per erroring Member holding a live Claim: the diagnostic's structured class beside the first sentence of the Host's
-  // reason; the full text rides the row's title.
+  // Show the diagnostic class and first sentence of the Host's reason; the row title keeps the full text.
   const risks = taskClaims.filter(claim => claim.state === 'active').flatMap(claim => {
     const status = members.find(candidate => candidate.member.memberId === claim.owner)
     if (status?.presence !== 'error') return []
@@ -488,23 +466,18 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       full: detail === '' ? t('statusError') : detail,
     }]
   })
-  // Threads are always entered through a Project page, so a Project origin
-  // returns to its timeline; a Thread restored without one returns further.
   const backLabel = projectRef === undefined ? t('backToWorkspace') : t('backToProject')
 
-  // The action band's lifecycle group, decided once so the divider can ask whether that group renders:
-  // a closed Task's reopen lives only in the composer-slot notice, so that state carries no group at all.
   const activeClaimCount = activeProjection?.claims.filter(claim => claim.taskRef === task?.taskRef && claim.state === 'active').length ?? 0
   // Accepting early closes Claims with the Task, so it asks first; a todo Task's work finished outside
   // the ledger, so there is nothing to confirm and no Claims to list.
   const earlyAccept = task?.resolution === 'open' && task.status === 'in_progress' && activeClaimCount > 0
   const canAccept = task?.resolution === 'open' && (task.status === 'in_review' || task.status === 'todo' || earlyAccept)
+  // Closed Tasks offer reopen in the composer slot, so the action band needs no lifecycle group or divider.
   const showLifecycleGroup = task === undefined || task.resolution !== 'closed'
   // The transfer receipt stands only while the Host still shows the Task where the write put it, so a later
   // move — this band's or anyone else's — retires the line instead of contradicting the Task on screen.
   const transferLandedOn = transfer.landedOn !== undefined && task?.accountable === transfer.landedOn ? transfer.landedOn : undefined
-  // One failure, two placements: the band states it while the dialog is shut, and the dialog states it while
-  // open, because a modal stands over the band's line. Rendering it once keeps the wording in one place.
   const transferFailure = transfer.error ?? (transfer.refusal === undefined ? undefined
     : transfer.refusal.kind === 'unread_required'
       ? t('transferUnreadRequired', { count: transfer.refusal.unreadCount })
@@ -527,19 +500,10 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           </div>
           {taskTitle !== undefined && taskTitle !== '' && <p className={threadCss.taskTitle} title={taskTitle}>{taskTitle}</p>}
         </div>
-        {/* One band, two groups: what the reader does with this Thread (following it, moving its
-            responsibility), and what resolves it (promotion, acceptance, closing). The 1px rule
-            between them states that hierarchy instead of the whitespace four siblings used to. */}
         {thread !== undefined && <div className={css.headerActions} data-team-action-band>
           <div className={css.actionGroup} data-team-action-group="thread">
-            {/* The follow control stands on both faces of a Thread: a discussion and a Task alike. Its
-                pressed state is the band's own fill, because a shipped outline button paints nothing
-                for `aria-pressed` and "followed" and "not followed" would otherwise read alike. */}
-            {/* The visible verb is the band's own grade; the accessible name keeps the full phrase, so the
-                control still says what it follows while four actions share one line. While a write runs the
-                name says so in the long form: the shortened visible word is not what a screen reader reads,
-                and a control that stopped announcing its own progress would be a regression against the
-                previous copy. */}
+            {/* Outline buttons do not style `aria-pressed`, so the band supplies the followed-state fill. */}
+            {/* Keep the full action and pending state accessible even though the visible labels are shortened. */}
             <Tooltip label={follow.following === true ? t('unfollowHint') : t('followHint')} side="bottom" delayMs={500} portal maxWidth={260}>
               <Button size="sm" variant="outline" className={follow.following === true ? css.toggleOn : undefined}
                 disabled={follow.pending} aria-pressed={follow.following === true}
@@ -548,9 +512,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
                 {follow.pending ? t('followPendingLabel') : follow.following === true ? t('unfollowLabel') : t('followLabel')}
               </Button>
             </Tooltip>
-            {/* A finished Task is mended from here: only a Member actor is confined to open Tasks, so the
-                Human's transfer stands with the resolution. The dialog opens even when nobody follows yet,
-                because the empty state is the only place that says why and what to do about it. */}
+            {/* Human transfers can repair responsibility even on a finished Task, so resolution must not hide this control. */}
             {task !== undefined && <Tooltip label={t('transferHint')} side="bottom" delayMs={500} portal maxWidth={260}>
               <Button size="sm" variant="outline" disabled={transfer.pending} aria-haspopup="dialog"
                 aria-label={transfer.pending ? t('transferringTask') : t('transferTask')} onClick={() => { setTransferDialogOpen(true) }}>
@@ -579,15 +541,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           </div>}
         </div>}
       </header>
-      {/* Two failures, two lines: which control refused, and what to do next. A band's failure is not
-          the whole-surface replacement `.errorState` draws, which would centre itself in the band. */}
+      {/* Keep action failures local; the whole-surface error layout would displace the controls. */}
       {follow.error !== undefined && <p className={css.actionError} role="alert">{follow.error}</p>}
       {/* The same failure, never twice: while the dialog is open it states its own error inside the dialog. */}
       {!transferDialogOpen && transferFailure !== undefined && <p className={css.actionError} role="alert">{transferFailure}</p>}
-      {/* What a committed transfer changed, where the control stands: the new accountable also lands in the
-          feed as the Host's own activity row, but that row sits below the fold of a long Thread. The receipt
-          is stated against the projection, so any later move of responsibility retires it instead of leaving
-          a line that claims the Task went somewhere it no longer is. */}
+      {/* Keep the receipt beside the control because its activity row may be below the fold. */}
       {transferLandedOn !== undefined && <p className={css.actionNotice} role="status">
         {transferLandedOn === projectView?.humanMemberId ? t('transferDoneYou') : t('transferDone', { name: memberName(transferLandedOn) })}
       </p>}
@@ -604,65 +562,31 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           the list is reachable and dismissable by keyboard alone; the write stays on the page's own
           hook, which keeps the Task's current accountable on screen until the Host commits, and
           closes the dialog on that commit rather than on the click. */}
-      {task !== undefined && <Modal
+      {task !== undefined && <TeamTaskTransferDialog
         open={transferDialogOpen}
-        onClose={() => { if (!transfer.pending) setTransferDialogOpen(false) }}
-        title={t('transferTitle')}
-        description={t('transferBody')}
-        closeLabel={t('cancel')}
-        footer={<Button variant="outline" disabled={transfer.pending} onClick={() => { setTransferDialogOpen(false) }}>{t('cancel')}</Button>}
-      >
-        <p className={css.transferAccountable}>{t('transferAccountable', { name: memberName(task.accountable) })}</p>
-        {transferCandidates.members.length === 0 && !transferCandidates.human
-          ? <p className={css.transferEmpty} role="status">{t('transferEmpty')}</p>
-          : <ul className={css.transferList}>
-              {transferCandidates.members.map(status => <li key={status.member.memberId}>
-                <button type="button" className={css.transferCandidate} disabled={transfer.pending}
-                  aria-label={t('transferTargetLabel', { name: memberName(status.member.memberId) })}
-                  onClick={() => { void transfer.transfer(status.member.memberId) }}>
-                  <TeamMemberIdentity status={status} t={t} />
-                </button>
-              </li>)}
-              {transferCandidates.human && projectView?.humanMemberId !== undefined && <li>
-                <button type="button" className={css.transferCandidate} disabled={transfer.pending}
-                  aria-label={t('transferTargetYou')}
-                  onClick={() => { void transfer.transfer(projectView.humanMemberId) }}>
-                  <span className={sidebarCss.agentAvatar} style={{ '--team-avatar-hue': memberHue(HUMAN_MEMBER_ID), overflow: 'hidden' } as CSSProperties} aria-hidden="true">
-                    {humanImage.image.kind === 'image'
-                      ? <img src={humanImage.image.src} alt="" width={34} height={34} onError={humanImage.failed} />
-                      : identityInitial(humanName)}
-                  </span>
-                  <span className={rowCss.copy}>
-                    <strong>{humanName}</strong>
-                    <small>{t('transferHumanHint')}</small>
-                  </span>
-                </button>
-              </li>}
-            </ul>}
-        {/* A failure is stated where the reader pressed, and never twice: while the dialog is open it is the
-            dialog's own line, because the band's line sits behind the modal. */}
-        {transferFailure !== undefined && <p className={css.actionError} role="alert">{transferFailure}</p>}
-      </Modal>}
-      {task !== undefined && thread !== undefined && (() => {
-        const activeClaims = activeProjection?.claims.filter(claim => claim.taskRef === task.taskRef && claim.state === 'active') ?? []
-        return <Modal
-          open={confirmingAccept}
-          onClose={() => { if (!pending) setConfirmingAccept(false) }}
-          title={t('acceptEarlyTitle')}
-          closeLabel={t('cancel')}
-          footer={<>
-            <Button variant="outline" disabled={pending} onClick={() => { setConfirmingAccept(false) }}>{t('cancel')}</Button>
-            <Button variant="primary" disabled={pending} onClick={() => { void mutateTask('accept') }}>{pendingAction === 'task:accept' ? t('acceptingTask') : t('acceptTask')}</Button>
-          </>}
-        >
-          <p className={css.confirmBody}>{t('acceptEarlyBody', { count: activeClaims.length })}</p>
-          <ul className={css.confirmList}>
-            {activeClaims.map(claim => (
-              <li key={claim.claimRef}>{memberName(claim.owner)} · {claim.direction}</li>
-            ))}
-          </ul>
-        </Modal>
-      })()}
+        pending={transfer.pending}
+        accountableName={memberName(task.accountable)}
+        members={transferCandidates.members}
+        human={transferCandidates.human}
+        humanName={humanName}
+        humanAvatarUrl={humanAvatarUrl}
+        memberName={memberName}
+        humanMemberId={projectView?.humanMemberId}
+        failure={transferFailure}
+        onClose={() => { setTransferDialogOpen(false) }}
+        onTransfer={memberId => { void transfer.transfer(memberId) }}
+        t={t}
+      />}
+      {task !== undefined && thread !== undefined && <TeamTaskEarlyAcceptDialog
+        open={confirmingAccept}
+        pending={pending}
+        accepting={pendingAction === 'task:accept'}
+        claims={activeProjection?.claims.filter(claim => claim.taskRef === task.taskRef && claim.state === 'active') ?? []}
+        memberName={memberName}
+        onClose={() => { setConfirmingAccept(false) }}
+        onConfirm={() => { void mutateTask('accept') }}
+        t={t}
+      />}
     </div>
 
     <section ref={timelineRef} onScroll={onTimelineScroll} className={css.timeline} aria-label={t('timelineLabel')}>

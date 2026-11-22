@@ -13,7 +13,7 @@ import { renderText, teamTools } from '../../tool-agent-team/tests/render-text.t
 import { realHarness, requestId } from './helpers/member-harness.ts'
 import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/index.ts'
-import type { AgentTeamOperation, AgentTeamOperationId } from '../src/types.ts'
+import type { AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamOperationReceipt, AgentTeamProjectRef } from '../src/types.ts'
 
 
 /** The live manager Agent for one Host. */
@@ -131,7 +131,7 @@ describe('Team manager write path', () => {
       { name: 'unknown provider', model: { provider: 'nope', model: 'mock' }, reason: 'is not in the model catalog' },
       { name: 'unknown model', model: { provider: 'mock', model: 'ghost' }, reason: 'is not offered by provider' },
       { name: 'invalid effort', model: { provider: 'mock', model: 'mock', reasoningEffort: 'high' }, reason: 'is not supported by' },
-      { name: 'unreadable catalog', model: { provider: 'broken', model: 'mock' }, reason: 'could not be read' },
+      { name: 'unreadable catalog', model: { provider: 'broken', model: 'mock' }, reason: "the model catalog for provider 'broken' could not be read: catalog lookup failed" },
     ]
     for (const [index, testCase] of cases.entries()) {
       const refused = await runTool(ctx, manager, 'member_create', `write-model-${index}`, {
@@ -142,6 +142,116 @@ describe('Team manager write path', () => {
     }
     // Every refusal happened before the append, so no Member row exists.
     expect(ctx.agentTeam.membersForClient({})).toEqual([])
+  })
+
+  it.each([
+    { label: 'an empty update name', fields: { action: 'update', name: '  ' }, reason: 'needs a non-empty name' },
+    { label: 'an update without fields', fields: { action: 'update' }, reason: 'needs a name or a description to change' },
+    { label: 'an archive with a name', fields: { action: 'archive', name: 'Renamed' }, reason: 'archives a Project by ref alone' },
+    { label: 'an archive with a description', fields: { action: 'archive', description: 'Changed goal' }, reason: 'archives a Project by ref alone' },
+  ] as const)('refuses project_update with $label without writing', async ({ fields, reason }) => {
+    const { ctx, workspaceId } = await realHarness()
+    const manager = await openManager(ctx)
+    const created = await ctx.agentTeam.managerCreateProjectForAgent(manager, {
+      requestId: requestId('validation-project'), workspaceId, name: 'Original', description: 'Original goal',
+    })
+    const ledger = ctx.agentTeam['ledger']!
+    const before = ctx.agentTeam.status().sequence
+    const project = ledger.getProject(created.projectRef)
+    const id = requestId('invalid-project-update')
+
+    await expect(ctx.agentTeam.managerUpdateProjectForAgent(manager, {
+      requestId: id, workspaceId, projectRef: created.projectRef, ...fields,
+    })).rejects.toThrow(reason)
+
+    expect(ledger.hasCommitted(id)).toBe(false)
+    expect(ctx.agentTeam.status().sequence).toBe(before)
+    expect(ledger.getProject(created.projectRef)).toEqual(project)
+  })
+
+  it.each(['non-manager', 'replaced manager'] as const)('checks authorization before validation for every write from a %s', async kind => {
+    const { ctx, workspaceId, checkout } = await realHarness()
+    const manager = await openManager(ctx)
+    let caller = manager
+    if (kind === 'non-manager') {
+      const ordinary = await ctx.agents.create({ sessionId: SessionId('session-auth-first'),
+        meta: { cwd: checkout, agentPreset: 'standard' }, agentOptions: mockRoute })
+      onTestFinished(async () => { await ordinary.dispose() })
+      caller = ordinary.agent
+    } else {
+      const replaced = await ctx.agentTeam.newManagerSession({ expectedSessionId: manager.id })
+      expect(replaced.status).toBe('ready')
+    }
+    const memberRef = 'member:missing' as AgentTeamMemberId
+    const projectRef = 'project:missing' as AgentTeamProjectRef
+    const calls = [
+      (id: ReturnType<typeof requestId>) => ctx.agentTeam.managerCreateMemberForAgent(caller, {
+        requestId: id, workspaceId, handle: 'invalid', description: ' ', model: mockRoute,
+      }),
+      (id: ReturnType<typeof requestId>) => ctx.agentTeam.managerCreateProjectForAgent(caller, {
+        requestId: id, workspaceId, name: 'Invalid', description: ' ',
+      }),
+      (id: ReturnType<typeof requestId>) => ctx.agentTeam.managerChangeProjectOwnerForAgent(caller, {
+        requestId: id, workspaceId, projectRef, memberRef, action: 'add', responsibility: ' ',
+      }),
+      (id: ReturnType<typeof requestId>) => ctx.agentTeam.managerUpdateProjectForAgent(caller, {
+        requestId: id, workspaceId, projectRef, action: 'update', name: ' ',
+      }),
+      (id: ReturnType<typeof requestId>) => ctx.agentTeam.managerUpdateMemberForAgent(caller, {
+        requestId: id, memberRef, description: ' ',
+      }),
+      (id: ReturnType<typeof requestId>) => ctx.agentTeam.managerSetMemberStateForAgent(caller, {
+        requestId: id, memberRef, action: 'recover',
+      }),
+      (id: ReturnType<typeof requestId>) => ctx.agentTeam.managerChangeMemberWorkspaceForAgent(caller, {
+        requestId: id, workspaceId: WorkspaceId('workspace:missing'), memberRef, action: 'join',
+      }),
+    ]
+    const before = ctx.agentTeam.status().sequence
+    for (const [index, call] of calls.entries()) {
+      const id = requestId(`auth-first-${index}`)
+      await expect(call(id)).rejects.toThrow('team manager tool requires the live Team manager Session')
+      expect(ctx.agentTeam['ledger']!.hasCommitted(id)).toBe(false)
+    }
+    expect(ctx.agentTeam.status().sequence).toBe(before)
+    expect(ctx.agentTeam.membersForClient({})).toEqual([])
+  })
+
+  it('answers the original receipt after a post-commit projection throws and never appends it twice', async () => {
+    const { ctx, workspaceId } = await realHarness()
+    const manager = await openManager(ctx)
+    const ledger = ctx.agentTeam['ledger']!
+    const request = { requestId: requestId('effect-throws'), workspaceId, name: 'Once', description: 'One durable Project' }
+    const receipts: AgentTeamOperationReceipt[] = []
+    ctx.on('agent-team/committed', ({ receipt }) => {
+      if (receipt.requestId === request.requestId) receipts.push(receipt)
+    })
+    const getOperation = ledger.getOperation.bind(ledger)
+    let projectedRequest: ReturnType<typeof requestId> | undefined
+    let committedAtFault = false
+    const projection = vi.spyOn(ledger, 'getOperation').mockImplementationOnce(operationId => {
+      projectedRequest = getOperation(operationId)?.requestId
+      committedAtFault = ledger.hasCommitted(request.requestId)
+      throw new Error('post-commit projection failed')
+    })
+    const info = vi.spyOn(ctx.logger, 'info')
+    const before = ctx.agentTeam.status().sequence
+
+    const first = await ctx.agentTeam.managerCreateProjectForAgent(manager, request)
+    const replay = await ctx.agentTeam.managerCreateProjectForAgent(manager, request)
+
+    expect(projection).toHaveBeenCalledTimes(1)
+    expect(projectedRequest).toBe(request.requestId)
+    expect(committedAtFault).toBe(true)
+    expect(receipts).toHaveLength(1)
+    expect(first.outcome).toBe('committed')
+    expect(first.receipt).toEqual(receipts[0])
+    expect(replay.outcome).toBe('committed')
+    expect(replay.receipt).toEqual(first.receipt)
+    expect(replay.projectRef).toBe(first.projectRef)
+    expect(ctx.agentTeam.status().sequence).toBe(before + 1)
+    expect(info.mock.calls.some(([line]) => String(line).includes(`manager write replayed sessionId=${manager.id} requestId=${request.requestId}`))).toBe(true)
+    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
   it('replays one requestId as the original receipt and refuses a changed parameter as a collision', async () => {

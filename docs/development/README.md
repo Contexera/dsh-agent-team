@@ -2,13 +2,13 @@
 
 English | [中文](README.zh.md)
 
-How to set up, verify, and deliver a change here — maintained in focused files:
+Find the setup, checks, and delivery guidance for your change.
 
-| Page | Owns |
+| If you are… | Go to |
 | --- | --- |
-| [start-and-checks.md](start-and-checks.md) | scope, first-run setup, and the check ladder with the release-time gates |
-| [e2e-lanes.md](e2e-lanes.md) | E2E browser lane catalog, real Web/Harness contracts, lower-layer tests, and targeted triggers |
-| [generated-and-seams.md](generated-and-seams.md) | browser evidence for UI changes, generated artifacts, the package seams, and the Host-operation checklist |
-| [environments-and-install.md](environments-and-install.md) | sandbox and CI environments, then verifying an external installation |
-| [storage-and-delivery.md](storage-and-delivery.md) | where the Team ledger is stored, the multi-page notification regression, and the pre-delivery checklist |
-| [team-performance.md](team-performance.md) | reusable Team performance scenarios, scale matrix, browser and semantic checks |
+| Setting up Harness, diagnosing CI, or installing the bundle | [Environments and installation](environments-and-install.md) |
+| Choosing checks, or deciding between live preview and keyless verification | [Start and checks](start-and-checks.md) |
+| Choosing a real-Web scenario or finding its screenshots | [E2E browser lanes](e2e-lanes.md) |
+| Regenerating Remote artifacts, changing a package boundary, or adding a Host operation | [Generated files, seams, and operations](generated-and-seams.md) |
+| Diagnosing ledger startup, checking cross-page delivery, or reviewing a handoff | [Ledger storage, notifications, and delivery](storage-and-delivery.md) |
+| Measuring performance or comparing before/after results | [Team performance evaluation](team-performance.md) |

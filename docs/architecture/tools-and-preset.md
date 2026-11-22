@@ -2,6 +2,10 @@
 
 English | [中文](tools-and-preset.zh.md)
 
+This page owns tool rosters, preset composition, and the placement of model guidance. [Host authority](host-authority.md) owns runtime permissions and lifecycle; [Collaboration tools](../team-collaboration/tools.md) owns individual call contracts.
+
+## Member preset
+
 The explicit `team-member` preset is the only Team Member composition. It adds coding capability rows (shell, filesystem/search, web search and fetch, background jobs, the skill loader tool, compaction), collaboration guidance/tools, Harness Workspace instruction discovery, bounded private-memory context, and the [Workspace rules](../team-collaboration/memory-and-context.md#workspace-rules) of each Workspace the Member participates in. Ordinary Sessions remain outside this roster and receive no Team prompt sections, tools, or Member memory.
 
 A nested preset group isolates the skills registry, Team's per-Agent router, and the skill loader together; [Host authority](host-authority.md#member-capabilities-and-skills) owns the exact roots and selection lifecycle.
@@ -9,6 +13,8 @@ A nested preset group isolates the skills registry, Team's per-Agent router, and
 Tool declarations and prompt guidance are separate model-input layers. Tool names, descriptions, and parameters become schemas in the request's dedicated `tools` field; some tool plugins also register system-prompt guidance sections. Skill summaries instead arrive as durable user-role `<system-reminder>` / `<available_skills>` messages, and a full skill body enters only after the `skill` tool loads it or the user explicitly invokes it. The isolated Team skills registry is shared by all three skill surfaces.
 
 The filesystem row states `applyPatch: false` rather than inheriting the Host default: `edit` is the one file-modification tool a Member is granted, and a preset that left the flag unstated would widen every Member's surface the day a Host default flips. The shipped preset test asserts the value, so the decision is checked rather than assumed.
+
+### Execution baseline and extra grants
 
 Every Member starts restricted to the tool definitions contributed by its selected preset, plus the explicitly shared `working_directory` tool. `capabilities.tools.allow` still only narrows this baseline.
 
@@ -34,9 +40,22 @@ The settings catalog discovers tool names from the Host's global registry and li
 
 A saved name that is no longer grantable remains selected and removable. Ordinary Sessions and other profiles receive no grant.
 
+### Limits of public extension points
+
 Team mode does not filter prompts injected by other official or custom plugins. Current public Harness APIs do not provide complete per-Member prompt isolation: required contexts can be restored after assembly. In particular, experimental Team's `team:policy` and required `team:identity` remain visible; they do not block activation or conversation.
 
 This uses public Harness hooks rather than an enforced final request policy. Other assembly middleware can change the result after Team's filter. Full plugin compatibility is not certified; see [the compatibility restriction](../dsh-release-compatibility.md#37-competing-team-implementations).
+
+### Tool roster and registration
+
+The `only` lists in `cordis.patch.yml` select registrations; `packages/agent-team/src/member-runtime.ts` and `manager-tool-policy.ts` maintain the runtime sets.
+
+| preset | Team tools |
+| --- | --- |
+| `team-member` | `team_view`, `team_inbox`, `team_thread`, `team_message`, `team_task`, `team_attention`, `team_dm`, `team_subscription`, `team_reminder`, `team_worker` |
+| `team-manager` | `team_overview`, `team_models`, `member_create`, `member_update`, `member_state`, `member_workspace`, `project_create`, `project_owner`, `project_update` |
+
+The Member roster has at most ten tools: `team_worker` is declared only while the Host Worker switch is on.
 
 Every row `name:` is a bare specifier the Loader resolves against the profile, not against this bundle. A profile links this bundle and the host closure, so a row may name a host package or one of this bundle's own subpaths, and never a package nested inside this bundle's dependency tree. A name that resolves in a working tree can still leave the row `never started` in a real install, so a dependency's module reaches a row only through a re-export under this bundle's own name.
 
@@ -48,44 +67,17 @@ The Web Client is the only Human control surface and delegates every mutation th
 
 A Member has no context tool. The preset's `compaction-basic` row mounts Team's thin `member-compaction-engine` adapter: Team owns proactive admission, while the Harness's `BasicCompactionEngine` supplies the summary template, compaction transaction, and overflow recovery. [`memory-and-context.md`](../team-collaboration/memory-and-context.md) defines the budgets. Generation swaps remain Host decisions, never model ones.
 
-The generation swap is owned by `team-context-management.ts`, Team's own coordinator. It starts from a Host wake decision rather than a durable intent, executes through the serialized lifecycle queue, and takes the successor's identity from the retired Session so a crash converges on one successor:
-
-1. wait for true idle;
-2. recheck the owned-jobs guard and the ordinary-input queue at the commit seam — a queued ordinary message defers the swap;
-3. inside `agent.runMaintenance`, commit the idempotent `team/member-session-recycled` operation as the Host actor, recording `inputFromSeq` (the retired log's offset) when a live generation exists;
-4. retire the old generation: its pre-step gate rejects the step without a model request, then dispose and archive (never delete); the original inbox insertions remain in the log even if already claimed;
-5. activate the fresh Session, whose lineage the ledger transition already records (its header carries no `parentSession`, which names a subagent's creator);
-6. fold the retired log from `inputFromSeq`, drop every message the successor already holds by id, deliver the rest by followup, then rederive the Inbox from the ledger.
-
-Maintenance is what makes the commit safe against input arriving mid-swap: the loop is parked there, so a new message waits in the durable inbox instead of reaching the generation being retired. A failed commit releases maintenance and the old generation continues; a committed one retires it, and startup or recovery finishes a swap interrupted before the replay.
-
-The successor first receives identity, Project ownership, Workspace participation, and its private-memory index, plus the message that woke it. Later steps append only changed or missing categories; [Member context injection](../team-collaboration/memory-and-context.md#member-context-injection) defines memory updates and recovery. There is no handoff envelope or generation announcement.
-
-The fold is Team's own `contextContinuity` projection unit, registered once per host at Team service init. `context-projection.ts` owns the durable checkpoint-ref naming, the Team-notice rule, the fork cut, and the folded state a generation reads back: its checkpoints with their turn-end delivery state, at most one legacy rollover intent, the continuation delivery records, and the unconsumed non-Team input the retired generation never consumed. The tool names it still decodes (`context_rollover`, `new_context`, `context_checkpoint`) are decoders for logs written by earlier builds, not tool aliases.
-
-`context-codec.ts` writes the one envelope this build still produces, the quiet checkpoint continuation. Recognition of that envelope, and of the two shapes earlier builds wrote, lives in `context-source.ts`; the handoff writer survives only as a test helper for those legacy shapes.
-
-Crash recovery is log-derived. An interrupted swap is finished from the recorded binding and the retired Session, and a legacy pending intent whose containing turn never ended durably is spent and discarded instead of leaving the generation permanently un-swappable.
-
-Carried-input replay is bounded and keyed by Message id. A swap records `inputFromSeq`, the retired log's offset at commit, so the fold counts only input at or after that boundary, and the retired Session's log is the only source — no message content is held in memory for the carry. A successor that already started its own turns is not skipped for that reason: the boundary and the successor's own log and inbox queues decide which messages it still lacks. Only a legacy transition without `inputFromSeq` skips the replay along its started generation.
-
-`agent-instructions` messages are regenerated by the successor rather than replayed as standalone turns.
-
-A canceled inbox splice does not identify who removed the message. Replay must preserve input cleared by disposal, so an explicit queue removal or replacement racing this swap can also be replayed. Ordinary Session cancel retains pending input by design; this limitation concerns queue editing during the transition.
-
-An unreadable retired previous Session fails open with a warning for two bounded classes — log corruption (`corrupt session log`, whose torn tail the Host repairs) and a deterministic released-format refusal (`SessionFormatUnsupportedError`, which no retry can change) — while missing, IO, and unknown causes stay fail-closed. A wake swap with an input boundary keeps this check even after its successor has run.
-
-Whether a Member Session has durable persisted content is decided through session-persistence inspection (which awaits in-flight retirement drains), never a bare metadata listing that races a suspend's final flush.
-
-The wake decision itself is a pure gate ladder in `wake-recycle.ts`: disabled, no prior generation, unreadable activity time, a cache possibly still warm, and a context below the waterline each answer resume, and only a cold gap over a large enough context recycles. [`memory-and-context.md`](../team-collaboration/memory-and-context.md) owns the thresholds and the configuration group.
+[Host authority](host-authority.md#generation-swaps-and-input-replay) owns generation swaps and input replay. This page owns preset composition, not a second lifecycle algorithm.
 
 ## Team manager preset
 
-The Host mounts a separate isolated `team-manager` preset for its [Team manager](../domain-model.md#team-manager) Session. It keeps a generic coding surface — persona, time and Workspace instructions, shell, filesystem/search, web, jobs, skill loading, ask-user, basic compaction, and every registered Workspace's rules — but deliberately omits Member context, the Member time context, Member memory and its compaction adapter, Worker and rollover policy, and the profile `extraToolGrants`. This build registers the nine manager tools of the planned management set and none of the rest.
+The Host mounts a separate isolated `team-manager` preset for its [Team manager](../domain-model.md#team-manager) Session. It keeps a generic coding surface — persona, time and Workspace instructions, shell, filesystem/search, web, jobs, skill loading, ask-user, basic compaction, and every registered Workspace's rules — but deliberately omits Member context, the Member time context, Member memory and its compaction adapter, Worker and rollover policy, and the profile `extraToolGrants`. It registers only the nine manager tools listed above.
 
 That surface runs at the trusted `danger-full-access` policy, so the persona carries the data red line as a rule: under `$DSH_HOME` the manager reads and writes only its own `agent-team/manager/` directory, the Workspace rules files it curates under `agent-team/workspaces/`, and a Member's private assets `team_overview` has just confirmed by ref, never the Host's sqlite files, and a Member's Session only through the read-only reader the locator names — never by opening the stored log itself.
 
 It edits a Member's memory, notes or skills only within the Human's current request and under the applicable upkeep rules; it never deletes a Member's directory or copies private content into shared material. Its own memory, notes and a tool result record what was once said, so none of them authorizes an irreversible or costly action in place of the Human asking for it now.
+
+### Directory reads and management writes
 
 The Team surface it mounts is that exact subset: two read-only tools plus seven writes. `team_overview` reads the whole Team as a directory: every Workspace with its checkout path, every Project with its shared goal, its owners and what each answers for, its live subscription counts and board summary, and every Member with its standing, where it participates, which model route it is configured to run, how it runs, what its capability configuration mounted, and what it owns.
 
@@ -120,6 +112,8 @@ The manager layer adds only what the Web Client's own forms add: a non-empty Mem
 Every write carries a `requestId`. The same id with the same parameters answers with the original receipt instead of writing twice, so a lost answer is retried rather than duplicated; a changed parameter under a reused id is refused as a collision. A refusal names its reason and wrote nothing. A committed Member whose activation failed is still committed: the answer keeps its receipt, ref and activation diagnostic, so the manager continues from there instead of creating it again.
 
 The isolated registry's default remains `team-member`; only the manager runtime mounts `team-manager`.
+
+### Current-manager authorization
 
 All nine handlers authorize the caller themselves: the tool is served only while the calling Agent is the current manager Session. `ownsSession` cannot serve there, because it answers lineage, which a replaced generation still satisfies, so a Session that reaches the tool by any other path — a Member's own scope registration, a custom preset, an ordinary Session — is refused rather than answered.
 

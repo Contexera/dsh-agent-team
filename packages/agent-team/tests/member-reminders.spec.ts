@@ -4,6 +4,7 @@ import {
   MEMBER_REMINDER_REF_PATTERN,
   MIN_RECURRING_MINUTES,
   nextOccurrenceAt,
+  nextReminderWakeAt,
   parseReminderNote,
   parseReminderSchedule,
   planMemberReminders,
@@ -161,12 +162,6 @@ describe('parseReminderSchedule reads the three schedule kinds', () => {
     }
   })
 
-  it('rejects a cron expression that can never fire again', () => {
-    const parsed = parseReminderSchedule({ kind: 'cron', expression: '0 0 30 2 *' })
-    expect(parsed.ok).toBe(false)
-    expect(parsed.ok === false && parsed.reason).toMatch(/never fire/)
-  })
-
   it('rejects an unknown schedule kind', () => {
     expect(parseReminderSchedule({ kind: 'hourly' }).ok).toBe(false)
     expect(parseReminderSchedule(undefined).ok).toBe(false)
@@ -274,12 +269,22 @@ describe('planMemberReminders decides what is due now', () => {
     expect(plan([reminder({ ...due, state: 'done' })])).toEqual([])
   })
 
-  it('plans one candidate per reminder, so a new occurrence replaces an unconsumed one', () => {
-    const due = [
-      reminder({ reminderRef: 'a', schedule: { kind: 'every' as const, minutes: 30 } }),
-      reminder({ reminderRef: 'b', schedule: { kind: 'every' as const, minutes: 30 } }),
-    ]
-    expect(plan(due)).toEqual(['reminder:a@2026-11-03T01:30:00.000Z', 'reminder:b@2026-11-03T01:30:00.000Z'])
+  it('plans each due reminder in input order', () => {
+    const due = ['b', 'a'].map(reminderRef => reminder({ reminderRef, schedule: { kind: 'every', minutes: 30 } }))
+    expect(plan(due)).toEqual(['reminder:b@2026-11-03T01:30:00.000Z', 'reminder:a@2026-11-03T01:30:00.000Z'])
+  })
+
+  it('reconciles a due suspended reminder before timing the next eligible one', () => {
+    const next = NOW + 60_000
+    const suspendedDue = reminder({ reminderRef: 'due', memberState: 'suspended',
+      schedule: { kind: 'once', at: new Date(NOW).toISOString() } })
+    const later = reminder({ reminderRef: 'next', schedule: { kind: 'once', at: new Date(next).toISOString() } })
+    const inactive = { ...suspendedDue, memberState: 'inactive' as const }
+    const invalid = reminder({ reminderRef: 'invalid', schedule: { kind: 'once', at: 'not an instant' } })
+    expect(nextReminderWakeAt([invalid, later, suspendedDue], NOW - 1)).toBe(NOW)
+    expect(nextReminderWakeAt([later, suspendedDue], NOW)).toBeUndefined()
+    expect(plan([later, suspendedDue], NOW)).toEqual(['reminder:due@2026-11-03T01:30:00.000Z'])
+    expect(nextReminderWakeAt([inactive, { ...suspendedDue, lastOccurrenceAtMs: NOW }, later], NOW)).toBe(next)
   })
 })
 

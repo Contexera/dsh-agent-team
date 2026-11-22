@@ -2,11 +2,16 @@
 
 English | [中文](host-authority.zh.md)
 
-Team is one collaboration domain per DSH home. Its append-only operation ledger is durable authority for Member, Workspace, Project, Message, independent Thread aggregates, optional Task overlays, Claim, Thread Attention, Inbox, and Activity facts.
+This page owns Host decisions and their failure boundaries: durable commits, runtime effects, and the projections they produce. Start with the ledger rules, then use the lifecycle and recovery sections to distinguish a committed fact from an effect still owed.
+
+Team is one collaboration domain per DSH home. Its append-only ledger owns Team facts: Members, Workspace participation, Projects, Messages, Threads, optional Task overlays, Claims, Attention, Inbox, and Activities. Harness remains the authority for Workspace existence and Session storage; see [storage reuse](workspace-session-storage.md).
 
 When changing a Host capability, read package source/tests first and then the matching Harness contract. [`harness-navigation.md`](../harness-navigation.md) maps the route to `deepseek-harness/docs/subsystems/` and source packages.
 
 ## Ledger authority and commits
+
+### Rules versions and replay
+
 - Current Session context may satisfy the [Thread reading requirement](../team-collaboration/boundaries.md#mutation-fences), but never confirms unread or creates another authority. Only explicit reads commit read-state changes.
 - Agent Thread and Main stream reads add [context-aware presentation](../team-collaboration/tools.md#team_thread) to the ledger result: missing recent Message background and references to already-visible bodies. The tool selects the prefix it can render within its output ceiling, and a Thread receipt stores that bound as `selectedThroughSequence` while a legacy receipt keeps the default batch; the Host commits only that prefix. Human reads, Remote parameters, and replay semantics are otherwise unchanged, and replay never depends on a Session.
 - Mutations enter Host authority and commit one durable operation. Projections, Inbox, tools, commands, Remote responses, and UI derive from committed operations; Client code never interprets ledger records or creates parallel authority.
@@ -14,9 +19,13 @@ When changing a Host capability, read package source/tests first and then the ma
 - Replay re-derives each record's expected Inbox delta and compares it exactly, so a release that changes how an existing kind is validated first records `team/rules-version-adopted` (Host actor, `{ version }`). Each record validates under the newest marker before it; a ledger with none is version 1. `initialize` appends the marker inside its own queued commit, so it precedes every later write, startup recovery included. Markers only ascend, at most one per version, and a build refuses a ledger adopted at a version above its own.
 - Current builds implement version 10. Mounting a ledger whose newest marker is lower appends only the version 10 marker, once, and a fresh ledger records it right after `team/initialized`; reopening a ledger already at version 10 appends nothing. The version-2 rules below still describe their own segments, not the current marker.
 - Version 10 changes how `team/thread-started` and `team/thread-promoted` validate a Task's accountable: any target a transfer accepts, where earlier segments demand the Agent creator, a Human start's enabled owner or the Human, and a promotion's promoter. Those segments replay byte-identically under their own rule, and a version 9 build stops at the version 10 marker.
+- Version 9 replaces Project-membership gates with Workspace participation: enabled Members may write, suspended Members may still read, and inactive or archived Members may not read. New Projects store no membership list; earlier segments retain their original rules. Ownership remains a separate permission.
 - Version 8 adds `team/project-owner-responsibility-updated` and an optional `responsibility` on `team/project-owner-added`. Both are refused inside a segment below version 8, so a ledger written by an earlier build replays byte-identically and its owner records keep reading as unspecified; a build implementing only version 7 stops at the version 8 marker before it parses either shape. An upgrade therefore needs no data migration — the marker alone decides which segments may carry the new field.
 - Behind version 2 the Host also commits `team/main-message-posted`, `team/main-stream-read` and `team/thread-started`, which a version-1 segment rejects, while `team/message-sent` is rejected in a version-2 segment. The Host no longer writes `team/message-sent` (a Thread starts with `startThread`); it replays only inside version-1 segments.
-- A ledger the 0.2.5 preview switch opened lands on that rejection exactly: it carries the version 2 marker, and its `sendMessage` — the path a new Thread took then — still wrote the version 1 `team/message-sent` with no guard, so the ledger opens only while that segment holds no `team/message-sent`. The switch was only ever meant for a one-off `DSH_HOME`.
+- A version-2 segment containing `team/message-sent` is refused, including a preview ledger with that combination; the marker and operation kind, not a release label, decide replay.
+
+### Inbox deltas and reply references
+
 - An inbox delta may carry an optional `mainMarkers` list with its own marker shape (`projectRef` plus a `messageRef` or `activityRef`). It appears only when it changes something, so version-1 records keep their stored bytes, and a departing Member's Main stream markers clear in the same operation as its other inbox state.
 - An inbox delta may also carry an optional `mainAttention` list (`set` of Main stream Attention rows, `removed` of their keys), with the same "only when it changes something" rule, so every delta written before Main stream Attention existed keeps its stored bytes. `team/main-attention-changed` writes it for an explicit follow or unfollow, an ownership grant writes the row it starts, and a withdrawal removes that row; its row is keyed by Member × Project and never enters a Thread index.
 - An Attention row carries the `source` that established it: `thread-author`, `claim`, `accountable`, `project-owner`, `mention`, or `self`. It is optional in storage, so rows written before it existed keep their bytes.
@@ -29,7 +38,9 @@ When changing a Host capability, read package source/tests first and then the ma
 ## Lifecycle and notifications
 - Agent lifecycle, replay, authorization, idempotency, and revision checks stay on Host. Durable unread changes may produce one bounded coalesced Agent notification through the public safe boundary: direct mentions carry their Message and source, direct Task/Claim Activities carry the complete event, and ordinary unread carries a Thread-first route with bounded digests and overflow counts. Promotion reaches followers through Activity markers. Notifications are not a second authority and do not promise exactly-once processing.
 - The notice ranks missing direct signals before reminders and ordinary digests; [attention-and-messaging.md](../team-collaboration/attention-and-messaging.md) owns its order, caps, and character budget.
-- A committed Session transition (`team/member-session-renewed`, `team/member-session-rolled-over`, `team/member-session-recycled`) records the desired binding, not a completed one: retiring the old generation and activating the target are Host effects outside the ledger write. Startup and the explicit Member recovery action both finish an interrupted transition from the recorded previous Session, and each effect derives its own completion — a live handle never proves the archive half ran. A repeated request answers with the recorded receipt and an honest status, never a second binding.
+- A committed Session transition (`team/member-session-renewed`, `team/member-session-rolled-over`, `team/member-session-recycled`) records the desired binding, not a completed one: retiring the old generation and activating the target are Host effects outside the ledger write.
+
+  Startup and the explicit Member recovery action both finish an interrupted transition from the recorded previous Session, and each effect derives its own completion — a live handle never proves the archive half ran. A repeated request answers with the recorded receipt and an honest status, never a second binding.
 - If a reload leaves another live Agent holding the current binding's write handle, the Member stays unavailable until that owner disposes. The release queues a runtime-only retry against the same binding, without another transition.
 - That transition record is the whole lineage of a rollover. The successor Session's header carries no `parentSession`, because the field names a subagent's creator, so a reader looking for the retired Session reads the ledger rather than the header.
 - Every durable Member state has one desired external effect set — the [Member Lifecycle](../domain-model.md#member-lifecycle) table. Each lifecycle operation re-runs that set right after its commit, and startup re-runs it for every non-enabled Member, so an archive, suspension, or removal interrupted by a crash or a failed Workspace/Session/filesystem call converges by repeating the same derivation rather than by a second durable write.
@@ -76,7 +87,7 @@ An error-state Member with a live handle is the last row: `recoverMember` steers
 A Member's current failure reason is carried on its status as a `diagnostic` and rendered by the Client. It is derived from the live surface, not persisted: after a Host restart it is re-derived only if something wakes the Member, so an un-woken Member shows no reason until the next operation touches it.
 
 ## Projections and the change stream
-- The `contextContinuity` unit folds live Session events through the Harness projection registry. It retains only the legacy intent, checkpoint, continuation and unanswered-input facts needed for recovery; activation and retired-Session recovery can also fold an inspected log in full.
+- The `contextContinuity` unit supports incremental live folding and full stored-log inspection; its recovery state is defined under [generation swaps](#generation-swaps-and-input-replay).
 - The Member clock baseline uses `session-event-cursor.ts` to consume only appended events. The cursor restarts when the Session identity, inherited prefix, length or anchor event changes. Its guard relies on the append-only log contract; an in-place replacement with the same sequence and event type is not detected.
 - `changes()` is a streaming Remote with one optional scope (workspace/project/thread/presence); an omitted scope observes shared Team projection changes, not presence. Host registers the listener before emitting the current baseline, then emits matching invalidations, retaining only the latest pending version while a consumer pauses. Cancellation or Host disposal closes the subscription.
 - Thread reads and `team/dm-sent` change no shared projection, so neither advances its version nor wakes subscribers. A private reminder does invalidate its Task Thread scope: that is how an open Human Inbox learns about it, without turning it into public Thread history.
@@ -109,23 +120,59 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 - `agent/error` owns terminal recovery with its consecutive-error limit, and the failure keeps its recorded Member diagnostic.
 - A Team wake discarded before any `turn/start` is the one error diagnostic with no `agent/error` behind it. A Team-owned Inbox or recovery notice that leaves the queue before the turn opens, and that the Host did not replace or dispose, records a `runtime` diagnostic with `source: 'agent/inbox/discarded'`, the `sessionId`, and `occurredAt`. A notice the Host replaces or disposes raises nothing, so ordinary replacement never errors. Like every runtime diagnostic it is process-local, re-derived only on the next wake.
 
+### Generation swaps and input replay
+
+The generation swap is owned by `team-context-management.ts`, Team's own coordinator. It starts from a Host wake decision rather than a durable intent, executes through the serialized lifecycle queue, and takes the successor's identity from the retired Session so a crash converges on one successor:
+
+1. wait for true idle;
+2. recheck the owned-jobs guard and the ordinary-input queue at the commit seam — a queued ordinary message defers the swap;
+3. inside `agent.runMaintenance`, commit the idempotent `team/member-session-recycled` operation as the Host actor, recording `inputFromSeq` (the retired log's offset) when a live generation exists;
+4. retire the old generation: its pre-step gate rejects the step without a model request, then dispose and archive (never delete); the original inbox insertions remain in the log even if already claimed;
+5. activate the fresh Session, whose lineage the ledger transition already records (its header carries no `parentSession`, which names a subagent's creator);
+6. fold the retired log from `inputFromSeq`, drop every message the successor already holds by id, deliver the rest by followup, then rederive the Inbox from the ledger.
+
+Maintenance is what makes the commit safe against input arriving mid-swap: the loop is parked there, so a new message waits in the durable inbox instead of reaching the generation being retired. A failed commit releases maintenance and the old generation continues; a committed one retires it, and startup or recovery finishes a swap interrupted before the replay.
+
+The successor receives the wake message and the context defined by [Member context injection](../team-collaboration/memory-and-context.md#member-context-injection). There is no handoff envelope or generation announcement.
+
+The fold is Team's own `contextContinuity` projection unit, registered once per host at Team service init. `context-projection.ts` owns the durable checkpoint-ref naming, the Team-notice rule, the fork cut, and the folded state a generation reads back: its checkpoints with turn-end delivery state, one possible legacy rollover intent, continuation delivery records, and unconsumed non-Team input. The tool names it still decodes (`context_rollover`, `new_context`, `context_checkpoint`) are decoders for logs written by earlier builds, not tool aliases.
+
+`context-codec.ts` writes the one envelope this build still produces, the quiet checkpoint continuation. Recognition of that envelope, and of the two shapes earlier builds wrote, lives in `context-source.ts`; the handoff writer survives only as a test helper for those legacy shapes.
+
+Crash recovery is log-derived. An interrupted swap is finished from the recorded binding and the retired Session, and a legacy pending intent whose containing turn never ended durably is spent and discarded instead of leaving the generation permanently un-swappable.
+
+Carried-input replay is bounded and keyed by Message id. A swap records `inputFromSeq`, the retired log's offset at commit, so the fold counts only input at or after that boundary, and the retired Session's log is the only source — no message content is held in memory for the carry. A successor that already started its own turns is not skipped for that reason: the boundary and the successor's own log and inbox queues decide which messages it still lacks. Only a legacy transition without `inputFromSeq` skips the replay along its started generation.
+
+`agent-instructions` messages are regenerated by the successor rather than replayed as standalone turns.
+
+A canceled inbox splice does not identify who removed the message. Replay must preserve input cleared by disposal, so an explicit queue removal or replacement racing this swap can also be replayed. Ordinary Session cancel retains pending input by design; this limitation concerns queue editing during the transition.
+
+An unreadable retired previous Session fails open with a warning for two bounded classes — log corruption (`corrupt session log`, whose torn tail the Host repairs) and a deterministic released-format refusal (`SessionFormatUnsupportedError`, which no retry can change) — while missing, IO, and unknown causes stay fail-closed. A wake swap with an input boundary keeps this check even after its successor has run.
+
+Whether a Member Session has durable persisted content is decided through session-persistence inspection (which awaits in-flight retirement drains), never a bare metadata listing that races a suspend's final flush.
+
+The wake decision itself is a pure gate ladder in `wake-recycle.ts`: disabled, no prior generation, unreadable activity time, a cache possibly still warm, and a context below the waterline each answer resume, and only a cold gap over a large enough context recycles. [`memory-and-context.md`](../team-collaboration/memory-and-context.md) owns the thresholds and the configuration group.
+
 ## Private memory, archival, and identity effects
 - The Member preset derives identity, Project ownership, Workspace participation, and private-memory context from current Host facts and the current Session surface. Classification and memory-update rules are defined in [Member context injection](../team-collaboration/memory-and-context.md#member-context-injection); this creates no second durable state store.
 - `workspaceRulesForAgent` resolves which [Workspace rules](../team-collaboration/memory-and-context.md#workspace-rules) files a Member or the current manager reads; the files are Team-owned, not ledger facts, and the Host only reads them.
 - Private-memory directories under `$DSH_HOME/agent-team/members/` are Host-owned effects of Member identity. Activation ensures the directory, `notes/`, and missing `memory.md`; startup does not prune unknown directories. Explicit removal archives the Session and removes that Member's private directory; unrelated entries remain untouched.
 
   Both that removal and the activation-time rename of a pre-fix colon directory are confined to the running process's own members root. The recorded `privateMemoryPath` is a durable absolute fact that names a directory in whichever DSH home added the Member, so a process resolving another home refuses to move or delete it (with a warning) instead of taking the Member's real private memory out of its home.
-- Member and Project archival is the reversible third state between suspend and remove. `archiveMember` commits `team/member-archived`, disposes the live session (private memory and the Session log stay on disk), archives the Session from grouping surfaces, and releases the Member's active Claims with public `claims_released` Activities plus Attention/marker cleanup. A hidden Member must not leave Tasks stuck in progress or phantom unread counts.
+- Archival hides a Member or Project while retaining its facts; it is not removal. There is currently no restore entry point. `archiveMember` commits `team/member-archived`, disposes the live session (private memory and the Session log stay on disk), archives the Session from grouping surfaces, and releases the Member's active Claims with public `claims_released` Activities plus Attention/marker cleanup. A hidden Member must not leave Tasks stuck in progress or phantom unread counts.
 
   `archiveProject` commits `team/project-archived` with the same release shape across every owner on the Project's Threads; the Project memberships earlier rules versions derived survive both archival forms as stored facts (hidden state, not departure).
 
   A partial Project edit merges inside the ledger's serialized section: `updateProject` keeps the stored name or description for every field the request leaves out, and a replay compares only the fields it stated, so an edit queued behind a concurrent one never writes back the snapshot its caller read before it queued.
 
-  Archived entities are gone from every Team API surface — projections (view projects/threads/tasks/members, mention candidates, Project joins, edits), ref resolution (`resolveTaskRefs`/`resolveThreadRefs` skip them so message bodies render plain text), and ref-addressed reads (`readThread`/`threadHistory`/`threadObservations`/`listClaims` reject with an explicit archived error, never an unknown-ref disguise). The facts stay complete in the ledger for replay and a future restore, and that boundary is the archival-vs-remove divide.
+  Archived entities are excluded from active collaboration surfaces — projections (view projects/threads/tasks/members, mention candidates, Project joins, edits), ref resolution (`resolveTaskRefs`/`resolveThreadRefs` skip them so message bodies render plain text), and ref-addressed reads (`readThread`/`threadHistory`/`threadObservations`/`listClaims` reject with an explicit archived error, never an unknown-ref disguise). The facts stay complete in the ledger for replay and a future restore, and that boundary is the archival-vs-remove divide.
 
   Removal from archived stays available as the data hygiene path, and there is deliberately no restore entry point this round (mirroring archived dsh sessions). Ledgers written before Project archival omit `project.state`; the record schema normalizes it to `active` at load.
 
 ## Member capabilities and skills
+
+### Durable intent and turn-boundary effects
+
 - Member capabilities (`capabilities` on the Member entity: reserved `tools.allow`, `skills.allow`) are durable intent carried verbatim by every lifecycle operation. Committing performs no known-name validation so old ledgers stay replayable across Harness upgrades; divergence is derived at activation as non-persisted `capabilityWarnings`. `tools.allow` is a deliberate interface reservation: it has no UI write path today.
 
   Edits are partial updates: an omitted field keeps the stored value and an explicit `null` clears it, so a caller that does not manage capabilities can leave the field out and any Remote-written override survives. `model` is deliberately not clearable — see the model contract below.
@@ -154,16 +201,22 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 
   The stored intent stays for the next activation to retry, and replaying the request retries it too: the effect is derived from what the live generation runs against the row as it stands, never from the record the request started from.
 - A lifecycle replay finishes only what its own operation owes: `suspendMember`, `resumeMember`, and `archiveMember` read the Member row as it stands after the write and converge the runtime to that state, so a late retry of a suspend cannot dispose the generation a resume activated, and a replayed resume cannot revive a Member a later suspend stopped. The answer reports the same row, while the receipt stays the original one.
+
+### Model route persistence
+
 - A Member always runs an explicit route. Creation requires one, an edit replaces it but never clears it back to the Host default, and the only two writers are the Human's edits (this section) and the Member Session itself (below). Ledger records written before this contract omit `model`; they still read, and they wake on the Host's default selection at that moment.
 - A model edit commits and reports like any other edit, but whether the new route takes effect is upstream's call: a switch whose new window cannot hold the Session after compaction is refused with the previous route kept, so the pending selection waits for a compatible model while the recorded intent survives either way.
 - The composer is the other entry point, and it does not reach the ledger on the selection event. A Member Session's `request/header` is what proves the switch passed the Host's compaction guard and entered a real request, so the Host records the route from `header.config` as one Human `team/member-updated` operation. Only the route is written: the reasoning tier stays a Session-log fact that activation re-reads for the same route.
 - Three requests write nothing. One is a request on the route the Member already runs, which includes the route Team itself wrote back when it activated that Member — so the write-back cannot feed itself through the ledger. Another is a switch the Host refuses: it never logs a header, so it never writes. The third is a header the Member has already moved past: a pick made after that step fixed its route is newer, and writing the header's route would put the replaced one back.
 - Every roster row carries `capabilityState` (`applied` | `pending`). It compares that Member's stored `capabilities` with the capabilities applied to its live runtime; a Member without a live runtime reports `pending`. It is separate from `availability` and `presence` and does not report whether the profile's `extraToolGrants` took effect on a turn.
+
+### Isolated skill catalogs
+
 - Team skills use an isolated registry inside each Team preset. Its only registered provider is Team's router, which selects the exact Agent's filesystem provider; Host-global providers and runtime skills never enter Team discovery, loading, explicit `/skill` invocation, or the model catalog. The same registry backs the shipped Session skill catalog and the `skill` tool. Ordinary Sessions keep using the Host registry and all their configured global skills.
 
   The Host runtime passes its Team registry into the provider mount explicitly. An ordinary `agent.ctx` lookup resolves the Host registry when both exist and cannot find the Team mount.
 
-  Each Member provider scans exactly two Team-owned roots with default roots excluded: the plugin's bundled read-only core skills (`packages/agent-team/core-skills/`, first — a same-name bundled skill stays stable across upgrades) and the Member's writable `$DSH_HOME/agent-team/members/<memberId>/skills/`.
+  Each Member provider scans exactly two Team-owned roots with default roots excluded: the plugin's bundled read-only core skills (`packages/agent-team/core-skills/`, first — a same-name bundled skill stays stable across upgrades) and the Member's writable `$DSH_HOME/agent-team/members/<member-directory>/skills/` (the Member id with `:` replaced by `-`).
 
   The Team manager Session gets the same isolated shape from its own runtime, with the two roots swapped for manager ones: the read-only `packages/agent-team/manager-skills/` (first, and checked by the same `check:core-skills` gate) and the writable `$DSH_HOME/agent-team/manager/skills/`. No Member root and no manager root crosses over.
 
@@ -178,120 +231,125 @@ The Host row publishes one service, `ctx.agentTeam`, consumed in two distinct wa
 - **Remote methods** (the `@Remote`-decorated ones, e.g. `members`, `view`, `addMember`, `updateMember`, `sendMessage`, `readThread`, `inbox`, `humanProfile`) are the Client contract. They are typed through Typert artefacts generated from the declarations, so the Client, the model-facing tools, and any other consumer compile against the same shape; changing one is a contract change.
 - **Host-only service methods** (e.g. `memberForAgent`, `membersForClient`, `status`, and the activation/lifecycle internals) exist for in-process Host callers — the preset row, commit listeners, and startup derivation. They carry no compatibility promise and may move between releases.
 
-Only the Remote set is a contract. Everything else on `ctx.agentTeam` is internal and may change shape without a migration note.
+Only Remote methods carry a compatibility promise.
 
 A preset row must resolve `ctx.agentTeam` while it runs, never capture it statically at declaration time: the service is provided when the Host plugin starts, so a row that closed over it at import time sees nothing. The same applies to `ctx.get('agentTeam')` in external code, which is undocumented use of an internal surface rather than a supported integration point.
 
 ## Subscription scheduling and unattended execution
 
-The Host owns every timer a subscription obeys. `SubscriptionScheduler` (`packages/agent-team/src/subscription-runtime.ts`) admits at most four script runs globally — an owner-requested trial takes one of those slots — keeps one waiting timer entry per subscription and merges later due instants into it, never runs one subscription twice at once, counts failures, and spends a per-subscription publication budget of 20 events a minute.
+`SubscriptionScheduler` (`subscription-runtime.ts`) owns timers and failure accounting. It admits four script runs globally, including owner trials, and never runs one subscription concurrently. Each subscription has one queued timer entry; later due instants merge into it. Publication is limited to 20 events per subscription per minute.
 
-Admission re-reads the ledger rather than the queued snapshot: a subscription deleted — or a Project archived — while a trial or a timer run waits is refused without running its script, and a record in that terminal state neither publishes again nor keeps a checkpoint.
+Admission rereads the ledger. A queued trial or timer cannot run after deletion or Project archival. An input-read failure logs and keeps the entry queued; a definite refusal removes it and settles the caller. Terminal subscriptions neither publish nor retain checkpoints.
 
-If the admission check cannot read its inputs, the scheduler logs the error and leaves the entry queued for a later pass. A refusal after a successful check removes the entry and settles the caller.
+### Private history and cleanup
 
-Scheduling state — next due instant, failure count, publication window, last success — lives in the private domain `agent_team_subscriptions` (`packages/agent-team/src/subscription-store.ts`). Restart resumes from the persisted checkpoint. Deleting that checkpoint changes scheduling and failure accounting even though it cannot rewrite a committed event.
+`subscription-store.ts` owns the private `agent_team_subscriptions` domain:
 
-The same domain keeps four tables no ledger fact depends on: `runs`, the newest fifty runs of each subscription; `deliveries`, the webhook deliveries whose automatic retries were spent; `replays`, the answer each replay request already got; and `admissions`, the accepted webhook requests that still owe a run, an accept, or a replayable failure record, with the definition each arrived under and the batch a full queue held back.
+| State | Retention and purpose |
+| --- | --- |
+| checkpoint | Next due time, consecutive failures, publication window, and last success; restart resumes from it. |
+| `runs` | Newest 50 runs per subscription. |
+| `deliveries` | Webhook deliveries whose automatic retries are exhausted. |
+| `replays` | Intent and answer for each replay request. |
+| `admissions` | Accepted webhooks still owing execution, acceptance, or a replayable failure; includes the received definition and any batch held back by a full queue. |
 
-A run record carries the trigger, the start instant, the duration, the structured category, the exit code or timeout, the event count, the last 8 KiB of each stream, and the identity that explains it — `subscriptionRevision`, `scriptHash`, `runRef`, and for a delivery its `deliveryRef` with the attempt that spent the retries.
+These rows are not Team ledger facts. Deleting a checkpoint cannot rewrite an event, but does change scheduling and failure accounting.
 
-The event count is what the run had accepted into the ledger, never what the script printed: a trial publishes nothing, a refused batch accepts nothing, and an id the subscription already knew is not new.
+A run records its trigger, start time, duration, category, exit code or timeout, accepted-event count, and the last 8 KiB of each output stream. Identity travels with the summary: `subscriptionRevision`, `scriptHash`, `runRef`, and, for a delivery, `deliveryRef` and retry attempt.
 
-A trial is recorded too, so an owner asking whether a fix passes reads the same history as the live runs; a create's draft trial is not, because the ledger never stored the subscription a record would belong to. Deleting a subscription drops all four tables with its checkpoint: the cleanup finishes before the call reports the deletion, and boot converges the rows an interrupted deletion left behind. Archiving a Project clears the same private state for every subscription it owns, at the archive rather than at the next restart.
+Event counts measure ledger acceptance, not printed output. Trials, refused batches, and already-known event ids add no accepted events. Trials enter history except a create's draft trial, which has no stored subscription to own the record.
 
-The cleanup takes the same write lock as the private writes, so it cannot land inside one of their segments: either it runs first — and the segment's barrier read finds nothing live, writes nothing, and reports that it did not — or it runs after and takes every row the segment wrote. Each segment also re-reads the terminal state before it writes, so a deletion that lands between two segments leaves nothing behind either.
+Deletion clears all private tables and the checkpoint before reporting completion; boot converges interrupted cleanup. Project archival clears the same state immediately. Cleanup and private writes share a lock, and every write segment rechecks terminal state: a segment either precedes cleanup or writes nothing after it. Deletion between segments cannot recreate rows.
 
-Reading the history is a Project read with one cut through it: every member sees the summary, while the output — the two tails and the sentence a run explains itself with — belongs to the Human and the owners, because the script ran under the Project's credentials.
+Any authorized Project reader sees run summaries and identity. Only the Human and owners see output tails and explanatory text, whether the run succeeded or failed, because scripts use Project credentials. `team_subscription logs` and Remote `subscriptionLogs` read the same history.
 
-The cut is on the output alone: a passing run shows its output to an owner exactly as a failing one does, and the identity travels with the summary, so a delivery, the revision it arrived under, and the run it produced read as one story. The `logs` action of `team_subscription` and `subscriptionLogs` on the Remote read the same records.
+### Success, failures, and publication limits
 
-A success has exactly one linearization point: the run succeeded when its output became durable in the ledger, which is the same commit that clears the consecutive-failure count and moves the last success. A script that exits 0 having printed nothing new is a success that accepts nothing.
+Success is linearized at durable output acceptance. Acceptance, consecutive-failure reset, and last-success time share one locked segment; later settlement only advances next due time. Exit 0 with no new events uses the same successful zero-event acceptance.
 
-The accept and that clear are one segment under the subscription's write lock, which is why the settle step that runs afterwards only advances the next due time. The lock is what makes the clear honest: a defeat the ingress counts beside the run falls either inside the streak this success ends or outside it entirely, and nothing between reading the count and writing it can slip in.
+Scripts run outside the lock so they do not block deliveries. Every checkpoint update uses locked read-modify-write, never a whole row composed from an earlier read. Thus concurrent failures cannot be lost between reading and writing a success reset: three failed deliveries count three times and the third pauses.
 
-Only an acceptance or defeat whose pinned revision is still current changes the failure count or last-success time.
-A late result from an older revision is retained under that revision, but it neither clears nor extends the current revision's streak.
+Only a result pinned to the current revision changes its failure count or last-success time. Older results remain in history under their own revision without clearing or extending the current streak.
 
-The script itself runs outside the lock — holding it there would stall every delivery for the run's whole duration. An empty success takes the same segment and clears the same way, because it is the same fact: the run worked.
+The unpublished-event ceiling is 500:
 
-One that alone prints past the 500-event ceiling is refused, since no later pass could ever publish it, and one that would carry the unpublished total past it is a failed run; a webhook delivery is the exception, because its request can never be fetched again, so it keeps that batch on its row until room opens (the ingress below).
+- A subscription already at the ceiling is skipped before script execution; the skip counts no failure.
+- A single batch over 500 is refused permanently.
+- An interval batch that would overflow the current queue fails.
+- A webhook batch that fits the ceiling alone but not the current queue stays on its admission until room opens; its request cannot be fetched again.
 
-A subscription already at that ceiling is skipped by admission before its script starts, which is why the skip counts nothing. Only interval and webhook runs count, a trial neither counts nor clears, and a resume clears the count only when it commits — a resume whose trial fails changes neither.
+Interval and webhook failures count; trials neither count nor clear. A resume clears only after its successful trial and durable commit. Three consecutive failures cause a Host-authored automatic pause and one Main stream marker per owner, including the Human, regardless of follow state.
 
-A delivery whose retries are spent becomes a row in `deliveries`: a stable `deliveryRef`, the received revision and script hash together with the script and credentials that version ran under, the request body the script reads on stdin, the last error, and a seven-day expiry, at most ten per subscription. It outlives the run records that explain it, and it counts exactly one failure however many attempts it took — a provider that redelivers the same request is still the same delivery.
+A spent delivery retains its stable ref, received revision and script hash, that version's script and credential references, stdin request body, last error, and seven-day expiry. At most ten are retained per subscription. It can outlive run history and counts one failure regardless of retries or provider redelivery.
 
-Every checkpoint write is one read-modify-write under that same lock: a settle advancing the due instant, a counted delivery, the success clear, and the publish window all change one field of the same row, and a writer that composed its record from an earlier read drops what the others committed — silently, because the last write wins. Deliveries count one at a time through it, so three arriving together add three failures instead of one, and the third still pauses.
+Ingress writes are not scheduler admissions, so ingress checks terminal state itself before writing. Deleted subscriptions and archived Projects cannot regain private rows through a late delivery.
 
-The ingress itself is the one writer no scheduler admits, so it reads the terminal barrier before it writes: a delivery arriving for a deleted subscription or an archived Project is dropped instead of rebuilding the rows the deletion removed.
+### Replay receipts and committed retries
 
-The `replay` action runs one again — the current definition by default, so a fixed script can handle an old request, or the version it arrived under — publishes what the script prints like any run, so the same commit decides its success: one that delivers ends the failure streak, while a replay whose script fails counts nothing. It is a run, so it is admitted like one: the same four slots, the same per-subscription exclusion, and the same convergence when the Host stops, with a pause, a deletion, or an archived Project refusing it on the way in.
+`replay` uses the current definition by default or the received version explicitly. It publishes through normal acceptance, with the same four slots, per-subscription exclusion, and shutdown convergence. Pause, deletion, or Project archival refuse admission. A successful replay clears the streak; a replay script failure adds no failure.
 
-A `requestId` names one intent, and `replays` holds it before anything runs: the record is written with the delivery and version the request named, in state `running`, and settled with the answer after the run.
+Before execution, `replays` durably records `requestId`, delivery, version, and `running`. Failure to record intent refuses execution. Once recorded, the id is spent: another delivery or version under it is a collision, even if no answer survived. A delivered replay cannot run again under a fresh id.
 
-Create and update operations written by current builds also retain the caller's script source, trigger options, and create baseline.
-After the current actor and Project authority pass, a committed retry resolves from that intent before file reads, origin checks, credential lookup, or script execution.
+A retry of a still-`running` replay never executes it automatically. If the ledger contains its acceptance, it returns that result; otherwise it reports the missing answer and offers an explicit new request id. Settlement writes the answer and delivery tombstone in one locked segment, ordered wholly before or after deletion.
 
-Operations written before this intent existed remain readable and replay through their stored normalized fields.
-Old pasted scripts can be compared exactly; a path retry those records cannot verify is refused with the committed `subscriptionRef` so the caller can read the stored subscription before starting a new request.
+Settlement storage faults are logged without hiding what the run already delivered. The answer expires with its delivery.
 
-Writing it is a precondition — a call that cannot record its own intent refuses instead of running a script nothing could then account for — and once it exists the id is spent. The same id naming another delivery, or the other version of the same one, is refused as a request collision even when no answer survived to say so, and a delivery whose replay delivered is not run again under a new id, since that would publish the same output twice.
+Current create/update operations also retain original script source, trigger options, and create baseline. After current actor and Project authorization, committed retries resolve that intent before file reads, origin checks, credential lookup, or execution.
 
-A record still `running` is an attempt whose answer never landed. A retry cannot tell it from one that died, so it is not run again: if the ledger holds an accept under that id the output was delivered and the retry answers with it, and otherwise the retry is told the earlier attempt never recorded its answer, and is offered a new request id instead.
+Older operations compare stored normalized fields. Pasted scripts remain exactly comparable; an unverifiable legacy path retry is refused with the committed `subscriptionRef`, so the caller can inspect it before choosing a new request.
 
-The answer and the delivery's own tombstone settle in one locked segment, so a deletion is ordered before or after both rather than between them.
+### Webhook ingress and durable admission
 
-A storage fault in either of those writes is logged and the call still answers with what the run did: the output is already in the ledger, so a private copy that fails cannot turn a delivered replay into an ungraspable one. The answer goes when retention takes the delivery it explains.
+The bundle's `webhook-ingress` row mounts a separate WebServer under `isolate: { webServer: true }`. It does not share the browser API listener. The row mounts the listener itself: naming the Harness-protected WebServer module in composition would prevent disabling the bundle.
 
-The HTTP ingress is a second WebServer of its own, mounted by the bundle's own `webhook-ingress` row under `isolate: { webServer: true }`, so nothing it serves shares the listener the browser API uses. That row mounts the listener itself instead of naming the WebServer in the composition, because the Harness protects that module: a bundle that names one cannot be disabled again, and the runtime toggle is exactly what an operator uses against this bundle. It registers one prefix, `/team/hooks`, and answers only `<prefix>/<token>`: a nested or longer path is not an address.
+The listener binds `127.0.0.1`, port `DSH_TEAM_WEBHOOK_PORT` (default 3081), and accepts only `/team/hooks/<token>`, not nested or longer paths. Public exposure requires a tunnel or reverse proxy and a matching `webhook.publicOrigin`.
 
-The listener binds `127.0.0.1` on `DSH_TEAM_WEBHOOK_PORT` (3081 by default), so publishing it is a deployment decision — a tunnel or reverse proxy in front, and the same public origin written into `webhook.publicOrigin`.
+Token hashes are compared in constant time across armed subscriptions. Resetting an address, dropping its trigger, deleting its subscription, or archiving its Project makes the old address return 404. Reset changes the address, not already-queued deliveries.
 
-The token resolves against the ledger's armed addresses — a hash compared in constant time across every armed subscription — so a reset, a dropped trigger, a deletion, or an archived Project all answer 404, while a delivery already queued keeps its row, because a reset moves an address and not a queue.
+| Response | Condition |
+| --- | --- |
+| 202 | Admission row is durable. |
+| 404 | Unknown token, deleted subscription, or archived Project. |
+| 409 | Paused subscription. |
+| 429 + `Retry-After` | Ten deliveries already queued or retrying. |
+| 413 | Body exceeds 256 KiB. |
+| 431 | A forwarded header value exceeds 1 KiB; never silently truncated. |
+| 415 | Non-identity `content-encoding`. |
+| 400 | Body is not UTF-8. |
+| 405 | Method is not POST. |
+| 5xx | Admission storage failed. |
 
-The status table is the contract: 202 once the row is durable, 404 for an unknown token or one whose subscription is deleted or archived, 409 while paused, 429 with `Retry-After` when ten deliveries are already queued or retrying, 413 past 256 KiB of body, 431 for a header over 1 KiB, 415 for a non-identity `content-encoding`, 400 for a body that is not UTF-8, 405 for anything but POST, 5xx when storage refuses the row.
+Size and encoding checks preserve the bytes a provider signed. Scripts receive only lowercased `content-type`, `user-agent`, and headers matching `x-*-event`, `x-*-delivery`, `x-*-signature*`, or `x-*-timestamp`; never authorization, cookies, API keys, or proxy-added headers.
 
-A header over 1 KiB refuses the delivery rather than truncating it, and a non-identity `content-encoding` is refused too, because a signature has to be verified over the bytes the provider signed.
+Scripts read `{headers, body}` on stdin with `DSH_TEAM_TRIGGER=webhook` and the admission id as `DSH_TEAM_DELIVERY_ID`. The same identity survives retries and replay. A restart after durable admission but before the 202 response leaves the work queued.
 
-Only `content-type`, `user-agent`, and names matching `x-*-event`, `x-*-delivery`, `x-*-signature*`, and `x-*-timestamp` reach the script, all lowercased; `authorization`, `cookie`, `x-api-key`, and proxy-inserted headers never do.
+Shutdown stops new queue passes, drains the scheduler, waits for the active webhook pass, then closes storage. Owed work remains for the next Host.
 
-The entry answers 202 only after the row is written, so a restart before the answer replays nothing it lost — the queue is private state, and the next pass runs what it owes. A run reads `{headers, body}` on stdin under `DSH_TEAM_TRIGGER=webhook` and the admission's own id as `DSH_TEAM_DELIVERY_ID`, which is what keeps one delivery one identity across its retries and a later replay.
+Failures retry after 1, 5, and 30 minutes. The fourth failure becomes a replayable `deliveries` row; a batch over the ceiling goes there immediately. A successful retry ends the delivery without counting a failure.
 
-On shutdown the Host stops scheduling new queue passes, drains the scheduler, and waits for the active webhook pass before closing storage. Any work still owed remains in the durable queue for the next Host.
+Before writing the replayable failure, Host records exhausted retries and failure-streak eligibility. Interrupted settlement resumes without rerunning the script; an eligible delivery counts once and may commit one automatic pause. Pause permits settlement; deletion and Project archival discard outstanding work.
 
-A failed run keeps the row and waits 1, 5, and 30 minutes; the fourth failure turns it into the `deliveries` row an owner replays, and a batch that alone passes the ceiling goes straight there, because retrying it would print the same output again. A retry that succeeds ends the delivery without spending a failure on it.
+A committed resume starts a new streak even if checkpoint persistence needs retry. Later success or resume prevents older pending settlement from counting again. A definition edit also prevents old settlement from counting or pausing the new definition, but preserves failures already counted. Timers wait for pending failure or pause settlement.
 
-The Host records that retries are exhausted and whether the delivery belongs to the current failure streak before writing the replayable failure. If settlement is interrupted, the next queue pass completes it without running the script again. An eligible delivery increments the count once; if it reaches the threshold, the ledger records one automatic pause. A pause still permits settlement; deletion and Project archival discard outstanding work.
+Reset mints a token and increments `generation`, not revision. Accepted deliveries keep their received version. Only the returned address contains the clear token; the ledger stores its hash.
 
-A committed resume starts a new failure streak even if the checkpoint write must be retried. A later success or resume prevents an older pending settlement from counting again. A definition edit also prevents the old settlement from counting or pausing the new definition; it keeps failures already counted. An overdue timer waits while its subscription has a pending failure count or pause to settle.
+Committed create/update/reset retries report `webhookAddressGone` only if that operation armed an address. For update, Host compares the previous revision; retaining an address does not report it gone, even when both writes share a millisecond.
 
-A reset mints a new token for the same subscription and moves `generation` by one without moving the revision: accepted deliveries keep the version they arrived under, and the address the caller receives is the only copy in the clear, since the ledger keeps a hash.
+### Script execution boundary
 
-A retried create, update, or reset reports `webhookAddressGone` only when that stored operation armed an address.
-For an update, the Host compares the operation with the subscription state at its previous revision; a retained address on an ordinary update remains silent even when both writes share one millisecond.
+Runtime tests use fake clocks and executors through ports. Production uses `ctx.shell`, as the Member shell tool does, with Host-built policy from the trusted Workspace: `workspace-write` rooted there, 60 seconds, 65,536 bytes of stdout, and no escalation. The cwd is that Workspace, never Host cwd; hard-coded checkout paths therefore fail after a move.
 
-The scheduler reaches the world only through ports, so the runtime tests drive a fake clock and a fake executor. A timer run executes the stored snapshot through `ctx.shell` — the same executor the Member's shell tool uses — under a policy the Host builds itself from the trusted Workspace record: `workspace-write` rooted at that Workspace, 60 seconds, a 65,536-byte stdout cap, and never the escalating mode, because an unattended run has no one to approve it.
+Team sets `ShellExecSpec.stdoutMaxBytes=1` to force a public `spillPath`, then reads and bounds the complete raw spill and removes it. The provider's default `maxSpillBytes` is 64 MiB. Missing, oversized, or incomplete spill is refused, not reconstructed from decoded text.
 
-A run starts in that Workspace directory, never in the Host process's own working directory; a script that bakes in an absolute checkout path fails after a move instead of reading the old tree.
+Stdout must be complete valid UTF-8, at most 65,536 bytes, with one validated JSON object per line. These are Team runner bounds, not caller/tool options. A valid-looking tail is not a complete stream.
 
-The Team runner caps recovered raw script stdout at 65,536 bytes; this is not a tool or caller setting.
-The executor receives `ShellExecSpec.stdoutMaxBytes=1` only to force the Harness public collector to publish `spillPath`; after capture, Team restores and bounds the raw bytes, then removes that spill.
-The provider's default `maxSpillBytes` is 64 MiB; an oversized, missing, or otherwise incomplete spill is refused rather than accepted from decoded text.
+The mounted shell family is behavior-probed once and cached. A snapshot from another family fails rather than running under the wrong shell. No executor yields `executor-missing`; a mounted executor whose policy probe cannot spawn yields `spawn-failed` with its own refusal. Without a usable sandbox backend, no subscription runs.
 
-The mounted shell family is probed by behavior once and cached. A snapshot recorded under the other family fails its runs with that reason instead of running under a shell it was not written for.
-
-No mounted executor fails every run as `executor-missing` before the script starts. A mounted executor that cannot spawn the pinned policy's probe — a deployment without a usable sandbox backend, for instance — fails them as `spawn-failed`, and the reason is the executor's own refusal, so a paused subscription names the sandbox instead of sending its owner after an executor that is mounted. A deployment without a usable sandbox backend therefore runs no subscription at all.
-
-A run's stdout is the output contract: one JSON object per line, validated by the Team's own byte-level parser from the recovered raw spill.
-The recovered raw bytes must be complete, valid UTF-8, and within the Team limit, so a decoded or valid-looking tail cannot pass as the full stream.
-
-New events are accepted into the ledger under the revision and script hash the run pinned and published at the budgeted rate; three failed runs in a row pause the subscription, which the ledger records with no Member actor because the Host acted on its own, and the pause carries one Main stream marker per owner — the Human included, followed or not — so the news reaches everyone it concerns.
-
-Credential values are resolved per run through `ctx.credentials` and merged after the executor's own environment scrub. The Host builds that map from scratch — the managed `DSH_TEAM_*` facts plus the subscription's declared references — so nothing from the Host process environment is forwarded by Team code.
+Acceptance pins revision and script hash; publication observes the budget above. Credentials resolve per run through `ctx.credentials` and merge after the executor's environment scrub. Team constructs only managed `DSH_TEAM_*` facts and declared credential references, forwarding none of Host's process environment itself.
 
 ### One Host per DSH home
 
-A single `$DSH_HOME` must run at most one Host process. Subscriptions schedule their timers and keep private checkpoints in that home; two Hosts sharing it would each fire every due instant and each advance their own ledger projection and sequence numbers, so committed operations race. This is a deployment constraint rather than a lock the bundle enforces: give profiles that run at the same time separate `DSH_HOME` values, and never start a second `dsh web` against a home another Host is using.
+Run at most one Host per `$DSH_HOME`. Timers and private checkpoints do not enforce a process lock; two Hosts would each schedule work and race ledger projections and sequence numbers. Concurrent profiles need separate homes. Never start another `dsh web` against an occupied home.
 
 ## Worker delegation
 
@@ -302,6 +360,8 @@ The subagent service follows the Host, not the Member: one `@deepseek-ai/dsh-sub
 Authorization is decided from the ledger at call time, never from the current page or directory: the target must exist and agree with itself, the caller must be one of the current Agent owners of the Project it belongs to, and the Host settings row's `worker` group must have the switch and that engine both on. The Human owns every Project but does not call Team tools, so no Human path exists. Any refusal happens before a native process starts, and a `requestId` already admitted answers with its own execution
 
 That answer belongs to the Member and delegation that opened the id: two concurrent calls under one id open one engine, and a resend naming another Member, task, engine, or target is refused instead of answered.
+
+### Engine policy and exposure
 
 The provider opens one OAR session per delegation with the operator's explicit engine settings, and carries the row's Codex permission mode into that open: the pinned OAR 0.95.1 reads it from the Host process's own `OAR_CODEX_SANDBOX` — a session's `env` only reaches the child process, and the library exposes no per-session option — so the value is set for the open call and restored once the app-server handshake returns — the one window in which another Codex session opening in this Host would see it.
 
@@ -419,6 +479,8 @@ On a reused request id the ledger compares the recorded resolved attachment ids 
 
 ## Human profile and version footnote
 
+### Profile authority and migration
+
 The Human's display name and avatar reference live in the Team Host row's own Config, in the settings namespace `contexera-agent-team-host` (user layer); avatar bytes live in the persistent `$DSH_HOME/agent-team/human/v1/` store, never in the TTL-bound attachment cache.
 
 A profile written before this row was renamed keeps the row's whole Config under the old id `wowyuarm-agent-team-host`: the display name, the avatar reference, and the operational `wakeRecycle` and `memberCompaction` groups. That row no longer mounts, so every one of those values silently returns to its schema default — a Member compaction an operator had switched off comes back on.
@@ -429,6 +491,8 @@ The retired `agent-team-human` section is no longer an authority: the rc.1 setti
 
 Only the Host row has this migration path: a profile patch that addresses one of the other five renamed rows by its pre-rename id — `wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}` — is skipped, because no loader entry answers to that id, so Team falls back to that row's shipped values. A hand edit to the Team preset or to the preset registry's `default` has to be re-applied after upgrading.
 
+### Settings reads and writes
+
 Five Agent Team typed Remotes serve the settings page: `humanProfile` (name, avatar reference, version footnote facts, and a write token tied to this Host instance and settings revision), `putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` (images only, 10 MB cap shared with attachments; a removed entry throws and the Client falls back to the initial), and `toolCatalog` (discovery across Host-global and live Member-scoped registrations, never ordinary Agent scopes).
 
 The Host stores a replacement image before committing its reference. Removal writes an explicit empty value so an inherited or migrated avatar cannot reappear. Replaced and removed images remain available to other profiles sharing the store. Only a new file known never to have been committed can be discarded; an uncertain settings write keeps its bytes.
@@ -438,6 +502,8 @@ The grant editor reads and writes the Team Host row's `extraToolGrants` through 
 It never uses `unset`, so an explicit `[]` is a real revocation rather than a fallback to a lower layer. A failed list read cannot be saved as an empty list. The catalog and the Human identity read are independent: a directory failure still permits removing loaded names, and an identity failure leaves the grant group available.
 
 The settings form and runtime normalization share the structural schema in `member-tool-grants.ts`: an array of non-empty strings with exact spelling. Team adds no name grammar, length ceiling, or grant quota; consumers collapse duplicates, and the catalog omits reserved names. The schema contains no transform callbacks, so reconstructing the Host's editable schema and serializing it for the browser preserves validation, including absent and empty lists.
+
+### Installed version and update checks
 
 The footnote carries the version of the bundle this Host runs from — read from the installed package's own manifest, so it states what the profile actually installed rather than a string every release must remember to bump — plus the repository link and an update tip. The tip names the newer version once a background check has observed a newer published release.
 

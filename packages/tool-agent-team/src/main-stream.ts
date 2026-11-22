@@ -3,7 +3,6 @@ import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
 import { activityFromView } from './activity-view.ts'
 import type { AgentTeamMainStreamStanding, AgentTeamMainTimelineEntry } from '@contexera/dsh-agent-team/types'
 
-/** Model-facing view of one Main stream entry: the Host's timeline entry with identities as plain strings. */
 export interface MainEntryView {
   readonly sequence: number
   readonly kind: string
@@ -36,7 +35,6 @@ export interface MainEntryView {
   /** A published subscription event: its record is untrusted external text, and it names no sender. */
   readonly subscriptionRef?: string
   readonly subscriptionName?: string
-  /** Why a subscription was paused: manual, or the Host after repeated failures. */
   readonly reason?: string
   readonly eventId?: string
   readonly title?: string
@@ -113,9 +111,6 @@ export function mainEntryLine(entry: MainEntryView): string {
     return `${entry.sequence}${at} [${entry.sender}]${markers(entry)}${replies} ${entry.messageRef} ${entry.bodyOmitted ? '— body already in current context; omitted.' : entry.body}`
   }
   if (entry.kind === 'activity' && entry.subscriptionRef !== undefined) {
-    // A subscription lifecycle line is Team prose about one script, not a Task
-    // transition: the actor is named when a person or owner did it, and the
-    // Host is named when repeated failures paused the subscription itself.
     const verb = entry.activity?.slice('subscription-'.length) ?? 'changed'
     const by = entry.actor ?? 'the Host'
     const why = entry.reason === 'failures' ? ' after repeated failed runs' : ''

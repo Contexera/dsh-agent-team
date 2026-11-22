@@ -25,6 +25,10 @@ describe('Member request budgets', () => {
   it('reduces a large output allowance without raising an explicit small one', () => {
     expect(memberOutputTokens(217_600, 272_000, 128_000)).toBe(50_304)
     expect(memberOutputTokens(217_600, 272_000, 8_192)).toBe(8_192)
-    expect(() => memberOutputTokens(272_000, 272_000, 128_000)).toThrow('no safe output space')
+  })
+
+  it('allows the last output token but rejects a window with only the reserve left', () => {
+    expect(memberOutputTokens(267_903, 272_000, undefined)).toBe(1)
+    expect(() => memberOutputTokens(267_904, 272_000, undefined)).toThrow('no safe output space')
   })
 })

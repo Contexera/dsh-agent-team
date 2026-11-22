@@ -19,8 +19,6 @@ function plan(input: Partial<InboxDeliveryInput>) {
   return planInboxDelivery({ threads: [], main: [], covered: undefined, ...input })
 }
 
-const range = (from: number, count: number) => Array.from({ length: count }, (_, index) => from + index)
-
 describe('every unread Thread fact interrupts, whatever the reader owns', () => {
   it('a Project owner gets one ordinary update immediately', () => {
     const result = plan({ threads: [thread(threadA, owned, [1])] })
@@ -31,7 +29,7 @@ describe('every unread Thread fact interrupts, whatever the reader owns', () => 
   it('carries an ordinary update alongside a mention instead of waiting for it', () => {
     const result = plan({ threads: [thread(threadA, owned, [1, 2], { direct: [2] })] })
     expect(result.trigger).toBe('immediate')
-    expect(result.threads[0]).toMatchObject({ role: 'follower' })
+    expect(result.signature).toBe(JSON.stringify([[threadA, 1, 2]]))
   })
 })
 
@@ -58,27 +56,23 @@ describe('an unchanged unread set spends no second attempt', () => {
 describe('a Thread the notice could not render stays undelivered', () => {
   it('retries the dropped Thread facts the next time, unchanged', () => {
     const threads = [thread(threadA, owned, [1]), thread(threadB, owned, [2])]
-    const first = plan({ threads })
-    // The notice rendered Thread A and dropped Thread B, so what it answered is
-    // Thread A's facts alone. The dropped Thread keeps its facts out of that.
     const answered = plan({ threads, undelivered: [threadB] })
-    expect(answered.delivered).not.toContain(threadB)
+    expect(answered.delivered).toBe(JSON.stringify([[threadA, 1]]))
     expect(plan({ threads, covered: answered.delivered }).trigger).toBe('immediate')
   })
 
   it('still stands down for the Threads the notice did render', () => {
     const threads = [thread(threadA, owned, [1]), thread(threadB, owned, [2])]
     const answered = plan({ threads, undelivered: [threadB] })
-    // Thread A is unchanged and was rendered, so it is covered: only Thread B
-    // still owes a delivery.
-    const retry = plan({ threads: [thread(threadB, owned, [2])], covered: answered.delivered })
-    expect(retry.trigger).toBe('immediate')
+    const retry = plan({ threads: [thread(threadA, owned, [1])], covered: answered.delivered })
+    expect(retry.trigger).toBeUndefined()
   })
 
   it('carries a reminder as delivered even when the Thread holds no ordinary unread', () => {
-    const withReminder = thread(threadA, owned, [1], { reminders: [{ kind: 'review-backlog', baselineSequence: 1 }] })
+    const withReminder = thread(threadA, owned, [], { reminders: [{ kind: 'review-backlog', baselineSequence: 1 }] })
     const first = plan({ threads: [withReminder] })
-    expect(first.delivered).toContain('reminder')
+    expect(first.trigger).toBe('immediate')
+    expect(first.delivered).toBe(JSON.stringify([[threadA, 'reminder', 'review-backlog:1']]))
     expect(plan({ threads: [withReminder], covered: first.delivered }).trigger).toBeUndefined()
   })
 })

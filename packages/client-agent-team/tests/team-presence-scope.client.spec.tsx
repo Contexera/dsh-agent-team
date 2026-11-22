@@ -1,24 +1,26 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, waitFor } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
+import { flushRefreshes, useRefreshClock } from './bench/refresh-clock.ts'
 
 usePinnedBrowserLanguages('zh-CN')
+beforeEach(useRefreshClock)
 
 describe('presence-scope wake wiring (issue #21)', () => {
   it('refreshes member rows on a presence wake without catalog or Inbox refetches', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     await waitFor(() => expect(b.members.mock.calls.length).toBeGreaterThanOrEqual(1))
     await waitFor(() => expect(b.viewProjects.mock.calls.length).toBeGreaterThanOrEqual(1))
-    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushRefreshes(b)
     const inboxCalls = b.inbox.mock.calls.length
     const projectCalls = b.viewProjects.mock.calls.length
     const memberCalls = b.members.mock.calls.length
 
     b.publishPresence()
     await waitFor(() => expect(b.members.mock.calls.length).toBeGreaterThan(memberCalls))
-    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushRefreshes(b)
     expect(b.viewProjects.mock.calls.length).toBe(projectCalls)
     expect(b.inbox.mock.calls.length).toBe(inboxCalls)
 
@@ -35,7 +37,7 @@ describe('presence-scope wake wiring (issue #21)', () => {
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     fireEvent.click(await b.view.findByRole('button', { name: /^打开 Task #1：/ }))
     await b.view.findByRole('heading', { name: 'Task #1' })
-    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushRefreshes(b)
     const inboxCalls = b.inbox.mock.calls.length
     const projectCalls = b.viewProjects.mock.calls.length
     const memberCalls = b.members.mock.calls.length
@@ -43,10 +45,10 @@ describe('presence-scope wake wiring (issue #21)', () => {
     // A presence wake moves member rows only (issue 03, criterion 4): the
     // open Thread's roster refresh must not ride the supplemental view
     // fetch, so view() stays parked exactly like the Inbox badge. The badge
-    // debounces, so wait past that window before asserting stillness.
+    // debounces, so drain its timers before asserting stillness.
     b.publishPresence()
     await waitFor(() => expect(b.members.mock.calls.length).toBeGreaterThan(memberCalls))
-    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushRefreshes(b)
     expect(b.viewProjects.mock.calls.length).toBe(projectCalls)
     expect(b.inbox.mock.calls.length).toBe(inboxCalls)
   })

@@ -4,25 +4,25 @@ English | [中文](e2e-lanes.zh.md)
 
 ## Purpose
 
-This catalog maps every `scripts/e2e/*.e2e.ts` lane to its real Web/Harness contract, lower-layer Vitest coverage, trigger condition, and screenshot evidence. Source and tests remain the authority for behavior; this document routes test selection and acceptance checks.
-
-Targeted runs (`npm run test:browser -- <lane>`) give fast surface feedback during development, but skip the full `[1440, 390]` dual-width completeness gate across all lanes. The default unfiltered run includes the short `team-journey` smoke. Add `--deep` when the complete cross-surface journey or its broad visual assertions are part of the change.
+This catalog explains what each assembled Web scenario proves, which lower-layer tests to try first, and where to find the browser evidence. For the full check ladder, see [Start and checks](start-and-checks.md#verification-gradient).
 
 ## Test selection by risk
 
-| Change seam | First check | Before delivery |
-| --- | --- | --- |
-| Host, ledger, Remote, permissions, subscriptions, Worker state | `npx vitest run --project unit` or targeted integration spec | `npm test` and `npm run typecheck` |
-| Client state machine, DOM interaction, error copy | Targeted `packages/client-agent-team/tests/*.client.spec.tsx` | `npm test` and `npm run typecheck` |
-| Slot, preset, bundle manifest, ordinary DSH restore, geometry, multi-page | Targeted `npm run test:browser -- <lane>` | Unfiltered `npm run test:browser` and `node scripts/audit-ui-parity.mjs` |
-| Cross-surface flow, `scripts/run-browser-test.mjs`, `scripts/e2e/support.ts` | Unfiltered `npm run test:browser` | `npm test`, `npm run typecheck`, `npm run lint`, `npm run test:browser` |
-| Complete Team journey, broad shell/visual regression, release | `npm run test:browser -- --deep` | `npm test`, `npm run typecheck`, `npm run lint`, `npm run test:browser -- --deep` |
+Start with a focused lane for slot, preset, layout, or cross-page changes. Run the full suite instead when changing shared scenario setup or the runner. The default suite uses the short `team-journey` smoke; use `--deep` for the complete Team journey or a release.
+
+```sh
+node scripts/run-browser-test.mjs --list
+npm run test:browser -- team-timeline-and-shell -t "four same-origin"
+npm run test:browser -- --deep
+```
+
+Use the Node runner directly to list lanes without building. A lane selector matches a file name; `-t` narrows test names inside the selected files. Filtered runs still build and check available images, but skip the full `1440`/`390` width requirement. Check `artifacts/browser/summary.json` for lanes, timings, and the failed phase.
 
 ## Full-run scheduling
 
 The unfiltered runner keeps `team-journey` and `team-manager` in a serial heavy batch because running them beside other full Harness scenarios caused hook timeouts. The deep profile replaces `team-journey` with `team-journey-deep`.
 
-The remaining lanes run in a bounded two-worker batch after the heavy batch. Targeted runs or runs with custom Vitest flags keep their requested arguments and are never reshaped automatically.
+The remaining lanes run in a batch with at most two workers by default after the heavy batch. Targeted runs or runs with custom Vitest flags keep their requested arguments and are never reshaped automatically.
 
 Set `DSH_E2E_SCHEDULING=serial` on a constrained machine to force one serial batch. Set `DSH_E2E_MAX_WORKERS` to change the light-batch worker limit.
 
@@ -46,7 +46,7 @@ Set `DSH_E2E_SCHEDULING=serial` on a constrained machine to force one serial bat
 - **Trigger:** Broad Team shell redesign, cross-surface navigation changes, deep visual regression review, or release acceptance.
 - **Required evidence:** `artifacts/browser/ui-01/` to `ui-06/` (`1440` and `390` viewports), zero console warnings/page errors, clean ordinary DSH restore.
 - **Not responsible for:** Replacing the focused Inbox, Manager, Worker, Settings, Subscription, or Main/Board lane contracts.
-- **Scale and cost:** 1 deep test (about 48s as a single lane in the current baseline).
+- **Scale and cost:** 1 deep test.
 
 ### `team-inbox-and-recovery`
 
@@ -54,14 +54,14 @@ Set `DSH_E2E_SCHEDULING=serial` on a constrained machine to force one serial bat
 - **Real Web/Harness contract:** Human Inbox delivery, offline retry/recovery, consecutive messages, expired attachment vs broken image distinction, and keyboard navigation.
 - **Lower-layer tests:** `packages/agent-team/tests/dm-delivery-lane.spec.ts`, `attachments.spec.ts`, and Client Inbox specs.
 - **Trigger:** Inbox UI, attachment rendering/fallback, offline retry, or Inbox keyboard navigation changes.
-- **Required evidence:** `artifacts/browser/ui-07/` (`1440` and `390` viewports), keyboard focus/navigation checks.
+- **Required evidence:** `artifacts/browser/ui-07/`, plus the offline states in `ui-08/`; keyboard focus/navigation checks.
 - **Not responsible for:** Host ledger replay invariants or non-Inbox Team surfaces.
-- **Scale and cost:** 2 tests (~12.42s single-lane historical record).
+- **Scale and cost:** 2 tests.
 
 ### `team-main-stream-and-board`
 
 - **File and command:** `scripts/e2e/team-main-stream-and-board.e2e.ts` — `npm run test:browser -- team-main-stream-and-board`
-- **Real Web/Harness contract:** Main stream posting, discussion/Task creation under rules v2, Project owner dialog, Task board card focus (keyboard/mouse), and taskless thread ref-chip navigation.
+- **Real Web/Harness contract:** Main stream posting, discussion/Task creation, Project owner dialog, Task board card focus (keyboard/mouse), and taskless thread ref-chip navigation.
 - **Lower-layer tests:** `packages/agent-team/tests/main-read-context.spec.ts`, `body-authored-mentions.spec.ts`, and Client Main/Board specs.
 - **Trigger:** Main stream, Task board, ref-chip navigation, or Project owner dialog UI changes.
 - **Required evidence:** `artifacts/browser/main-stream/`, `ui-04/`, `ui-02/` (`1440` and `390` viewports), focus assertions.
@@ -104,7 +104,7 @@ Set `DSH_E2E_SCHEDULING=serial` on a constrained machine to force one serial bat
 - **Real Web/Harness contract:** Thread/Main scroll anchoring across history load and arrivals, 4 concurrent same-origin Team pages, and keyboard shortcuts (`Meta+Alt+T` and global faces).
 - **Lower-layer tests:** `packages/client-agent-team/tests/` timeline scroll and shortcut specs, and `packages/agent-team/tests/harness-lifecycle.spec.ts` (Host dispose/re-enable persistence).
 - **Trigger:** Timeline scroll anchoring, multi-page Remote sync, or global shell shortcut changes.
-- **Required evidence:** `artifacts/browser/timeline-anchor/`, `ui-09/` (`1440` and `390` viewports), scroll-offset stability probes.
+- **Required evidence:** `artifacts/browser/timeline-anchor/`, `ui-09/`, and `multi-web-{desktop,mobile}.png`; scroll-offset stability probes.
 - **Not responsible for:** Single-page Inbox or Manager flows, or Host plugin dispose/re-enable persistence.
 - **Scale and cost:** 3 tests.
 
@@ -124,7 +124,7 @@ Set `DSH_E2E_SCHEDULING=serial` on a constrained machine to force one serial bat
 - **Real Web/Harness contract:** Configuring the Worker delegation group on Team settings and observing a delegated Worker run in its own Thread.
 - **Lower-layer tests:** `packages/client-agent-team/tests/team-worker-settings.client.spec.tsx` and Host Worker delegation specs.
 - **Trigger:** Worker delegation settings UI, `team_worker` thread projection, or Worker failure terminal-state rendering changes.
-- **Required evidence:** `artifacts/browser/worker-thread/` (`1440` and `390` viewports).
+- **Required evidence:** `artifacts/browser/worker-thread/` and Worker settings images in `ui-09/`.
 - **Not responsible for:** Worker diagnostic row cap or stop-button isolation (covered by `team-worker-lifecycle`).
 - **Scale and cost:** 2 tests.
 
@@ -132,4 +132,4 @@ Set `DSH_E2E_SCHEDULING=serial` on a constrained machine to force one serial bat
 
 | Selector | Target lane | Reason |
 | --- | --- | --- |
-| `team-settings-nav-icon` | `team-settings-and-tools` | Preserves selector compatibility after lane consolidation (`scripts/run-browser-test.mjs`) |
+| `team-settings-nav-icon` | `team-settings-and-tools` | Preserves selector compatibility after lane consolidation (`scripts/browser-runner.mjs`) |

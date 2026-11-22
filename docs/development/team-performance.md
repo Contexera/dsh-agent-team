@@ -4,7 +4,7 @@ English | [中文](team-performance.zh.md)
 
 ## Purpose
 
-The Team performance suite measures the costs that a human or Member can observe across loading, tool calls, ledger reads, Session work, and collaboration. It is an evaluation tool, not a production code path, and it runs only when explicitly enabled.
+The Team performance suite measures the costs that a human or Member can observe across loading, tool calls, ledger reads, Session work, and collaboration. It is an opt-in evaluation tool, not a production code path. Use the same [certified environment](environments-and-install.md#sandbox-and-ci-environments) and workload on both sides of a comparison.
 
 The source of the scenarios is [`scripts/team-performance/`](../../scripts/team-performance/). The script index lists the entry points and their output formats in [`scripts/README.md`](../../scripts/README.md).
 
@@ -12,7 +12,7 @@ The source of the scenarios is [`scripts/team-performance/`](../../scripts/team-
 
 ### Baseline
 
-Run the default 16 scenarios in one Node process:
+Run the default 16 scenarios through one coordinator; cold Host boot uses a fresh Node child. For a quick first pass, set `DSH_BENCH_SCENARIOS` to one scenario from the table below.
 
 ```sh
 DSH_BENCH_TEAM=1 npm run bench:team
@@ -28,13 +28,15 @@ Run the default 15 cases in separate Node processes:
 npm run bench:team:matrix
 ```
 
-Set `DSH_BENCH_MATRIX_CASES` to a comma-separated list of `scenario:threads:followers`. The default collaboration cases cover the observed 1–4 follower range, the eight-Member queue boundary, a 20-Thread backlog, and one 32-follower stress case. The matrix routes the first size to Member or Session workloads when the scenario requires it. Each matrix directory contains a manifest, each child run, and an aggregated `results.json`.
+Set `DSH_BENCH_MATRIX_CASES` to a comma-separated list of `scenario:threads:followers`. The default collaboration cases cover the observed 1–4 follower range, the eight-Member queue boundary, a 20-Thread backlog, and a 32-follower stress case. For Member or Session workloads, the first size means Members or events instead of Threads.
+
+Under `artifacts/team-perf/matrices/`, each matrix has a manifest and `results.json`; that file points to the individual runs under `artifacts/team-perf/runs/`.
 
 In the fan-out fixture, `DSH_BENCH_FOLLOWERS` counts additional followers alongside one receiver, so a value of 32 yields 33 notification dispatches. Each raw sample records the expected and actual counts. The 8 case exercises the deferred path; mixed-batch ordering and shutdown are checked separately by the semantic probe.
 
 ### Real profile usage
 
-Summarize an explicit read-only SQLite copy from a real profile:
+Pass a consistent snapshot, not the live profile database. To create one, use [the release runbook’s backup procedure](../release-runbook.md#2-pre-flight); copying only the main file of a live WAL database can miss committed data. The usage command opens the supplied copy read-only:
 
 ```sh
 npm run bench:team:usage -- /path/to/agent_team.sqlite --json
@@ -54,7 +56,9 @@ Measure the assembled Web bundle and Team mode:
 DSH_BENCH_BROWSER_SAMPLES=3 npm run bench:team:browser
 ```
 
-Each sample uses a fresh temporary Web scaffold and Chromium. The runner records page load, Workspace connection, ordinary ready, Team mode ready, navigation timing, transfer bytes, console warnings, and page errors. It writes `manifest.json`, `samples.jsonl`, and `summary.json` under `artifacts/team-perf/browser/runs/`. Browser results must be read with p95 and p99 and with the individual samples because cold startup variance is material.
+Each sample uses a fresh temporary Web scaffold and Chromium. The runner records page load, Workspace connection, ordinary ready, Team mode ready, navigation timing, transfer bytes, console warnings, and page errors. It writes `manifest.json`, `samples.jsonl`, and `summary.json` under `artifacts/team-perf/browser/runs/`.
+
+Chrome defaults to `/usr/bin/google-chrome`; set `CHROME_PATH` otherwise. Review individual samples alongside p95 and p99: cold starts vary, and a few samples are not enough to establish a stable tail.
 
 ### Semantic probes
 
@@ -77,7 +81,7 @@ npm run bench:team:compare -- --max-regression 20 before/summary.json after/summ
 
 Host boot, Agent collaboration, and fan-out workloads carry `schema: 2` in each raw sample. Older runs measured different paths or unread loads and are not valid before/after inputs for these scenarios; rerun the same current evaluation script against both production versions.
 
-The comparator reports shared p50, p95, and p99 rows and separately reports missing scenarios, missing metrics, and invalid measurements. With `--max-regression`, a metric with no measured percentiles fails the comparison; a zero-to-positive baseline change also fails instead of being treated as incomparable. A regression threshold is meaningful only when the workload, environment, and scenario schema match.
+The comparator reports shared p50, p95, and p99 rows. With `--max-regression`, missing scenarios, missing metrics, invalid measurements, and changes from zero to a positive value all fail the comparison. A threshold is meaningful only when the workload, environment, and scenario schema match.
 
 ## What the scenarios measure
 

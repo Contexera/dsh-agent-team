@@ -3,65 +3,36 @@
 English | [中文](environments-and-install.zh.md)
 
 ## Sandbox and CI environments
-The test and type systems are not self-contained: they resolve 40+ `@deepseek-ai/dsh-*` packages from the adjacent Harness checkout (both `src/` and a built `lib/`). Sandboxed agents and CI runners must reproduce that layout instead of improvising their own.
 
-This applies to any fresh environment: a new clone **or a `git worktree`**. A worktree does not carry the main checkout's gitignored `node_modules/` and `lib/`, so the setup below is required from scratch there too. Skipping step 4 (linking and building) surfaces later as mass false preset-resolution failures in host tests, not as a missing-module error at startup.
+For Host tests, type checking, and builds, keep the Team repository next to `../deepseek-harness`. A new worktree also needs its own gitignored dependencies and build outputs, and resolves Harness from its own parent directory. For a documentation-only change, see [Start and checks](start-and-checks.md#verification-gradient) instead.
 
-**Checkout naming is the contract.** Clone the Harness as the sibling `../deepseek-harness` — the default directory name every script falls back to — and check out the latest certified release tag. Sibling checkouts with tag-suffixed names (`../deepseek-harness-<tag>/`) belong to isolated certification environments only (see [dsh-release-compatibility.md](../dsh-release-compatibility.md) §3.2); pointing tooling at one is the root cause of mass false test failures. A checkout with a non-default name must be selected explicitly with `DSH_HARNESS_DIR`.
+Use Node and Corepack that satisfy the certified Harness manifest. From a fresh environment:
 
-**Setup, in order:**
+1. Clone Harness as the sibling `../deepseek-harness` at the latest certified tag (currently `dsh-v0.2.2-rc.2`). Enable the pnpm shim with `corepack enable pnpm`: Harness build scripts invoke bare `pnpm`. Corepack uses each repository's own `packageManager` pin; the two pins need not match.
+2. In Harness, run `corepack pnpm install`, `corepack pnpm build:lib`, and `corepack pnpm build:native-system`. Team runs Vitest directly, so Harness's own test script will not build the native addon for Team. The native build uses `--host-addon-only` and skips unsupported platforms. For browser testing or either preview, also run `corepack pnpm build:web`.
+3. In the Team repository, run `corepack pnpm install`. Do not run `npm install`; it can disrupt pnpm's links. For `ERR_PNPM_IGNORED_BUILDS`, review the dependency's build script and record approval or denial in the same dependency change under `allowBuilds` in `pnpm-workspace.yaml`.
+4. Still in Team, run `node scripts/link-harness-packages.mjs` and `npm run build`. The links and built package exports are needed by preset resolution from the repository root, not just by TypeScript.
+5. Run `node scripts/sync-paths.mjs`. This regenerates TypeScript path facades, including the locale source wildcard. `npm run check:facades` compares without writing; it does not repair drift.
+6. To validate the full setup, run `npm run typecheck && npm test`. For an ordinary change, use the narrower checks in [Start and checks](start-and-checks.md#verification-gradient).
 
-1. Enable the corepack shims with `corepack enable pnpm`, then clone `../deepseek-harness`, check out the latest certified release tag (currently `dsh-v0.2.2-rc.2`; advance it per certification), and run `corepack pnpm install` (one workspace-wide install) followed by `corepack pnpm build:lib` and `corepack pnpm build:native-system`. The shim is required because the certified Harness invokes a bare `pnpm` from inside its own scripts (`build:lib`, `build:web`), while `corepack pnpm` resolves only within its own process; without the shim those steps fail as `pnpm: not found`.
+In a disposable sandbox, [`sh scripts/hoplite-setup.sh`](../../scripts/hoplite-setup.sh) automates steps 1–5 and builds Web. It force-checks out the certified tag in an existing sibling and may remove build residue; do not run it over a Harness checkout with work you need to keep. [Hoplite settings](../../.hoplite/settings.json) expose step 6 separately as `check`.
 
-   Both repositories pin `pnpm@11.7.0` through `packageManager`, so the shim resolves to that version rather than whatever the environment preinstalled. The native step is a separate build that nothing else performs for us: the host addon is gitignored, the Harness `test` script builds it itself via `build:native-system` before its own Vitest run, and this repository runs Vitest directly against that checkout. A fresh clone without it therefore fails host Team activation (`Agent is not an active Team Member`) rather than reporting a missing module.
+| Variable | When to set it |
+| --- | --- |
+| `DSH_HARNESS_DIR` | To select a different checkout, typically for [isolated certification](../dsh-release-compatibility.md). Leave unset for daily work. |
+| `NODE_OPTIONS` | Override the sandbox setup's default `--max-old-space-size=4096` if needed. |
+| `CHROME_PATH` | Set for browser runs when Chrome is not at `/usr/bin/google-chrome`. Sandbox setup can provision Playwright Chromium as a fallback. |
+| `DEEPSEEK_API_KEY` | Only for live `npm run preview`, not for `preview:ui` or `test:browser`. |
 
-   `--host-addon-only` exits without building off Linux/macOS, so the same step is safe on every platform. Do not reuse stale `lib/` or `node_modules/` from an earlier build — old artifacts can conceal declaration or runtime incompatibility.
-2. Build the Harness `apps/web` dist with `corepack pnpm build:web` if the workflow needs `test:browser`; the workspace install already provisioned its dependencies.
-3. Inside this repository, install with `corepack pnpm install`. Never run `npm install`: it silently breaks the workspace symlinks into the adjacent checkout's vendor packages, and the failure surfaces later as a misleading `Cannot find module 'zod'`.
+**Diagnose setup failures before changing code.**
 
-   pnpm 11 defaults `strictDepBuilds` to true, so a dependency that declares a lifecycle script fails the install as `ERR_PNPM_IGNORED_BUILDS` until `allowBuilds` in `pnpm-workspace.yaml` decides it: `true` when the repository consumes what the script builds, `false` when it does not. A new transitive dependency carrying a build step therefore needs that decision in the same change that introduces it, or every fresh install and both CI lanes stop at this step.
-4. Link the Harness workspace and its vendor packages into this repository's `node_modules` with `node scripts/link-harness-packages.mjs`, then build the bundle with `npm run build`.
+- **Wrong Harness checkout:** shared-resolver scripts use `DSH_HARNESS_DIR`, then the `.generated-harness` marker from `sync-paths`, then the default sibling. A missing checkout fails early. When returning from certification, unset the override, clear any marker pointing to the old checkout, then regenerate facades against the daily sibling.
+- **Widespread Host/preset failures:** verify the certified tag, fresh Harness `lib/` and native addon where supported, then Team's links and built exports. Errors such as `Agent is not an active Team Member` or `UNLOADING` on an undefined value are clues, not diagnoses.
+- **Missing `zod` or inexplicable React types:** check the pnpm install and links, or the [Typert staging step](generated-and-seams.md#generated-files) if the error is in generation. Look for stray ancestor `node_modules/@types` when the compiler sees types absent from the lockfile.
 
-   Host tests resolve preset rows and the bundle's own unpublished rows (for example `@contexera/dsh-agent-team/member-context`) through real `node_modules` lookups from this repository root, exactly as a profile install of the published bundle would.
-5. Regenerate the TypeScript path facades against the fresh checkout with `node scripts/sync-paths.mjs`. A fresh clone must not trust the committed facades: no npm script rewrites them, and skipping this step leaves them pointing at the paths baked in at generation time. The read-only `check:facades` gate that `npm test` runs fails on exactly that mismatch. `sync-paths` also emits the `@deepseek-ai/dsh-client-locale/src/*` wildcard the test harness's locale-table import needs.
-6. Smoke-check with `npm run typecheck && npm test`. Green means the environment is right; mass false failures (see below) mean it is not — fix the environment before debugging the diff.
+[CI](../../.github/workflows/ci.yml) runs static checks and lint without Harness on pull requests, pushes to `master`, and manual dispatches. The Linux and Windows jobs run on code changes or manual dispatch: they cache the pnpm store and certified Harness build, link and build Team, regenerate facades, typecheck, and run `test:ci`. Linux also checks the package artifact, stripped Desktop boot, and UI parity. CI does not run browser acceptance.
 
-**Environment variables:**
-
-| Variable | Required for | Notes |
-| --- | --- | --- |
-| `NODE_OPTIONS` | sandbox setup (optional) | `hoplite-setup.sh` defaults to `--max-old-space-size=4096` when unset or empty so Harness Client compilation can exceed Node's default heap; an explicit value is preserved |
-| `CHROME_PATH` | `test:browser` (optional) | Defaults to `/usr/bin/google-chrome`; set only when the sandbox Chrome lives elsewhere |
-| `DSH_HARNESS_DIR` | certification escapes only | Points at a tag-suffixed sibling checkout; unset for everyday work — the default name is the contract |
-| `DEEPSEEK_API_KEY` | `npm run preview` | Real-model preview fails fast without it; test and browser paths never need it |
-
-**Symptoms of a wrong environment, not wrong code:** mass `TypeError ... reading 'UNLOADING'` / `FiberState` undefined failures mean Vitest resolved a stale or missing Harness checkout. `Cannot find module 'zod'` means npm broke the pnpm links — unless it comes from `generate:typert`, which provisions its own link (see Generated files). Fix the environment before debugging the diff.
-
-**No stray `node_modules` above the working tree.** TypeScript `typeRoots` and Node module resolution both walk ancestor directories, so a leftover `node_modules\@types` in a home directory (from an accidental `npm install` run there once) silently injects its types into every compile. The harness build showed this as React-19-typed errors against a React-18 lockfile. If a fresh checkout fails typecheck with type errors the lockfile cannot explain, check each ancestor directory for a stray `node_modules` before debugging the code.
-
-**The checkout pointer is centralized and fails fast. ** `scripts/harness-dir.mjs` is the single source of truth every consumer (Vitest, `sync-paths`, `build-client`, `generate-typert`, the browser/preview runners) resolves through. `DSH_HARNESS_DIR` wins when set, then the `.generated-harness` marker that `sync-paths` writes (so tests follow the same checkout the facades were generated against — a forgotten env var after a cert-run generation cannot split them), then the default sibling name.
-
-A resolved checkout that does not exist aborts immediately with the sibling Harness checkouts that do exist and pointers to the fix, instead of surfacing as the far-away symptoms above.
-
-**The bundle's own dependencies are its whole external surface. ** Nothing outside the host closure and this repository is resolved by name any more: the root manifest declares `yaml` and `zod` alone, and both are linked into the Typert analysis package by `generate-typert.mjs` from this repository's own install. A profile install therefore brings nothing else in, and CI needs no extra provisioning step.
-
-**CI lanes.** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs on pull requests, pushes to `master`, and `workflow_dispatch`. A fast `checks` job runs on `ubuntu-latest` without checking out Harness (`check:docs`, `check:e2e-docs`, `check:core-skills`, `check:boundaries`, `check:versions`, `check:comments`, `check:scratch`, and `lint`) and classifies whether code or package files changed.
-
-When non-doc files change (or on `workflow_dispatch`), `linux` (`ubuntu-latest`) and `windows` (`windows-latest`) run in parallel with cached pnpm store and built Harness artifacts keyed by runner OS and `DSH_HARNESS_TAG`. Both build, sync paths, typecheck, and run `npm run test:ci` after the shared static gates. The preceding build/typecheck steps have already generated Typert, so this command keeps only the Harness-dependent facade check and full Vitest suite.
-
-`linux` also runs `check:artifact`, `verify-desktop-strip-boot.mjs`, and `audit-ui-parity.mjs`, while Windows runs in git bash (`shell: bash`) with directory junctions.
-
-Scope guard: no coverage matrix, no release automation, and no `test:browser` — browser acceptance stays a local step. The Windows lane is the regression fence for filesystem-identifier bugs (issues #7/#8). When certification advances `DSH_HARNESS_TAG`, update the workflow env and this document together with the DSH peer ranges; `npm run check:versions` refuses a mismatch.
-
-All three jobs report, and none gate: `master` carries no required status checks, no rulesets, and `enforce_admins` is off, so a green run does not block a merge and nothing server-side refuses a red one. A green workflow is evidence, never permission — whether a change waits for CI is still a matter of discipline.
-
-**Hoplite sandbox.** [`.hoplite/settings.json`](../../.hoplite/settings.json) runs [`scripts/hoplite-setup.sh`](../../scripts/hoplite-setup.sh) for steps 1–5 in every new thread, and exposes step 6 as the `check` script instead of running it during setup. The script checks out `dsh-v<lower bound>` of the DSH peer range, so it follows a peer move without a separate edit. A Hoplite project-level setup override takes precedence over the repository file; keep it unset.
-
-A tag advance that also moves the DSH peers must commit `pnpm-lock.yaml` in the same change: CI installs with `frozen-lockfile`, while a local install rewrites the lockfile in place and hides the mismatch until CI runs.
-
-**Check the lockfile still lists both native-binding families before committing it.** `@rolldown/binding-*` and `jscpd-*` reach the tree only from the lockfile, and a lockfile that lost them still installs cleanly, so nothing fails until tests run: Vitest 5 loads rolldown at startup and every test aborts with `Cannot find native binding`, while `npm run duplication` reports the jscpd platform package as missing. An unchanged manifest makes pnpm reuse what the lockfile records, so re-resolving — with or without `--force` — leaves the gap in place. Grep the lockfile for both families.
-
-The dev scripts (`build-client`, `run-browser-test`, `run-preview`, `run-ui-preview`) are Windows-hardened and run under git bash there, so local Windows development follows the same environment contract.
+When certification advances, update the CI tag, documentation, peer ranges, and lockfile together; CI installs with `--frozen-lockfile`. If Vitest or `npm run duplication` fails at startup after a lockfile edit, check for the platform entries for `@rolldown/binding-*` or `jscpd-*`, respectively. A successful install alone does not prove those entries survived.
 
 ## External installation verification
 The published layout is the root bundle:
@@ -71,14 +42,15 @@ dsh plugin --profile web add @contexera/dsh-agent-team
 dsh web
 ```
 
-A local directory can be installed with:
+For local linked development, build first and use a separate profile. Run these commands from the Harness checkout. Use the first command only to create a **new** `web-dev` profile; rerunning it replaces that profile’s dependencies and patches.
 
 ```sh
-dsh plugin --profile web add /absolute/path/to/dsh-agent-team
-dsh web
+corepack pnpm dsh --profile web-dev --from-default-profile web --dump-default-config
+corepack pnpm dsh plugin --profile web-dev add link:/absolute/path/to/dsh-agent-team
+corepack pnpm dsh --profile web-dev
 ```
 
-`cordis.patch.yml` is the bundle patch entry point. It adds Host, Client, and invariant rows to the opt-in profile and mounts the `team-member` roster in the isolated `agentPresets` scope. Ordinary shipped/user preset rosters must not be changed.
+`cordis.patch.yml` is the bundle patch entry point. It adds Host, Client, and invariant rows to the opt-in profile and mounts the `team-member` and `team-manager` rosters in the isolated `agentPresets` scope. Ordinary shipped/user preset rosters must not be changed.
 
 The plugin manager renders that scope container as a component row and shows it as off; this is expected and needs no action there. The container is a composition carrier rather than a feature plugin, so it has no live entry of its own to match, while the Loader treats a group entry as always enabled. The rows listed inside it are the ones that run, and the web and desktop builds render the same way.
 
@@ -99,7 +71,9 @@ The runtime must match the installation form. Published `dsh` runs the stable pr
 
 Release cadence is batched. Between releases, daily use of a local build is a lightweight acceptance channel; choose the narrowest check for each small change and batch a release after accumulated fixes are stable. The release procedure itself — pre-flight, the check ladder, release material, the tag and publish sequence, and post-publish verification — is [`release-runbook.md`](../release-runbook.md).
 
-Stable and development profiles share `$DSH_HOME/storages/`. If a stable old version reads a ledger written by a newer version, schema validation can fail; once that ledger has adopted a newer rules version, an older build refuses it outright instead of only risking a failure. The order is therefore: back up `agent_team.sqlite`, install the new build on every profile sharing that storage, and only then open Team for the first time anywhere. [`release-runbook.md`](../release-runbook.md) §2 step 7 holds the backup procedure.
+Profiles in the same `$DSH_HOME` share `storages/`. If a stable old version reads a ledger written by a newer version, schema validation can fail. The current Host adopts rules version 9 (`AGENT_TEAM_RULES_VERSION` in [`ledger.ts`](../../packages/agent-team/src/ledger.ts)); older builds that do not accept that version refuse a ledger once it adopts it.
+
+Before opening Team on the new build, [back up `agent_team.sqlite`](../release-runbook.md#2-pre-flight) and upgrade every profile that shares it.
 
 The minimum compatible DSH version is `0.2.2-rc.2`. DSH's JSONL Session persistence migrates released historical formats itself (v0/v1/v2 → V3 → V4); old-format Session data needs no manual disposal. Do not add Team ledger or Member Session migration, old-format reads, or silent fallbacks.
 
@@ -107,17 +81,9 @@ The minimum compatible DSH version is `0.2.2-rc.2`. DSH's JSONL Session persiste
 
 Local refs can be the only copy of what `master` does not contain: the `backup-pre-*` branches and the local-only tags that pin abandoned pre-rewrite commits are one such family, and deleting them is irreversible. Pushing them is irreversible in the other direction — this repository is public, and a published commit cannot be withdrawn.
 
-Before rewriting history — `reset --hard` over committed work, `rebase`, or an amend that abandons commits with unique content — park the current tip in a `backup-pre-<what>-<YYYYMMDD>` branch, or in a `git bundle` file when the refs themselves are about to be deleted. Without one, `git reflog` is the only anchor for the abandoned commits and `git gc` prunes unreachable objects; the 2026-09-12 rewrite of the 0.1.11 round created no backup ref, so only the reflog held the replaced commits.
+Before rewriting history, give any commits you need to keep a durable local reference, or create a Git bundle if you intend to delete the references. Verify rewritten commits by their contents, not their position in a rebase list.
 
-A rebase whose step list a script chooses fails silently. `GIT_SEQUENCE_EDITOR='sed -i …'` edits the todo by line number, and a commit's line there depends only on how many commits the range holds: a script written for one range shape marks the wrong commit once the range has another, and the rebase still succeeds. Folding commit 3 into commit 2 when you meant commit 4 exits zero and yields a plausible history. Select by subject, not position, then verify by content — each commit's diff must still belong to that commit alone.
-
-Before pushing, dry-run the exact refspec and require the output to name only the refs you intend to publish:
-
-```sh
-git push --dry-run origin master    # add the version tag when the push is a release
-```
-
-A third ref means a local-only ref would go public — stop and resolve it first. `git push --all` and `git push --tags` bypass this gate and are never the release command. A release push is this same fence with the version tag added; the sequence around it is in [`release-runbook.md`](../release-runbook.md) §5.
+Before pushing, dry-run the exact refspec and check that it names only the branch or tag you intend to publish. Do not use `git push --all` or `git push --tags` for a release; follow the sequence in the [release runbook](../release-runbook.md).
 
 ## Unattended work in a container
 

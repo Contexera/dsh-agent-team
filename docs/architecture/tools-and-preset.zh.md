@@ -2,15 +2,19 @@
 
 [English](tools-and-preset.md) | 中文
 
-显式的 `team-member` preset 是唯一的 Team Member composition。它含一整套 coding capability rows：shell、filesystem/search、web search 与 fetch，以及 background jobs、skill 加载工具、compaction。
+本文维护模型可见工具的名单、preset 组合与提示指导的分工。运行时权限和生命周期见 [Host 权威](host-authority.zh.md)，具体调用契约见 [协作工具](../team-collaboration/tools.zh.md)。
 
-它还含 Team collaboration guidance/tools、Harness Workspace instruction discovery、有界的 private-memory reference context，以及 Member 参与的每个 Workspace 的 [Workspace 规则](../team-collaboration/memory-and-context.zh.md#workspace-规则)。普通 Sessions 留在这个 isolated roster 之外，拿不到 Team prompt sections、tools 或 Member memory。
+## Member preset
+
+`team-member` 是 Member 唯一使用的显式 preset。它组合了 shell、文件读写与搜索、网页搜索与抓取、后台作业、skill 加载及压缩，还提供协作指导与工具、Workspace 指令发现、有界的私有记忆上下文，以及 Member 参与的每个 Workspace 的 [Workspace 规则](../team-collaboration/memory-and-context.zh.md#workspace-规则)。普通 Session 不使用这份组合，也不接收 Team 提示、工具或 Member 记忆。
 
 嵌套的 preset group 把 skills registry、Team 的逐 Agent router 与 skill loader 放在同一个隔离域；确切 roots 与选择生命周期归 [Host authority](host-authority.zh.md#member-capabilities-与-skills)。
 
 工具声明与提示指导是模型输入的不同层。工具名、描述与参数会成为请求专用 `tools` 字段里的 schemas；部分工具插件还会注册 system-prompt guidance sections。技能摘要目录则是持久的 user-role `<system-reminder>` / `<available_skills>` 消息，完整技能正文只在 `skill` 工具加载或用户显式调用后进入。隔离的 Team skills registry 同时服务这三种技能表面。
 
-filesystem row 显式写 `applyPatch: false`，而不是沿用 Host 默认值：Member 只被授予 `edit` 这一种文件修改工具，preset 若留空，将来 Host 默认值一翻就会悄悄扩大每个 Member 的工具面。发布包的 preset 测试断言这个值，所以这是一项被检查的决定，不是一个假设。
+filesystem row 显式设置 `applyPatch: false`，不继承 Host 默认值。Member 的文件修改工具只有 `edit`；若省略该字段，Host 默认值变化就可能扩大工具范围。发布包的 preset 测试会检查这一设置。
+
+### 执行基线与额外许可
 
 每个 Member 默认只获准使用所选 preset 注册的工具定义，以及显式共享的 `working_directory`。`capabilities.tools.allow` 仍只能进一步缩减。Team Host row 另有一份 profile 级 `extraToolGrants`，可按确切、区分大小写的已注册宿主工具名放行，包括 Member allow-list 省略掉的继承基线名称。名单默认空，只属于一个 profile，并作用于该 profile 的全部 Team Member。这是为 Member 已能接入的外部插件工具解除执行限制：不挂载插件、不修改 Member preset，也不开启 DSH 内置能力。
 
@@ -30,9 +34,22 @@ Host 在 Agent 发布前保存 preset 定义，并在直接调用和嵌套调用
 
 设置目录发现 Host 全局注册与 live Member scope 中已注册的工具名，不读取普通 Agent scope。它不推断插件来源、不克隆插件，也不声称是某个 Member 或某一轮的精确当步准入集合。已激活 Member preset 提供的名称、Team-owned 名称、`working_directory` 与 `team_worker` 不作候选。DSH 树内共享任务板的四个工具也不作候选，因为该任务板与 Team 账本持有的 Task 重合。已保存但当前不可授权的名称仍保留为已选，可随时移除。普通 Session 与其他 profile 不获得任何许可。
 
+### 公开扩展接口的限制
+
 Team mode 不过滤其他官方或自定义插件注入的提示。当前 Harness 公开接口不支持完整的 Member 提示隔离：必需上下文会在组装后被恢复。例如 experimental Team 的 `team:policy` 与必需的 `team:identity` 仍会进入上下文，但不会因此阻止激活或对话。
 
 这些检查使用 Harness 公开扩展接口，不是强制执行的最终请求策略。其他组装中间件仍可在 Team 过滤之后改变结果。尚未完成通用插件兼容性认证，见[兼容性限制](../dsh-release-compatibility.zh.md#37-并存的另一套-team-实现)。
+
+### 工具名单与注册
+
+`cordis.patch.yml` 的 `only` 名单是注册入口；`packages/agent-team/src/member-runtime.ts` 与 `manager-tool-policy.ts` 分别维护运行时工具集合。
+
+| preset | Team 工具 |
+| --- | --- |
+| `team-member` | `team_view`, `team_inbox`, `team_thread`, `team_message`, `team_task`, `team_attention`, `team_dm`, `team_subscription`, `team_reminder`, `team_worker` |
+| `team-manager` | `team_overview`, `team_models`, `member_create`, `member_update`, `member_state`, `member_workspace`, `project_create`, `project_owner`, `project_update` |
+
+Member 名单最多十个；`team_worker` 只在 Host Worker 开关打开时声明。
 
 每一行 `name:` 都是 Loader 按 profile 解析的裸标识符，不按本 bundle 解析。profile 只链接本 bundle 与宿主闭包，所以一行只能点名宿主包或本 bundle 自己的子路径。绝不能点名嵌在本 bundle 依赖树里的包。工作树里能解析的名字，在真实安装里仍可能让该行 `never started`：依赖里的模块只能经由本 bundle 自己名下的再导出到达一行。
 
@@ -44,32 +61,7 @@ model-facing tools 定义在 `packages/tool-agent-team/src/index.ts` 与 `packag
 
 Member 没有 context 工具。preset 的 `compaction-basic` 行挂载 Team 的薄适配层 `member-compaction-engine`：Team 负责主动请求准入，Harness 的 `BasicCompactionEngine` 提供摘要模板、压缩事务与 overflow 恢复。预算定义归 [`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md)。换代仍是 Host 的决定，不是模型的。
 
-换代归 `team-context-management.ts`，Team 自己的协调器。它从 Host 的唤醒决定出发，而不是从 durable 意图出发，走串行 lifecycle queue 执行，并让新代身份从被退役的 Session 派生，因此崩溃后收敛到同一个后继：
-
-1. 等真正 idle；
-2. 在 commit seam 复查 owned-jobs guard 与普通输入队列——排队中的普通消息会让这次换代延后；
-3. 在 `agent.runMaintenance` 内以 Host actor 提交幂等的 `team/member-session-recycled` operation，并在存在 live 代时记下 `inputFromSeq`（退役日志的偏移）；
-4. retire 旧代：它的 pre-step gate reject 该 step，不发旧代模型请求；随后 dispose + 归档，绝不删除；即使输入已经被 claim，最初的 inbox 插入记录仍在日志中；
-5. 激活新 Session，lineage 由 ledger 的 transition 记录承载（它的 header 不写 `parentSession`，那个字段专指 subagent 的创建者）；
-6. 从 `inputFromSeq` 起折叠退役日志，按 message id 剔掉新代已经持有的消息，其余用 followup 投递，再从 ledger 重导出 Inbox。
-
-maintenance 是这次 commit 能安全面对换窗中途新输入的原因：loop 停在那里，新消息留在 durable inbox，不会落到正在被退役的那一代。commit 失败则 maintenance 放行，旧代继续运行；commit 成功就退役它，崩溃则留给启动或恢复补完尚未重放的换代。
-
-新代首先收到身份、Project ownership、Workspace 参与和私有记忆索引，加上唤醒它的消息。后续步骤只追加变化或缺失的类别；记忆更新与恢复规则见 [Member 上下文注入](../team-collaboration/memory-and-context.zh.md#member-上下文注入)。不提供 handoff 信封或换代公告。
-
-折叠是 Team 自己的 `contextContinuity` projection unit，在 Team service init 时按 host 注册一次。`context-projection.ts` 拥有 durable checkpoint ref 命名、Team notice 规则、fork cut，以及一代读回的那份折叠状态：带 turn-end 投递状态的 checkpoints、至多一条 legacy rollover 意图、continuation 投递记录，以及被退役那代从未消费的非 Team 输入。它仍然解码的工具名（`context_rollover`、`new_context`、`context_checkpoint`）是给早先版本日志用的解码器，不是 tool alias。
-
-`context-codec.ts` 只写当前构建还产出的那一个信封：quiet checkpoint continuation。识别它、以及识别早先版本写下的两种形状，都在 `context-source.ts`；handoff 的写者只作为那些 legacy 形状的测试 helper 保留。
-
-崩溃恢复从日志派生。被中断的换代按已记录的绑定与被退役的 Session 补完；旧日志里所属 turn 从未 durable 结束的 pending 意图视为 spent 直接丢弃，不会让该代永久无法换窗。
-
-carried-input 重放有界，且以 message id 为准。换代在 commit 时记下 `inputFromSeq`，即退役日志的偏移；折叠只计该边界及其之后的输入。唯一来源是退役 Session 的日志——不出于搬运而把消息内容留在内存里。新代即使已经跑过自己的 turn 也不因此跳过：由边界、新代自己的日志和 inbox 队列决定它还缺哪些消息。只有不带 `inputFromSeq` 的 legacy transition 就沿其已开始的代直接跳过重放。`agent-instructions` 消息由新代重新生成，不作为独立回合重放。
-
-取消的 inbox splice 不记录由谁移除消息。重放必须保住 dispose 清空的输入，因此换代期间显式删除或替换的排队消息也可能被重放。普通 Session cancel 按设计保留待处理输入；这项限制只涉及换代期间编辑队列。
-
-上一代 Session 读不出来时，看问题属于哪一类。两类都走 warn 放行。第一类是日志损坏（`corrupt session log`，Host 会修复 torn tail）。第二类是确定性格式拒绝（`SessionFormatUnsupportedError`，重试无法改变结果）。缺失、IO 和未知原因仍 fail-closed。带输入边界的 wake 换代即使新代已经运行，也仍执行这项检查。Member Session 有没有 durable 持久内容，看 session-persistence inspection 的判定。判定会等进行中的 retirement drain。绝不使用会与 suspend 终末 flush 竞争的裸元数据列表。
-
-唤醒判定本身是 `wake-recycle.ts` 里的一条纯 gate 阶梯：未启用、没有上一代、活动时刻读不出来、缓存可能还热、context 未到水位线，每一档都答 resume，只有冷得够久且 context 够大才换代。[`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md) 拥有阈值与那个配置组。
+换代与输入重放统一见 [Host 权威](host-authority.zh.md#换代与输入重放)。这里仅维护 preset 的组合，不重复生命周期算法。
 
 Web Client 是唯一的 Human control surface。它经 typed Remote 把每个 mutation 委托给 `ctx.agentTeam`，不绕过 Host authorization 或 ledger commits。别把 slash-command adapter 加回来当第二界面。
 
@@ -81,11 +73,13 @@ Web Client 是唯一的 Human control surface。它经 typed Remote 把每个 mu
 
 ## Team manager preset
 
-Host 为 [Team manager](../domain-model.zh.md#team-manager) Session 挂载另一个隔离的 `team-manager` preset。它保留通用 coding 工具面——persona、时间与 Workspace instructions、shell、filesystem/search、web、jobs、skill 加载、ask-user、basic compaction，以及所有已注册 Workspace 的规则——但有意省略 Member context、Member time context、Member memory 及其 compaction adapter、Worker 与 rollover policy，以及 profile 的 `extraToolGrants`。当前构建注册计划中的九个 manager 工具，其余不注册。
+Host 为 [Team manager](../domain-model.zh.md#team-manager) Session 挂载另一个隔离的 `team-manager` preset。它保留通用 coding 工具面：persona、时间与 Workspace instructions、shell、filesystem/search、web、jobs、skill 加载、ask-user、basic compaction、各 Workspace 的规则——但有意省略 Member context、Member time context、Member memory 及其 compaction adapter、Worker 与 rollover policy 和 `extraToolGrants`。只注册上面的九个 manager 工具。
 
 这个工具面跑在可信的 `danger-full-access` policy 上，所以数据红线由 persona 写成规则而不是期望：在 `$DSH_HOME` 下，manager 只读写自己的 `agent-team/manager/` 目录、它主编的 `agent-team/workspaces/` 下各 Workspace 规则文件，以及 `team_overview` 刚按 ref 查实的 Member 私有资产；绝不碰 Host 的 sqlite 文件；Member 的 Session 只能经由 locator 给出的只读 reader 读取，绝不自己打开日志文件。
 
 只有 Human 当前请求明确要求时，才能按相应的维护规则整理该 Member 的 memory、notes 或 skills；不得删除成员目录，也不得把私有内容复制进共享材料。它自己的 memory、notes 和一条工具结果只记录过去说过的话，因此它们都不能代替 Human 现在提出请求，来为不可逆或高代价的动作授权。
+
+### 目录读取与管理写入
 
 它挂载的 Team 工具面就是这个确切子集：两个只读工具加七个写操作。`team_overview` 把整个 Team 当目录读：每个 Workspace 及其 checkout 路径、每个 Project 的共享目标、它的 owners 与各自负责什么、活跃与暂停的订阅计数、board 摘要，以及每个 Member 的身份描述、参与哪些 Workspace、配置的模型路由、以什么方式运行、capability 配置挂载了什么、负责哪些 Project。
 
@@ -95,7 +89,7 @@ Host 为 [Team manager](../domain-model.zh.md#team-manager) Session 挂载另一
 
 `member_create`、`project_create`、`project_owner`、`project_update`、`member_update`、`member_state` 与 `member_workspace` 是 manager 仅有的写操作，并且都走 Host 自己的写路径——与 Web Client 相同的串行账本队列、激活与回执——所以写操作答回的记录就是其他所有面读到的记录。
 
-`member_update` 调整已存在的 Member，并且是局部更新：调用没写的字段保留写入真正执行那一刻已存下的值，合并在账本的串行段落内完成，所以一次编辑不会覆盖排队期间落地的改名或描述修改。
+`member_update` 调整已存在的 Member，并且是局部更新：调用没写的字段保留写入真正执行那一刻已存下的值，合并在账本的串行区间内完成，所以一次编辑不会覆盖排队期间落地的改名或描述修改。
 
 重放的 `requestId` 只比较它自己写明的字段。handle 与 preset 在这里不可编辑，显式空白的身份描述会被拒绝，省略 `capabilities` 保留已存的覆盖而 `clearCapabilities` 清除它，替换路由只在请求是新的时对照目录校验。
 
@@ -105,7 +99,7 @@ Host 为 [Team manager](../domain-model.zh.md#team-manager) Session 挂载另一
 
 `member_workspace` 以纯账本关系加入或退出一个非默认 Workspace——Member 的 Session 不会被创建、复制或迁移——而退出创建时的 Workspace 会被拒绝，并指向归档。
 
-`project_update` 编辑一个 Project 的展示事实，或归档它。调用没写的名字或共同目标保留写入真正执行那一刻已存下的值，合并在账本的串行段落内完成，所以一次改名不会把排队期间 Human 改过的共同目标写回旧值；显式空白的共同目标会像 Web 编辑器那样清空它，而空名字会被拒绝。归档保留全部事实与整段历史，释放该 Project 的活跃 Claim、清空相关 Attention，并停掉、清空该 Project 拥有的每一个订阅。
+`project_update` 编辑一个 Project 的展示事实，或归档它。调用没写的名字或共同目标保留写入真正执行那一刻已存下的值，合并在账本的串行区间内完成，所以一次改名不会把排队期间 Human 改过的共同目标写回旧值；显式空白的共同目标会像 Web 编辑器那样清空它，而空名字会被拒绝。归档保留全部事实与整段历史，释放该 Project 的活跃 Claim、清空相关 Attention，并停掉、清空该 Project 拥有的每一个订阅。
 
 归档提交之后才失败的清理会作为警告写在回执旁边，而不是把已经持久化的决定变成一次拒绝。归档本身不能用新的 `requestId` 重做；用同一个 id 重放会保留原回执，同时再跑一次该清理，欠下的订阅状态就是这样被清掉的。
 
@@ -115,17 +109,19 @@ Host 为 [Team manager](../domain-model.zh.md#team-manager) Session 挂载另一
 
 manager 层只加上 Web Client 自己的表单也加的部分：非空的成员身份、非空的 Project 共同目标、新授予时非空的 owner 责任，以及在确认请求是新的之后对照 Session controller catalog 校验的模型路由。owner 资格、准入门槛、保留的 Member 工具集与 2,000 字符的责任上限都沿用账本自己的规则，不在工具里复制第二份。
 
-每次写操作都带一个 `requestId`。同一个 id 配同样的参数答回原回执，不会写第二次，所以丢失的答案是重试而不是重复写入；同一个 id 下改了参数会被当成冲突拒绝。拒绝会说明原因，并且什么都没有写。已提交但激活失败的 Member 依然是已提交的：答回里保留它的回执、ref 与激活诊断，manager 从那里继续，而不是把它再建一遍。
+每次写操作都带一个 `requestId`。同一个 id 配同样的参数返回原回执，不会写第二次，所以答案丢失后可以重试，不会重复写入；同一个 id 下改了参数会被当成冲突拒绝。拒绝会说明原因，并且什么都没有写。已提交但激活失败的 Member 依然是已提交的：响应保留它的回执、ref 与激活诊断，manager 从那里继续，而不是把它再建一遍。
 
 隔离 registry 的默认值仍是 `team-member`；只有 manager runtime 挂载 `team-manager`。
 
+### 当前 manager 授权
+
 九个 handler 各自校验调用方：只有调用者正是当前 manager Session 时才应答。这里用不上 `ownsSession`，它回答的是 lineage，而被替换掉的旧代同样满足 lineage，所以任何从别的路径拿到该工具的 Session——Member 自己 scope 上的注册、自定义 preset、普通 Session——都被拒绝，不会拿到数据。
 
-写操作校验两次：工具入口的同一道 manager gate，加上账本在幂等重放分支之后、串行段落之内的 `authorize` 钩子，所以在调用与提交之间被替换掉的 manager 会被拒绝，且什么都不写。`recover` 没有可授权的账本段落，所以它在 Member 的生命周期段落——它实际运行的临界区——里重检 manager；排队期间 manager 被替换时，恢复会在那里被拒绝，且什么都没修。
+写操作校验两次：先过工具入口的 manager gate，再过账本串行区间内、幂等重放分支之后的 `authorize` 钩子。调用与提交之间被替换的 manager 因此无法写入。`recover` 不写账本，而是在 Member 的生命周期临界区内重检 manager；若排队期间 manager 已被替换，就拒绝恢复，不执行修复。
 
 manager policy 只捕获这个 preset 自己的精确 definitions，加上共享的 `working_directory`；执行 guard 只对确切的当前 manager Agent 放行这些 definitions。后来注册或外来的 definition 会被拒绝，不会继承。`addMember` 只接受 `team-member`，检查发生在 model validation 与任何 ledger write 之前，所以 manager composition 不能变成一个 Member。
 
-manager 目的地在屏时，Client 会隐藏 shipped hero preset picker。这个收口只是展示，不是授权，也不是永久的 authorization lock：composition 归 Host，manager guard 每次执行都从确切 Agent 与当前 pointer 重新授权。入口与 gate 行为归 [Client 边界](client-and-remote.zh.md#client-plugin-和-slot-composition)。
+manager 目的地在屏时，Client 会隐藏 shipped hero preset picker。这个收口只是展示，不是授权，也不是永久的 authorization lock：composition 归 Host，manager guard 每次执行都从确切 Agent 与当前 pointer 重新授权。入口与 gate 行为归 [Client 边界](client-and-remote.zh.md#client-插件与-slot-组合)。
 
 ## Persona 与 core skills
 
@@ -146,7 +142,7 @@ Team 内容仍是不可信输入。persona 按代码里的现状点名工具；�
 
 详细内容放在 `packages/agent-team/core-skills/` 下的内置 core skills，由 Member 的 skill 目录按需加载：
 
-- `team-domain-model` 说明角色与权限（Human、Project owner、Project member、负责人）、Main stream 与 Thread 的分工、点名、带链接的回复与普通消息如何投递、何时看 Inbox 或 board、Task 生命周期与谁来验收、关闭、重开或转交、DM 的用途，以及写明恢复方式的常见拒绝码。它只写稳定规则，不含当前状态：身份、所属 Project、未读工作来自动态 context 和 Team tools，权限与投递规则由 Host 执行。
+- `team-domain-model` 说明角色与权限（Human、Project owner、Workspace participant、accountable）、Main stream 与 Thread 的分工、点名、带链接的回复与普通消息如何投递、何时看 Inbox 或 board、Task 生命周期与谁来验收、关闭、重开或转交、DM 的用途，以及写明恢复方式的常见拒绝码。它只写稳定规则，不含当前状态：身份、所属 Project、未读工作来自动态 context 和 Team tools，权限与投递规则由 Host 执行。
 - `member-memory-manager` 与 `member-skill-manager` 负责私有 memory 与私有 skill 的写法。
 - `project-subscriptions` 负责只读 Project 订阅脚本、GitHub 轮询示例、webhook 注册与验签、credential 处理，以及运行和投递调试。
 
@@ -156,7 +152,7 @@ Team 内容仍是不可信输入。persona 按代码里的现状点名工具；�
 
 Worker 开关打开时，它再加一段关于本地 Worker 的简短说明。它从不复述工具参数或单个 Project 的事实，那些属于工具说明与账本；又因为它是 prompt section 而不是消息，compaction 不会把它抹掉。
 
-管理会话从 `packages/agent-team/manager-skills/` 加载自己的只读 skills，排在可写的 `$DSH_HOME/agent-team/manager/skills/` 之前。这个 root 与 Member 的 core skills 刻意分开：管理 skill 不该出现在 Member 的目录里，Member 的 skill 也不该出现在 manager 的目录里。
+隔离的 manager skill roots 与优先级统一见 [Host 权威](host-authority.zh.md#隔离的-skill-目录)。
 
 随包交付的六份 skill 把常驻方法与按需知识分开：`team-management-guide` 讲 Team 怎么运作、如何基于证据设计；`team-operations` 讲操作顺序与九个工具；`team-event-loops` 把 subscription、reminder 与消息当作让 Team 持续运转的闭环；`manager-domain-model` 把面向 Member 的规则讲给不持有这些工具的 manager；`manager-memory` 讲 manager 自己的有界索引与复查节点；`manager-session-evidence` 讲如何把 Member 的已存 Session 当证据来读。
 

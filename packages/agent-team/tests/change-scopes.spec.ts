@@ -263,6 +263,34 @@ describe('scoped Team change notifications', () => {
 })
 
 describe('ledger change scope and affected member derivation', () => {
+  it('distinguishes initialization wake-all from rules adoption with no shared wake', async () => {
+    const { ledger, table } = await openTestLedger({ initialize: true })
+    expect([...table.entries()].map(([, operation]) => ({ kind: operation.kind, scopes: ledger.changeScopesOf(operation) })))
+      .toEqual([
+        { kind: 'team/initialized', scopes: undefined },
+        { kind: 'team/rules-version-adopted', scopes: [] },
+      ])
+    expect(ledger.projectionSequence()).toBe(1)
+    expect(ledger.status().sequence).toBe(2)
+  })
+
+  it('keeps owner grant and responsibility changes ordered Workspace then Project', async () => {
+    const { ledger, human } = await openTestLedger({ initialize: true })
+    const project = await human.createProject('owner-scopes')
+    const member = await human.addMember('owner', { projects: [project] })
+    const granted = await human.makeOwner(project, member)
+    const updated = await ledger.updateProjectOwner({ requestId: requestId('owner-responsibility-scope'), workspaceId: alpha,
+      projectRef: project.projectRef, memberId: member.memberId, responsibility: 'Own delivery', actor: human.raw })
+    for (const result of [granted, updated]) {
+      const operation = ledger.getOperation(result.value.receipt.operationId)
+      expect(operation).toBeDefined()
+      expect(ledger.changeScopesOf(operation!)).toEqual([
+        { kind: 'workspace', workspaceId: alpha },
+        { kind: 'project', projectRef: project.projectRef },
+      ])
+    }
+  })
+
   it('derives empty scopes for reads and precise scopes plus members for replies', async () => {
     const { ctx, facility } = await harness()
     const thread = await startThread(ctx, 'derive')

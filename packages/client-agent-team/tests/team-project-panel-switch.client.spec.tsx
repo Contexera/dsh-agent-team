@@ -45,6 +45,35 @@ async function openDiscussions(configure?: (bench: Awaited<ReturnType<typeof run
 }
 
 describe('Team Project discussion panel switching', () => {
+  it.each(['successful', 'refused'] as const)('ignores a late %s opening read after switching discussions', async outcome => {
+    const { b, panel, open } = await openDiscussions()
+    const original = b.readThread.getMockImplementation()!
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    b.readThread.mockImplementationOnce(async request => {
+      const result = await original(request)
+      entered.resolve()
+      await release.promise
+      return outcome === 'successful' ? result : { ok: false, error: { message: '旧讨论读取失败' } }
+    })
+
+    open(1)
+    await entered.promise
+    expect(within(panel).queryByRole('textbox', { name: '消息内容' })).toBeNull()
+    open(0)
+    await within(panel).findByText('第一条讨论')
+    const input = within(panel).getByRole<HTMLTextAreaElement>('textbox', { name: '消息内容' })
+    fireEvent.change(input, { target: { value: '当前讨论的草稿' } })
+
+    await act(async () => { release.resolve() })
+    expect(within(panel).getByText('第一条讨论')).toBeTruthy()
+    expect(within(panel).queryByText('第二条讨论')).toBeNull()
+    expect(within(panel).queryByRole('alert')).toBeNull()
+    expect(input.value).toBe('当前讨论的草稿')
+    expect(input.readOnly).toBe(false)
+    expect(b.readThread.mock.calls.map(([request]) => request.threadRef)).toEqual(['thread:1', 'thread:2', 'thread:1'])
+  })
+
   it('starts a new read on each discussion opening and drops old history', async () => {
     const latePage = Promise.withResolvers<void>()
     const lateFact = {

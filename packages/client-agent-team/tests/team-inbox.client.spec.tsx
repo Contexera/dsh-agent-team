@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
+import { flushRefreshes, useRefreshClock } from './bench/refresh-clock.ts'
 import { STORAGE_KEY } from '../src/client/navigation.ts'
 
 usePinnedBrowserLanguages('zh-CN')
@@ -653,6 +654,7 @@ describe('Team Inbox surfaces', () => {
   })
 
   it('keeps the last successful unread total when a background refresh fails', async () => {
+    useRefreshClock()
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
     const seeded = (): ReturnType<typeof inboxRow>[] => [
@@ -673,8 +675,7 @@ describe('Team Inbox surfaces', () => {
       .mockImplementation(async () => ({ ok: false, error: { message: 'inbox down' } }))
     const callsBeforeFailure = b.inbox.mock.calls.length
     b.publishWorkspaceUpdate()
-    // The badge debounces, so wait past that window before reading the result.
-    await new Promise(resolve => { setTimeout(resolve, 300) })
+    await flushRefreshes(b)
     // Positive control: the failing refresh really ran against both Workspaces.
     expect(b.inbox.mock.calls.length).toBeGreaterThan(callsBeforeFailure)
     await waitForEntryUnread(card, 3)

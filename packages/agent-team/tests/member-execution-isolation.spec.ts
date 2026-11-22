@@ -195,6 +195,35 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     expect(adapter.requests.length).toBe(requestsBefore)
   })
 
+  it('never publishes a Member handle when shutdown races activation at Workspace attachment', async () => {
+    const { ctx, workspaceId, workspaces, teamFiber } = await realHarness()
+    const team = ctx.agentTeam
+    const attached = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    workspaces.get(workspaceId)!.attachSession = async () => {
+      attached.resolve()
+      await release.promise
+    }
+    const publish = vi.spyOn(team['handles'], 'set')
+    const activation = team.addMember({ requestId: requestId('shutdown-activation'), workspaceId,
+      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [],
+      model: { provider: 'mock', model: 'mock' } })
+    await attached.promise
+    const disposal = teamFiber.dispose()
+    try {
+      await vi.waitFor(() => { expect(team['accepting']).toBe(false) })
+      release.resolve()
+      const added = await activation
+      expect(publish).not.toHaveBeenCalled()
+      expect(team['handles'].has(added.status.member.memberId)).toBe(false)
+      expect(ctx.agents.get(added.status.member.sessionId)).toBeUndefined()
+    } finally {
+      release.resolve()
+      await activation
+      await disposal
+    }
+  })
+
   it('resolves a parked boundary wait when the turn is cancelled', async () => {
     const adapter = new GatedAdapter()
     const h = await realHarness(adapter)

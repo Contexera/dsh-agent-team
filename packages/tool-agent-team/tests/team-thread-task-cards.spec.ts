@@ -80,7 +80,9 @@ describe('team_thread renders a discussion\'s derived Task cards', () => {
       taskCards: [CARD], readThroughSequence: 5, remainingUnreadCount: 0,
     })
     const lines = text.split('\n')
-    expect(lines.findIndex(line => line.includes('[task card]'))).toBeGreaterThan(lines.findIndex(line => line.includes('the only fact')))
+    const fact = lines.findIndex(line => line.includes('the only fact'))
+    expect(fact).toBeGreaterThanOrEqual(0)
+    expect(lines.findIndex(line => line.includes('[task card]'))).toBeGreaterThan(fact)
   })
 
   it('a discussion with no derived Task renders no card line', () => {
@@ -104,8 +106,20 @@ describe('team_thread renders a discussion\'s derived Task cards', () => {
       taskCards: [CARD], cursor: 5, hasMore: false,
     })
     const lines = spanning.split('\n')
-    expect(lines.some(line => line.includes('[task card]'))).toBe(true)
-    expect(lines.findIndex(line => line.includes('[task card]'))).toBeGreaterThan(lines.findIndex(line => line.includes('older fact')))
+    const fact = lines.findIndex(line => line.includes('older fact'))
+    expect(fact).toBeGreaterThanOrEqual(0)
+    expect(lines.findIndex(line => line.includes('[task card]'))).toBeGreaterThan(fact)
+  })
+
+  it.each([
+    { boundary: 'oldest fact', sequence: 5, visible: true },
+    { boundary: 'beforeSequence', sequence: 20, visible: false },
+  ])('handles a card exactly at the history page $boundary', ({ sequence, visible }) => {
+    const text = renderText(teamTools().get('team_thread')!, { action: 'history', threadRef: THREAD, beforeSequence: 20 }, {
+      ...BASE, kind: 'history', facts: [{ sequence: 5, kind: 'message', body: 'oldest fact', sender: 'member:reeve', mentions: [] }],
+      taskCards: [{ ...CARD, sequence }], cursor: 5, hasMore: true,
+    })
+    expect(text.includes(`[task card] Task ${TASK}`)).toBe(visible)
   })
 
   it('declares the card fields the render reads, because an undeclared value throws', () => {

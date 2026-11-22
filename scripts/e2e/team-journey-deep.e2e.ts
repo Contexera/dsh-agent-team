@@ -246,6 +246,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await projectDialog.getByLabel('说明').fill('M2 完整协作验收')
   // v9 dropped initial-member selection from project creation; a new Project
   // starts with only the Human and Members enter by owner grant or work.
+  expect(await projectDialog.getByRole('button', { name: /初始成员/ }).count()).toBe(0)
+  await settleAnimations(page)
   await page.screenshot({ path: join(UI03_SHOTS, 'project-create-modal.png'), fullPage: true })
   await projectDialog.getByRole('button', { name: '创建项目' }).click()
   // Reopen from the narrow-expanded sidebar after the collapse settles.
@@ -261,6 +263,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(dialogBox!.y).toBeGreaterThanOrEqual(0)
   expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(390)
   expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(844)
+  await settleAnimations(page)
   await page.screenshot({ path: join(UI03_SHOTS, 'project-create-modal-narrow.png'), fullPage: true })
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 1440, height: 960 })
@@ -333,10 +336,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     expect(row.inside).toBe('true')
   }
   expect(await rampMenu.textContent()).toContain('本 Workspace')
+  expect(await rampMenu.textContent()).not.toContain('加入本项目')
   // Resolve the alias the rule names so the expectation follows a theme swap.
   const labelPrimary = await resolveAliasColor(page, '--dsw-alias-label-primary')
   expect([...new Set(rampWide.map(row => row.nameColor))]).toEqual([labelPrimary])
-  await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-outside.png'), fullPage: true })
+  await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-workspace.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   // Measure used values: the element never answers a container query about its
@@ -352,7 +356,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     expect(row.descriptionDisplay).toBe('none')
     expect(row.nameColor).toBe(labelPrimary)
   }
-  await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-outside-narrow.png'), fullPage: true })
+  await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-workspace-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await page.keyboard.press('Escape')
   await expect.poll(projectOrder, { timeout: 20_000 }).toEqual(['delivery', 'engineering', 'ramp'])
@@ -2556,6 +2560,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await closedDialog.waitFor()
   expect(await closedDialog.locator('li button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))))
     .toEqual(['转交给 @builder', '转交给你自己'])
+  expect(await closedDialog.getByRole('status').count()).toBe(0)
   await settleAnimations(page)
   await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread-transfer-dialog.png') })
   await page.keyboard.press('Escape')

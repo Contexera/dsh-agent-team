@@ -682,6 +682,32 @@ export interface WorkerResumeAnchor {
 }
 
 
+interface ViewPageArguments {
+  readonly limit: number
+  readonly direction: 'before' | 'after'
+  readonly cursor: number
+}
+
+interface ViewAccess {
+  readonly projectRefFilter: AgentTeamProjectRef | undefined
+  readonly threadRefFilter: AgentTeamThreadRef | undefined
+  readonly directoryRequested: boolean
+  readonly projects: AgentTeamProject[]
+  readonly projectRefs: Set<AgentTeamProjectRef>
+}
+
+interface ViewSelection {
+  readonly selected: AgentTeamThreadFact[]
+  readonly hasMore: boolean
+}
+
+interface ViewCatalog {
+  readonly catalogThreads: AgentTeamThread[]
+  readonly catalogTasks: AgentTeamTask[]
+  readonly taskNumbers: ReadonlyMap<AgentTeamTaskRef, number>
+  readonly items: AgentTeamView['items']
+}
+
 /**
  * Everything one Thread read durably claims, plus the projection state the
  * picture derivation needs. `unread` and `attentionBefore` are derivation
@@ -1266,9 +1292,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: project.workspaceId, execution,
           ...(activity === undefined ? {} : { activity }) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.workerStartedRecorded(operation))
+      return this.commitOperation(operation, () => this.workerStartedRecorded(operation))
     })
   }
 
@@ -1308,9 +1332,7 @@ export class AgentTeamLedger {
           ...(activity === undefined ? {} : { activity }),
           inbox: this.inboxDelta([], [], [], [], marker === undefined ? [] : [marker], []) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.workerSettledRecorded(operation))
+      return this.commitOperation(operation, () => this.workerSettledRecorded(operation))
     })
   }
 
@@ -1369,9 +1391,7 @@ export class AgentTeamLedger {
           ...(request.aliasOf === undefined ? {} : { aliasOf: request.aliasOf }),
         }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.workerSteerAdmissionOf(operation))
+      return this.commitOperation(operation, () => this.workerSteerAdmissionOf(operation))
     })
   }
 
@@ -1410,9 +1430,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ admissionRequestId: request.admissionRequestId,
           outcome: this.freezeWorkerSteerOutcome(request.outcome) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed({ receipt: this.receipt(operation), outcome: operation.data.outcome })
+      return this.commitOperation(operation, () => ({ receipt: this.receipt(operation), outcome: operation.data.outcome }))
     })
   }
 
@@ -1962,9 +1980,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, subscription, activity, baselineIds: Object.freeze([...request.baselineIds]),
           ...(requestIntent === undefined ? {} : { request: Object.freeze({ ...requestIntent,
             scriptSource: Object.freeze({ ...requestIntent.scriptSource }) }) }) }) })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.subscriptionChangeOf(operation, armed.token))
+      return this.commitOperation(operation, () => this.subscriptionChangeOf(operation, armed.token))
     })
   }
 
@@ -1981,8 +1997,7 @@ export class AgentTeamLedger {
         this.assertSameSubscriptionWrite(existing, request)
         return this.resolved(this.subscriptionChangeOf(existing))
       }
-      const prior = this.ownedSubscription(request, request.subscriptionRef)
-      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      const prior = this.ownedSubscriptionAtRevision(request)
       const problem = subscriptionDefinitionProblem(request)
       if (problem !== undefined) throw new Error(`this update cannot be stored: ${problem}`)
       const notifyProblem = request.notify === undefined
@@ -2007,9 +2022,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, subscription, previousRevision: prior.revision, activity,
           ...(requestIntent === undefined ? {} : { request: Object.freeze({ ...requestIntent,
             scriptSource: Object.freeze({ ...requestIntent.scriptSource }) }) }) }) })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.subscriptionChangeOf(operation, armed.token))
+      return this.commitOperation(operation, () => this.subscriptionChangeOf(operation, armed.token))
     })
   }
 
@@ -2021,8 +2034,7 @@ export class AgentTeamLedger {
         return this.resolved(this.subscriptionChangeOf(existing))
       }
       if (request.actor.kind === 'host' && request.reason !== 'failures') throw new Error('only the failures a run reported may pause a subscription without an owner')
-      const prior = this.ownedSubscription(request, request.subscriptionRef, { hostMayPause: true })
-      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      const prior = this.ownedSubscriptionAtRevision(request, { hostMayPause: true })
       if (prior.state !== 'active') throw new Error(`subscription '${prior.subscriptionRef}' is already ${prior.state === 'deleted' ? 'deleted' : 'paused'}`)
       const subscription: AgentTeamSubscription = Object.freeze({ ...prior, state: 'paused', pausedReason: request.reason })
       return this.commitSubscriptionState('team/subscription-paused', request, subscription, 'subscription-paused', request.reason)
@@ -2036,8 +2048,7 @@ export class AgentTeamLedger {
         this.assertSameSubscriptionWrite(existing, request)
         return this.resolved(this.subscriptionChangeOf(existing))
       }
-      const prior = this.ownedSubscription(request, request.subscriptionRef)
-      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      const prior = this.ownedSubscriptionAtRevision(request)
       if (prior.state !== 'paused') throw new Error(`subscription '${prior.subscriptionRef}' is not paused`)
       const subscription: AgentTeamSubscription = Object.freeze({ ...prior, state: 'active', pausedReason: undefined })
       return this.commitSubscriptionState('team/subscription-resumed', request, subscription, 'subscription-resumed')
@@ -2051,8 +2062,7 @@ export class AgentTeamLedger {
         this.assertSameSubscriptionWrite(existing, request)
         return this.resolved(this.subscriptionChangeOf(existing))
       }
-      const prior = this.ownedSubscription(request, request.subscriptionRef)
-      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      const prior = this.ownedSubscriptionAtRevision(request)
       const subscription: AgentTeamSubscription = Object.freeze({ ...prior, state: 'deleted', pausedReason: undefined })
       return this.commitSubscriptionState('team/subscription-deleted', request, subscription, 'subscription-deleted')
     })
@@ -2070,8 +2080,7 @@ export class AgentTeamLedger {
         this.assertSameSubscriptionWrite(existing, request)
         return this.resolved(this.subscriptionChangeOf(existing))
       }
-      const prior = this.ownedSubscription(request, request.subscriptionRef)
-      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      const prior = this.ownedSubscriptionAtRevision(request)
       const armed = prior.webhook
       if (armed === undefined) {
         throw new Error(`subscription '${prior.subscriptionRef}' has no webhook address to reset; enable the webhook trigger first`)
@@ -2084,9 +2093,7 @@ export class AgentTeamLedger {
       const activity = this.subscriptionActivity(subscription, 'subscription-webhook-reset', request.actor, sequence, base.occurredAt)
       const operation: AgentTeamSubscriptionWebhookResetOperation = Object.freeze({ ...base, kind: 'team/subscription-webhook-reset',
         data: Object.freeze({ workspaceId: request.workspaceId, subscription, previousGeneration: armed.generation, activity }) })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.subscriptionChangeOf(operation, token))
+      return this.commitOperation(operation, () => this.subscriptionChangeOf(operation, token))
     })
   }
 
@@ -2111,9 +2118,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, projectRef: prior.projectRef,
           subscriptionRef: prior.subscriptionRef, ids: Object.freeze([...request.ids]) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.receipt(operation))
+      return this.commitOperation(operation, () => this.receipt(operation))
     })
   }
 
@@ -2157,9 +2162,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, projectRef: request.projectRef, subscriptionRef: subscription.subscriptionRef,
           subscriptionRevision: request.subscriptionRevision, scriptHash: request.scriptHash, events: Object.freeze(request.events.map(event => Object.freeze({ ...event }))) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.subscriptionAcceptOf(operation))
+      return this.commitOperation(operation, () => this.subscriptionAcceptOf(operation))
     })
   }
 
@@ -2202,13 +2205,10 @@ export class AgentTeamLedger {
           acceptedSequence: accepted.acceptedSequence, eventId: accepted.event.id,
           inbox: this.inboxDelta([], [], [], [], [], [], markers) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.subscriptionPublishOf(operation))
+      return this.commitOperation(operation, () => this.subscriptionPublishOf(operation))
     })
   }
 
-  /** Commit one non-deleting lifecycle transition with its Main stream line. */
   private async commitSubscriptionState<K extends 'team/subscription-paused' | 'team/subscription-resumed' | 'team/subscription-deleted'>(
     kind: K,
     request: AgentTeamAuthorizedPauseSubscriptionRequest | AgentTeamAuthorizedSubscriptionStateRequest,
@@ -2229,9 +2229,7 @@ export class AgentTeamLedger {
     const operation = Object.freeze({ ...base, kind,
       data: Object.freeze({ workspaceId: request.workspaceId, subscription, activity, ...(inbox === undefined ? {} : { inbox }) }) }) as AgentTeamSubscriptionPausedOperation
       | AgentTeamSubscriptionResumedOperation | AgentTeamSubscriptionDeletedOperation
-    await this.table.put(operation.operationId, operation)
-    this.applyAndAdvanceProjectionVersion(operation)
-    return this.committed(this.subscriptionChangeOf(operation))
+    return this.commitOperation(operation, () => this.subscriptionChangeOf(operation))
   }
 
   private subscriptionActivity(subscription: AgentTeamSubscription, kind: AgentTeamSubscriptionActivity['kind'],
@@ -2281,6 +2279,13 @@ export class AgentTeamLedger {
     const live = subscription.notify.filter(memberId => this.notifyRecipientIsLive(subscription.projectRef, memberId))
     if (live.length === subscription.notify.length) return subscription
     return Object.freeze({ ...subscription, notify: Object.freeze(live) })
+  }
+
+  private ownedSubscriptionAtRevision(request: AgentTeamAuthorizedSubscriptionStateRequest,
+    options?: { readonly hostMayPause?: boolean }): AgentTeamSubscription {
+    const prior = this.ownedSubscription(request, request.subscriptionRef, options)
+    if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+    return prior
   }
 
   private subscriptionStaleRevision(prior: AgentTeamSubscription, expected: number): string {
@@ -2423,7 +2428,11 @@ export class AgentTeamLedger {
         : { kind: 'content' as const }) })
   }
 
-  /** Old creates carry no source or baseline intent; compare every fact their operation did retain. */
+  /**
+   * Before subscription request intent was persisted, creates kept triggers and
+   * baseline ids, not the script path or baseline mode. Compare retained effects
+   * so those request ids can still replay without inventing missing intent.
+   */
   private sameLegacyCreateReplay(existing: Extract<AgentTeamOperation, { kind: 'team/subscription-created' }>,
     request: Extract<AgentTeamSubscriptionWriteReplayRequest, { readonly kind: 'create' }>): boolean {
     const triggers = Object.freeze({ ...(request.intervalMinutes === undefined ? {} : { interval: Object.freeze({ minutes: request.intervalMinutes }) }),
@@ -2432,7 +2441,11 @@ export class AgentTeamLedger {
     return !(request.baseline === 'ignore-history' && existing.data.baselineIds.length > 0)
   }
 
-  /** Old updates lack the caller's omitted-or-explicit trigger intent, so compare the effects they did record. */
+  /**
+   * Before subscription request intent was persisted, updates kept resulting
+   * triggers, not whether webhook was omitted. Compare those effects so old
+   * retries need not supply intent their records cannot prove.
+   */
   private sameLegacyUpdateReplay(existing: Extract<AgentTeamOperation, { kind: 'team/subscription-updated' }>,
     request: Extract<AgentTeamSubscriptionWriteReplayRequest, { readonly kind: 'update' }>): boolean {
     const stored = existing.data.subscription
@@ -2644,9 +2657,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, this.nextSequence()), kind: 'team/member-reminder-created',
         data: Object.freeze({ workspaceId: request.workspaceId, reminder }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed({ receipt: this.receipt(operation), workspaceId: request.workspaceId, reminder, activeCount: activeCount + 1 })
+      return this.commitOperation(operation, () => ({ receipt: this.receipt(operation), workspaceId: request.workspaceId, reminder, activeCount: activeCount + 1 }))
     })
   }
 
@@ -2681,9 +2692,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, memberId: current.memberId, reminderRef: request.reminderRef, reminder,
           inbox: this.memberReminderInboxDelta([], marker === undefined ? [] : [marker]) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed({ receipt: this.receipt(operation), workspaceId: request.workspaceId, reminder })
+      return this.commitOperation(operation, () => ({ receipt: this.receipt(operation), workspaceId: request.workspaceId, reminder }))
     })
   }
 
@@ -2861,9 +2870,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, sequence), kind: 'team/project-created',
         data: Object.freeze({ workspaceId: request.workspaceId, project, memberIds }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.projectResult(operation))
+      return this.commitOperation(operation, () => this.projectResult(operation))
     })
   }
 
@@ -2889,9 +2896,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, this.nextSequence()), kind: 'team/project-updated',
         data: Object.freeze({ workspaceId: request.workspaceId, project }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.projectUpdateResult(operation))
+      return this.commitOperation(operation, () => this.projectUpdateResult(operation))
     })
   }
 
@@ -2942,9 +2947,7 @@ export class AgentTeamLedger {
         ...envelope, kind: 'team/project-owner-responsibility-updated',
         data: Object.freeze({ ...base, responsibility, activity, inbox: this.ownerActivityInboxDelta(activity) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.projectOwnerResult(operation))
+      return this.commitOperation(operation, () => this.projectOwnerResult(operation))
     })
   }
 
@@ -3002,9 +3005,7 @@ export class AgentTeamLedger {
       const operation: AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation = Object.freeze({
         ...envelope, kind, data,
       }) as AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.projectOwnerResult(operation))
+      return this.commitOperation(operation, () => this.projectOwnerResult(operation))
     })
   }
 
@@ -3081,9 +3082,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, this.nextSequence()), kind: 'team/member-added',
         data: Object.freeze({ member, projectRefs }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.memberResult(operation))
+      return this.commitOperation(operation, () => this.memberResult(operation))
     })
   }
 
@@ -3126,9 +3125,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, this.nextSequence()), kind: 'team/member-updated',
         data: Object.freeze({ member }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.memberResult(operation))
+      return this.commitOperation(operation, () => this.memberResult(operation))
     })
   }
 
@@ -3161,9 +3158,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ member, previousSessionId: request.previousSessionId, newSessionId: request.newSessionId,
           ...(request.inputFromSeq === undefined ? {} : { inputFromSeq: request.inputFromSeq }) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.memberResult(operation))
+      return this.commitOperation(operation, () => this.memberResult(operation))
     })
   }
 
@@ -3224,9 +3219,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, this.nextSequence()), kind: 'team/member-workspace-joined',
         data: Object.freeze({ workspaceId: request.workspaceId, memberId: member.memberId }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.workspaceJoinResult(operation))
+      return this.commitOperation(operation, () => this.workspaceJoinResult(operation))
     })
   }
 
@@ -3270,9 +3263,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, sequence), kind: 'team/member-workspace-left',
         data: Object.freeze({ workspaceId: request.workspaceId, memberId: member.memberId, ...snapshot }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.workspaceLeaveResult(operation))
+      return this.commitOperation(operation, () => this.workspaceLeaveResult(operation))
     })
   }
 
@@ -3316,9 +3307,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, sequence), kind: 'team/project-archived',
         data: Object.freeze({ workspaceId: request.workspaceId, project: nextProject, ...snapshot }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.projectArchivalResult(operation))
+      return this.commitOperation(operation, () => this.projectArchivalResult(operation))
     })
   }
 
@@ -3372,9 +3361,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, baseRevision: request.baseRevision,
           mentions: delivered, message, ...(task === undefined ? {} : { task }), thread: nextThread, inbox }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.replyResult(operation, undelivered))
+      return this.commitOperation(operation, () => this.replyResult(operation, undelivered))
     })
   }
 
@@ -3416,9 +3403,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, mentions: recipients, message,
           inbox: this.mainMessageInboxDelta(message, recipients) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.mainPostResult(operation))
+      return this.commitOperation(operation, () => this.mainPostResult(operation))
     })
   }
 
@@ -3452,9 +3437,7 @@ export class AgentTeamLedger {
       })
       // The picture shows what the reader saw before this read, so it is taken ahead of the commit.
       const picture = this.mainReadPage(actor.memberId, project.projectRef, consumed, readThrough)
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(Object.freeze({ receipt: this.receipt(operation), projectRef: project.projectRef, readThroughSequence: readThrough,
+      return this.commitOperation(operation, () => Object.freeze({ receipt: this.receipt(operation), projectRef: project.projectRef, readThroughSequence: readThrough,
         entries: picture, consumedMarkers: consumed, standing: this.mainStandingFrom(this.state, actor.memberId, project.projectRef) }))
     })
   }
@@ -3543,9 +3526,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, projectRef: project.projectRef, kind: request.kind, mentions: recipients,
           anchor, ...(task === undefined ? {} : { task }), ...(taskActivity === undefined ? {} : { activity: taskActivity }), thread, inbox }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.startThreadResult(operation))
+      return this.commitOperation(operation, () => this.startThreadResult(operation))
     })
   }
 
@@ -3614,9 +3595,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, baseRevision: request.baseRevision,
           activity, task, thread: nextThread, inbox }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.promotionResult(operation))
+      return this.commitOperation(operation, () => this.promotionResult(operation))
     })
   }
 
@@ -3680,9 +3659,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, baseRevision: request.baseRevision,
           activity, claim, task: nextTask, thread: nextThread, inbox }),
       }) as AgentTeamClaimChangedOperation
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.claimResult(operation))
+      return this.commitOperation(operation, () => this.claimResult(operation))
     })
   }
 
@@ -3718,9 +3695,7 @@ export class AgentTeamLedger {
       const inbox = this.inboxDelta(attention, ended, [], [], [{ memberId: target, threadRef: thread.threadRef, activityRef: activity.activityRef, sequence }])
       const operation: AgentTeamTaskAccountableChangedOperation = Object.freeze({ ...this.operationBase(request, sequence), kind: 'team/task-accountable-changed',
         data: Object.freeze({ workspaceId: request.workspaceId, baseRevision: request.baseRevision, activity, task: nextTask, thread: nextThread, inbox }) })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.transferTaskResult(operation))
+      return this.commitOperation(operation, () => this.transferTaskResult(operation))
     })
   }
 
@@ -3802,9 +3777,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, baseRevision: request.baseRevision,
           activity, task: nextTask, thread: nextThread, claims: Object.freeze(claims), inbox }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.taskResult(operation))
+      return this.commitOperation(operation, () => this.taskResult(operation))
     })
   }
 
@@ -3834,9 +3807,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, sequence), kind: 'team/member-removed',
         data: Object.freeze({ member: nextMember, ...snapshot }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.removalResult(operation))
+      return this.commitOperation(operation, () => this.removalResult(operation))
     })
   }
 
@@ -3874,9 +3845,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, sequence), kind: 'team/member-archived',
         data: Object.freeze({ member: nextMember, ...snapshot }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.archivalResult(operation))
+      return this.commitOperation(operation, () => this.archivalResult(operation))
     })
   }
 
@@ -3916,9 +3885,7 @@ export class AgentTeamLedger {
           data: Object.freeze({ workspaceId: request.workspaceId, action: 'follow', memberId: actor.memberId,
             ...(task === undefined ? {} : { task }), thread, inbox: this.inboxDelta([attention]) }),
         })
-        await this.table.put(operation.operationId, operation)
-        this.applyAndAdvanceProjectionVersion(operation)
-        return this.committed(this.attentionResult(operation))
+        return this.commitOperation(operation, () => this.attentionResult(operation))
       }
       if (current === undefined) throw new Error(`Member is already unfollowed from Thread '${thread.threadRef}'`)
       if (task !== undefined && this.hasActiveClaim(actor.memberId, task.taskRef)) throw new Error(`Member cannot unfollow Thread '${thread.threadRef}' while owning an active Claim on Task '${task.taskRef}'; finish the work or release the Claim first`)
@@ -3927,9 +3894,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, action: 'unfollow', memberId: actor.memberId,
           ...(task === undefined ? {} : { task }), thread, inbox: this.inboxDelta([], [{ memberId: actor.memberId, threadRef: thread.threadRef }], [], this.directMarkersFor(actor.memberId, thread.threadRef)) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.attentionResult(operation))
+      return this.commitOperation(operation, () => this.attentionResult(operation))
     })
   }
 
@@ -3957,9 +3922,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, action: 'follow', memberId: actor.memberId, project: project,
           inbox: this.inboxDelta([], [], [], [], [], [], [], [], [], [], [attention], []) }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.mainAttentionResult(operation, attention))
+      return this.commitOperation(operation, () => this.mainAttentionResult(operation, attention))
     }
     if (current === undefined) throw new Error(`Member is already unfollowed from the Main stream of Project '${projectRef}'`)
     // The Human's Attention is derived from owning the Project, so it cannot
@@ -3976,9 +3939,7 @@ export class AgentTeamLedger {
         inbox: this.inboxDelta([], [], [], [], [], [], [], [], [], [], [],
           stored === undefined ? [] : [{ memberId: actor.memberId, projectRef }]) }),
     })
-    await this.table.put(operation.operationId, operation)
-    this.applyAndAdvanceProjectionVersion(operation)
-    return this.committed(this.mainAttentionResult(operation, undefined))
+    return this.commitOperation(operation, () => this.mainAttentionResult(operation, undefined))
   }
 
   /**
@@ -4009,9 +3970,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, senderMemberId: sender.memberId,
           recipientMemberId: recipient.memberId, body }),
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.dmResult(operation))
+      return this.commitOperation(operation, () => this.dmResult(operation))
     })
   }
 
@@ -4421,9 +4380,7 @@ export class AgentTeamLedger {
       const operation: AgentTeamThreadReadOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/thread-read', data,
       })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return Object.freeze({ value: Object.freeze({ receipt: this.receipt(operation), ...this.readPicture(prepared) }), committed: true })
+      return this.commitOperation(operation, () => Object.freeze({ receipt: this.receipt(operation), ...this.readPicture(prepared) }))
     })
   }
 
@@ -4627,12 +4584,24 @@ export class AgentTeamLedger {
   }
 
   view(request: AgentTeamViewRequest, memberId?: AgentTeamMemberId): AgentTeamView {
+    const page = this.viewPageArguments(request)
+    const access = this.resolveViewAccess(request, memberId)
+    const selection = this.selectViewFacts(request, page, access)
+    const catalog = this.enrichViewCatalog(request, access, selection.selected)
+    return this.assembleView(request, memberId, page, access, selection, catalog)
+  }
+
+  private viewPageArguments(request: AgentTeamViewRequest): ViewPageArguments {
     const limit = request.limit ?? 20
     const direction = request.direction ?? 'after'
     const cursor = request.cursor ?? 0
     if (direction !== 'after' && direction !== 'before') throw new Error('direction must be after or before')
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer between 1 and 100')
     if (!Number.isInteger(cursor) || cursor < 0) throw new Error('cursor must be a non-negative integer sequence')
+    return { limit, direction, cursor }
+  }
+
+  private resolveViewAccess(request: AgentTeamViewRequest, memberId: AgentTeamMemberId | undefined): ViewAccess {
     if (memberId !== undefined) {
       const member = this.requireMember(memberId)
       if (!this.participatesIn(member.memberId, request.workspaceId)) throw new Error('Member cannot view another Workspace')
@@ -4659,6 +4628,11 @@ export class AgentTeamLedger {
       && this.visibleProject(project) !== undefined
       && (memberId === undefined || this.canReadProjectFrom(this.state, project.projectRef, memberId)))
     const projectRefs = new Set(projects.map(project => project.projectRef))
+    return { projectRefFilter, threadRefFilter, directoryRequested, projects, projectRefs }
+  }
+
+  private selectViewFacts(request: AgentTeamViewRequest, { limit, direction, cursor }: ViewPageArguments,
+    { projectRefs, projectRefFilter, threadRefFilter }: ViewAccess): ViewSelection {
     const before = request.cursor ?? this.state.ordered.length + 1
     const matches = (fact: AgentTeamThreadFact): boolean => {
       const threadRef = fact.kind === 'message' ? fact.message.threadRef : fact.activity.threadRef
@@ -4672,47 +4646,37 @@ export class AgentTeamLedger {
     }
     const selected: AgentTeamThreadFact[] = []
     let hasMore = false
-    // A cursor is a sequence bound, but one operation can append two facts
-    // under the same sequence (a Task's anchor Message and its promote
-    // activity). A page boundary must never split such a run: the next page
-    // would address it by the same sequence and silently drop the half left
-    // behind. So a full page absorbs the rest of its boundary sequence.
-    if (direction === 'before') {
-      for (let index = this.state.orderedFacts.length - 1; index >= 0; index -= 1) {
-        const fact = this.state.orderedFacts[index]!
-        if (!matches(fact)) continue
-        if (selected.length < limit) selected.push(fact)
-        else {
-          hasMore = true
-          let run = index
-          while (run >= 0) {
-            const candidate = this.state.orderedFacts[run]!
-            if (!matches(candidate) || candidate.sequence !== fact.sequence) break
-            selected.push(candidate)
-            run -= 1
-          }
-          break
+    // One operation can append two facts under one sequence (a Task's anchor
+    // Message and its promote activity), and a cursor addresses sequences, so
+    // a page must not end inside such a run: the next page would skip the
+    // facts left behind. Once `limit` facts match, the next match and the rest
+    // of its same-sequence run are absorbed as well; when that match starts a
+    // new sequence the page just carries one extra run. `hasMore` reports that
+    // absorption, not that the next page is nonempty.
+    const step = direction === 'before' ? -1 : 1
+    const start = direction === 'before' ? this.state.orderedFacts.length - 1 : 0
+    for (let index = start; index >= 0 && index < this.state.orderedFacts.length; index += step) {
+      const fact = this.state.orderedFacts[index]!
+      if (!matches(fact)) continue
+      if (selected.length < limit) selected.push(fact)
+      else {
+        hasMore = true
+        let run = index
+        while (run >= 0 && run < this.state.orderedFacts.length) {
+          const candidate = this.state.orderedFacts[run]!
+          if (!matches(candidate) || candidate.sequence !== fact.sequence) break
+          selected.push(candidate)
+          run += step
         }
-      }
-      selected.reverse()
-    } else {
-      for (let index = 0; index < this.state.orderedFacts.length; index += 1) {
-        const fact = this.state.orderedFacts[index]!
-        if (!matches(fact)) continue
-        if (selected.length < limit) selected.push(fact)
-        else {
-          hasMore = true
-          let run = index
-          while (run < this.state.orderedFacts.length) {
-            const candidate = this.state.orderedFacts[run]!
-            if (!matches(candidate) || candidate.sequence !== fact.sequence) break
-            selected.push(candidate)
-            run += 1
-          }
-          break
-        }
+        break
       }
     }
+    if (direction === 'before') selected.reverse()
+    return { selected, hasMore }
+  }
+
+  private enrichViewCatalog(request: AgentTeamViewRequest,
+    { projectRefs, projectRefFilter, threadRefFilter }: ViewAccess, selected: readonly AgentTeamThreadFact[]): ViewCatalog {
     // What this response's catalog describes. A caller that asked for the
     // catalog wants the whole request scope (the address-book radar). Every
     // other read describes its own facts: the Threads this page's facts
@@ -4754,9 +4718,12 @@ export class AgentTeamLedger {
         messageCount: this.state.messageCountByThread.get(thread.threadRef) ?? 0,
         lastActivityAt: facts.at(-1)?.occurredAt ?? '' })
     })
-    const initialization = this.initialization()
-    const nextCursor = selected.length === 0 ? cursor : direction === 'before' ? selected[0]!.sequence : selected.at(-1)!.sequence
-    const directory = !directoryRequested ? undefined : Object.freeze({
+    return { catalogThreads, catalogTasks, taskNumbers, items }
+  }
+
+  private assembleViewDirectory(request: AgentTeamViewRequest, memberId: AgentTeamMemberId | undefined,
+    { directoryRequested, projectRefFilter }: ViewAccess): AgentTeamView['directory'] {
+    return !directoryRequested ? undefined : Object.freeze({
       projects: Object.freeze([...this.state.projects.values()].filter(project => project.workspaceId === request.workspaceId
         && this.visibleProject(project) !== undefined
         && (projectRefFilter === undefined || project.projectRef === projectRefFilter)).map(project => {
@@ -4775,6 +4742,15 @@ export class AgentTeamLedger {
       memberIds: Object.freeze([...this.state.members.values()].filter(member => member.state !== 'inactive' && member.state !== 'archived'
         && this.participatesIn(member.memberId, request.workspaceId)).map(member => member.memberId)),
     })
+  }
+
+  private assembleView(request: AgentTeamViewRequest, memberId: AgentTeamMemberId | undefined,
+    { cursor, direction }: ViewPageArguments, access: ViewAccess, { selected, hasMore }: ViewSelection,
+    { catalogThreads, catalogTasks, taskNumbers, items }: ViewCatalog): AgentTeamView {
+    const { projects, projectRefs } = access
+    const initialization = this.initialization()
+    const nextCursor = selected.length === 0 ? cursor : direction === 'before' ? selected[0]!.sequence : selected.at(-1)!.sequence
+    const directory = this.assembleViewDirectory(request, memberId, access)
     return Object.freeze({
       humanMemberId: initialization.data.humanMemberId,
       workspaces: Object.freeze(memberId === undefined ? [] : this.workspacesOfFrom(this.state, memberId)
@@ -4969,10 +4945,9 @@ export class AgentTeamLedger {
   }
 
   /**
-   * A stored subscription as the projection should hold it. Records written
-   * before events were addressed carry no `notify`; they read back as the
-   * Creating Member alone, so replay of an old ledger never routes an event to
-   * someone the subscription never named.
+   * Before addressed subscription events, snapshots omitted `notify`. Default
+   * them to the Creating Member alone so old records still load without
+   * silently granting additional recipients access to their events.
    */
   private subscriptionWithNotify(subscription: AgentTeamSubscription): AgentTeamSubscription {
     if (Array.isArray((subscription as { readonly notify?: unknown }).notify)) return subscription
@@ -5093,16 +5068,154 @@ export class AgentTeamLedger {
     return this.projectionVersion
   }
 
-  /** Scopes whose projections one committed operation invalidates; undefined wakes every waiter. */
+  /** Scopes invalidated by a commit: undefined wakes every waiter; [] wakes none. */
   changeScopesOf(operation: AgentTeamOperation): readonly AgentTeamChangeScope[] | undefined {
     switch (operation.kind) {
       case 'team/initialized':
         return undefined
       case 'team/project-created':
+      case 'team/project-updated':
+      case 'team/project-member-added':
+      case 'team/project-member-removed':
+      case 'team/project-archived':
+      case 'team/project-owner-added':
+      case 'team/project-owner-responsibility-updated':
+      case 'team/project-owner-removed':
+        return this.projectChangeScopes(operation)
+      case 'team/member-added':
+      case 'team/member-suspended':
+      case 'team/member-resumed':
+      case 'team/member-session-restarted':
+      case 'team/member-context-cleared':
+      case 'team/member-session-renewed':
+      case 'team/member-session-rolled-over':
+      case 'team/member-session-recycled':
+      case 'team/member-updated':
+      case 'team/member-removed':
+      case 'team/member-archived':
+      case 'team/member-workspace-joined':
+      case 'team/member-workspace-left':
+        return this.memberChangeScopes(operation)
+      case 'team/message-sent':
+      case 'team/thread-replied':
+      case 'team/thread-started':
+      case 'team/thread-promoted':
+      case 'team/claim-created':
+      case 'team/claim-done':
+      case 'team/claim-released':
+      case 'team/task-changed':
+      case 'team/task-accountable-changed':
+      case 'team/thread-attention-changed':
+      case 'team/thread-read':
+        return this.threadChangeScopes(operation)
+      case 'team/main-message-posted':
+      case 'team/main-stream-read':
+      case 'team/main-attention-changed':
+        return this.mainChangeScopes(operation)
+      case 'team/reminder-raised':
+      case 'team/member-reminder-created':
+      case 'team/member-reminder-raised':
+      case 'team/member-reminder-consumed':
+      case 'team/member-reminder-cancelled':
+        return this.reminderChangeScopes(operation)
+      case 'team/worker-started':
+      case 'team/worker-settled':
+      case 'team/worker-steer-admitted':
+      case 'team/worker-steer-recorded':
+        return this.workerChangeScopes(operation)
+      case 'team/subscription-created':
+      case 'team/subscription-updated':
+      case 'team/subscription-paused':
+      case 'team/subscription-resumed':
+      case 'team/subscription-deleted':
+      case 'team/subscription-webhook-reset':
+      case 'team/subscription-baseline':
+      case 'team/subscription-events-accepted':
+      case 'team/subscription-event-published':
+        return this.subscriptionChangeScopes(operation)
+      case 'team/dm-sent':
+      case 'team/rules-version-adopted':
+        return []
+      default:
+        return assertUnhandledKind(operation)
+    }
+  }
+
+  private projectChangeScopes(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/project-created'
+      | 'team/project-updated'
+      | 'team/project-member-added'
+      | 'team/project-member-removed'
+      | 'team/project-archived'
+      | 'team/project-owner-added'
+      | 'team/project-owner-responsibility-updated'
+      | 'team/project-owner-removed'
+    }>,
+  ): readonly AgentTeamChangeScope[] {
+    switch (operation.kind) {
+      case 'team/project-created':
         return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }]
       case 'team/project-updated':
         // The rename is visible in the sidebar list and any open Project/Thread header.
         return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.project.projectRef }]
+      case 'team/project-member-added':
+        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
+      case 'team/project-member-removed':
+        return this.withReleasedActivityScopes(
+          [
+            { kind: 'workspace', workspaceId: operation.data.workspaceId },
+            { kind: 'project', projectRef: operation.data.projectRef },
+          ],
+          operation.data.tasks,
+          operation.data.activities,
+        )
+      case 'team/project-archived': {
+        const scopes: AgentTeamChangeScope[] = [
+          { kind: 'workspace', workspaceId: operation.data.workspaceId },
+          { kind: 'project', projectRef: operation.data.project.projectRef },
+        ]
+        for (const activity of operation.data.activities) scopes.push({ kind: 'thread', threadRef: activity.threadRef })
+        return scopes
+      }
+      case 'team/project-owner-added':
+        // Ownership shows on the Project rows and widens who sees the Project.
+        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
+      case 'team/project-owner-responsibility-updated':
+        // The replacement text shows on the same Project rows and in the new
+        // owner's context, and it appends a Main stream Activity.
+        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
+      case 'team/project-owner-removed':
+        // Removal also appends transfer facts on the Tasks it returns, so an
+        // open Thread re-renders its new responsibility line.
+        return this.withReleasedActivityScopes(
+          [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }],
+          operation.data.tasks,
+          operation.data.transfers,
+        )
+      default:
+        return assertUnhandledKind(operation)
+    }
+  }
+
+  private memberChangeScopes(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/member-added'
+      | 'team/member-suspended'
+      | 'team/member-resumed'
+      | 'team/member-session-restarted'
+      | 'team/member-context-cleared'
+      | 'team/member-session-renewed'
+      | 'team/member-session-rolled-over'
+      | 'team/member-session-recycled'
+      | 'team/member-updated'
+      | 'team/member-removed'
+      | 'team/member-archived'
+      | 'team/member-workspace-joined'
+      | 'team/member-workspace-left'
+    }>,
+  ): readonly AgentTeamChangeScope[] {
+    switch (operation.kind) {
       case 'team/member-added':
       case 'team/member-suspended':
       case 'team/member-resumed':
@@ -5128,35 +5241,32 @@ export class AgentTeamLedger {
           operation.data.tasks,
           operation.data.activities,
         )
-      case 'team/project-member-added':
-        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
-      case 'team/project-member-removed':
-        return this.withReleasedActivityScopes(
-          [
-            { kind: 'workspace', workspaceId: operation.data.workspaceId },
-            { kind: 'project', projectRef: operation.data.projectRef },
-          ],
-          operation.data.tasks,
-          operation.data.activities,
-        )
-      case 'team/project-archived': {
-        const scopes: AgentTeamChangeScope[] = [
-          { kind: 'workspace', workspaceId: operation.data.workspaceId },
-          { kind: 'project', projectRef: operation.data.project.projectRef },
-        ]
-        for (const activity of operation.data.activities) scopes.push({ kind: 'thread', threadRef: activity.threadRef })
-        return scopes
-      }
+      default:
+        return assertUnhandledKind(operation)
+    }
+  }
+
+  private threadChangeScopes(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/message-sent'
+      | 'team/thread-replied'
+      | 'team/thread-started'
+      | 'team/thread-promoted'
+      | 'team/claim-created'
+      | 'team/claim-done'
+      | 'team/claim-released'
+      | 'team/task-changed'
+      | 'team/task-accountable-changed'
+      | 'team/thread-attention-changed'
+      | 'team/thread-read'
+    }>,
+  ): readonly AgentTeamChangeScope[] {
+    switch (operation.kind) {
       case 'team/message-sent':
       case 'team/thread-replied':
         return [{ kind: 'project', projectRef: operation.data.message.projectRef }, { kind: 'thread', threadRef: operation.data.message.threadRef }]
       case 'team/thread-started':
         return [{ kind: 'project', projectRef: operation.data.projectRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
-      case 'team/main-message-posted':
-        return [{ kind: 'project', projectRef: operation.data.message.projectRef }]
-      case 'team/main-stream-read':
-        // Private read progress, like a Thread read: nobody else has anything to refetch.
-        return []
       case 'team/thread-promoted':
         return [{ kind: 'project', projectRef: operation.data.task.projectRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
       case 'team/claim-created':
@@ -5167,8 +5277,42 @@ export class AgentTeamLedger {
         return [{ kind: 'project', projectRef: operation.data.task.projectRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
       case 'team/thread-attention-changed':
         return [{ kind: 'thread', threadRef: operation.data.thread.threadRef }]
+      case 'team/thread-read':
+        return []
+      default:
+        return assertUnhandledKind(operation)
+    }
+  }
+
+  private mainChangeScopes(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/main-message-posted'
+      | 'team/main-stream-read'
+      | 'team/main-attention-changed'
+    }>,
+  ): readonly AgentTeamChangeScope[] {
+    switch (operation.kind) {
+      case 'team/main-message-posted':
+        return [{ kind: 'project', projectRef: operation.data.message.projectRef }]
+      case 'team/main-stream-read':
+        return []
       case 'team/main-attention-changed':
         return [{ kind: 'project', projectRef: operation.data.project.projectRef }]
+      default:
+        return assertUnhandledKind(operation)
+    }
+  }
+
+  private reminderChangeScopes(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/reminder-raised'
+      | 'team/member-reminder-created'
+      | 'team/member-reminder-raised'
+      | 'team/member-reminder-consumed'
+      | 'team/member-reminder-cancelled'
+    }>,
+  ): readonly AgentTeamChangeScope[] {
+    switch (operation.kind) {
       case 'team/reminder-raised': {
         const task = this.state.tasks.get(operation.data.taskRef)
         return task === undefined ? [] : [{ kind: 'thread', threadRef: task.threadRef }]
@@ -5180,17 +5324,20 @@ export class AgentTeamLedger {
         // A Member reminder belongs to no Thread and no Project, but the Human's
         // Member detail renders it, so the whole Workspace catalog refetches.
         return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }]
-      case 'team/thread-read':
-        // A read advances only the reader's private watermark; no projection
-        // visible to other participants changes, so nobody is woken.
-        return []
-      case 'team/dm-sent':
-        // A DM changes no shared projection: delivery is a session-level
-        // runtime effect, so no change waiter has anything to refetch.
-        return []
-      case 'team/rules-version-adopted':
-        // Later records validate differently; no projection anybody reads changes.
-        return []
+      default:
+        return assertUnhandledKind(operation)
+    }
+  }
+
+  private workerChangeScopes(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/worker-started'
+      | 'team/worker-settled'
+      | 'team/worker-steer-admitted'
+      | 'team/worker-steer-recorded'
+    }>,
+  ): readonly AgentTeamChangeScope[] {
+    switch (operation.kind) {
       case 'team/worker-started':
       case 'team/worker-settled':
         // A Thread-bound run writes one public fact into that Thread, so an open
@@ -5203,32 +5350,36 @@ export class AgentTeamLedger {
         // A steer receipt is the private answer to the caller that already has
         // the execution ref. It writes no Thread fact, revision, or Worker row.
         return []
-      case 'team/project-owner-added':
-        // Ownership shows on the Project rows and widens who sees the Project.
-        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
-      case 'team/project-owner-responsibility-updated':
-        // The replacement text shows on the same Project rows and in the new
-        // owner's context, and it appends a Main stream Activity.
-        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
-      case 'team/project-owner-removed':
-        // Removal also appends transfer facts on the Tasks it returns, so an
-        // open Thread re-renders its new responsibility line.
-        return this.withReleasedActivityScopes(
-          [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }],
-          operation.data.tasks,
-          operation.data.transfers,
-        )
+      default:
+        return assertUnhandledKind(operation)
+    }
+  }
+
+  private subscriptionChangeScopes(
+    operation: Extract<AgentTeamOperation, { kind:
+      'team/subscription-created'
+      | 'team/subscription-updated'
+      | 'team/subscription-paused'
+      | 'team/subscription-resumed'
+      | 'team/subscription-deleted'
+      | 'team/subscription-webhook-reset'
+      | 'team/subscription-baseline'
+      | 'team/subscription-events-accepted'
+      | 'team/subscription-event-published'
+    }>,
+  ): readonly AgentTeamChangeScope[] {
+    switch (operation.kind) {
       case 'team/subscription-created':
       case 'team/subscription-updated':
       case 'team/subscription-paused':
       case 'team/subscription-resumed':
       case 'team/subscription-deleted':
       case 'team/subscription-webhook-reset':
-        // Subscription state shows in the Project's Main stream and the list.
         return [{ kind: 'project', projectRef: operation.data.subscription.projectRef }]
       case 'team/subscription-baseline':
       case 'team/subscription-events-accepted':
-        // Accept only moves the pending count; a baseline moves nothing a reader shows.
+        // Baselines change the Project's subscription deduplication waterline,
+        // not a Thread fact; acceptance changes its pending events.
         return [{ kind: 'project', projectRef: operation.data.projectRef }]
       case 'team/subscription-event-published':
         return [{ kind: 'project', projectRef: operation.data.projectRef }]
@@ -9261,9 +9412,7 @@ export class AgentTeamLedger {
       const operation: AgentTeamMemberSuspendedOperation | AgentTeamMemberResumedOperation = state === 'suspended'
         ? Object.freeze({ ...this.operationBase(request, this.nextSequence()), kind: 'team/member-suspended', data: Object.freeze({ member: next }) })
         : Object.freeze({ ...this.operationBase(request, this.nextSequence()), kind: 'team/member-resumed', data: Object.freeze({ member: next }) })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.memberResult(operation))
+      return this.commitOperation(operation, () => this.memberResult(operation))
     })
   }
 
@@ -10186,6 +10335,12 @@ export class AgentTeamLedger {
       actor: freezeActor(request.actor), previousOperationId: this.state.ordered.at(-1)?.operationId ?? null }
   }
 
+  private async commitOperation<T>(operation: AgentTeamOperation, resultOf: () => T): Promise<AgentTeamLedgerResult<T>> {
+    await this.table.put(operation.operationId, operation)
+    this.applyAndAdvanceProjectionVersion(operation)
+    return this.committed(resultOf())
+  }
+
   private nextSequence(): number {
     if (this.state.ordered.length === 0) throw new Error('agent-team ledger is not initialized')
     return this.state.ordered.length + 1
@@ -10211,13 +10366,9 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Attention rows written before the source field existed carry none, and a
-   * replay validator re-derives the row it expects from the projection — which
-   * always has one. The missing source is supplied in memory, so an old record
-   * validates against the same row the projection holds. `self` is the only
-   * source that claims a cause the stored bytes never had, so it is the honest
-   * default: a row whose origin the ledger cannot know is treated as the
-   * Member's own choice.
+   * Before Attention recorded its cause, inbox rows omitted `source`. Backfill
+   * only missing sources in memory so these records still match the rows replay
+   * validation derives; already-recorded causes must not be overwritten.
    */
   private repairLegacyAttentionSource(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
     const inbox = 'inbox' in operation.data ? operation.data.inbox : undefined
@@ -10225,11 +10376,6 @@ export class AgentTeamLedger {
     const threadRows = inbox.attention.set.filter(attention => attention.source === undefined)
     const mainRows = (inbox.mainAttention?.set ?? []).filter(attention => attention.source === undefined)
     if (threadRows.length === 0 && mainRows.length === 0) return operation
-    // The cause is derived from the operation, not guessed from a version: the
-    // validator re-derives the same row, so a repair that guessed would leave
-    // the record failing against it. Every kind that establishes Attention
-    // names its own cause, and the one that cannot is the Member's own choice —
-    // the only source that claims nothing.
     const fallback = this.legacyAttentionSourceOf(operation, projection)
     const withThread = (attention: AgentTeamThreadAttention): AgentTeamThreadAttention => (
       attention.source === undefined ? { ...attention, source: fallback } : attention)
@@ -10243,7 +10389,11 @@ export class AgentTeamLedger {
     return { ...operation, data: { ...operation.data, inbox: repaired } } as typeof operation
   }
 
-  /** What an operation whose Attention rows carry no source established them by. */
+  /**
+   * Pre-source rows need the cause implied by their operation and prior follow.
+   * Rules 1 Messages could establish mention Attention; rules 2 Messages cannot.
+   * The `self` fallback avoids inventing a grant or mention for an unknown cause.
+   */
   private legacyAttentionSourceOf(operation: AgentTeamOperation, projection: Projection): AgentTeamAttentionSource {
     switch (operation.kind) {
       case 'team/project-owner-added':
@@ -10278,36 +10428,24 @@ export class AgentTeamLedger {
   }
 
   /**
-   * An owner grant written before Main stream Attention existed carries the
-   * era's inbox: a Main marker alone, with no `mainAttention` row. That grant
-   * still started its Member's default attention, so the missing row is
-   * re-minted from the grant's own sequence and the record is repaired in
-   * memory. Any other shape — a row already present, or a delta that differs
-   * from the era's in some other way — is left alone, so it still fails
-   * validation and a forgery is not silently accepted.
+   * Pre-Main-Attention owner grants stored a Main marker without a follow row.
+   * Restore the implicit owner follow so these grants still validate. Only the
+   * exact marker-only delta qualifies; other omissions must still fail validation.
    */
   private repairLegacyMainAttentionGrant(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
     if (operation.kind !== 'team/project-owner-added') return operation
     const { inbox, memberId, projectRef } = operation.data
     if (inbox.mainAttention !== undefined) return operation
     const granted = [this.startMainAttention(memberId, projectRef, operation.sequence, 'project-owner')]
-    // The era's delta: the owner-added Main marker and nothing else. A delta
-    // that differs in any other way is a shape this build never wrote, so it
-    // is left alone and still fails validation.
     const legacy = this.inboxDelta([], [], [], [], [], [], inbox.mainMarkers?.added ?? [])
     if (!isDeepStrictEqual(inbox, legacy)) return operation
     return { ...operation, data: { ...operation.data, inbox: this.inboxDelta([], [], [], [], [], [], inbox.mainMarkers?.added ?? [], [], [], [], granted) } }
   }
 
   /**
-   * An owner grant written before the grant learned to leave an existing follow
-   * alone overwrote the Member's Main stream Attention with a fresh row anchored
-   * at the grant, discarding the read watermark its own follow had earned. The
-   * Member was already following, so the correct durable result of that grant is
-   * no row at all: the existing one stands. The overwriting row is dropped in
-   * memory, which restores the progress the write destroyed. Only that exact
-   * shape is repaired — a grant that minted a row for a Member not yet following
-   * is what this build writes and is left alone.
+   * Early Main-Attention grants reset an existing follow to the grant sequence,
+   * losing its read watermark. Drop only that exact reset row so replay keeps
+   * the prior follow's progress; a first grant must still establish its own row.
    */
   private repairLegacyMainAttentionGrantOverwrite(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
     if (operation.kind !== 'team/project-owner-added') return operation
@@ -10322,13 +10460,9 @@ export class AgentTeamLedger {
   }
 
   /**
-   * An Agent's Main stream read written before Main stream Attention existed
-   * carried only the markers it consumed: its watermark lived in a projection
-   * field that no longer exists, so replay alone would lose every byte of read
-   * progress and hand the reader its whole history as unread. The row is
-   * re-minted from the read's own `readThroughSequence`, so the era's progress
-   * survives. Only the era's shape is repaired — a receipt that differs in any
-   * other way is a shape this build never wrote and still fails validation.
+   * Pre-Main-Attention reads stored consumed markers and `readThroughSequence`,
+   * not a follow row. Restore that row for advancing Agent reads so their read
+   * progress survives; only the exact old marker-only receipt qualifies.
    */
   private repairLegacyMainStreamRead(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
     if (operation.kind !== 'team/main-stream-read') return operation
@@ -10336,7 +10470,6 @@ export class AgentTeamLedger {
     if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID || inbox.mainAttention !== undefined) return operation
     const attention = this.mainAttentionForFrom(projection, memberId, projectRef)
     if (attention === undefined) return operation
-    // The era's receipt: the markers it consumed and nothing else.
     if (!isDeepStrictEqual(inbox, this.inboxDelta([], [], [], [], [], [], [], inbox.mainMarkers?.removed ?? []))) return operation
     // A read that advanced nothing is a shape this build still writes: a read
     // consuming only markers leaves the watermark alone, so repairing it would
@@ -10348,12 +10481,9 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Records written by releases that scoped Project archival and Project
-   * member-removal inbox cleanup to taskful Threads only (the collector read
-   * the Task projection) carry an incomplete inbox when the Project holds a
-   * taskless Thread with Attention or markers. They are repaired in memory
-   * the same way pre-envelope Thread reads are; any other inbox still fails
-   * validation, so a forgery is not silently accepted.
+   * Before taskless-Thread cleanup, Project archival and member removal used
+   * only Task-backed Threads. Expand only that exact old inbox so these records
+   * still validate without accepting arbitrary missing cleanup as legacy data.
    */
   private repairLegacyProjectCleanup(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
     if (operation.kind === 'team/project-archived') {
@@ -10377,17 +10507,16 @@ export class AgentTeamLedger {
     return operation
   }
 
-  /** The legacy Project Thread scope: only Threads carrying a Task. */
+  /** Reproduce the Task-only cleanup era's scope to distinguish old omissions from forged inboxes. */
   private legacyProjectThreadRefs(projection: Projection, projectRef: AgentTeamProjectRef): Set<AgentTeamThreadRef> {
     return new Set([...projection.tasks.values()].filter(task => task.projectRef === projectRef).map(task => task.threadRef))
   }
 
   /**
-   * Ledgers written before message occurredAt existed store bare messages;
-   * snapshot-shaped Thread reads resolve instants from the originating
-   * operations. A receipt-shaped read carries no message at all, so it passes
-   * through untouched — the load path must never touch a shape it does not
-   * have, and it never writes either form back.
+   * Before Message/fact timestamps, Thread-read snapshots stored bare anchors
+   * and facts. Resolve their instants from originating operations so old reads
+   * still validate. Slim receipts carry no snapshots and must pass through;
+   * normalization never writes either stored format back.
    */
   private normalizeOperation(operation: AgentTeamOperation, occurrences: Map<AgentTeamMessageRef, string>, instants: Map<number, string>): AgentTeamOperation {
     if (operation.kind !== 'team/thread-read' || !isThreadReadSnapshot(operation.data)) return operation

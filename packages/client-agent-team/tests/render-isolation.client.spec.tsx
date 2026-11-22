@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, waitFor } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
+import { flushRefreshes, useRefreshClock } from './bench/refresh-clock.ts'
 
 /**
  * Render-isolation probe for the Thread page (ticket 06).
@@ -44,6 +45,7 @@ vi.mock('../src/client/TeamComposer.tsx', async (importOriginal) => {
 
 usePinnedBrowserLanguages('zh-CN')
 beforeEach(() => {
+  useRefreshClock()
   localStorage.clear()
   counters.messages.length = 0
   counters.composers = 0
@@ -87,17 +89,6 @@ function reset(): void {
   counters.composers = 0
 }
 
-/** Wait until the Remote call counters stop moving, so a burst is measured whole. */
-async function settle(b: Runtime): Promise<void> {
-  let last = JSON.stringify(counts(b))
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 50))
-    const next = JSON.stringify(counts(b))
-    if (next === last) return
-    last = next
-  }
-}
-
 /** Open the seeded Project and follow the first Task footer into its Thread page. */
 async function openThread(b: Runtime): Promise<void> {
   fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -139,11 +130,11 @@ describe('Thread page render isolation', () => {
       // Flush the initial silent probe before measuring one change event.
       b.publishAgentReply()
       b.publishAgentReply()
-      await settle(b)
+      await flushRefreshes(b)
       reset()
       const beforeBurst = counts(b)
       b.publishAgentReply()
-      await settle(b)
+      await flushRefreshes(b)
       bursts.push(delta(beforeBurst, counts(b)))
       const burst = bursts[bursts.length - 1]!
       // One change event re-reads no Thread and re-renders no row: its cost
@@ -159,7 +150,7 @@ describe('Thread page render isolation', () => {
       fireEvent.click(b.view.getByRole('button', { name: '发送' }))
       await waitFor(() => expect(b.reply).toHaveBeenCalled())
       await waitFor(() => expect(b.view.queryAllByText('hello').length).toBeGreaterThan(0))
-      await settle(b)
+      await flushRefreshes(b)
       arrivals.push(delta(beforeSend, counts(b)))
       const arrival = arrivals[arrivals.length - 1]!
       // The committed arrival renders its own row and nothing else, at either

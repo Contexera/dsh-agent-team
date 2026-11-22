@@ -37,7 +37,7 @@ export interface ActivityViewFields {
   readonly refollowedMembers?: readonly string[]
 }
 
-/** Rebuild the exact Host Activity fact a view came from; a view missing its identity yields none, so it can never bind. */
+/** Bind only complete Activity identities: a partial fact cannot satisfy the Host's visibility check. */
 export function activityFromView(value: ActivityViewFields, projectRef?: string): ActivityFact | undefined {
   if (value.kind !== 'activity' || value.activityRef === undefined || value.actor === undefined || value.activity === undefined) return undefined
   const base = { activityRef: value.activityRef, sequence: value.sequence, actor: value.actor }
@@ -55,7 +55,6 @@ export function activityFromView(value: ActivityViewFields, projectRef?: string)
     return activityFact({ ...worker, kind: 'worker_settled', state: value.state,
       ...(value.reason === undefined ? {} : { reason: value.reason }) } as unknown as AgentTeamActivity)
   }
-  // Every remaining kind is Task progress, so its Task ref is part of its identity.
   if (value.taskRef === undefined) return undefined
   const thread = { ...base, taskRef: value.taskRef, threadRef: value.threadRef }
   switch (value.activity) {

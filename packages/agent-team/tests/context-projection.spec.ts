@@ -83,7 +83,8 @@ describe('AgentTeam context projection — legacy rollover intent decode', () =>
   it('a legacy context_rollover call/result pair still creates pending intent', () => {
     const events = [
       turnStart(1),
-      ...legacyNewContextPair(1, 'call-1', { handoff: 'continue from here' }),
+      contextToolCall(1, 'call-1', CONTEXT_ROLLOVER_TOOL_NAME, { handoff: 'continue from here' }),
+      toolResult(1, 'call-1'),
       turnEnd(1),
     ]
     const state = fold(events)
@@ -311,6 +312,26 @@ describe('AgentTeam context projection — checkpoints', () => {
 })
 
 describe('AgentTeam committed wake-swap input recovery', () => {
+  it('deduplicates replayed input but does not consume it until an uninterrupted answer in its turn', () => {
+    const message = createUserMessage({ content: [{ type: 'text', text: 'keep me' }], source: { kind: 'user' } })
+    const splice = (): SessionEvent => ({
+      type: 'agent/inbox/spliced', seq: nextSeq(), time: 0,
+      data: { target: 'next-turn', start: 0, inserted: [message, message] },
+    }) as SessionEvent
+    const answer = (turn: number, interrupted: boolean): SessionEvent => ({
+      type: 'assistant/message', seq: nextSeq(), time: 0, data: { turn, step: 1, message: {}, interrupted },
+    }) as SessionEvent
+    const target = { sessionId: SID, inputFromSeq: 1 }
+    const interrupted = [splice(), turnStart(1), userMessageEvent(message), answer(1, true), turnEnd(1, 'aborted')]
+    const otherTurn = [...interrupted, turnStart(2), answer(2, false), turnEnd(2), splice()]
+    const answered = [...otherTurn, turnStart(3), userMessageEvent(message), answer(3, false), turnEnd(3), splice()]
+
+    expect(carriedInputOf(foldTeamContextProjection(otherTurn, target), otherTurn)).toEqual([message])
+    const state = foldTeamContextProjection(answered, target)
+    expect(carriedInputOf(state, answered)).toEqual([])
+    expect(state.carriedCandidates).toEqual([{ messageId: message.id, surfacedTurn: 3, consumed: true }])
+  })
+
   it('replays only unanswered post-boundary input without a legacy rollover intent', () => {
     const message = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
     const before = message('before boundary')
