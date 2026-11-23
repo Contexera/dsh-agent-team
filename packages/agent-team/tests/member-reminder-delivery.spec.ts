@@ -326,6 +326,7 @@ describe('a failed consumption write rederives the notice instead of silencing i
     const write = vi.spyOn(ledger, 'consumeMemberReminders').mockRejectedValueOnce(new Error('storage write failed'))
     await seam.claim(first)
     expect(ledger.unreadMemberRemindersFor(memberId)).toHaveLength(1)
+    expect(ctx.agentTeam['memberReminderConsumeFailures'].get(memberId)).toBe(1)
     // The failed attempt drops the coverage this notice earned and rederives the
     // notice now, rather than waiting for an unrelated Team fact or a restart.
     const second = notices(seam).at(-1)!
@@ -338,6 +339,7 @@ describe('a failed consumption write rederives the notice instead of silencing i
     await seam.claim(second)
     expect(ledger.unreadMemberRemindersFor(memberId)).toEqual([])
     expect(ledger.memberRemindersOf(memberId)[0]?.reminder.state).toBe('done')
+    expect(ctx.agentTeam['memberReminderConsumeFailures'].has(memberId)).toBe(false)
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
@@ -352,11 +354,13 @@ describe('a failed consumption write rederives the notice instead of silencing i
       await seam.claim(notices(seam).at(-1)!)
       expect(ledger.unreadMemberRemindersFor(memberId)).toHaveLength(1)
       expect(notices(seam)).toHaveLength(attempt + 1)
+      expect(ctx.agentTeam['memberReminderConsumeFailures'].get(memberId)).toBe(attempt)
     }
     // The fourth failure stands down: the occurrence stays owed, and no further
     // notice is spent on it until something else touches this Member.
     await seam.claim(notices(seam).at(-1)!)
     expect(notices(seam)).toHaveLength(4)
+    expect(ctx.agentTeam['memberReminderConsumeFailures'].get(memberId)).toBe(4)
     expect(ledger.unreadMemberRemindersFor(memberId)).toHaveLength(1)
     expect(ctx.agentTeam['inboxNoticeDeliveries'].get(memberId)?.covered).toBe('')
 
@@ -368,6 +372,7 @@ describe('a failed consumption write rederives the notice instead of silencing i
     expect(textOf(redelivered)).toContain('check the build')
     await seam.claim(redelivered)
     expect(ledger.unreadMemberRemindersFor(memberId)).toEqual([])
+    expect(ctx.agentTeam['memberReminderConsumeFailures'].has(memberId)).toBe(false)
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
   })
 })

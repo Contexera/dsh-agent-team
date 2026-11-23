@@ -92,6 +92,7 @@ async function openCurrent() {
 }
 
 describe('subscription storage upgrade', () => {
+  // Windows SQLite file I/O variance can exceed the default 5s budget across these reopen and rollback checks.
   it('keeps v4 records through a read and a rolled-back write, and stamps the first committed settlement', async () => {
     const writer = connect()
     const old = await writer.kv.open(released)
@@ -150,7 +151,7 @@ describe('subscription storage upgrade', () => {
     await expect(connect().kv.open(released)).rejects.toMatchObject({
       code: 'version-mismatch', message: expect.stringContaining('version 5'),
     })
-  })
+  }, 30_000)
 
   it.each([1, 2, 3])('can skip from v%i and write while leaving earlier rows readable', async version => {
     const writer = connect()

@@ -872,6 +872,25 @@ describe('replay', () => {
     expect(shell.requests.filter(spec => !spec.command.includes('BASH_VERSION'))).toHaveLength(0)
   })
 
+  it.each(['fresh', 'settled'] as const)('refuses an expired delivery for a %s replay request without running', async state => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = keep(await boot(pool, shell))
+    const projectRef = await project(booted)
+    const subscription = await created(booted, projectRef, 'printf events\n')
+    const seam = seams(booted)
+    await seam.recordFailedDelivery(subscription, deliveryInput(subscription))
+    if (state === 'settled') {
+      expect(await replayOf(seam, projectRef, subscription, 'delivery:d1', 'once')).toMatchObject({ kind: 'replayed' })
+    }
+    const key = deliveryKey(subscription.subscriptionRef, 'delivery:d1')
+    const delivery = deliveriesTable(booted).get(key) as SubscriptionDeliveryRecord
+    await deliveriesTable(booted).put(key, { ...delivery, expiresAt: new Date(0).toISOString() })
+    shell.requests.length = 0
+    await expect(replayOf(seam, projectRef, subscription, 'delivery:d1', 'once')).rejects.toThrow(/unknown or has expired/)
+    expect(shell.requests).toHaveLength(0)
+  })
+
   it('pins the received definition when asked, and keeps a refused replay on the list', async () => {
     const pool = new MemoryMediaPool()
     const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })

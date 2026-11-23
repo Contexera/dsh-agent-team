@@ -42,6 +42,54 @@ import { AgentTeamLedger } from '../src/ledger.ts'
 import type { AgentTeamProjectRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 
 describe('Agent Team Member lifecycle', () => {
+  it('keeps Member reader and writer participation fences ahead of ledger work', async () => {
+    const h = await realHarness()
+    const builder = await h.human.addMember('adapter-builder', { description: '', projects: [] })
+    const otherId = WorkspaceId('workspace:adapter-other')
+    h.workspaces.set(otherId, { id: otherId, path: join(h.root, 'other-checkout'), attachSession: async () => {} })
+    const project = await h.ctx.agentTeam.createProject({ requestId: requestId('adapter-project'), workspaceId: otherId,
+      name: 'other', description: '' })
+    const request = { workspaceId: otherId, projectRef: project.project.projectRef }
+    expect(() => h.ctx.agentTeam.mainStreamHistoryForAgent(builder.agent, request))
+      .toThrow('Member cannot mutate another Workspace')
+    await expect(h.ctx.agentTeam.postMainMessageForAgent(builder.agent, { ...request,
+      requestId: requestId('adapter-foreign-post'), body: 'Not authorized' }))
+      .rejects.toThrow('Member cannot mutate another Workspace')
+    expect(h.ctx.agentTeam.mainStreamHistory(request).entries).toEqual([])
+  })
+
+  it('rejects a released Member binding from reader and writer adapters', async () => {
+    const h = await realHarness()
+    const project = await h.human.createProject('adapter-project', { description: '' })
+    const builder = await h.human.addMember('adapter-builder', { description: '', projects: [project] })
+    const agent = builder.agent
+    const request = { workspaceId: h.workspaceId, projectRef: project.projectRef }
+    await h.ctx.agentTeam.suspendMember({ requestId: requestId('adapter-suspend'), memberId: builder.memberId })
+    expect(() => h.ctx.agentTeam.mainStreamHistoryForAgent(agent, request))
+      .toThrow('Agent is not an active Team Member')
+    await expect(h.ctx.agentTeam.postMainMessageForAgent(agent, { ...request,
+      requestId: requestId('adapter-inactive-post'), body: 'Not authorized' }))
+      .rejects.toThrow('Agent is not an active Team Member')
+  })
+
+  it('rejects Human and Member writes once Host shutdown begins', async () => {
+    const h = await realHarness()
+    const project = await h.human.createProject('adapter-project', { description: '' })
+    const builder = await h.human.addMember('adapter-builder', { description: '', projects: [project] })
+    const agent = builder.agent
+    const host = h.ctx.agentTeam
+    const request = { requestId: requestId('adapter-shutdown-post'), workspaceId: h.workspaceId,
+      projectRef: project.projectRef, body: 'Too late' }
+    const disposing = h.teamFiber.dispose()
+    await vi.waitFor(() => { expect(host['accepting']).toBe(false) })
+    try {
+      await expect(host.postMainMessage(request)).rejects.toThrow('agent-team service is shutting down')
+      await expect(host.postMainMessageForAgent(agent, request)).rejects.toThrow('agent-team service is shutting down')
+    } finally {
+      await disposing
+    }
+  })
+
   it('works in a joined Workspace through the existing live Session and withdraws without disposing it', async () => {
     const adapter = new ScriptedAdapter()
     const { ctx, workspaceId, checkout, root, workspaces, archived } = await realHarness(adapter)
@@ -844,6 +892,25 @@ describe('Agent Team Member lifecycle', () => {
     expect(restored.diagnostic).toBeUndefined()
     expect(ctx.agentTeam['sessionOwnershipBlocked'].has(memberId)).toBe(false)
     expect(ctx.agentPresets.composedPreset(ctx.agents.get(sessionId)!.ctx)).toBe('team-member')
+    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+  })
+
+  it('does not restore an ownership-blocked Member suspended before its Session owner is disposed', async () => {
+    const { ctx, workspaceId, teamFiber } = await realHarness()
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('blocked-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [], model: { provider: 'mock', model: 'mock' }})
+    const memberId = added.status.member.memberId
+    const sessionId = added.status.member.sessionId
+    await teamFiber.dispose()
+    const foreign = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
+    await ctx.plugin(AgentTeam)
+    await waitFor(() => ctx.agentTeam['sessionOwnershipBlocked'].has(memberId) ? true : undefined, 20_000)
+    await ctx.agentTeam.suspendMember({ requestId: requestId('blocked-suspend'), memberId })
+    await foreign.dispose()
+    await waitFor(() => !ctx.agentTeam['sessionOwnershipBlocked'].has(memberId)
+      && !ctx.agentTeam['memberLifecycleTails'].has(memberId) ? true : undefined, 20_000)
+    expect(ctx.agentTeam['handles'].has(memberId)).toBe(false)
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+    expect(ctx.agentTeam.members().find(status => status.member.memberId === memberId)?.availability).toBe('suspended')
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
   })
 

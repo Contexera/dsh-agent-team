@@ -58,6 +58,48 @@ function wakeSeam(): { readonly agent: Agent; readonly state: { fail: boolean; r
 }
 
 describe('post-commit delivery', () => {
+  it('reads one empty snapshot, clears coverage and queues nothing without spending an attempt', async () => {
+    const { ctx } = await harness()
+    const team = ctx.agentTeam
+    const project = await team.createProject({ requestId: requestId('empty-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
+    const { agent, state } = wakeSeam()
+    team['handles'].set(member.memberId, { agent, dispose: async () => {} })
+    team['inboxNoticeDeliveries'].set(member.memberId, { covered: 'old facts', attempt: 3, undelivered: [] })
+    const snapshot = vi.spyOn(team['ledger']!, 'notificationSnapshot')
+    team['deliverInboxNotice'](agent, team['ledger']!.getMember(member.memberId)!, { kind: 'running' })
+    expect(snapshot).toHaveBeenCalledExactlyOnceWith(member.memberId)
+    expect(team['inboxNoticeDeliveries'].get(member.memberId)).toEqual({ covered: '', attempt: 3, undelivered: [] })
+    expect(state.calls).toHaveLength(0)
+    expect(team['pendingTeamWakes'].size).toBe(0)
+    snapshot.mockRestore()
+  })
+
+  it('counts a forced followup before dispatch and retains the attempt when that lane fails', async () => {
+    const { ctx } = await harness()
+    const team = ctx.agentTeam
+    const project = await team.createProject({ requestId: requestId('followup-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
+    const { agent } = wakeSeam()
+    const carried = createUserMessage({ content: [{ type: 'text', text: 'Ordinary queued input' }], source: { kind: 'user' } })
+    Object.defineProperty(agent.inbox, 'nextTurn', { value: [carried], configurable: true })
+    const steer = vi.spyOn(agent, 'steer')
+    const followup = vi.spyOn(agent, 'followup').mockImplementation(() => {
+      expect(team['inboxNoticeDeliveries'].get(member.memberId)?.attempt).toBe(1)
+      throw new Error('followup failed')
+    })
+    team['handles'].set(member.memberId, { agent, dispose: async () => {} })
+    const sent = await team.startThread({ kind: 'discussion', requestId: requestId('followup-send'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `@${member.handle} review` })
+    expect(sent.kind).toBe('committed')
+    expect(steer).not.toHaveBeenCalled()
+    expect(followup).toHaveBeenCalledTimes(1)
+    expect(team['inboxNoticeDeliveries'].get(member.memberId)).toMatchObject({ attempt: 1, covered: '' })
+    expect(agent.inbox.nextTurn).toEqual([carried])
+    followup.mockRestore()
+    steer.mockRestore()
+  })
+
   it('answers with the committed reply when the recipient wake fails, and re-derives the wake later', async () => {
     const { ctx } = await harness()
     const warn = vi.spyOn(ctx.logger, 'warn')

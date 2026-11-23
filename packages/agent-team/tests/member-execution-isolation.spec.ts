@@ -8,6 +8,35 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { GatedAdapter, realHarness, requestId } from './helpers/member-harness.ts'
 
 describe('Agent Team member execution isolation (state-requests 02)', () => {
+  it.each(['member', 'addition'] as const)('runs the next %s lifecycle operation after rejection and prunes only the settled tail', async kind => {
+    const h = await realHarness()
+    const member = await h.human.addMember('reader', { description: 'Reads work' })
+    const team = h.ctx.agentTeam
+    const key = requestId('rejected-addition')
+    const enqueue = (operation: () => Promise<string>): Promise<string> => kind === 'member'
+      ? team['enqueueLifecycle'](member.memberId, operation) : team['enqueueAddition'](key, operation)
+    const hasTail = (): boolean => kind === 'member'
+      ? team['memberLifecycleTails'].has(member.memberId) : team['additionLifecycleTails'].has(key)
+    let rejectFirst!: (error: Error) => void
+    let finishSecond!: (value: string) => void
+    const firstGate = new Promise<string>((_, reject) => { rejectFirst = reject })
+    const secondGate = new Promise<string>(resolve => { finishSecond = resolve })
+    const order: string[] = []
+    const first = enqueue(() => { order.push('first'); return firstGate })
+    const rejected = expect(first).rejects.toThrow('lifecycle failed')
+    const second = enqueue(() => { order.push('second'); return secondGate })
+    await vi.waitFor(() => expect(order).toEqual(['first']))
+    rejectFirst(new Error('lifecycle failed'))
+    await rejected
+    await vi.waitFor(() => expect(order).toEqual(['first', 'second']))
+    expect(hasTail()).toBe(true)
+    finishSecond('completed')
+    expect(await second).toBe('completed')
+    await vi.waitFor(() => expect(hasTail()).toBe(false))
+    expect(await enqueue(() => enqueue(async () => 'reentrant'))).toBe('reentrant')
+    await vi.waitFor(() => expect(hasTail()).toBe(false))
+  })
+
   it("suspends B while A's capability edit waits for A's turn boundary", async () => {
     const adapter = new GatedAdapter()
     const h = await realHarness(adapter)
