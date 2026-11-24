@@ -3,33 +3,32 @@
 English | [中文](attention-and-messaging.zh.md)
 
 ## Thread Attention and Inbox
-Attention is durable private state for one Member and Thread: current period start, contiguous read watermark, and what established the period. Creating a Thread (its author follows), creating a Task Claim, being named accountable — by a Task start, a transfer, a promotion, or a reopen — or explicitly following starts it; a rules-version-1 mention started it too, which is the only source version 2 no longer produces.
 
-Taskless Threads can be unfollowed directly; taskful Threads require no active Claim. Unfollow ends the period and discards its unread work; a later follow starts at the current tail.
+Keep three questions separate: may I read this Project, do I follow this Thread, and have I acknowledged its unread facts? Workspace access, Attention, and the read watermark answer them independently.
 
-The source is the one field of a row that is not permission or progress: it lets a result say why the reader follows instead of guessing, and it changes nothing about delivery. [tools.md](tools.md) owns what each result renders; a row written before the field existed has its cause derived from the operation that wrote it, which [host-authority.md](../architecture/host-authority.md) records.
+Attention is durable private Member × Thread state: a period start, a contiguous read watermark, and a source explaining what established the period.
 
-While active, other Members' Messages—and taskful Claim and Task resolution Activities—become ordinary unread. Mentions create durable direct markers. The sender's own mutation is not unread. Promotion creates a `promote` Activity for current followers. Follow/unfollow/read are private and do not advance Thread revision. Close ends Attention; reopen does not restore old periods, but a new reopen restores the accountable's current follow unless the accountable is the actor or already follows.
+| Event | Attention effect |
+| --- | --- |
+| Start a Thread | Author follows |
+| Claim a Task | Claim owner follows; an active Claim prevents unfollow |
+| Name an accountable at start, promotion, transfer, or reopen | Establishes its follow when needed; actor/already-following exceptions apply |
+| Explicit follow | Starts at the current tail, without historical backlog |
+| Reply or mention under current rules | No follow; the Message can still create a direct marker |
+| Unfollow | Ends the period and ordinary unread; direct markers remain |
+| Close Task | Ends Attention; reopening does not restore old periods |
 
-A closed Task's Thread still takes a follow: closing leaves the follower set empty, and following is how a reader gets back into it. It is the only Attention row such a Thread can still create; the Task's own resolution and the Human's transfer of a finished Task are the other writes that still reach it.
+A new reopen establishes the accountable's follow unless it is the actor or already follows. A closed Task still permits explicit follow. Rules-version-1 mentions could establish Attention; current mentions do not.
 
-`read` returns orientation as well as unread work. When the reader's current context no longer holds the discussion, it returns the anchor when missing plus the Message facts among up to four preceding facts, skipping background already fully visible; this can happen on any read, not only the first. Background is orientation, not newly acknowledged work. `history` is the only older-facts pager, and `message` reads one Message back verbatim; neither acknowledges unread work. [tools.md](tools.md) owns the full read contract.
+Following creates ordinary unread from other Members' public updates. Direct markers deliver mentions, replies to the reader, and responsibility events even without a follow. The sender's own mutation is not unread; a marker and ordinary unread for the same fact count once. Follow/unfollow/read are private and do not advance Thread revision.
 
-Human navigation is Workspace → Project → Thread; a Task is an overlay, not a navigation level. The Inbox is a global Team page that opens from the sidebar card/narrow-rail icon and merges every visible Workspace's Inbox calls — the reader's whole unread slice, mentions counted inside it rather than alone. Opening it performs no Thread read, and only opening a Thread advances the watermark and clears its direct and private reminder markers. A private Task reminder is a direct notification, not a mention or a public Activity; reading the Inbox or board never consumes it.
+Only `team_thread read` acknowledges Thread unread. `history`, `message`, Inbox listing, board listing, notifications, and replies do not. Reads can restore missing anchor/recent Message background even with no unread; that background is orientation, not newly acknowledged work. [The read contract](tools.md#team_thread) owns batching, Message parts, and continuation.
 
-Opening a Thread performs durable Human read and scrolls to the latest fact; a bounded result with remaining unread drains automatically through continued reads, so no explicit continuation exists. History does not acknowledge new work. Arrivals while the Thread is open are acknowledged durably regardless of scroll position; a reader away from the bottom sees only a pure jump hint with no read semantics.
+The Human Inbox merges visible Workspaces. Opening the page acknowledges nothing. Opening a Thread performs durable reads and automatically drains remaining unread batches; new arrivals while it remains open are read regardless of scroll position. A jump-to-latest hint changes scroll, not read state.
 
-An Inbox call answers a bounded queue: at most `limit` unread Threads (1–100, default 50), with `hasMore` stating whether Threads remain beyond that page, and the Client prints that verdict where its list ends. Reading a Thread drains it from the queue, so the rows a full page hid become reachable without a cursor — which the projection deliberately does not carry.
+An Inbox call bounds unread Thread rows to `limit` (1–100, default 50) and reports `hasMore`. There is no cursor: draining visible Threads exposes those hidden beyond the limit. A private Task reminder is a direct signal, not a mention or public Activity; it is consumed by reading its Task Thread.
 
-Both Thread faces render one follow control: its pressed state is read from the Host's current follower set asked about the Human's own Member id, the write goes through the Human `changeAttention` Remote, and the control never optimistically flips, so a refused write leaves the previous standing on screen with its failure beside the control. The Human-only follow/unfollow observations themselves are not rendered as history.
-
-That set is every Member whose Attention is on the Thread, so the control's question is never "is anyone following?": a set holding other Members reads as not followed exactly as an empty one does. The id comes from the Host's own projection, and until it arrives the control's standing stays unanswered rather than guessing one — a guess would let another Member's Attention be read as the Human's. The same set still ranks the composer's mention candidates whole, which is why the fix reads one row out of it instead of replacing it.
-
-The standing is re-read from the Host, not decided once. Every observation the control receives becomes the standing, so a change another face or another client makes reaches the button without the Human touching it. A write's requestId serves one answer and is then dropped, scoped to the action and the Thread: a cached id would make the Host answer the next write from its idempotency cache with the earlier result, leaving the button claiming a standing the Host's follower set does not hold.
-
-The control says its standing before it says its action. A followed Thread shows the pressed fill (the shipped selected vocabulary, so the two standings differ by more than a stroke) and a failure never flips it, so the button a reader pressed still shows what the Host last answered. Its visible verb is short while the accessible name keeps the full phrase, which is what lets it share one band with the Task's own actions.
-
-While that write runs, the accessible name takes the long pending phrase rather than the idle one: the shortened visible word is not what a screen reader reads, so an unchanged name would leave the write's progress unannounced.
+Human follow controls read the Human's own id from the Host's follower set, not whether anyone follows. Writes are non-optimistic, and observations refresh the standing across surfaces. [Client and Remote](../architecture/client-and-remote.md#client-data-and-presentation-boundary) owns the UI and local navigation boundary.
 
 ## Agent delivery
 The Host computes delivery from the current Inbox; delivery class is runtime state, not a durable fact on the Message or Activity. There is one delivery class: every unread fact interrupts.
@@ -81,30 +80,32 @@ Withdrawing Project ownership ends the row the grant started, so a Member remove
 A Task reminder participates only while its current durable conditions still hold. Reading filters stale reminders from Inbox and wake planning without rewriting the ledger; [model-and-time.md](model-and-time.md) owns the conditions and read-time rules.
 
 ## Mentions
-A Message names its recipients in its own body: writing `@Handle` is what makes a mention, matched against the Project's addressable names case-insensitively, on ASCII word boundaries, and longest handle first — an address stays prose, while CJK prose can call a handle directly, so a name the Client renders as a chip is the same name that delivers. A bare handle stays ordinary prose, and a handle inside a code block or code span is quoted rather than called. `@all` is plain text under rules version 2: it notifies no one, so every Member that must be reached is named.
 
-The Host resolves the body for a Human composing in the Web Client and for an Agent composing through `team_message` alike. The body is the sole delivery authority: the request carries no recipient list, and the names it mentions are the entire recipient set, plus the parent's author on a reply. A name the body does not carry is not delivered, and naming a Member outside the addressable set leaves that text as prose rather than delivery. The Human is addressable the same way, as `@human` — a permanent alias that survives renames, which no agent handle may claim.
+The Message body is the delivery authority. Write `@Handle` to mention a reachable Member; the request carries no separate recipient list. The Host applies the same parser to Human and Agent Messages.
 
-A mention — in a Thread start, a reply, or a Main stream post — delivers its Message to the named Member once and never starts or resumes Attention: following is a Member's own explicit choice. Every addressable Member of the Project can be mentioned; there is no invitation step.
+Matching is case-insensitive, longest handle first, outside code spans and fenced code blocks, on ASCII word boundaries. Thus `mail@host.example` stays prose while CJK prose can call `请@Reeve` directly. A bare handle or an unreachable name stays prose. `@all` is plain text from rules version 2 onward; name each recipient.
 
-Agents may mention the Human without making the Human a follower.
+`@human` is the Human's permanent alias across renames and cannot be assigned to an Agent. Mentioning the Human notifies them without making them a follower. The sender is excluded from mention recipients.
 
-A reply answers one existing Message, so it also carries that Message's author as a recipient: quoting a Member delivers to them exactly as naming them does.
+A mention in a start, reply, or Main stream post creates a direct marker once and never starts or resumes Attention. Under current rules the addressable set comes from the Project's Workspace, not a Project enrollment or invitation step.
 
-The parent Message's author joins the recipient set before delivery is resolved, under the same direct-marker rule, including the Human. Replying to your own Message does not add you as a recipient; explicit mentions still deliver normally.
+`replyToMessageRef` adds the parent's author to the recipient set, including the Human, unless replying to oneself. This is a structured reply, not merely a prose quotation. The target must exist in the same Thread, or in the same Project's Main stream for a Main reply; otherwise the write is refused.
 
-A reply whose target is unknown, or belongs to another Thread, is refused rather than recorded.
+A direct notice distinguishes the delivered `Message ref` from its parent in `Replies to:`. The parent line gives author, first body line, and full ref:
 
-A direct-mention notice names the Message it carries and, when that Message answers another, the one it answers: `Message ref` is the Message being delivered, and `Replies to` is its parent. Without that line a recipient knows it was answered but not what it said, and the answer it sends back is a guess.
+`Replies to: @handle — "first line" [message:<uuid>]`
 
-The line states the parent's author and the first line of its body, with the full ref last: `Replies to: @handle — "first line" [message:<uuid>]`. The ref is what the reader hands back — to `team_message.replyToMessageRef` to answer it, or to `team_thread message` to read the body whole. A parent that no longer resolves, which an archived Project causes, leaves the line as the bare ref: the ref is still true and a summary would not be.
+Use that ref as `replyToMessageRef` to answer the parent, or with `team_thread message` to retrieve it. If the parent no longer resolves, the notice keeps only its ref rather than inventing context.
 
 ## Human-readable messages
-Every message leads with the conclusion or state; mechanical detail — `file:line`, commands, hashes, probe output — follows below it, and detail a peer Member needs is never dropped, only moved. Prose stays in the language the Human writes, while identifiers, paths, commands, and refs stay verbatim.
 
-Writing `@human` in the body notifies the Human through a durable direct marker in their Inbox, as does linking a reply to their Message. The minimum set that mentions the Human: a Human decision is owed; a Claim is finished and waits for acceptance; a blocker or risk the Human must know about; progress the Human explicitly asked for. Agent-to-Agent progress chatter mentions no Human. The persona owns this cross-tool writing rule; the `team_message` body description keeps only the call format and delivery rules where the model composes the body.
+Lead with the result or state, then a material caveat and next action. Keep prose in the Human's language; preserve identifiers, paths, commands, and refs verbatim. Explain unavoidable technical terms when the Human is the audience.
 
-A mention opens with the answer in one to three readable sentences; when a decision is owed, it says plainly what needs deciding and what happens by default if nobody answers — no fixed template. Message shape is a convention the Inbox ignores: it counts mentions, never formatting.
+Keep public updates actionable: report a blocker, changed decision, completed handoff, or requested progress, not every successful step. Put necessary evidence after the conclusion; avoid execution-log dumps. Detail needed by one peer can go by DM or attachment, while durable decisions and Task results stay in the Thread.
+
+Mention `@human` when a Human decision is owed, a finished Claim awaits acceptance, a blocker/risk needs their attention, or they requested progress. Agent-to-Agent routine coordination does not need a Human mention.
+
+A decision request says what must be decided and what happens if nobody answers, without a fixed template. These are persona writing conventions, not delivery parsing rules: Inbox counts unread facts and direct markers, not sentence shape.
 
 ## Ref citation
 Team tools return branded refs (`task:`, `thread:`, `project:`, `member:`, `claim:`) with full UUIDs; reuse them verbatim when quoting. A ref whose UUID is truncated still resolves when its first 6+ hex characters are unambiguous: `task:0f0ad7` addresses the Task whose UUID starts with `0f0ad7`. A prefix shared by several refs is rejected with the candidate full refs, and a prefix shorter than 6 hex characters is not accepted — lengthen the prefix or quote the full ref.

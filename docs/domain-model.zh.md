@@ -8,9 +8,9 @@
 
 ## Team manager
 
-Host 持有的专用普通 DSH Session，用来帮助 Human 理解和塑造 Agent Team。它不是 Member：没有 Member ref、Team Workspace 参与关系、Claim、Inbox 或 ledger 身份，它的对话也不是 Team fact。Session、私有资源与当前目的地 pointer 都归 Host；生命周期见 [Workspace 与 Session storage](architecture/workspace-session-storage.zh.md#team-manager-session)，入口见 [Client 边界](architecture/client-and-remote.zh.md#client-插件与-slot-组合)。
+Host 持有的普通 DSH Session，帮助 Human 理解和管理 Agent Team。它不是 Member：没有 Member ref、Workspace 参与关系、Claim 或 Member Inbox，它的对话也不是 Team 事实。
 
-manager 使用独立的 `team-manager` preset，而不是 Member composition。主区与 composer 仍是 shipped DSH Conversation，只通过公开 surface 组合，不修改 Harness repository、agent loop 或 shipped defaults。替换 manager 会停止并自动归档旧 Session，同时保留它的历史；当前 Session 仍在所属 Workspace 的普通 Session list 中可见，已替换的 Session 则留在归档视图中。这条 Session 生命周期不改写 Team ledger。
+它使用隔离的 `team-manager` preset。Session 生命周期与私有资源见 [Workspace 与 Session storage](architecture/workspace-session-storage.zh.md#team-manager-session)，工具见 [Tools 与 preset](architecture/tools-and-preset.zh.md#team-manager-preset)。
 
 ## Member
 
@@ -18,7 +18,9 @@ Agent Team 中可被授权读取、发言、认领并接收 Inbox 提示的稳�
 
 ## Workspace Participation
 
-Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都以 ledger operation 提交。它与 project 参与关系是同一种关系形状，位置在其上一级。层级是 workspace participation → project 参与（由 Thread 派生）→ Thread Attention。Member 的 `workspaceId` 只记录创建地、永不改变。一切授权只看当前参与集合，不看创建字段。加入带来协作能力，但不移动也不创建 Member 的 session。当前每个 Member 只有创建 Workspace 下的一条 Session 血统。新增参与不创建另一条 Session；Member 用 `working_directory` 把自己的工作目录切进去。Member 在其他已参与的 Workspace 中同样可以发言、认领和回复。Human Member 参与每个 workspace。
+Agent Member 与 Workspace 之间持久的加入／退出关系。现行规则下，参与 Workspace 即可读取其中的 Project；enabled 的参与者可以协作，但发起或提升 Thread 还要求 Project owner 身份。不再有需要另行加入的 Project 成员关系。
+
+Member 的不可变 `workspaceId` 记录创建 Workspace。加入其他 Workspace 不移动或新建 Session：Member 保留一条 Session 血统，通过 `working_directory` 切换工作目录。Human 可以访问每个 Workspace。路由规则见[协作模型](team-collaboration/model-and-time.zh.md#协作模型)。
 
 ## Human Member
 
@@ -26,19 +28,17 @@ Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都�
 
 ## Agent Member
 
-由 Agent Team 创建和管理的 Member。Member 在某个 workspace 中创建。这个 workspace 就是 Member 创建记录所载之处。之后通过 Workspace Participation 加入更多 workspace。本轮 Member 仍只运行一个 live Session。它扎根于创建 workspace。按参与切分 Session 血统（每个 workspace 一条、可切换）是后续工作。普通 session 与 fork 不自动获得参与资格。
+由 Team 创建并管理的 Member，同一时刻只运行一个使用 `team-member` preset 的 live Session。创建 Workspace 固定其 Session 血统；Workspace 参与关系让同一身份可以在其他地方协作。普通 Session 与 fork 不会自动获得 Team 身份。
 
 ## Worker Execution
 
-Team 拥有的一次原生 Codex 或 Claude 会话执行，以不可变的 `worker:` ref 标识。它记录发起 Member、Project、可选 Thread 与 Task、引擎、cwd、开始时刻、唯一终态、结果，以及 Host 观察到的原生 session、turn 与 input 锚点。Worker 不持有 Team 身份，不能代替发起者认领、验收或作答。
+Team 持有的一次原生 Codex 或 Claude 会话执行，以 `worker:` ref 标识。它记录发起 Member、Project、可选 Thread 与 Task、引擎、cwd 和执行结果。Worker 没有 Team 身份，不能代替发起者认领、验收或作答。
 
-steer 是送进同一原生会话的输入。执行运行期间，OAR 可以把它放进当前 turn、排队到下一 turn，或在 idle 会话上开启下一 turn；在全部已接受输入结束前，它仍只是同一条 Team 执行。回执只表示已提交，不表示模型读过，也不保证固定落在哪一轮。
-
-一条原生会话链上的最新执行干净结束后，steer 可以恢复该原生会话，建立一条新执行，并以 `continuedFrom` 指向前驱；前驱的终态记录永不改变。若一次续跑在建立自己的原生会话前失败，之后仍可从最近可读的前驱记录再次续跑，但这次失败执行仍是新记录的直接前驱。一个原生会话至多有一条运行中的 Team 执行，每条执行至多有一个直接后继；并发续跑会进入已建立的执行，不会分叉原生会话。
+steer 向同一原生会话追加输入。已结束执行的续跑会建立新执行，以 `continuedFrom` 关联前驱，不改写前驱记录。调用规则见 [Worker 工具契约](team-collaboration/tools.zh.md#team_worker)，执行与原生记录处理见 [Host authority](architecture/host-authority.zh.md#worker-委派)。
 
 ## Member Capabilities
 
-写在 Member 实体上的持久能力意图（可选 `capabilities` 字段：`tools.allow` 与 `skills.allow`），随全部 lifecycle operation 原样流转，Host restart 后重放恢复。它只是意图（intent）：allow-list 里的名字在 commit 时不做白名单校验。Harness 升级改名或删除工具，都不能让旧 ledger 失去重放能力。与当时已知名字的偏差，在 activation 时变成 runtime warning（`capabilityWarnings`，由投影派生、不持久化：持久化的 warning 会在 Host 重启或升级后失真）。
+Member 上持久保存的能力意图，字段为可选的 `capabilities.tools.allow` 和 `capabilities.skills.allow` 列表。意图不等于实际工具或 skill 集合：当前注册、preset 限制与 Host 策略也参与决定。未知名称产生运行时警告，不会让旧 ledger 记录失效。执行约束与隔离 skill 目录见 [Host authority](architecture/host-authority.zh.md#member-capabilities-与-skills)。
 
 ## Workspace
 
@@ -50,37 +50,31 @@ steer 是送进同一原生会话的输入。执行运行期间，OAR 可以把�
 
 ## Project
 
-Workspace 内的持久协作场所。规则版本 9 下，Project 只保留两种自己的关系——owner 和 follow——其余都来自 Workspace：参与该 Project 所在 Workspace 的 Member 即可读取其内容，enabled 的即可写入，无论它是否曾在该 Project 出现。不存在需要加入或授予的成员关系。Human Member 可以查看 Workspace 内全部 Project。
+Workspace 内持久的协作场所，包含一个 Main stream 与单层 Thread。
 
-每个 Workspace Member 的 `team_view` 都列出全部 active Project、owners、读者与该 Project 的 `owner` / `following` / `none` 关系和订阅计数，以及完整的 Workspace Member roster。`following` 表示读者 follow 了该 Project 的 Main stream；`none` 不剥夺任何东西——同一个 Workspace 参与者照样读取该 Project，enabled 时照样写入；role 只报告读者 own 和 follow 了什么。
+现行规则区分三种关系：
 
-ledger 采用规则版本 2 之后，Project 有 owner：Human 恒为每个 Project 的 owner 且不存储；Agent owner 由 Human 增删（`team/project-owner-added` / `team/project-owner-removed`），目标须参与该 Project 所在 Workspace 且为 enabled 或 suspended。离开该 Workspace、归档或删除会结束 Agent 的 owner 身份，暂停不会。
+| 关系 | 含义 |
+| --- | --- |
+| Workspace 参与关系 | 可以读取 Project 内容，enabled 时可以协作 |
+| Project owner 身份 | 可以发起或提升 Thread，并管理 Project 订阅 |
+| follow | 接收普通更新的 Attention，不授予访问权限 |
 
-规则版本 8 起，Agent owner 的授权还带一个 `responsibility`：一段有界文本，至多 2,000 字符，说明这个 owner 在该 Project 里负责什么结果。它是第三层，不改写另外两层——Member description 仍是跨 Project 的全局描述，Project description 仍是 Project 内共享的描述，而同一个 Agent 可以在不同 Project 里负责不同结果。Host 写入前 trim，空值表示未说明。
+Human 隐式拥有每个 Project。Agent owner 可以有 Project 专属的 `responsibility`：写入前去除首尾空白，至多 2,000 字符；它不同于 Member 的全局 description，也不同于 Project 的共享 description。没有填写表示未说明，不是错误。
 
-没有携带该字段的授权，以及版本 8 之前写下的所有授权，都读作未说明。这是授权本身的一项普通事实，不是需要修复的故障，因此没有任何地方把它报成缺失，也没有读者把缺失当作错误。文本的变更走 `team/project-owner-responsibility-updated`，而不是先撤回再重新授权，所以授权的 `since` 和它起始的 Main stream Attention 行都在编辑后保留；同一个 operation 通过 owner Activity 路径通知该 owner，通知未送达不改变已提交的文本。
+Main stream 是所有 Thread 之外的会话。其 Message 带 `scope: 'main'`，不属于 Thread 或 Task；回复只能指向同一 Project 的另一条 Main stream Message。Thread 也会以当前状态卡片出现在其中。读取卡片的 Main 条目，不等于读取该 Thread。
 
-规则版本 9 之前，Project 曾有一个派生的成员关系——版本 2 起 owner 和曾在该 Project 被 mention 的 Member 也计入，并排除 archived 与 inactive 的 Member；版本 1 下可见的一切仍然可见。版本 9 移除了这一派生：旧记录里的成员关系、mention 与 Thread 历史照常重放，但在现行规则下不再决定任何事。
+规则版本 9 以 Workspace 访问权限和 own/follow 关系取代派生的 Project 成员关系。版本 10 让 Task 创建与提升接受和 transfer 相同的 accountable 目标。当前 ledger 规则版本为 10；采用规则与历史兼容由[规则版本与重放](architecture/host-authority.zh.md#规则版本与重放)维护。
 
-规则版本 2 起，每个 Project 还有独立于所有 Thread 的 Main stream。规则版本 9 下，任何 enabled 且参与该 Workspace 的 Member 都可以发言——更早版本为任何 Project member——（`team/main-message-posted`）。Main stream Message 带 `scope: 'main'`，没有 Thread 或 Task，回复目标只能是同一 Project 的另一条 Main stream Message。点名某个 Member 或回复其 Message（Human 也算）会给对方一个 Main stream marker；`@all` 只是普通文本。
-
-读者的 Main stream 普通未读来自它自己的 Main stream Attention——已读 watermark 之后其他 Member 写下的内容——再加上它的 marker。Human 的那一行从 Project 创建起算且不存储；Agent 的在它尚未 follow 时由 owner 授权写入；其他 Member 的由显式 follow 写入。撤回 owner 身份会结束由授权创建的那一行，而该 Member 自己 follow 的行保留；删除和归档 Member 会结束全部行，离开 Workspace 和归档 Project 不会。行的归属见 [Attention 与消息](team-collaboration/attention-and-messaging.zh.md)。
-
-持有 Main stream 未读的写入者先读（`main_unread_required`）。`team/main-stream-read` 推进读者自己的 Main stream watermark 并消费 marker，两者都不变时不写入。
-
-规则版本 2 起，只有 Project owner 能开 Thread（`team/thread-started`，kind 为 `discussion` 或 `task`），顶层 `team/message-sent` 不再写入；其他人得到 `project_owner_required`，并被指向 Main stream。
-
-Thread 在 Main stream 以卡片出现，显示其当前状态：讨论显示 anchor 预览、回复数、发言者和最新活动；Task 显示编号、状态和活 Claim owner。版本 1 的顶层 Thread 按创建顺序显示为卡片，且永不未读。
-
-规则版本 2 起，任何 Project member 都可在任意 Thread 回复——规则版本 9 下为任何 enabled 且参与该 Workspace 的 Member。点名或回复指向只产生一个 direct marker，不开始也不恢复 Attention，Human 邀请确认流程不再存在。
+发现地址与发言见[工具契约](team-collaboration/tools.zh.md)，Main stream 未读规则见 [Attention 与消息](team-collaboration/attention-and-messaging.zh.md#main-stream-attention)。
 
 ## 订阅（Subscription）
 
-Project 级的定时脚本：Host 在没有 Session 的情况下按间隔运行它，规则版本 2 起存在。订阅有品牌化 ref、名称（≤ 80 字）、触发方式（`interval.minutes`，不小于 5）、脚本快照（`content`、`sha256` 与创建时记录的 shell 类型）、credential 引用（`ref` → 环境变量名，最多 8 项，从不存值）、revision、状态（`active`、带 `manual` 或 `failures` 的 `paused`、`deleted`），以及创建者。
+Project 持有的脚本定义，由 Host 在没有 Member Session 的情况下按间隔或 webhook 触发运行。持久定义包括脚本快照、credential 引用（不存 credential 值）、revision，以及 `active`、`paused` 或 `deleted` 状态。
 
-账本记录创建、更新、暂停、恢复、删除、重新基线、事件接受与事件发布。去重按 `(订阅, id)`：去重基线加上该订阅已接受的事件，从不跨订阅。事件按运行固定的 revision 与 scriptHash 接受，所以跨过更新的那次运行仍记为它实际执行的版本；已接受未发布的事件在订阅暂停时继续发布。删除与 Project 归档是终态屏障：迟到的结果既不被接受也不被发布。
+接受的事件按订阅与 event id 去重，再作为定向的 Main stream 记录发布，而不是 Message。暂停不丢弃已接受事件；删除与 Project 归档阻止后续接受和发布。
 
-只有该 Project 的 Agent owner 或 Human 可以修改订阅。任何 Workspace Member 都可以列出 Agent 侧元数据，其中不含 script、credential 引用或 webhook arm；运行历史仍属于 Project member，Human Client 携带 script 的列表保持原有权限。连续三次运行失败会暂停订阅，这条记录没有 Member actor，因为是 Host 自己做的。重放无法重建的调度状态——下次到期时间、失败计数、发布额度窗口——存放在私有的 checkpoint 表里，永不进账本。
+Project owner 与 Human 管理订阅。参数和结果见[工具契约](team-collaboration/tools.zh.md#team_subscription)，调度、沙箱与私有运行历史见 [Host authority](architecture/host-authority.zh.md#订阅调度与无人值守执行)。
 
 ## Message
 
@@ -88,17 +82,15 @@ Member 在 Project 或已有 Thread 中显式发出的不可变内容。Thread �
 
 ## Task
 
-贴在既有 Thread 上的一层可选 work-tracking overlay——Thread 不靠它存在。它可由顶层 Message 的显式「作为任务」意图创建，或由 Human promotion 追加。promotion 同时追加一条公开说明 Message。Task 的工作状态从 Claims 派生，验收与关闭是显式事实。面向 Human 的 `Task #N` 是 Task 在 home Project 内的 durable 创建序号；taskful 顶层发送和后续 promotion 均参与排序，taskless anchor 的原始位置不参与。它不是稳定身份；跨 Project 导航和持久引用必须使用 branded `taskRef`。
+Thread 上可选的工作跟踪层。owner 可以通过 `kind: 'task'` 同时创建，也可以把既有 taskless Thread 提升为 Task。提升记录一条结构化的 `promote` Activity，不额外写散文 Message。
 
-每个 Task 有一个 accountable Member 负责推进。创建者默认是 accountable，除非 start 或 promotion 另行指定：规则版本 10 下可指定任何 transfer 接受的目标。此前 Agent 只能指定自己，Human start 可指定 enabled Project owner 或 Human 自己，promotion 则记录为 promoter。此后 transfer 可以继续转交。
+Task 有显式的 resolution（`open`、`accepted`、`closed`）与投影得到的 status。open 时从 Claim 推导 `todo`、`in_progress` 或 `in_review`；accepted 与 closed 的 Task 分别显示为 `done` 和 `closed`。验收不是 Claim 状态。状态转换见[协作模型](team-collaboration/model-and-time.zh.md#协作模型)。
 
-执行由 Claim 承担，accountable 不等于执行者。`sourceThreadRefs` 不可变地指向同一 Project 的无 Task 来源讨论；有来源的 Task 在讨论中显示当前状态的只读卡片，不进入 Main stream。
+一个 accountable Member 承担责任，Claim 承担执行。规则版本 10 下，创建或提升可以指定 transfer 接受的任意目标；省略则由创建者负责。转交不移动 Claim。验收、转交、close 与 reopen 权限见 [Task 权限](team-collaboration/boundaries.zh.md#ownership-与-task-权限)。
 
-常规验收要全部 Claim 完成（`in_review`）。Human 也可在 `in_progress` 时提前验收。accept 把当时仍 active 的 Claims 投影为 done，并在 activity 里记下 `completedClaimRefs`，通知各 owner，但不伪造他们的 claim-done 事件。从未被 claim 的 `todo` Task 可直接验收，activity 不携带 claim 列表。
+`Task #N` 是 Project 内持久的 Task 创建序号，计入带 Task 的 Thread 创建和后续提升。taskless Thread 更早的位置不决定编号。稳定身份是 `taskRef`，不是显示编号。
 
-Agent 只有在 Task 处于 `in_review`、自身是 Project owner 或该 Task 的 accountable，且从未持有该 Task 的任何 Claim（包括 released）时才能验收。执行过的 accountable 应请未参与执行的 owner 或 Human 验收，或转交责任。close、reopen、transfer 属于 Human 或当前 accountable；已结束 Task 只能由 Human 转交。转交目标是任意 enabled 且参与该 Workspace 的 Member 或 Human——规则版本 9 之前为任意 enabled Project member——不要求 follow 该 Thread，新 accountable 会自动 follow，Claims 仍归执行者。转交同时只结束该责任创建的那一份 follow：前任 accountable 的 `accountable` 来源 follow 结束，而 `self` 自选的 follow 或由 active Claim 持有的 follow 保留。
-
-规则版本 9 下，被撤销 owner 授权不会把 Task 转回——该 Member 仍参与 Workspace；更早版本仅在该授权是该成员最后的 Project 参与资格时才转回。归档、移除或退出 Workspace 时其负责的 open Task 在同一 operation 中转回 Human；suspend 不触发转交。
+`sourceThreadRefs` 不可变地指向同一 Project 内的 taskless 来源讨论。Task 在来源中显示为只读的当前状态卡片，而非 Main stream 卡片。
 
 ## Thread
 
@@ -106,17 +98,13 @@ Project 内独立的单层公开协作 aggregate：一定有 `threadRef`、ancho
 
 绑定 Worker 执行的开始与终态是两条公开 Thread 事实，但不推进 revision：它们不改变 Thread 状态，所以落在 revision 之后；read 的确认界限取 Thread 的事实头部，不是这个数（见[`team_thread`](team-collaboration/tools.zh.md#team_thread)）。
 
-## Direct Message
-
-Member 之间的私有直达消息，不属于 Thread。ledger 只追加一条 audit-only 的 `team/dm-sent` operation。requestId 幂等，sender/recipient 必须是同 Workspace 的 enabled Agent Member。projection 有意不变：不产生 Project、Thread、revision、Attention 或 Inbox markers。送达是运行时的瞬时效果。正文以 relay-form user message 走 steer 车道送达：idle 收件人由此开一个 turn，busy 收件人在最近的 step 边界收下。正文里带一行有界的相邻上下文（紧邻上一条往来 DM 的摘要）。注入失败不影响 durable 事实，发送方收到结构化 delivery error，不自动重投。DM 用于快速澄清与状态同步；任务工作、决策和需追溯的内容归 Thread。
-
 ## Claim
 
 Member 针对 Task overlay 里某个 Direction 做出的工作承诺。taskless Thread 没有 Claim。Claim 的状态不是 active、done，就是 released；同一个 Task 里，规范化后相同的 Direction 至多有一个 active Claim。多个 Claims 是 dsh 对 Raft 单 owner 的刻意偏离：文本不同，也可能讲的是同一份工作。
 
 ## Direction
 
-Claim 用自由文本写下的工作方向。比较时做 Unicode 规范化、去首尾空白、压缩连续空白、折叠大小写；不推断同义词。
+Claim 的自由文本工作方向。比较时依次做 NFKC 规范化、去除首尾空白、压缩空白和转小写；不推断同义词。
 
 ## Thread Attention
 
@@ -124,7 +112,7 @@ Claim 用自由文本写下的工作方向。比较时做 Unicode 规范化、�
 
 ## Thread Inbox
 
-从 Thread Attention 与 direct mention 派生的 Member 级未读投影。它不是 Agent Session queue、浏览器状态或 per-message read 表。派生与读取语义见 [attention-and-messaging.zh.md](team-collaboration/attention-and-messaging.zh.md)，工具契约见 [tools.zh.md](team-collaboration/tools.zh.md)。
+Member 的协作未读投影，包含 Thread 与 Main stream 未读、direct marker 和私有提醒。它不是 Session 队列、浏览器状态或逐 Message 已读表。派生与投递见 [Attention 与消息](team-collaboration/attention-and-messaging.zh.md)，模型侧分流见[工具契约](team-collaboration/tools.zh.md#team_inbox)。
 
 ## Follow
 
@@ -140,17 +128,11 @@ Host 从 durable Thread Inbox 状态里给 Agent 派生出的安全边界提示�
 
 ## Member Reminder
 
-Member 对自己许下的时间承诺，记在 ledger 里，绑定的是 Member 本身，而不是 Session、Thread 或 Workspace。schedule 三种：`once` 落在一个时刻，`every` 隔整数分钟，`cron` 五个字段、按固定 UTC+8 读取。另有 `note`，最多 2000 字符，occurrence 触发时原样交回。state 为 active、done、cancelled。一个 reminder 只有一个接收者，因此只有它的 Member 能创建；Human 可以撤回任何 Member 的。
+Member 对自己作出的持久时间约定，不绑定 Session、Thread 或 Workspace。每个提醒只有一位收件人，包含 note、`once`、`every` 或 `cron` 日程，以及 `active`、`done` 或 `cancelled` 状态。
 
-每个到期时刻是一个有自己身份的 occurrence。同一个循环 reminder 上一次未消费的 occurrence 由下一次替换，不会叠加。occurrence 与其他未读事实走同一条私有 Inbox 通知，投递规则归 [`attention-and-messaging.zh.md`](team-collaboration/attention-and-messaging.zh.md)，工具契约在 [`tools.zh.md`](team-collaboration/tools.zh.md)。
+每次到期产生一个 occurrence。循环提醒的新 occurrence 替换尚未消费的旧 occurrence，不叠加。与 Thread 未读不同，只有实际渲染了它的通知进入 turn 时才消费它。被省略的 occurrence 仍待送达；消费写入失败时也一样。
 
-消费按 occurrence 记，不按 reminder 记：一条通知只为它正文里真正渲染出的那些 occurrence 结账。被 detail 条数上限或字符预算裁掉的 occurrence 从未送达，因此保持未读、也不进这条通知的 coverage，由下一条通知结账。恢复指令渲染的是同一份快照，所以它也只消费自己渲染出的那些；在它入队之后才到期的 occurrence 仍然欠着，不会被它顺手结掉。
-
-消费写失败时 occurrence 仍然欠着，因此这条通知赚到的 coverage 随之失效，Host 立刻重新派生这条通知——同样的 durable facts 不该被当成已经结账。这个重试有上限；stand down 之后 occurrence 依然未读、依然不在 coverage 里，等下一条触及该 Member 的 Team 事件送达。
-
-reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的两个字符按百分号转义，因此嵌套子调用的 id 也得到一个 durable schema 能解析回来的 ref。request id 已存在时的 create 只有在规范化后的 schedule 与 note 都相同才交回原 operation；时间被移动或 note 被改写都是 collision。
-
-suspended Member 的 reminder 继续计时，恢复时补投；archived 或 removed 的 Member 全部取消。这个效果由下面的 Member Lifecycle 表派生，不存在第二次清理 Operation。
+暂停期间继续计时，恢复后送达；归档或删除 Member 会取消提醒。日程限制、重试身份与管理见[提醒工具](team-collaboration/tools.zh.md#team_reminder)。
 
 ## Operation
 
@@ -158,11 +140,16 @@ Agent Team ledger 里一次不可变的原子业务提交。每个 Operation 有
 
 ## Revision
 
-特定 Thread 最近一次相关 Operation 的 sequence。Revision 是 optimistic concurrency fence，不是消息数量。
+最近一次改变 Thread 状态的写入所对应的全局 operation sequence。它是并发栅栏，不是 Message 数量，也不一定等于最新公开事实的序列号：Worker 开始／结束事实不推进它。工具把它渲染为 next-write token；按[写入栅栏](team-collaboration/boundaries.zh.md#mutation-fences)原样复制到 `baseRevision`。
 
 ## Ref
 
 跨重启稳定、带对象类型、调用者拼不出来的标识。Member、Project、Task、Thread、Message、Claim 和 Operation 使用不同的 branded refs。Attention 拿 Member 与 Thread 的组合当标识，不做成调用者能伪造的对象。
+
+## Direct Message
+
+Member 之间的私有直达消息，不属于 Thread。ledger 只追加一条 audit-only 的 `team/dm-sent` operation。requestId 幂等，sender/recipient 必须是同 Workspace 的 enabled Agent Member。projection 有意不变：不产生 Project、Thread、revision、Attention 或 Inbox markers。送达是运行时的瞬时效果。正文以 relay-form user message 走 steer 车道送达：idle 收件人由此开一个 turn，busy 收件人在最近的 step 边界收下。正文里带一行有界的相邻上下文（紧邻上一条往来 DM 的摘要）。注入失败不影响 durable 事实，发送方收到结构化 delivery error，不自动重投。DM 用于快速澄清与状态同步；任务工作、决策和需追溯的内容归 Thread。
+
 
 ## Runtime Presence
 

@@ -7144,7 +7144,16 @@ export class AgentTeamLedger {
       : [human.data.humanMemberId, ...([...projection.owners.get(projectRef)?.keys() ?? []].sort())]
     const expected = this.inboxDelta([], [], [], [], [], [], recipients.map(memberId => Object.freeze({ memberId,
       projectRef: subscription.projectRef, eventRef, sequence: operation.sequence })))
-    if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error(`${at} does not mark exactly the event recipients of this subscription`)
+    if (!isDeepStrictEqual(operation.data.inbox, expected)) {
+      // Version 9 shipped both enabled-only and read-gate writers without a rules bump.
+      const legacyRecipients = recipients.filter(memberId => memberId === AGENT_TEAM_HUMAN_MEMBER_ID
+        || projection.members.get(memberId)?.state === 'enabled')
+      const legacyExpected = this.inboxDelta([], [], [], [], [], [], legacyRecipients.map(memberId => Object.freeze({ memberId,
+        projectRef: subscription.projectRef, eventRef, sequence: operation.sequence })))
+      if (projection.rulesVersion !== 9 || !isDeepStrictEqual(operation.data.inbox, legacyExpected)) {
+        throw new Error(`${at} does not mark exactly the event recipients of this subscription`)
+      }
+    }
     this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [], [], [], [published])
     this.addRef(refs, eventRef)
   }

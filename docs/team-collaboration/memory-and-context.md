@@ -39,86 +39,66 @@ Upkeep follows the same bounded-index and private-skill rules at the manager's p
 Skills are file-configured and discovered per turn through the manager preset's isolated registry: its provider scans the bundled manager root first and its writable `manager/skills/` second, so a same-name private skill never shadows a shipped one. Host-global skills do not enter the manager catalog or loader. Adding or removing a private file is visible on the next turn without a new conversation and without touching the preset. Neither manager root is mounted for a Member or an ordinary Session.
 
 ## Context lifecycle ownership
-A Member's context has exactly two mechanisms, and neither is the model's to invoke.
 
-**In-place compaction.** The preset mounts `member-compaction-engine`, a thin adapter over the Harness's `BasicCompactionEngine`. Team owns proactive request admission; the parent supplies the summary template, tool-pair-safe reduction, durable transaction, and overflow retries. Compaction never changes generation or deletes the original log.
+The Member maintains private continuity, not context lifecycle. Team has two automatic mechanisms: in-place compaction shortens a Session, while a generation swap replaces the Session binding. Neither is a model-callable Team tool.
 
-The input trigger is `floor(min(B, W × 0.8, W − 16384))`, where `B` is `memberCompaction.tokens` (default 256000) and `W` is the routed window. Without a declared window the absolute budget still applies. A 1M or 2M model triggers at 256000; a 272000 model triggers at 217600. Model maximum output is not subtracted from this trigger. Pending messages, assembled tools, and system-prompt growth are counted before admission.
+### In-place compaction
 
-The count is the provider's own prompt figure for the last request plus this surface's growth since, and a tool set the step declares beyond that request's own is added on top. It falls back to the meter's fixed density heuristic only when no comparable request exists: a failed or aborted attempt logs a header without usage, so the header the count belongs to is resolved from the log rather than taken as the latest. A heuristic-only reading prices a long Session well under what the provider counted, so the trigger would be reached only after the window was already gone.
+The preset adapter uses Harness's `BasicCompactionEngine`. It preserves the generation and original log. The proactive input trigger is:
 
-`memberCompaction` is a volatile Host-row group (`enabled`, `tokens`). The Team settings page edits `tokens` alone under 「上下文」, through the shared configuration form: the field accepts a capacity (`256K`, `1M`) and a blank field clears the override so the group re-inherits the composition layer and its 256000 default. The write names the `memberCompaction.tokens` child path, so the sibling `enabled` switch is untouched.
+`floor(min(B, W × 0.8, W − 16384))`
 
-When input reaches the trigger, Team first prunes tool results, then requests one upstream forced reduction if needed. This path uses a zero retained-tail budget rather than retaining 0.16 of a large window; upstream may still preserve a recent balanced block. The summary output cap is independently 32768, and a per-model policy may set another.
+`B` is `memberCompaction.tokens` (default 256000); `W` is the routed context window. Without a declared window, `B` still applies. Thus a 1M/2M model defaults to 256000, while a 272000 window triggers at 217600. Maximum model output is not subtracted from this trigger.
 
-Who writes that summary is chosen before the call. An explicit `summarizationProvider`/`summarizationModel` wins, whichever route's policy carries it; otherwise the step's own fixed route is used when the model it names can hold that call's own replayed input, the instruction appended after it, and that route's summary cap strictly inside its window — the call's own input, not the whole Session, so a smaller-window route still writes the part it can read — and the route the last request committed otherwise.
+Pricing uses the last comparable provider prompt count plus surface growth, pending messages, changed tools, and system-prompt growth. Without comparable usage it falls back to the token meter's estimate. A failed/aborted request header is not mistaken for the usage-bearing request.
 
-A target configured for the step's own route outranks that route's window, because the route is only the key it is configured under.
+At the trigger, Team prunes tool results and, if still needed, forces reduction with zero retained-tail budget; upstream may preserve a recent balanced block. Summary output defaults to 32768 tokens, independently of the input trigger, with per-model overrides.
 
-The step's route comes from `agent/pre-step.modelSelection`, is retained for that step only — so a retry or overflow recovery in the same step still sees it, while a later manual `/compact` does not — and is cleared when the step ends, is rejected, or throws. A request whose route departs from it is refused before any summary runs.
+Summary route selection is deliberate:
 
-A failure costs at most one more summary, and only when the step's own route was the chosen one: a target pinned globally or for the committed route is an operator decision, so its failure opens the circuit instead of rotating to the conversation model. A step therefore spends at most two automatic summaries however many entry points price it — the failure pauses that route's automatic summaries and later turns spend none, until the route or the summary configuration changes or a manual `/compact` succeeds.
+1. An explicit global or committed-route summary target takes precedence.
+2. Otherwise a target configured on the step's route takes precedence.
+3. Without an explicit target, the step's fixed route is used only if its window strictly holds the summary call's own input, instruction, tools, and summary cap.
+4. Otherwise the last committed request route is used.
 
-Beyond that the turn continues without a checkpoint rather than failing, and the failed attempt stays in the log as `compaction/end` with its error, so a Member whose route cannot write a summary is not locked out. That route is then left alone — later admissions send requests through without summarizing until the route or the summary configuration changes, or a manual `/compact` succeeds — and a request the provider's real window cannot hold ends its turn at the provider. A reduction that leaves input above the trigger without a summary failure still ends the turn.
+The step route is captured from `agent/pre-step.modelSelection` only for that step, including its retries. A route mismatch is refused before summary execution. The choice uses the replayed summary input, not the whole Session size; a later manual `/compact` has no stale step route.
 
-A paused route that overflows at the provider three times in a row, with no settled response in between, is reported as compaction unreachable: an error diagnostic carries the last upstream failure and the actions that actually help — a route change, Member recovery, or an idle generation swap — and leaving the route, a fresh generation, or a checkpoint that lands retires it.
+A step permits at most one alternative summary attempt. A globally pinned or committed-route target failure does not rotate away from that operator choice. If automatic summarization fails, that route is paused until the route/summary configuration changes or manual `/compact` succeeds. The failed `compaction/end` remains in the log; the turn may continue without a summary instead of being locked out.
 
-Each request's output allowance is capped at `W − estimated input − 4096`, never raised above its original allowance. The actual value is logged in the request header; a temporary reduction is removed before the next allowance is resolved, and a resumed loop starts from its declared options. Input pricing is heuristic, so provider overflow recovery remains necessary.
+A reduction that still leaves input over the trigger, without a summary failure, ends the turn. On a paused route, provider overflow can also end it. Three consecutive provider overflows without a settled response produce a compaction-unreachable diagnostic with recovery options; a route change, fresh generation, or successful checkpoint clears that episode.
 
-Cancellation follows the Agent's own stop/dispose semantics; only budget failures restore unadmitted input. A window too small to hold both the context reserve and a minimal output allowance — under 20480 tokens — cannot satisfy this policy at all, so the policy declines there and leaves the request to the Agent's own limits.
+Each request's output allowance is capped at `W − estimated input − 4096`, never increased above its requested allowance. This temporary clamp is logged and removed before the next resolution. Below a 20480-token window the policy declines because its reserves cannot fit. Only budget failures restore unadmitted input; cancellation follows Agent stop/dispose semantics.
 
-This is a trigger, not a physical ceiling: a tool result can cross it before the next request. `memberCompaction.enabled: false` restores upstream pressure handling, including its output reservation, headroom, and retained-tail policy. The adapter is mounted only in the Team preset; ordinary Sessions are unchanged.
+This is a trigger, not a physical ceiling: tool output can cross it before the next request. `memberCompaction.enabled: false` restores upstream pressure handling. The volatile Host-row group contains `enabled` and `tokens`; the Team 「上下文」 setting edits only `tokens`, accepts capacities such as `256K`/`1M`, and a blank value clears the override without changing `enabled`. Ordinary Sessions are unchanged.
 
-**Generation swaps.** A swap is a Host decision taken at a wake boundary and executed by Team's own coordinator (`team-context-management.ts`). It commits `team/member-session-recycled` as the Host actor, retires the old Session (dispose and archive, never delete), and activates a fresh one parented at the one it replaces, then rederives the Inbox.
+### Generation swaps
 
-The successor's identity derives from the retired Session, so a restart between the commit and the activation finishes the same swap rather than minting a second one. An older log's pending intent or checkpoint anchor is read only for legacy recovery; no current build writes one.
+A notification, DM, or explicit resume aimed at an idle Member can trigger a swap. By default, both conditions are strict: idle longer than 60 minutes and measured context greater than 128000 tokens. Unknown facts choose resume. Host startup does not create a swap just because it restarted, but finishes an already committed one.
 
-The ordinary swap has one trigger: a wake aimed at an idle Member through a notification, a DM, or an explicit Member resume. It is strict — the generation must have been idle longer than 60 minutes and measure more than 128000 context tokens — and every fact it cannot establish answers resume, the conservative direction because a swap that should not have happened costs a Member its working trail. Host startup restoration only reattaches the ledger's current Session and does not recycle it because the Host restarted.
+`wakeRecycle` is a volatile Host-row group with `enabled`, `idleMs`, and `minContextTokens`. No Team settings form exposes it; `enabled: false` disables new swaps. Pending ordinary input and owned-job guards can defer a swap even when the thresholds pass.
 
-An already committed transition is still finished; startup simply does not create a new one.
+A swap commits `team/member-session-recycled`, archives rather than deletes the old Session, and activates a fresh binding. The successor is not a Harness subagent: lineage comes from the Team transition, not a Session `parentSession` header. [Host authority](../architecture/host-authority.md#generation-swaps-and-input-replay) owns commit ordering, crash completion, and bounded input replay.
 
-`wakeRecycle` is a volatile Host-row group (`enabled`, `idleMs`, `minContextTokens`); the Team settings page renders no form for it, and `enabled: false` turns the swap off.
+The successor receives current identity, ownership, participation, private memory, and the wake input, not the old working context or a handoff briefing. Keep durable private conclusions in memory while working; there is no model action that starts, prevents, or steers a swap.
 
-The cold path decides from storage, not from a live Agent: a stored Session is rebuilt from its own log and its inbox inspected, and a pending ordinary message there keeps that generation instead of recycling it; a live generation is asked the same question from its queue before any context pricing.
+### Acceptance boundary
 
-A generation holding unprocessed non-Team input keeps its continuity. While a queued ordinary message is pending, the swap declines to start. Past that point the commit runs inside `agent.runMaintenance`, so a message arriving mid-swap waits in the durable inbox instead of reaching the retiring generation, and the retiring generation rejects any later step without spending a model request. Its original inbox insertions remain available for replay even after a claim.
+A Thread read that acknowledges acceptance prompts memory upkeep only when it concludes work the reader contributed to or was accountable for. An observing follower is left alone. The Member committing acceptance gets the same boundary without a separate read.
 
-What crosses a generation is inbox input at and after the recorded boundary, carried as Message ids: replay is bounded by that offset, deduplicated against what the successor already holds, and is not a general carry of working context.
-
-A swap leaves no mark on what the successor is told. Its first model-facing context is the same classified per-step injection every turn carries — identity, Project ownership, Workspace participation, and private memory — followed by the message that woke it. Continuity across a generation is not a briefing: it is `memory.md` being maintained while the work happens and read back afterwards.
-
-Because both mechanisms are Host-controlled, the model has no context tool at all: no rollover, no checkpoint, no status, and no advice riding a Thread read. Nothing a Member can say starts, prevents, or steers a swap.
+The Host steers one `<system-reminder>` into the relevant turn, naming the standing (`contributed`, `accountable`, or `accepted`) and asking for durable conclusions in the memory index and notes. At or above 128000 measured tokens, that boundary also requests in-place compaction once the Agent settles. It does not announce a handoff or promise compaction when no engine is mounted.
 
 ## Agent notification boundary
-Host derives bounded coalesced notices from durable unread state. Idle Agents start a turn; running Agents receive them at the next safe step. Direct mentions include body, sender, Project, Task overlay, Thread, and Message ref. Direct Task/Claim Activities include actor, transition, and affected refs. Ordinary unread exposes a Thread-first route, total, three latest digests, and overflow count; taskful summaries may name the Task. Digests bind nothing. No notice renders a revision or write token. Omitted details remain available through `team_inbox` and `team_thread`.
 
-A Member reminder occurrence carries its note and its reminderRef and nothing else: the note is why the Member was interrupted, and the ref is what `team_reminder list` and `cancel` read.
+A notice provides context and a route, not proof of acknowledgment or a next-write token. Idle Agents start a turn; running Agents receive notices at a safe step. A complete identified Message/Activity can satisfy a later mutation's context check, but a digest cannot.
 
-Missing direct signals are ranked ahead of reminders and ordinary digests. [attention-and-messaging.md](attention-and-messaging.md) owns the notice order, caps, and character budget.
+[Attention and messaging](attention-and-messaging.md#agent-delivery) owns ranking, coalescing, output limits, reminder consumption, and at-least-once delivery. Read missing or omitted facts with `team_thread`; use `team_inbox` to triage scopes. Thread unread stays unread until explicit read.
 
-Hints are at-least-once notification intent, coalesced per Member and rediscovered on restart/resume. A consumed or ignored hint does not create another turn until a later relevant durable change or recovery. Runtime recovery, error thresholds, and the two UI recovery actions remain Host behavior; they do not create ledger authority beyond their documented operations.
-
-Automatic recovery acts only on two conservatively matched error families — transient network failures and rate limiting — and counts consecutive `agent/error` occurrences per Member rather than wakeups or error text. Each of the first two occurrences schedules its own delayed wakeup, the third stands down and leaves the error with the operator, and a non-recoverable error cancels tracking outright. Only a clean turn end clears the count.
-
-Every delivery and recovery decision leaves one bounded line through the Host logger: an Inbox wake names the Member id, the Session, the request and operation that caused it, and the attempt it spent, and says a queued notice is not yet read by the model. Unchanged facts spend no second attempt and add no line above diagnostic level. A failed wake logs at warn, keeps the committed operation as its result, and clears its signature for the next rederivation; automatic recovery reports its classification, count, wait, wakeup, stand-down, and the reason tracking ended.
-
-Manual control of a Member's context is gone: no row action and no Remote write starts a new generation. The ledger keeps the older transition kinds (`team/member-session-renewed`, `team/member-session-rolled-over`) readable so recorded ledgers still replay, but nothing writes them.
-
-While a swap's ledger binding has moved and the successor has not activated, the Member reads unavailable with a `context rollover in progress` diagnostic; when that Member's Session is embedded in the right rail, the Client follows the old→new binding once, and archived views never follow.
-
-**The acceptance boundary.** A Thread read that acknowledges the acceptance of a Task also hands the reader a boundary of its own, but only when that acceptance concluded work the reader owned — its own Claim, or the Task it was accountable for; an observer following the Thread sees the same accept as unread and is left alone. The Member that commits the accept gets the same boundary without a read: the verifier never holds the Claim the read path keys on, so its own accept is the only boundary it can receive.
-
-The Host steers one `<system-reminder>` into the turn that noticed or committed the acceptance, asking the Member to move durable conclusions into its `memory.md` index and the notes it names. The reminder names the standing it addresses — contributed, accountable, or accepted. At or above 128000 measured tokens the same boundary also compacts the generation, once the Agent settles: acceptance usually lands mid-turn, and the engine only compacts an idle Agent.
-
-Nothing crosses the boundary — no handoff, no announcement — so the reminder states the consequence only when it is true, and a preset that mounts no compaction engine is never told otherwise.
+Recovery is distinct from unread. Runtime failures and recovery attempts do not create collaboration facts or move read watermarks. [Host authority](../architecture/host-authority.md#which-operations-wake-a-member-and-how-recovery-is-chosen) owns error classification, retry limits, diagnostics, and operator recovery.
 
 ## Assembled acceptance
-`npm run test:browser` runs the `team-journey` smoke and focused surface lanes on a credential-free Harness Web scaffold; `npm run test:browser -- --deep` adds the complete journey. Together they verify default taskless Thread creation, default-off Human 「作为任务」, Human promotion and Host reread, taskless header/Claim gating, a version-2 mention delivering directly, Agent Inbox read/reply, Human Project/Thread state, reload persistence, desktop/390×844/keyboard paths, Team exit, and ordinary DSH restoration.
 
-That `--deep` journey drives the Human's own durable writes: Thread follow and unfollow, whose control reads the Host observation rather than its own guess, and Task transfer to a Thread follower, including the mend of a finished Task whose accountable has lost Project ownership. Real Agent-loop integration tests separately cover safe-boundary wake and direct, Activity, and ordinary digest notification forms.
+The maintained [browser lane catalog](../development/e2e-lanes.md) owns scenario coverage and commands. Use the [verification gradient](../development/start-and-checks.md#verification-gradient) to choose component, integration, and assembled checks; unfiltered browser acceptance is the delivery gate for assembled-Web changes.
 
-That journey measures the band as well as driving it: one band holds every control at one height, radius, inset, stroke and step, and the follow control's two standings differ by a fill.
+Collaboration acceptance must distinguish durable state from presentation: taskless start versus Task promotion, Inbox listing versus read, follow versus mention, Claim completion versus acceptance, and reload versus a fresh projection. Include Human writes, Agent safe-boundary delivery, desktop/mobile keyboard paths, and ordinary DSH restoration where applicable.
 
-The Worker subscription scenario replays model responses through the real Agent loop: a timer publication wakes an owner, whose declared `team_worker` calls start two bound runs. A directed Human reply makes the owner stop just one, observe its confirmed Thread settlement, and keep answering while its sibling runs.
-
-Only the model and Codex executable are stand-ins; settings, notification delivery, tool execution, and ordinary DSH restoration are real. Published-CLI probes separately verify native engine behavior; replay does not prove model judgment or native steering.
+Replay can exercise real settings, notification delivery, and tool execution while substituting model responses and Worker executables. It does not establish live-model judgment, native CLI behavior, or native steering. Record that boundary rather than treating a replay result as evidence for all three.
