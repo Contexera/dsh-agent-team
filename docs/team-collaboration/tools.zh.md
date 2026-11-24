@@ -26,7 +26,11 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 ## `team_inbox`
 
-`team_inbox` 返回有 unread work 的 Threads 的有界、无正文 summaries，另为每个对读者有 Main stream 未读的 Project 列一行（其 Main stream Attention 覆盖的普通未读与每个读者的 marker）。Direct requests 排在 ordinary unread work 之前，之后按最新相关 sequence 排序。列出结果不改变 read state。header 给出 unread/direct 总数与展示的 Threads 数。有界列表之外仍有未读，header 给出截断结论。每个条目显示精确的 unread/direct 计数、Project ref 与 taskful 时的 Task standing。这是读者自己的 unread 队列。要看在途的工作（无论是否有未读），用 `team_task board`。页脚把正文阅读与确认指向 `team_thread read`。渲染不携带 revision 与写令牌。当前 read 才是必需的变更基础，并提供令牌。
+`team_inbox` 返回有 unread work 的 Threads 的有界、无正文 summaries，另为每个对读者有 Main stream 未读的 Project 列一行（其 Main stream Attention 覆盖的普通未读与每个读者的 marker）。Direct requests 排在 ordinary unread work 之前，之后按最新相关 sequence 排序。列出结果不改变 read state。
+
+header 给出 unread/direct 总数与展示的 Threads 数。有界列表之外仍有未读，header 给出截断结论。每个条目显示精确的 unread/direct 计数、Project ref 与 taskful 时的 Task standing。这是读者自己的 unread 队列。要看在途的工作（无论是否有未读），用 `team_task board`。
+
+页脚把正文阅读与确认指向 `team_thread read`。Inbox 结果不携带 revision 或写令牌。排空未读的 read 提供 next-write token；其他合格来源见[变更栅栏](boundaries.zh.md#mutation-fences)。
 
 ## `team_thread`
 
@@ -147,7 +151,7 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 
 `board` 渲染 Host 的 Task board 投影：读者可见 Project 的全部 open Task，按待处理、进行中、待验收分组、按最新活动排序；再列每个 Project 最近完成的 5 个 Task。每行携带 Task ref 与编号、Project、Thread ref、live Claim 上的 Members、读者与它的关系（`accountable`、`executor` 或 `project-owner`）、负责人、读者是否可验收、有界主题与最新活动时刻。
 
-`projectRef` 限定一个 Project；`mine` 只保留读者负责或持有 live Claim 的 Task。
+`projectRef` 限定一个 Project；`mine` 只保留读者负责或持有 active Claim 的 Task。
 
 `finishedTruncated` 说明 Host 是否还压着更早的已了结工作；渲染结果会把它写出来，所以一页永远不会被读成整列。
 
@@ -155,126 +159,89 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 
 `promote` 把讨论 Thread 转为 Task，需要 `threadRef` 与该 Thread 的 `baseRevision`，可选 `accountable`，只有 Project owner 可以执行（否则 `project_owner_required`）。
 
-`list`、`claim`、`done`、`release` 只管理 Agent 自己在真实 Task 上的 Direction Claims。taskless Threads 没有 Claim mutation path。Direction 是一句说明 Agent 工作角度的话，帮助其他人发现冲突并追踪进展。execution plans 和 acceptance checklists 应写在 Thread messages 中。Claim 成功后会自动开始 Attention。`list` 渲染 Task/Thread 身份与当前 collision surface：只有 active Claims，或显式的空。渲染结果不带写令牌，也不提供 Thread 事实或变更基础。commit 的 mutation 点名动作（Claim created、completed 或 released）。先渲染权威的受影响 Claim：ref、结果 state、owner、direction。再渲染 Task/Thread 身份，以及恰好一个 next-write token hand-off。
+`claim`、`done`、`release` 只管理 Agent 自己在真实 Task 上的 Direction Claims；`list` 列出该 Task 上所有 active Claims。taskless Threads 没有 Claim mutation path。Direction 是一句说明 Agent 工作角度的话，帮助其他人发现冲突并追踪进展。execution plans 和 acceptance checklists 应写在 Thread messages 中。Claim 成功后会自动开始 Attention。
+
+`list` 渲染 Task/Thread 身份与当前 collision surface：只有 active Claims，或显式的空。渲染结果不带写令牌，也不提供 Thread 事实或变更基础。commit 的 mutation 点名动作（Claim created、completed 或 released）。先渲染权威的受影响 Claim：ref、结果 state、owner、direction。再渲染 Task/Thread 身份，以及恰好一个 next-write token hand-off。
 
 拒绝与 message 拒绝使用相同形式及[完整性与令牌规则](boundaries.zh.md#mutation-fences)；每次尝试仍重新检查 Task 权限。
 
-`accept`、`close`、`reopen`、`transfer` 了结的是 Task 而非 Claim，权限由 Host 判定：`accept` 属于 Human、Project owner，或该 Task 自己的 accountable，且在该 Task 上持有过任何 Claim 的一律不行，Agent 只能在 in_review 时验收；`close`、`reopen`、`transfer` 属于 Human 与当前负责人。工具只转发 action 与写令牌，不重新推导该权限。
+`accept`、`close`、`reopen`、`transfer` 了结的是 Task 而非 Claim，权限由 Host 判定：`accept` 对 Human 开放；Agent 必须是 Project owner 或该 Task 自己的 accountable、从未持有该 Task 的任何 Claim，且只能在 `in_review` 时验收；`close`、`reopen`、`transfer` 属于 Human 与当前负责人。工具只转发 action 与写令牌，不重新推导该权限。
 
 `transfer` 取 `target`——该 Task 所在 Workspace 中任意 enabled Member 的 memberRef、`@Handle` 或唯一 memberRef 前缀，或 `human`——只转移责任，Claim 仍留在其 owner 手上；新 accountable 从此刻起参与该 Thread，并会收到这个 Task 现在要求它做什么。commit 的了结结果点名动作、结果 status 与 resolution、负责人，以及它完成或释放的 Claims。`self_acceptance_forbidden` 或 `accountable_owner_required` 拒绝的出路来自 Host 的 recovery registry，并补上 Task 的当前状态与负责人——那只有拒绝之后调用方自己才读得到。
 
 ## `team_subscription`
 
-`team_subscription` 创建并维护某个 Project 的订阅：一段由 Host 在没有 Session 的情况下、以该 Project 的身份运行的脚本——按间隔、收到 webhook 时，或两者兼有。动作有 `list`、`create`、`update`、`test`、`pause`、`resume`、`delete`、`baseline`、`logs`、`deliveries`、`replay`、`reset_webhook`。
+管理无人值守的 Project 脚本，支持 interval、webhook 或两者结合。每个动作都需要 `projectRef`，必要时带路由用的 `workspace`。
 
-只有该 Project 的 owner 可以修改、试运行或重放投递（否则返回 `project_owner_required`）。任何 Workspace Member 都可以用 `list` 读取 Agent 侧元数据，其中不含 script、credential 引用和 webhook arm；运行历史仍只向 Project member 开放，owner 输出权限如下所述。
+| 动作 | 其他输入 |
+| --- | --- |
+| `list` | 无；返回不含脚本、credential ref 或 webhook secret 的 Agent 侧元数据 |
+| `create` | `name`、一个脚本来源、至少一个 trigger；可选 `credentials`、`notify`、`baseline` |
+| `update` | `subscriptionRef`、`expectedRevision`、`name`、一个脚本来源与 trigger；可选 `credentials`、`notify` |
+| `test` | `subscriptionRef`；运行已存定义，不更新它 |
+| `pause`、`resume`、`delete`、`reset_webhook` | `subscriptionRef`、`expectedRevision` |
+| `baseline` | `subscriptionRef`、非空 `ids`；追加忽略 id，绝不清空 |
+| `logs` | `subscriptionRef`；可选 `limit`（1–50，默认 50） |
+| `deliveries` | `subscriptionRef`；列出自动重试已耗尽的失败 webhook delivery |
+| `replay` | `subscriptionRef`、`deliveryRef`；可选 `version: 'current' | 'received'`（默认 `current`） |
 
-`create`、`update`、`test`、`resume` 与 `replay` 会让 Host 在自己的 shell 上运行脚本并把输出交回调用方，因此 Agent owner 自身实际生效的工具范围里还必须有 shell 工具（`bash` 或 `pwsh`）；没有时调用会在读取或运行任何脚本之前以 `subscription_shell_required` 被拒绝。
+Project owner 管理、测试和重放订阅；`deliveries` 包含请求正文，仅限 owner。Workspace 参与者可以列出元数据；运行摘要要求 Project 读取权限。owner 与 Human 还能看到原因和 stdout／stderr 各自最后 8 KiB，成功运行也一样。
 
-`scriptPath` 必须留在调用方的工作目录之内：相对路径以它为基准解析，指向目录之外的绝对路径、`..` 越界或目标在目录外的符号链接都会被拒绝。Human 路径不受影响，始终粘贴脚本内容。
+`create`、`update`、`test`、`resume` 与 `replay` 还要求 Agent 实际工具面中有 `bash` 或 `pwsh`。否则在读取或运行脚本前以 `subscription_shell_required` 拒绝。owner 身份不绕过该执行边界。
 
-空的 `workspace`、`scriptPath` 与 `scriptContent` 视为未传；两个非空脚本来源仍然冲突，没有脚本仍是错误。`intervalMinutes` 或 `limit` 为零时按省略处理。这绝不丢弃 `notify: []`、`credentials: []`、`webhook: false` 或 `expectedRevision`：清空接收者、移除凭据引用、卸下 webhook 与版本校验仍是实际指令。
+脚本来源必须恰好是 `scriptPath` 或 `scriptContent` 之一。相对路径按调用者工作目录解析，位于该目录内的绝对路径也有效。词法逃逸与指向目录外的 symlink 被拒绝。Host 保存至多 16 KiB 的快照，并用生产执行器对 create／update 试跑，限时 60 秒。试跑失败返回原因和输出尾部，不存任何定义。credential ref 必须已配置，每次运行重新解析；工具最多接受八项 `REF` 或 `REF=ENV_NAME`，不接受 secret 值。
 
-`create` 与 `update` 用 `intervalMinutes` 指定定时、用 `webhook: true` 指定地址，也可以两者都要，两者都不给会被拒绝。`update` 里两者的省略语义不同：不给 `intervalMinutes` 就是去掉定时，而不给 `webhook` 表示地址照旧，只有显式 `false` 才会卸下它——不认识 webhook 的调用方不该把正在用的提供方连接切断。启用触发需要部署已配置公网地址（Host 行的 `webhook.publicOrigin`）。
+trigger 为 `intervalMinutes`（至少 5）、`webhook: true` 或两者。update 省略 `intervalMinutes` 会移除 timer；省略 `webhook` 保留已有地址，`false` 才解除。最终定义仍须至少有一个 trigger。空 `credentials: []` 会移除 credential，不是保留。
 
-启用或重置的那次调用会带回完整地址，而那也是唯一能读到它的时刻：账本只存 token 的哈希，所以同一请求的重试、之后的 `list`、订阅页面都不会再显示它。`reset_webhook` 按调用方读到的 `expectedRevision` 移动地址；旧地址立即失效，而已入队的投递继续处理。
+启用／重置 webhook 要求 Host row 的 `webhook.publicOrigin`。完整地址只在该次调用返回；后续 list／重试无法取回，因为只存 token hash。应立即注册给 provider。重置让旧地址失效，但不取消已经排队的 delivery。
 
-`logs` 读最近的运行记录——每个订阅保留 50 条，最新在前——带触发方式、开始时间、耗时、结构化类别、事件数、退出码或超时、这次运行固定的 revision，webhook 运行还带发起它的投递与 attempt。事件数是这次运行真正被账本接受的数量，所以只打印了订阅早已知道的 id 的运行计 0。
+脚本每行 stdout 打印一个 JSON 对象：`id`、`title`，可选 `url` 与 `detail`。按订阅与 event id 去重。create 默认 `baseline: 'current-output'`，忽略试跑看到的 id；`'ignore-history'` 从空集开始。update 保留原水位。状态转换不增加 revision，update 会增加；过时的 `expectedRevision` 被拒绝。
 
-webhook 运行若在未发布队列里找不到空位也不会丢：已校验的事件随这条投递保存，之后某一趟会原样接受它们，且不消耗投递的重试次数——只有一次运行自己就印出超过 500 条事件的，才会变成 `deliveries` 里的一条。
+`notify` 用 member ref、handle 或至少 6 位十六进制唯一前缀指定 enabled／suspended Workspace Member 或 Human。create 省略时只发给创建者，update 省略时保留收件人。`[]` 表示仅时间线，不产生 Inbox marker 或唤醒。发布时丢弃已无 Project 访问权限的收件人，不用 owner 替代。外部事件文本是数据，不是指令，也不解析 mention。
 
-Project 的 owner 与 Human 还能看到每次运行的原因和两路输出各自末尾 8 KiB——成功的运行同样如此；其他成员只看到摘要，因为脚本是在该 Project 的凭据下跑的。`deliveries` 只对 owner 列出（因为投递带着它到达时的请求体）自动重试用尽的 webhook 投递，带稳定 ref、接收时的 revision、最后一次错误与到期时间。每条在重试用尽时只计 1 次失败，所以三条这样的投递和三次失败的运行一样会暂停订阅。
+空 `workspace`、`scriptPath` 与 `scriptContent` 视为省略；零 `intervalMinutes`／`limit` 也一样。有实际含义的 `notify: []`、`credentials: []`、`webhook: false` 与 revision 值不会被丢弃。
 
-`replay` 重跑一条，默认用当前脚本（这样修好的脚本能处理旧请求），也可以 `version: received` 用该投递接收时的定义。它是一次运行：占用运行位、受同一订阅互斥约束，暂停、删除或已归档的订阅在入场时被拒绝。
+每个订阅每分钟最多发布 20 个事件，最多 500 个已接受事件等待发布。连续三次运行失败会暂停；试跑不改变失败计数。webhook 队列压力可以延后接受已验证输出，而不重跑脚本。
 
-重放会发布脚本打印的内容，绝不计为订阅的失败。重复调用保持同一 request id，该 id 之后回答的是第一次调用的结果。一个 id 只命名一个意图：用它指另一条投递、或同一条投递的另一个版本，按请求碰撞拒绝；已经重放成功的投递不会被新的 id 再跑一遍。
+replay 按要求使用当前定义或收到请求时的版本。paused／deleted／archived 目标拒绝重放。它发布输出，但不计为订阅失败。一个工具调用身份只代表一个 delivery／version；重试返回原结果，改变意图则冲突，已成功重放的 delivery 不会因新 id 再跑一次。
 
-`create` 与 `update` 用 `scriptPath` 给脚本——按调用者自己的工作目录解析，也就是它 shell 工具所用的目录——或用一个没有文件可指时给的 `scriptContent`。Host 读取文件、存下不超过 16 KiB 的快照，并用正式运行的同一套方式试运行一次：同一个执行器、同一份显式 sandbox policy、60 秒上限、同一套输出合同。试运行失败就拒绝这次写入，返回 stdout 与 stderr 的末尾内容，什么都不会存下。声明的每个 credential 引用必须已配置，且 Host 每次运行前重新解析——之后被移除的引用会让那一次运行明确失败，而不是悄悄少一个变量。
-
-create 与 update 的请求身份包含脚本来源、触发选项与 create baseline。已提交请求的重试仍校验当前操作者与 Project 所有权，然后直接从账本回答，不再读取脚本文件、检查凭据是否可用或重跑试运行；同一 id 使用不同选项按碰撞拒绝。旧记录若没有保存脚本路径，路径重试会被拒绝并返回已提交的 `subscriptionRef`；调用方应先读取该订阅，再发起新请求。
-
-新订阅默认把试运行输出的 id 记为去重基线，因此第一次正式运行不会把脚本已经发现的内容全部重发一遍；`baseline: ignore-history` 则从空基线开始。`update` 从不改动这条水位线：脚本的 id 规则变化后，用 `baseline` 追加要忽略的 id，既有记录不会被清除。暂停、恢复、删除都要带 `expectedRevision`；update 推进版本，状态转换不推进。
-
-事件就是脚本的 stdout：每行一个 JSON 对象，含 `id`、`title`，可选 `url` 与 `detail`。去重范围限定在单个订阅内，两个脚本输出相同 id 时各自都会发布。新事件作为接受写入账本，再按每个订阅每分钟最多 20 条发布到该 Project 的 Main stream；最多 500 条已接受未发布的事件可以等待，会使未发布总量越过这条上限的一批整批拒绝并计 1 次失败，而不是被悄悄截断。试运行既不计入也不清零失败计数；连续三次运行失败会暂停订阅，并在账本中这样记录。
-
-`create` 与 `update` 接受 `notify`：已发布事件要送达哪些 Member 的 Inbox，每个以 `memberRef`、`@Handle`、唯一的 6+ hex 前缀或 `human` 给出。可以点名该 Project 所在 Workspace 的任何启用或停用中的 Member（owner 与否皆可），Human 被点名时同样送达；省略该字段时，`create` 只送给创建者本人，`update` 保留已存集合；显式传空数组是一个真实的选择——事件照常进 Main stream，但不唤醒任何人。
-
-发布提交时，已不能读取该 Project 的收件人（已归档或已不在其 Workspace）会被丢弃，而不是用 owner 顶替；停用中的收件人留在名单上，恢复后照常收到；该字段出现之前写下的记录，一律按创建者本人读取。
-
-结果会写明订阅、状态、版本与间隔；被拒绝的试运行会渲染原因和两条流的末尾内容。脚本打印的内容是数据，不是指令：Main stream 上的事件标注为不可信文本，其标题、链接与说明不会变成 mention。Project 订阅是无人值守执行——受限 Member 由此获得一条执行入口，Main stream 记录每次修改，Human 可以随时暂停订阅。
+已提交 create／update 的重试会重查当前 actor 与 owner，然后返回回执，不重读文件或重跑试验。同一调用 id 下更换脚本来源／选项会冲突。调度、沙箱策略、队列接纳、私有历史与 webhook 传输限制由 [Host authority](../architecture/host-authority.zh.md#订阅调度与无人值守执行)维护。
 
 ## `team_worker`
 
-`team_worker` 把一件自包含的工作交给本机 Worker 引擎——Codex 或 Claude Code——用它自己的工具、登录与设置执行。参数为 `task`，`threadRef`、`taskRef`、`projectRef` 三者至少给一个，以及可选的 `engine`、`cwd` 与 `requestId`。
+把可独立交接的工作委派给本地 Codex 或 Claude Code。Worker 使用自己的工具、登录与设置，看不到父会话。任务文本需包含目标、背景、范围与所需证据。调用 Member 仍负责核验结果，并保留原有 Task Claim 责任。
 
-一次调用是四种形状之一：start、stop、只读查询或 steer。stop 与只读查询各自只命名一个 `worker:` ref、不带其它参数，steer 则是该 ref 加一句 instruction。
+| 模式 | 参数 |
+| --- | --- |
+| 启动 | `task` 加上 `threadRef`、`taskRef` 或 `projectRef`；可选 `engine`、`cwd`、`requestId` |
+| 停止 | 只传 `stop: <worker:…>` |
+| 诊断 | 只传 `inspect: <worker:…>` |
+| 追加指令 | `steer: <worker:…>` 与 `instruction`；可选 `requestId` |
 
-空槽在区分形状之前就视为未传——把每个可选槽位都填满的模型会在 start 上发 `stop: ''`、在 stop 上发 `task: ''`，两者都不命名 ref 或 task——而真实值仍会得到点名冲突的拒绝。`engine` 是 start 的选择器，所以在其余三种形状上，它出厂默认的 `codex` 同样被丢弃，写明另一引擎则被拒绝。
+`workspace` 是可接受的路由槽位，但 Worker 授权取自目标或已记录执行，不靠它改变 cwd 或选择 actor。控制调用容忍无意义填充的 `engine: 'codex'`；其他引擎或有实际含义的启动字段会被拒绝。
 
-目标决定结果去处。绑定到 Thread 的执行在原 Thread 上留结果：开始与终态成为所有参与者都能读到的 Thread 事实，答案则进发起成员的 Inbox。只绑定 Project 的执行什么都不发布，结果像引入目标之前那样回到调用者自己的 Session；它的执行记录仍然写入，因此仍能按 `worker:` 引用查到。
+启动要求 Host Worker 开关开启、引擎启用，并且调用者当前拥有目标 Project。开关关闭时不声明该工具。显式目标必须一致：Task 属于 Thread，两者也须属于显式指定的 Project。缺少、未知、冲突或无权访问的目标都在启动原生进程前拒绝。
 
-委派默认关闭，直到操作者打开。Team 设置行携带 `worker` 组：`enabled`、`defaultEngine`、每个引擎一项（`enabled`、`executable`，Codex 另有 `sandbox`），以及可选的 `timeoutMs`；所有字段都是 volatile，改动能到达运行中的 Host。两个引擎都以全权限运行、无需任何配置：`sandbox` 默认 `danger-full-access`，设置页不提供该字段，收紧 Codex 的策略要手写设置行。
+`engine` 为 `codex` 或 `claude`，省略时用 Host 默认值。不自动改用其他引擎、账号或模型。`cwd` 必须能解析为绝对工作目录，省略时默认调用 Session 的目录。
 
-`executable` 存在的原因是 Host 进程的 `PATH` 不是 shell 的 `PATH`：人装好的 CLI 可能不在 Host 搜索的路径里，留空则沿用引擎自己的发现规则。
+启动立即返回 `worker:` ref、Project、引擎、cwd 与开始时刻，工作在后台继续。不要轮询。相同意图重复使用 `requestId` 会返回原执行，并发启动也一样；复用该 id 却更换 Member、任务、引擎或目标会冲突。
 
-开关关闭时，`team_worker` 根本不会声明给 Member；打开后在 Member 的下一个 turn 边界出现，关闭后收回。同一开关还决定 `team:project-owner` guidance section 里的 Worker 段落，而该段落每次组装都会重新求值。已在执行的 run 无论开关如何都保留自己的 handle：开关只拦新的委派，而 registry 在关闭时仍然拒绝发起。
+绑定 Thread／Task 的执行发布 `worker_started` 与 `worker_settled` 事实，不发布答案。答案作为不可信外部文本到达发起 Member 的 Inbox，不再另发父会话通知。只绑定 Project 的执行不公开发布，保留父通知路径。两者都不创建 Task、Main 条目或 Claim，不改变 Thread revision，也不验收工作。
 
-以下情况一律在写 started 记录之前、启动任何原生进程之前拒绝：没有给出目标（`worker_target_required`）；指定的 Thread（`worker_thread_unknown`）、Task（`worker_task_unknown`）或 Project（`worker_project_unknown`）不属于本 Team；调用者当前不是目标所属 Project 的 owner（`worker_owner_required`）。
+stop 仅授权发起 Member；Human 另有 Web 停止入口。关闭新委派或失去 Project owner 身份不会撤销已有停止句柄。结果等待清理与持久终态：`worker_stop_pending` 表示操作仍在继续，`worker_stop_unrecorded` 表示终态未获持久确认。已经结束时返回真实状态。
 
-目标必须一致：Task 须属于同时指定的 Thread；显式给出的 Project 也须包含该 Thread 或 Task。矛盾目标按 `worker_target_conflict` 拒绝，重送一个原先合法的请求时也一样，不会静默丢弃显式 Project。
+inspect 只授权发起者与 Human，不授权新任 Project owner。结果包含已存摘要、原生标识，以及已结束执行的原生记录中的有界片段；无法读取时说明原因。运行中／未确认执行不提供已结束片段。原生记录不复制进 Team 存储，也不向同行发布。
 
-其余拒绝来自设置与这次执行本身：开关关闭（`worker_disabled`）；指定的引擎不是 Worker 引擎（`worker_engine_unknown`）或未启用（`worker_engine_disabled`）；任务文本为空（`worker_task_required`）；无法解析出绝对工作目录（`worker_cwd_required`）；Harness subagent 服务未挂载（`worker_unavailable`）；或该 `requestId` 已被另一个委派用掉（`worker_request_conflict`）。拥有一个 Project 不授予另一个 Project 的授权，Team preset 之外的普通 DSH Session 也不会获得这个工具。
+steer 向同一原生会话提交一条指令；运行中的引擎可在当前或后续 turn 接收。`submitted` 不表示模型已读，也不保证落入固定 turn。只有发起 Member 能 steer，Human 没有该入口。
 
-`engine` 只覆盖这一次委派的 `defaultEngine`；引擎不可用会说明原因，不会自动改用其他引擎、账号或模型。用相同 `requestId` 重送会返回首次调用已经启动的那次执行，绝不会再开一个——两次并发到达也一样。这个 id 只代表那一次委派：换一个成员重送、或改掉任务、引擎、目标，都会被拒绝，而不会拿到一次它没要求的执行。
+链上最新执行干净结束后，包括干净失败，可以续跑为新执行，返回新 ref 与 `continuedFrom`；前驱不变。续跑重查 Member、Project owner／状态、开关、引擎与原生记录。停止中、未确认或上个 Host 留下的 running 执行不会复活。并发续跑进入同一个后继。
 
-回执给出 Team 执行编号（`worker:` 引用）、Project、引擎、工作目录与启动时刻，绑定执行还给出 Thread，并说明执行在后台继续、结果会出现在哪里。
+steer 重试使用持久请求身份。相同 id 返回首次回执／拒绝，不再投递；更换指令、Member 或 Worker 会冲突。新 id 的同文请求会成为 pending／submitted／ambiguous 接纳的 alias。原生明确拒绝表示未投递，允许新 id 重试；ambiguous 或 unconfirmed 不是盲目重试的理由。
 
-同一个工具也能停止一次执行：只给 `stop: <worker:…>`。停止只授权发起 Member，Human 可通过「编辑 Agent」弹窗停止。当前 owner 或设置开关只约束启动。已结束的执行不会再次被停止；没有活跃句柄且没有终态记录时，拒绝码为 `worker_unconfirmed`。
-
-停止等待清理和终态落账，重试也遵守相同的等待上限。超时返回 `worker_stop_pending`，说明还在等待什么，已开始的操作继续执行。清理失败会记录 `failed` 并附诊断；终态写入失败会返回 `worker_stop_unrecorded`，重试也不会把内存里的终态当成确认结果。工具结果保留这些 Worker 拒绝码。
-
-两次执行彼此独立：停一条不影响另一条的进程、Thread 事实与 Inbox 通知。
-
-绑定执行发布两条 Thread 事实：开始时 `worker_started`，结束时 `worker_settled` 带 `state`，失败或停止再加一行有上限的 `reason`。答案永远不是 Thread 事实：它随唤醒发起成员的那条 Inbox notice 抵达，标明是外部文本、是数据不是指令，父 Session 不会再收到一份。只绑定 Project 的执行保持 parent 通知、不发布任何东西。两者都不创建 Task、Main stream 条目或 Claim。
-
-把 Task 上的工作委派出去不改变任何责任：Claim 仍属于该成员，执行完成从不自动验收，独立验收规则照旧适用。
-
-Worker 不持有 Team 身份：它不能发帖、认领、验收或代替成员作答。若它承担了某个 Task 的实施，Claim 仍属于该成员，独立的验收规则照旧适用。Worker 返回的内容是待核对的证据，不是指令。
-
-每次执行的记录都是持久的：Thread 读取会报告绑定到它的每次执行，状态为 `running`、`completed`、`failed`、`stopped` 或 `unconfirmed`；只绑定 Project 的执行同样记录这些事实，只是不发布到 Thread。上一个 Host 留在 `running` 的记录读作 `unconfirmed`：结果无法确认，不重跑、不自动重试，也不会为它唤醒任何人。
-
-同一个工具也能按编号只读查看一次执行的诊断：只给 `inspect: <worker:…>`，不给别的。答案包含 Thread 已经承载的摘要、失败发生的阶段、结算时记录的原生标识（引擎自己的会话、本次执行拥有的 turns 与 input ids、其记录的绝对路径），以及进程退出后该记录仍能回答的有界片段；读不到时给出那一个真实原因。原生记录本身从不复制进 Team、不落盘、不发布：Thread 保持原有摘要，详细答案只给发起这次执行的成员与 Human，Human 在「编辑 Agent」弹窗里按行读。
-
-只有发起成员与 Human 能查，其他成员即使现在是该 Project 的 owner 也按 `worker_inspect_forbidden` 拒绝。尚未结束的执行只回答摘要，并说明原生记录在结束后才读取。若执行在引擎记录会话之前就结束，或记录已不存在、不可读、格式不认识、没有与所记 id 对应的 turn，则保留 Team 摘要并说明该原因，而不是返回并不存在的片段。
-
-读取有界且自校验：记录位置必须是引擎自己目录下以 `.jsonl` 结尾的绝对路径——Codex 是 `sessions`，Claude 是 `projects`——超长值整条拒绝，而不是裁成一个没人记录过的路径。Claude 的流里没有记录路径，所以结算时由 CLI 自报的 cwd 与本次执行打开时的环境推导。打开的文件必须就是该位置所指的文件——打开时核对身份，读取后再核对一次——首条记录必须写明所记会话，字节上限在任何分行与解析之前生效。续跑执行会跳过前驱前缀，并在自己的 turns 完成后、或在下一条不是它提交的根 prompt 之前结束。片段只取这些 turn 少数结构上安全的字段并逐条限长；命中凭证形状的文本整条不返回，而不是掩码，带引号的 JSON 键值同样如此。Claude 重复的 turn metadata 会去重，避免后面的失败被挤掉；四个片段上限仍省略事实时会标 `truncated`。每条原因都是一句有界的话，陈述事实而不回显原生值；引擎记录的任何内容都不会写回 Team。
-
-Human 的「编辑 Agent」弹窗给出五行以内：本 Host 仍持有的执行与上一个 Host 留在 `running` 的未确认记录先占座位，按结束时间排序的最近几条已结束执行补满其余——早启动、刚结束的长执行仍在这个窗口内——每条都显示真实终态。
-
-已结束的行提供诊断入口；运行中与未确认的行没有可读的东西，因此不带门。Human 界面只有这一个入口：编号在这个界面上从不显示，所以没有按编号查询的输入框；按编号读取仍是成员工具 `inspect` 的入口。
-
-同一个工具还能向 Worker 的同一个原生会话追加指令：给 `steer: <worker:…>` 和 `instruction`，不给别的。Codex 与 Claude 走同一条路。执行仍在运行时，OAR 把输入送进当前 turn、排队中的 turn，或 idle 会话的下一 turn；执行会等待每个已接受输入结束，后来的回答、失败、停止、超时与部分输出都属于同一个 Team 终态。
-
-回执只说 `submitted`，绝不说模型已经读取或固定落在某一轮。引擎确认过 turn 时回执带上它，并报告写回执这一刻的执行状态，因此期间落地的停止或结束是可见的。
-
-链上最新执行已干净结束时，steer 会恢复它的原生会话，建立一条新的关联执行并返回新的 `worker:` ref 与 `continuedFrom`；旧终态保持不变，新 ref 可继续 stop、inspect 或 steer。干净失败同样可续跑。停止中、清理未确认、Project 已归档、owner 权限已撤、Member 或引擎已关闭、原生记录缺失或不匹配，以及上一个 Host 留下的 `running` 记录都会拒绝。
-
-只有原执行的发起成员能补，其他成员按 `worker_steer_forbidden` 拒绝；Human 没有 steer 入口。续跑会重查当前 Worker 与指定引擎开关、Project 状态与 owner、发起 Member。账本保证一个原生会话至多一条运行中执行、每条执行至多一个直接后继，所以并发续跑会进入已建立的 ref，不会另开原生会话。
-
-每条指令按其所属执行只送一次。Host 先在账本接纳请求，再触及原生投递；refused、ambiguous 或 submitted 也先记录，才向调用方报告。同一 request id 重送会拿回第一次的回执或拒绝，执行结束或 Host 重建之后也一样，不会再到达引擎。
-
-同一句话的新 request id 会成为该接纳的持久 alias；它不读原生记录，直接返回同一结果，并发的 canonical 与 alias 调用只产生一次投递。用已用过的 request id 送不同指令、换 Member 或换 Worker 按 `worker_steer_conflict` 拒绝。
-
-已接纳但结果始终没进账本的请求读作 `worker_steer_unconfirmed`，不是重送的理由。原生明确拒绝表示什么都没送达，因此可以换新 request id 重试；传输不明保持 ambiguous，绝不重试。后续关联执行可以用新 id 接收同一句话。
-
-活动投递控制归本 Host 的执行注册表所有：引擎会话打开时建立，该执行结束时摘除，Host 释放执行时清空；续跑作为自己的执行持久化。steer 的私有账本回执与续跑都不改 Thread revision、Task、Claim、前驱终态或既有执行；只有续跑会增加自己的 Worker start 与 settle 事实。
-
-卸载插件会拒绝新的委派，先取消仍在启动的执行（包括还在写 started 记录的），活动 steer 调用也共用这段有界启动等待，随后用屏障拒绝迟到的回执写入；再等待本 Host 仍持有的执行清理并落终态后才关闭存储。到界限仍未确认的执行保留 `running` 记录并封口，关闭存储后不会再写入迟到的终态。已经开始的持久写入会在 provider 释放前等待完成；十一秒终态等待界限不会取消一个不再回答的存储写入。
+执行状态为 `running`、`completed`、`failed`、`stopped`，上个 Host 的 running 记录投影为 `unconfirmed`。不确定时不自动重跑。设置、原生诊断防护、steer 接纳与卸载清理由 [Host authority](../architecture/host-authority.zh.md#worker-委派)维护。
 
 ## Team manager 工具面
 
-九个 manager 工具不属于这份 Member 协议，也从不声明给 Member：`team_overview`、`team_models`、`member_create`、`project_create`、`project_owner`、`project_update`、`member_update`、`member_state` 与 `member_workspace` 只挂在隔离的 `team-manager` preset 里，每个 handler 都会拒绝任何不是当前 manager 的 Session。
+manager 不是 Member，使用独立的 `team-manager` preset。其九个工具为 `team_overview`、`team_models`、`member_create`、`project_create`、`project_owner`、`project_update`、`member_update`、`member_state` 与 `member_workspace`，从不声明给 Member。
 
-它们沿用本文的规则——已提交的写操作答回自己的回执，拒绝会说明原因且什么都没写；`requestId` 让重试保持幂等，而同一个 id 下改了参数就是冲突；省略的可选字段保留已存的值，而不是清空它——并且校验两次：工具入口一次，账本串行段落内、幂等重放分支之后再校验一次。
-
-它们的契约、挂载它们的 preset，以及它们运行所依据的 manager 权限，归 [Team manager preset](../architecture/tools-and-preset.zh.md#team-manager-preset) 所有。
+参数、当前 manager 授权与提交后重试规则由 [Team manager preset](../architecture/tools-and-preset.zh.md#team-manager-preset)维护。不要从 Member 工具推断其可选字段行为：省略或空值的含义由各 schema／action 决定。

@@ -33,88 +33,66 @@ ownership 和参与始终给出完整列表，包括 ownership 撤销为空，�
 skills 用文件配置，经 manager preset 的隔离 registry 按轮次发现：provider 先扫随包发布的 manager root，再扫可写的 `manager/skills/`，所以同名的私有 skill 不会盖住内置的。Host 全局 skills 不会进入 manager 的目录或加载器。在这里增删私有文件，下一轮就能看到，不必换会话、也不必改 preset。这两处 root 都不会挂给 Member 或普通 Session。
 
 ## 上下文生命周期归属
-Member 的上下文只有两个机制，且都不由模型发起。
 
-**就地压缩。** preset 挂载 `member-compaction-engine`，它是 Harness `BasicCompactionEngine` 的薄适配层。Team 负责主动请求准入；父类提供摘要模板、工具配对安全切分、持久化事务与 overflow 重试。压缩不换代，也不删除原始日志。
+Member 维护私有连续性，不管理上下文生命周期。Team 有两种自动机制：原地压缩缩短 Session，换代则替换 Session 绑定。两者都不是模型可调用的 Team 工具。
 
-输入触发线是 `floor(min(B, W × 0.8, W − 16384))`，`B` 为 `memberCompaction.tokens`（默认 256000），`W` 为路由窗口。窗口未声明时仍执行绝对预算。1M、2M 模型在 256000 触发，272000 模型在 217600 触发。触发线不扣模型最大输出。准入前计入待发送消息、本次工具声明与 system prompt 增量。
+### 原地压缩
 
-这个计数取上一次请求的 provider 自报 prompt 数，加上此后本 surface 的增量，再补上本步声明而那次请求没有的工具集。只有在没有可比请求时才回落到 meter 的固定密度启发式：失败或中止的尝试会留下 header 却没有 usage，所以计数所属的那份 header 从日志里解析，而不是直接取最新的一份。只按启发式计价会把长 Session 算得远低于 provider 的计数，触发线要等窗口已经用光之后才到。
+preset 适配器使用 Harness 的 `BasicCompactionEngine`，保留当前代与原始日志。主动输入触发阈值为：
 
-`memberCompaction` 是 Host 行上的 volatile 配置组（`enabled`、`tokens`）。Team 设置页在「上下文」下只编辑 `tokens`，经共享的配置表单读写：字段按容量书写（`256K`、`1M`），留空则清除覆盖，让这一组回落到组合层与它的 256000 默认值。写入点名 `memberCompaction.tokens` 这条子路径，兄弟 `enabled` 开关不受影响。
+`floor(min(B, W × 0.8, W − 16384))`
 
-输入达到触发线后，Team 先裁剪工具结果，必要时请求一次上游强制缩减。这条路径的原文保留预算为零，不再保留大窗口的 0.16；上游仍可能保留最近的完整消息组。摘要输出独立设为 32768，按模型的策略可以另设。
+`B` 是 `memberCompaction.tokens`（默认 256000），`W` 是路由的上下文窗口。没有声明窗口时仍使用 `B`。因此 1M／2M 模型默认在 256000 触发，272000 窗口在 217600 触发。该阈值不扣除模型最大输出。
 
-这份摘要由谁写，在调用前就已选定。显式配置的 `summarizationProvider`/`summarizationModel` 优先，写在哪条路由的策略上都一样；否则当步骤自己的固定路由所指模型能把「这次调用自己的重放输入＋它之后追加的指令＋该路由解析出的摘要上限」严格放进窗口时用它——量的是这次调用的输入而不是整个 Session，所以窗口更小的路由仍能写它读得下的那部分——做不到则用上一次请求提交的路由。步骤自己的路由上若有显式目标，则该目标优先于这条路由的窗口——路由只是它被配置的键。步骤路由取自 `agent/pre-step.modelSelection`，只在那个步骤内有效——同一步的重试与 overflow 恢复仍读得到，之后的手动 `/compact` 读不到——并在步骤结束、被拒绝或抛错时清除。请求路由偏离它时，在写出任何摘要之前就拒绝。
+计量使用上次可比较的 provider prompt 数，加上 surface 增长、待输入消息、工具变化与 system prompt 增长。没有可比较 usage 时才退回 token meter 估算，不会把失败／中止请求的 header 误当成有 usage 的请求。
 
-一次失败最多再多付一次摘要，而且只在选中的是步骤自己的路由时才补：写在全局或 committed 路由上的目标是 operator 的固定决定，失败即开路，不换成对话模型；因此一步最多两次自动摘要，无论有多少入口为它计价——失败之后该路由的自动摘要整体暂停，后续轮次不再花费，直到路由或摘要配置改变、或手动 `/compact` 成功。再往后本轮不再写 checkpoint 而是继续，失败的尝试以带错误的 `compaction/end` 留在日志里，所以写不出摘要的成员不会被困住。该路由随后被搁置——后续准入直接放行、不再摘要，直到路由或摘要配置改变、或手动 `/compact` 成功——而 provider 真实窗口装不下的请求由 provider 结束本轮，而不是被 Team 的准入量度拦截。没有摘要失败、只是缩减后仍高于触发线时，同样明确结束 turn。
+达到阈值后，Team 先裁剪工具结果，仍有需要才强制压缩，保留尾部预算为零；上游仍可能保留最近的平衡块。summary 输出默认 32768 token，与输入阈值独立，可按模型覆盖。
 
-暂停摘要的路由若在没有成功响应插入的情况下连续三次被 provider 拒绝上下文，上报为「该 Member 的压缩不可达」：错误诊断携带最后一次上游失败与真正有帮助的动作——改路由、Member recovery、或空闲换代——离开该路由、新代际或成功写入 checkpoint 都会解除这个诊断。
+summary 路由有明确优先级：
 
-每次请求的输出额度最多为 `W − 估算输入 − 4096`，不会提高原有额度。实际值写入 request header；解析下一次额度前会移除临时缩减，恢复的 loop 则从声明的 options 开始。输入计价仍是估算，因此保留 provider overflow 恢复。
+1. 显式的全局或已提交路由 summary target 优先。
+2. 否则，step 路由上配置的 target 优先。
+3. 没有显式 target 时，只有 step 固定路由的窗口严格容得下本次 summary 输入、指令、工具与 summary 上限，才使用它。
+4. 否则使用最后一次已提交请求的路由。
 
-取消沿用 Agent 的 stop/dispose 语义；只有预算失败会恢复尚未准入的输入。窗口小到容不下 context 预留加最小输出额度（不满 20480 token）时，策略无法自洽，会直接退出，请求交给 Agent 自身的限制。
+step 路由从 `agent/pre-step.modelSelection` 捕获，只在该 step 及其重试中有效；路由不一致会在 summary 前拒绝。判断依据是本次回放的 summary 输入，不是整个 Session 大小。之后手动 `/compact` 不会沿用过期 step 路由。
 
-这是触发线，不是物理上限：工具结果可在下一次请求前越线。`memberCompaction.enabled: false` 恢复上游压力判定，包括输出预留、headroom 与尾部保留策略。适配层只挂在 Team preset，普通 Session 不变。
+每个 step 至多允许一次替代 summary 尝试。全局或已提交路由的显式 target 失败，不会轮换离开操作者的选择。自动 summary 失败后暂停该路由，直到路由／summary 配置变化或手动 `/compact` 成功。失败的 `compaction/end` 留在日志中；turn 可以不生成 summary 而继续，不被永久锁住。
 
-**换代。** 换代是 Host 在唤醒边界做出的决定，由 Team 自己的协调器（`team-context-management.ts`）执行。它以 Host actor 提交 `team/member-session-recycled`，退役旧 Session（dispose 并归档，绝不删除），再激活一代新的、lineage parent 指向被替换的那一代，随后从 ledger 重导出 Inbox。
+若压缩后仍超阈值，且不是 summary 失败，则结束 turn。路由暂停后，provider overflow 也可能结束 turn。没有成功响应隔开的连续三次 provider overflow 会产生 compaction-unreachable 诊断与恢复选项；切换路由、新一代或成功 checkpoint 会清除该周期。
 
-新代的身份从被退役的 Session 派生，所以 commit 与激活之间重启会补完同一次换代，而不是另造一代。旧日志里的 pending 意图或 checkpoint 锚点只为 legacy 恢复而读；当前构建不再写其中任何一种。
+每次请求的输出额度限制为 `W − estimated input − 4096`，不超过原请求额度。临时限制写入日志，下次计算前移除。窗口小于 20480 token 时无法容纳保留量，该策略不介入。只有预算失败才恢复未接纳输入；取消遵循 Agent 的 stop／dispose 语义。
 
-常规换代只有一个触发点：一次通过通知、DM 或显式 Member resume 指向 idle Member 的唤醒。判定是严格的——这一代必须已经 idle 超过 60 分钟，且实测 context 超过 128000 token——而任何无法确立的事实都答 resume。Host 启动恢复只重新挂载 ledger 当前绑定的 Session，不会因为 Host 重启就单独换代。已经提交的 transition 仍会补完；启动只是不会新创建一次。那是保守的那一侧，因为不该发生的换代会让 Member 丢掉工作轨迹。
+这是触发阈值，不是物理上限：工具输出可在下次请求前越过它。`memberCompaction.enabled: false` 恢复上游压力处理。volatile Host-row 组包含 `enabled` 与 `tokens`；Team「上下文」设置只编辑 `tokens`，接受 `256K`／`1M` 等容量，留空清除覆盖但不改变 `enabled`。普通 Session 不受影响。
 
-`wakeRecycle` 是 Host 行上一个 volatile 配置组（`enabled`、`idleMs`、`minContextTokens`）；Team 设置页不为它渲染表单，`enabled: false` 关掉换代。
+### 换代
 
-冷路径从存储判断，不靠 live Agent：存储中的 Session 由自己的日志重建后看 inbox，里面有 pending 的普通消息就保留那一代、不换代；live 的那一代则在计价前先问自己的队列。
+发给 idle Member 的通知、DM 或显式 resume 可以触发换代。默认两项条件都必须严格超过：idle 长于 60 分钟，实测上下文大于 128000 token。未知事实选择 resume。Host 不会仅因重启而新建换代，但会完成已经提交的换代。
 
-还持有未处理普通非 Team 输入的一代保持连续性。只要还有普通消息在排队，换代就不启动。过了那一关，commit 在 `agent.runMaintenance` 内执行，换窗中途到达的消息留在 durable inbox，不会落到正在退役的那一代；退役中的一代 reject 后续 step，不花一次模型请求。输入即使已经被 claim，最初的 inbox 插入记录仍可用于重放。
+`wakeRecycle` 是 volatile Host-row 组，包含 `enabled`、`idleMs` 与 `minContextTokens`。Team 设置页不提供表单；`enabled: false` 禁止新换代。即使达到阈值，待处理普通输入与自有 job 防护仍可能推迟换代。
 
-跨代的只是已记录边界及其之后的 inbox 输入，以 Message id 传递：重放以此为界，按新代已持有的消息去重，不是一般性的工作上下文搬运。
+换代提交 `team/member-session-recycled`，归档而非删除旧 Session，并激活新绑定。后继不是 Harness subagent：血统来自 Team transition，不是 Session 的 `parentSession` header。提交顺序、崩溃续完与有界输入重放由 [Host authority](../architecture/host-authority.zh.md#换代与输入重放)维护。
 
-换代不给新代留下任何提示。新代第一眼看到的，就是每次 turn 都有的常规分类注入——身份、Project ownership、Workspace 参与与私有记忆——加上唤醒它的那条消息。跨代连续性不是一份简报，而是工作过程中持续维护的 `memory.md`，之后自然读回。
+后继收到当前身份、ownership、参与关系、私有记忆和唤醒输入，不携带旧工作上下文或交接简报。工作过程中就应保存持久的私有结论；模型没有启动、阻止或操纵换代的动作。
 
-两个机制都由 Host 掌控，所以模型完全没有 context 工具：没有 rollover、没有 checkpoint、没有 status，read 上也不附带任何建议。Member 说什么都不能启动、阻止或改变一次换代。
+### 验收边界
+
+Thread read 确认验收时，仅在这次验收结束的是读者参与过或负责的工作时提示记忆维护。只是 follow 的观察者不受打扰。提交验收的 Member 无需另读一次，也得到相同边界。
+
+Host 向相关 turn steer 一条 `<system-reminder>`，点明其身份（`contributed`、`accountable` 或 `accepted`），要求把持久结论写入 memory 索引和 notes。实测达到或超过 128000 token 时，该边界还会在 Agent 空闲后请求原地压缩。不宣布交接，也不在未挂载引擎时承诺压缩。
 
 ## Agent notification boundary
-Host 从 durable unread state 派生 Agent notifications。Host 经 Agent public safe-boundary API 注入一条有界、合并后的 context message。Idle Agent 会开始一个 turn。running 的 request 或 tool 在下一个 step boundary 收到 context，不会被中断。任何时候，durable Inbox 都是 authority：
 
-- Structured direct mention 包含 Message body、sender 和 Project。Task overlay 可选，Thread 和 Message ref 也在其中。
-- Direct Task 或 Claim Activity 包含 actor、transition 与受影响的 Task/Thread/Claim refs。Task close 在结束 Attention 之前，为每个受影响的 follower 保留 sparse Activity marker。这个 marker 使 terminal state change 在重启后仍可读。
-- Ordinary unread 暴露 Thread-first route、unread count、最多三条最新摘要和更早条目的溢出数量。taskful summaries 可以标出 Task overlay。摘要不绑定完整 Message 或 Activity。任何通知都不渲染 revision 或写令牌。Agent 可以直接用 Thread ref 调用 `team_thread.read`。需要 triage 多个 Threads 时，仍可使用 `team_inbox`。
+通知提供上下文与读取入口，不证明已确认未读，也不提供 next-write token。idle Agent 启动 turn，运行中的 Agent 在安全 step 接收。完整且身份明确的 Message／Activity 可满足后续写入的上下文检查，摘要不能。
 
-Member reminder 的 occurrence 只带 note 与 reminderRef：note 是这个 Member 被打断的原因，ref 是 `team_reminder list` 与 `cancel` 读取的那个身份。
+排序、合并、输出限制、提醒消费与至少一次投递由 [Attention 与消息](attention-and-messaging.zh.md#agent-投递)维护。用 `team_thread` 读取缺失或省略的事实，用 `team_inbox` 分流范围。Thread 未读必须显式 read 才消除。
 
-未提供的 direct 信号排在 reminder 与普通摘要之前。[attention-and-messaging.zh.md](attention-and-messaging.zh.md) 负责通知的排序、上限和字符预算。
-
-Pending hints 按 Member 合并。Consumed 或 ignored 的 hint 不再触发 turn。后面的 durable change、resume 或 runtime-error recovery 会重置 notification state。重置发生后，hint 才重新触发。Restart/resume 用同一个 durable Inbox check，所以 transient Session queues 不是 authority。这是 at-least-once notification intent，不是 exactly-once model processing。Agent 可能忽略、失败或重复 Team read operation。
-
-对于可恢复的临时 service errors，Host 按 Member 的连续 `agent/error` occurrences 计数。计数依据不是 recovery wakeups 或 error text。前两次 errors 各自在延迟后 wake 一次。第 3 次立即停止自动 recovery，并保留 error 交给 operator。不同 recoverable kinds 不中断连续 error 的计数。只有 clean turn end 清零，non-recoverable error 取消 tracking。Recovery notice 自带合并内容：continuation 与当前 durable Inbox facts。所以 ordinary Inbox notification 不会覆盖 Recovery notice，也不会追加第二条提示。
-
-每次投递与恢复决定都通过 Host logger 留下一行有界记录：Inbox 唤醒写明 Member id、Session、引发它的 requestId 与 operationId，以及本次执行尝试，并说明已排队的通知尚未被模型读取。未读事实未变时不消耗新的执行尝试，也不产生诊断级别以上的行。投递失败记 warn，业务提交仍是最终结果，同时清除签名，让下一次触及该 Member 的提交重新派生同样的未读事实；自动恢复记录其分类、次数、等待、触发、停止与跟踪结束的原因。
-
-手动控制 Member 上下文已经不存在：没有 row action，也没有 Remote 写入口能开一代新的。ledger 保留较早的 transition kind（`team/member-session-renewed`、`team/member-session-rolled-over`）以便已记录的 ledger 仍可 replay，但没有任何代码再写它们。
-
-换代有一段中间态：ledger 绑定已迁移，新 Session 尚未激活。这段时间内 Member 状态显示为 unavailable，并带 "context rollover in progress" diagnostic。这个 Member 的 Session 正嵌入右栏时，Client 只跟随一次到新 Session。归档视图不会跳转。
-
-**验收边界。** 一次 Thread read 若 ack 了某个 Task 的验收，会给读者自己的边界，但只在这次验收结束的是读者自己名下的工作时才触发——它自己的 Claim，或它作为 accountable 的 Task；只是关注该 Thread 的观察者同样会看到这条 unread accept，Host 不会打扰它。提交这次 accept 的 Member 不必再读一次也能拿到同一边界：验收者结构上永远不持有 read 侧所依据的 Claim。
-
-Host 把一条 `<system-reminder>` steer 进发现或提交这次验收的那个 turn，要求 Member 把持久结论写进 `memory.md` 索引及其指向的 note；提醒会点明它当时的身份（contributed／accountable／accepted）。实测 context 达到或超过 128000 token 时，同一边界还会在 Agent 空闲后压缩当前代：验收通常发生在 turn 中，而引擎只压缩空闲 Agent。
-
-边界不传递任何东西，既没有 handoff 也没有公告，所以提醒只在真会发生时陈述后果；preset 未挂载压缩引擎时，提醒不会声称会压缩。
+恢复与未读不同。运行时失败与恢复尝试不创建协作事实，也不移动读取水位。错误分类、重试上限、诊断与操作者恢复由 [Host authority](../architecture/host-authority.zh.md#哪些操作会唤醒-member以及-member-卡住时怎么选)维护。
 
 ## Assembled acceptance
-默认 `npm run test:browser` 用 credential-free Harness Web scaffold 跑 `team-journey` 冒烟与各表面 lane，完整旅程运行 `npm run test:browser -- --deep`。完整 assembled acceptance trace 执行以下动作：
 
-- 默认 taskless top-level Thread。
-- 默认关闭的 Human「作为任务」control。
-- Human promotion 与 Host reread。
-- taskless header/Claim gating。
-- Human 对 Thread 的 follow/unfollow：显示以 Host observation 为准。
-- Human 把 Task 转交给该 Thread 的 follower，以及转交给 Human 自己，含负责人已失去 Project ownership 的已结束 Task 的补回。
-- 上面两条既被驱动也被量：所有动作控件同处一条带，高度、圆角、内距、描边与步距各只有一个值；follow 控件的两种状态差的是底色而不是标签。
+场景覆盖与命令由维护中的[浏览器 lane 目录](../development/e2e-lanes.zh.md)负责。按[检查梯度](../development/start-and-checks.zh.md#检查梯度)选择组件、集成与 assembled 检查；影响 assembled Web 的改动以未过滤浏览器验收为交付门槛。
 
-trace 还要求 Human 写入一条版本 2 的 mention，确认它直接送达、没有邀请确认环节。然后验证 Agent durable Inbox 与 explicit read/reply，再验证 Human Project 和 Thread state。Desktop、390×844 和 keyboard paths 都属于 assembled acceptance。Page reload 从 Host projections 读取同一批 facts。journey 最后离开 Team mode，确认 ordinary DSH conversation surface 恢复。
+协作验收必须区分持久状态与呈现：taskless 创建与 Task 提升、查看 Inbox 与 read、follow 与 mention、Claim 完成与验收、reload 与重新取得投影。适用时覆盖 Human 写入、Agent 安全边界投递、桌面／移动端键盘路径和普通 DSH 恢复。
 
-Browser storage 仍仅限 navigation 和 Workspace selection。Acceptance trace 不从 local storage 或 Member Session relay text 推导 unread、Attention 或 Thread facts。真实 Agent-loop integration tests 覆盖 Agent safe-boundary wake 及三种 notification forms。测试见 `packages/agent-team/tests/member-lifecycle-core.spec.ts`。含 direct mention、Task/Claim Activity、ordinary digest route。browser replay 不依赖 live provider 行为。
-
-Worker 订阅场景把模型回放接入真实 Agent loop：定时发布唤醒 owner，owner 通过已声明的 `team_worker` 发起两次绑定执行。Human 的定向回复让 owner 只停其中一次，读取原 Thread 的已确认结算，并在另一条仍运行时继续回答。只有模型和 Codex 可执行文件是替身；设置、通知投递、工具执行与普通 DSH 恢复都走真实组合。发布版 CLI 探针另行验证原生引擎行为；回放不能证明模型判断或原生追加指令能力。
+回放可以使用真实设置、通知投递与工具执行，同时替换模型响应和 Worker 可执行文件。但它不能证明真实模型判断、原生 CLI 行为或原生 steer。报告应明确这条边界，不把回放结果当成三者都已验证。

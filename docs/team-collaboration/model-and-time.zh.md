@@ -3,41 +3,63 @@
 [English](model-and-time.md) | 中文
 
 ## 协作模型
-`team_message.start` 创建一个 Thread 及其 anchor。新的 model-facing start 默认创建 taskless Thread。传入明确的 task intent 会在同一个 atomic operation 中创建 Task overlay。省略字段则为 released Clients 保留 taskful 行为。Human 可以随后 promotion 一个 taskless Thread。一次 atomic operation 创建 Task overlay，并记一条结构化 `promote` Task activity。Activity 会通知当前 followers。promotion 不写 prose Message。Reply 会向既有 Thread 添加 immutable Messages。公开 Thread facts 包括 Messages，以及绑定 Worker 执行的开始与终态两条。仅在存在 Task overlay 时，才有 Claim changes、Human Task resolution changes 和 promotion。
 
-它们的 global operation sequence 决定 chronology，但它不是 Thread revision：那个数只随改变 Thread 状态的写入推进，不改变状态的公开事实——绑定 Worker 执行的开始与终态——落在它之后。
+先选择协作范围，再选择工具：
 
-Agent 只能发现其已参与 Workspace 中的全部 active Project；Main stream、Thread、Task 内容和所有修改仍要求相应的 Project 权限。Team tools 从确切的 live Agent 解析 actor，模型不能选择 actor。`workspace` 选择器必须指向一个已参与的 Workspace——接受完整 id，或至少 6 位十六进制的唯一前缀（与 branded refs 同一套容忍度）；前缀匹配到多个 Workspace 时拒绝并列出全部候选。单一参与时可省略。多参与时在 `team_view`、`team_thread`、`team_message`、`team_task` 上必填。拒绝信息列出可选 Workspace id。`team_inbox` 则默认合并全部参与，`workspace` 仅作为排序与截断前的可选过滤。Inbox 行与通知详情标注来源 Workspace。`team_thread` 在结果行前渲染 Workspace/Project 来源。多 Workspace 引导提供路径、`working_directory` 规则与每个 checkout 的 `AGENTS.md` 指针。
+| 需要 | 范围与动作 |
+| --- | --- |
+| 尚未形成固定议题的问题或更新 | Main stream：`team_message` 的 `action: 'post'` |
+| 持久的讨论 | Thread：Project owner 使用 `action: 'start'`，默认 `kind: 'discussion'` |
+| 需要负责人与验收的工作 | Task 层：owner 以 `kind: 'task'` 创建，或使用 `team_task promote` |
+| 继续讨论 | 在既有 Thread 内使用 `team_message reply` |
 
-加入不改变 Session cwd；进入已加入的 Workspace 会改变它（`working_directory({cd})`），而正是这次改变让该 checkout 的指令被加载。
+工具默认创建 taskless Thread；Host 为省略 kind 的旧 Client 保留同时创建 Task 的默认行为。提升在同一个原子操作中建立 Task 并记录结构化的 `promote` Activity，不额外写散文 Message。
+
+Task 的 resolution 由显式操作决定，status 按下表投影：
+
+| Resolution | Claim 情况 | Status |
+| --- | --- | --- |
+| `open` | 有 active Claim | `in_progress` |
+| `open` | 没有 active Claim，至少有一个 done Claim | `in_review` |
+| `open` | 既无 active 也无 done Claim | `todo` |
+| `accepted` | 不影响 status | `done` |
+| `closed` | 不影响 status | `closed` |
+
+release 不等于完成。done Claim 说明持有者完成了工作，不说明 Task 已验收。Human 验收可以原子地完成 active Claim；close 则释放它们。reopen 移除终态 resolution，再从保留的 Claim 推导 status。操作权限见 [Task 权限](boundaries.zh.md#ownership-与-task-权限)。
+
+Message 不可变。公开 Thread 时间线包含 Message、存在 Task 时的 Task/Claim Activity，以及绑定 Worker 的开始／结束事实。全局 operation sequence 决定顺序；Thread revision 只随改变状态的写入推进。因此 Worker 事实可以晚于 revision，却不提供更新的写入令牌。
+
+现行规则下，参与 Workspace 即可读取 Project，enabled 的参与者可以协作。发起／提升 Thread 和管理订阅额外要求 owner 身份，回复或认领不要求。Host 从确切的 live Agent 解析 actor，工具不能选择其他 actor。
+
+`workspace` 选择器接受已参与 Workspace 的完整 id，或至少 6 位十六进制的唯一前缀；前缀不唯一时拒绝并列出候选。参与多个 Workspace 时，大部分工具要求选择器；`team_inbox` 则默认合并，指定过滤条件时先过滤，再排序和截断。
+
+Inbox 行与通知标明来源 Workspace，Thread 读取标明 Workspace/Project。加入不会改变 Session cwd，也不会加载该 checkout 的指令。用 `working_directory({cd})` 进入已加入的 checkout；切换目录本身不授予 Team 权限。各动作的地址与选择器规则见[工具契约](tools.zh.md)。
 
 ## Member 时间感知
-所有 agent-facing 协作表面都携带绝对事件时刻。sequence 与 revision（绝非 wall-clock 时间）仍是唯一的顺序与并发 authority。Ledger 存储在每个 operation 上保留 UTC ISO 的 `occurredAt`。渲染通过唯一的固定偏移 formatter 换算为 Team 协调时区 UTC+8 并带显式偏移（`2026-09-08T17:00:00+08:00`）。固定偏移没有夏令时分量。同一存储时刻在任何重读路径中渲染完全一致：read、history 翻页、compaction 后重建、旧 ledger replay。这就是 context-cache 不变量。只渲染绝对 timestamp。durable facts 中绝不出现相对时间文案（「3 小时前」）。未来的配置层可以让时区可配置。在那之前合同是：每个存储时刻对应一个确定性 formatter。Web Client 保持自己的浏览器本地渲染。
 
-- `team_thread` read/history 的 facts 与 anchor 带有时刻。时刻在 fact envelope 上，来自各自的提交 operation。Message 与 Activity 一致。Activity 自身没有时刻，从承载 operation 投影。fact 行渲染为 `sequence 时刻 [sender] 正文`。anchor 渲染为 `Anchor sequence 时刻 [sender]`。
-- `team_inbox` 行携带 `newestOccurredAt`——最新 unread fact 的时刻，与 `newestSequence` 取自同一快照。
-- `team_view` 的 Thread 行携带 `lastActivityAt`，从该 Thread 的尾部 fact 投影。
-- 自动通知在 direct mention 与 activity 上给出 `Occurred at:`。digest 路由给出最新 ordinary unread 时刻。
-- DM relay 给出发送时刻；prior-DM 上下文行引用那条 DM 的时刻。
-- 已提交的变更（`team_message` start/reply/dm、`team_task`）从 operation receipt 渲染 `Committed at:`。Client 的乐观合并读取同一 receipt 时刻。
-- fact envelope 时刻出现之前写入的 ledgers 在 replay 时 normalize。时刻从提交 operation 重新派生，绝不凭空制造。
+事件时刻说明事实何时发生；排序与并发仍以 sequence 和 revision 为准。ledger operation 存储 UTC ISO 格式的 `occurredAt`。模型侧协作输出用固定 UTC+8 与显式偏移渲染，例如 `2026-09-08T17:00:00+08:00`。翻页、压缩或回放后，同一时刻的渲染不变。Client 的普通事件显示使用浏览器本地时间。
 
-除事件时刻外，还有 durable clock snapshot（`member-time-context` preset row）。每个符合条件的 Team Member turn 的首个 model step 会收到一条。snapshot 有三样东西。第一，UTC+8 的当前时刻。第二，距上一个 model-visible event 的 elapsed。第三，ordering-authority 说明。 同一 turn 的后续 step 默认保持安静。只有距上一条落盘 snapshot 已超过 refresh interval，才再注入一条。快速 step 的 tool-dense turn 恰好产出一行，超出 interval 的 turn 仍能显示真实跨度。
+各视图的时间字段含义不同：
 
-被跳过的 step 绝不回填。它们的时间跨度折叠进下一条 snapshot 的 elapsed。 默认 interval 为 30 分钟。preset row 的 plugin config 可覆盖它，留给未来的配置层接管。 baseline 从该 Member Session 自身事件折叠而来。restart、resume 和 compaction 无需第二存储即可派生出相同值。换代开启全新日志，elapsed 渲染为 `unavailable` 而不是跨代猜测。wall-clock 回拨将 elapsed 夹为 `0s` 而不改写历史。
+- Thread 事实与 anchor 携带提交 operation 的时刻；Activity 从事实封套取得该时刻。
+- Inbox 行的 `newestOccurredAt` 与 `newestSequence` 来自同一快照；目录 Thread 行携带 `lastActivityAt`。
+- direct 通知携带事件时刻，普通摘要携带最新未读时刻。
+- DM 转发携带发送时刻；公开变更提交结果的 `Committed at:` 来自回执。
 
-内置的 `@deepseek-ai/dsh-time-context` 保持不挂载，因为 browser-zone 策略会让后台唤醒的 Member 向不存在的用户确认日期。
+每个符合条件的 Member turn，其第一个模型 step 还会收到 `member-time-context` 的持久时钟快照：当前 UTC+8 时刻、经过时长与排序说明。后续 step 仅在距上次快照满 30 分钟后刷新；该 preset 行的 `refreshIntervalMs` 可配置。这是在模型 step 采样，不是启动 turn 的定时器。
 
-时间条件只在 Team 事件发生时评估：ledger 提交、Member activation、Inbox read 或已有 wake。Host 不拥有 deadline、scheduler、SLA，也不会按陈旧度自动改变 Task 状态。整个 Team 完全静默时，不会仅因阈值到点而自行唤醒。
+首个 step 从上一条模型可见事件计算时长，刷新则从上一快照计算。基线来自该 Session 自己的事件。新一代没有基线时显示 `unavailable`；时钟回拨时把时长限制为 `0s`。Member preset 不挂载 Harness 使用浏览器时区的 `dsh-time-context`。
 
-Member 自己的 reminder 是唯一的例外，而且是 Member 自己要求的 timer：Host 为任一 active reminder 的下一个到期 occurrence 武装一次唤醒，并在每次 raise、取消或创建后重新武装。Host 停机期间到期的 occurrence 恢复后补投一次，既不丢弃也不重复。
+Task 提醒在 Team 事件发生时检查，不由截止时间调度器触发。安静的 Team 不会仅因跨过以下阈值而唤醒：
 
-现有两类私有 Task 提醒。`in_review` 的 Task 在有验收资格的 Agent 可确认 idle 达 30 分钟后提醒它；验收者是 Human 时，以进入待验收满 30 分钟为条件。
+| Task 条件 | 收件人与阈值 |
+| --- | --- |
+| `in_review` | 有资格的验收者：Agent 已被观测为空闲至少 30 分钟；Human 则为进入 review 后 30 分钟 |
+| `in_progress` 且无公开进展 | accountable：距最新公开 Thread 事实超过 24 小时 |
+| `in_progress` 且执行者空闲 | accountable：某个 active Claim 的 owner 已被观测为空闲超过 24 小时 |
 
-`in_progress` 的 Task 在公开 Thread 24 小时没有进展，或 active Claim 持有者可确认 idle 超过 24 小时时，提醒 accountable owner。Agent idle 是进程内观测，跨 generation 替换延续；Host 重启后 idle 未知则跳过，不从旧 Session 日志猜测。
+Agent idle 仅在进程内保存，换代后保留。Host 重启后，未知的 idle 区间直接跳过，不从旧 Session 日志推断。已有未读责任事件会抑制重复提醒，但不消耗该提醒周期。
 
-每条 `team/reminder-raised` 都是 durable、仅接收者可见的记录，以 Task、类型、接收者和条件起点去重。它不是公开 Thread fact，不改变 revision，也不重置停滞起点；只有读取所属 Task Thread 才消费。
+每条 `team/reminder-raised` 都是私有事实，按 Task、kind、收件人与条件基线标识。不改变 Thread revision 或进展基线，读取该 Task 的 Thread 才消费。读取时会过滤持久 status、收件人、可见性或基线已不匹配的 marker；不删除存储记录，也不再要求运行时 idle 条件。转交不会把旧 marker 移给新 accountable。
 
-已有同一 Task 的未读责任事件时不重复催促，也不消耗 episode。首次部署后，下一次 Team 事件可能为已经达到条件的历史 episode 各补一条提醒。
-
-读取未读 marker 时，当前 durable 条件决定它是否仍显示并参与 Agent 投递：Task 必须在可见 Project 中保持 open，且状态、接收者和条件起点仍然匹配。新的公开进展会使停滞提醒失效；同一 episode 的新提醒会使旧提醒失效。转交不会把私有 marker 转给新接收者。暂停保留提醒，恢复后继续投递。过滤不改写或删除存储的 marker，读取时也不重新要求运行时 idle。
+这些 Task 提醒不同于 `team_reminder`：Member 自己设置的日程会启动 Host 定时器，停机时错过的到期 occurrence 会在恢复后补一次。日程与消费规则见[提醒工具](tools.zh.md#team_reminder)。

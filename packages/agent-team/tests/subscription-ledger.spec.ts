@@ -801,6 +801,53 @@ describe('addressed subscription events', () => {
       .entries.find(entry => entry.kind === 'subscription-event' && entry.event.event.id === eventId)
   }
 
+  it.each([9, 10])('accepts the historical suspended-recipient omission only before version 10 (version %s)', async rulesVersion => {
+    const team = await seed({ rulesVersion })
+    const alice = await addAgent(team.ledger, 'alice')
+    const subscriptionRef = await addressed(team, [alice.memberId])
+    await team.ledger.suspendMember({ requestId: requestId('suspend'), actor: human, memberId: alice.memberId })
+    await publishOne(team, subscriptionRef)
+    const records = [...team.table.entries()].map(([key, operation]) => {
+      if (operation.kind !== 'team/subscription-event-published') return [key, operation] as [string, unknown]
+      const { mainMarkers, ...inbox } = operation.data.inbox
+      expect(mainMarkers?.added).toHaveLength(1)
+      return [key, { ...operation, data: { ...operation.data, inbox } }] as [string, unknown]
+    })
+    const table = await openTable(poolOf(records))
+    if (rulesVersion === 9) {
+      const reloaded = replayedAt(table, current)
+      expect(reloaded.subscription(subscriptionRef)?.notify).toEqual([alice.memberId])
+    } else {
+      expect(() => replayedAt(table, current)).toThrow('does not mark exactly the event recipients of this subscription')
+    }
+  })
+
+  it.each([9, 10])('keeps the live writer on the read gate for suspended recipients (version %s)', async rulesVersion => {
+    const team = await seed({ rulesVersion })
+    const subscriptionRef = await addressed(team, [team.writer.memberId])
+    await team.ledger.suspendMember({ requestId: requestId('suspend'), actor: human, memberId: team.writer.memberId })
+    await publishOne(team, subscriptionRef)
+    const published = [...team.table.entries()].map(([, operation]) => operation)
+      .find(operation => operation.kind === 'team/subscription-event-published')
+    expect(published?.kind === 'team/subscription-event-published' && published.data.inbox.mainMarkers?.added)
+      .toEqual([expect.objectContaining({ memberId: team.writer.memberId })])
+    expect(() => replayedAt(team.table, current)).not.toThrow()
+  })
+
+  it('replays a version-9 lifecycle write that dropped a suspended recipient', async () => {
+    const team = await seed({ rulesVersion: 9 })
+    const subscriptionRef = await addressed(team, [team.writer.memberId])
+    await team.ledger.suspendMember({ requestId: requestId('suspend'), actor: human, memberId: team.writer.memberId })
+    await team.ledger.pauseSubscription({ requestId: requestId('pause'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, reason: 'manual' })
+    const records = [...team.table.entries()].map(([key, operation]) => {
+      if (operation.kind !== 'team/subscription-paused') return [key, operation] as [string, unknown]
+      return [key, { ...operation, data: { ...operation.data, subscription: { ...operation.data.subscription, notify: [] } } }] as [string, unknown]
+    })
+    const reloaded = replayedAt(await openTable(poolOf(records)), current)
+    expect(reloaded.subscription(subscriptionRef)?.notify).toEqual([])
+  })
+
   it('marks only the addressed recipients, and leaves the owners and the Human no Inbox entry', async () => {
     const team = await seed({ rulesVersion: current })
     const subscriptionRef = await addressed(team, [team.writer.memberId])

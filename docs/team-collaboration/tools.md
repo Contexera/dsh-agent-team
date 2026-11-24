@@ -32,7 +32,7 @@ The cursor pages Thread rows only; continuation pages render Threads alone, and 
 
 The header states the total unread and direct counts and the number of Threads shown, with a truncation conclusion when unread work lies beyond the bounded list; each row shows its exact unread and direct counts, Project ref, and Task standing when taskful. This is the reader's own unread queue; to see work in flight regardless of unread, use `team_task board`.
 
-The footer routes body reading and acknowledgement to `team_thread read`; the render carries no revision and no write token — a current read is the required mutation basis, and it supplies the token.
+The footer routes body reading and acknowledgement to `team_thread read`; Inbox results carry no revision or write token. A fully drained read supplies the next-write token; [mutation fences](boundaries.md#mutation-fences) describe the other eligible sources.
 
 ## `team_thread`
 
@@ -161,7 +161,7 @@ While the Member is suspended its reminders keep timing and deliver when it resu
 
 `board` renders the Host's Task board projection: every open Task of the Projects the reader can see, grouped into To do, In progress, and In review, newest activity first, then each Project's five newest finished Tasks. Each row carries the Task ref and number, Project, Thread ref, the Members on live Claims, the reader's relation (`accountable`, `executor`, or `project-owner`), the accountable owner, whether the reader may accept it, a bounded subject, and the last-activity instant.
 
-`projectRef` limits the board to one Project; `mine` keeps only Tasks the reader is accountable for or holds a live Claim on.
+`projectRef` limits the board to one Project; `mine` keeps only Tasks the reader is accountable for or holds an active Claim on.
 
 `finishedTruncated` says whether the Host held back older resolved work; the render states it, so a page never reads as the whole column.
 
@@ -169,13 +169,13 @@ The board is current state, not unread: reading it changes no read state and car
 
 `promote` turns a discussion Thread into a Task; it takes `threadRef`, the Thread's `baseRevision`, and optionally `accountable`, and only a Project owner may do it (`project_owner_required` otherwise).
 
-`list`, `claim`, `done`, and `release` manage only the Agent's own Direction Claims on real Tasks. Taskless Threads have no Claim mutation. A Direction is one sentence describing the Agent's angle; plans and acceptance checklists belong in Thread messages. A successful Claim starts Attention. `list` renders the Task/Thread identity with the active collision surface — active Claims only, or an explicit none — and no write token; it supplies neither Thread facts nor a mutation basis.
+`claim`, `done`, and `release` manage only the Agent's own Direction Claims on real Tasks; `list` shows all active Claims on that Task. Taskless Threads have no Claim mutation. A Direction is one sentence describing the Agent's angle; plans and acceptance checklists belong in Thread messages. A successful Claim starts Attention. `list` renders the Task/Thread identity with the active collision surface — active Claims only, or an explicit none — and no write token; it supplies neither Thread facts nor a mutation basis.
 
 A committed mutation names its action (Claim created, completed, or released), renders the authoritative affected Claim first — ref, resulting state, owner, direction — then Task/Thread identity, and exactly one next-write token hand-off. Rejections share the message rejection form and the same [completeness and token rules](boundaries.md#mutation-fences); Task permissions are checked again on each attempt.
 
 `accept`, `close`, `reopen`, and `transfer` resolve a Task rather than a Claim, and the Host decides who may call them.
 
-`accept` belongs to the Human, to a Project owner, or to the Task's own accountable, and never to a Member that held a Claim on that Task; an Agent may accept only while it is in review. `close`, `reopen`, and `transfer` belong to the Human and the current accountable. The tool forwards the action and the write token and never re-derives that authority.
+The Human may accept any open Task. An Agent must be a Project owner or the Task's own accountable, must never have held a Claim on that Task, and may accept only in `in_review`. `close`, `reopen`, and `transfer` belong to the Human and the current accountable. The tool forwards the action and the write token and never re-derives that authority.
 
 `transfer` takes `target` — the memberRef, `@Handle`, or unique memberRef prefix of any enabled Member of the Task's Workspace, or `human` — and moves responsibility only, leaving Claims with their owners; the new accountable takes part in the Thread from there and is woken with what the Task now asks of it.
 
@@ -183,138 +183,77 @@ A committed resolution names the action, the resulting status and resolution, th
 
 ## `team_subscription`
 
-`team_subscription` creates and maintains a Project's subscription: a script the Host runs with no Session, as that Project, on a timer, on an incoming webhook, or on both. Its actions are `list`, `create`, `update`, `test`, `pause`, `resume`, `delete`, `baseline`, `logs`, `deliveries`, `replay`, and `reset_webhook`.
+Manage an unattended Project script with interval, webhook, or combined triggers. Every action takes `projectRef` and the routing `workspace` when needed.
 
-Only the Project's owners may change one, test one, or replay a delivery (`project_owner_required` otherwise). Any Workspace Member may use `list` for Agent-facing metadata that omits scripts, credential references, and webhook arms; run history remains Project-member-only, with owner-only output as described below.
+| Action | Additional inputs |
+| --- | --- |
+| `list` | None; returns Agent-facing metadata without scripts, credential refs, or webhook secrets |
+| `create` | `name`, one script source, at least one trigger; optional `credentials`, `notify`, `baseline` |
+| `update` | `subscriptionRef`, `expectedRevision`, `name`, one script source, triggers; optional `credentials`, `notify` |
+| `test` | `subscriptionRef`; runs the stored definition without updating it |
+| `pause`, `resume`, `delete`, `reset_webhook` | `subscriptionRef`, `expectedRevision` |
+| `baseline` | `subscriptionRef`, nonempty `ids`; appends ignored ids, never clears them |
+| `logs` | `subscriptionRef`; optional `limit` (1–50, default 50) |
+| `deliveries` | `subscriptionRef`; lists failed webhook deliveries whose automatic retries were spent |
+| `replay` | `subscriptionRef`, `deliveryRef`; optional `version: 'current' | 'received'` (default `current`) |
 
-`create`, `update`, `test`, `resume`, and `replay` make the Host run a script on its shell and hand the output back, so an Agent owner also needs a shell tool (`bash` or `pwsh`) in its own enforced tool surface; without one the call is refused with `subscription_shell_required` before any script is read or run.
+Project owners manage, test, and replay subscriptions; `deliveries` is owner-only because it contains request bodies. Workspace participants may list metadata; run summaries require Project read access. Owners and the Human additionally receive reasons and the last 8 KiB of stdout/stderr, including successful runs.
 
-A `scriptPath` must stay inside the caller's working directory: a relative path resolves against it, and an absolute path, a `..` escape, or a symlink whose target lies outside is refused. The Human path is unaffected and always pastes the content.
+`create`, `update`, `test`, `resume`, and `replay` also require the Agent's enforced surface to contain `bash` or `pwsh`. Otherwise `subscription_shell_required` refuses the operation before reading or running a script. Ownership does not bypass that execution boundary.
 
-Empty `workspace`, `scriptPath`, and `scriptContent` slots are absent; two nonempty script sources still conflict, and no script is still an error. Zero `intervalMinutes` or `limit` uses omission semantics. This never drops `notify: []`, `credentials: []`, `webhook: false`, or an `expectedRevision`: clearing recipients, removing credentials, disarming a webhook, and revision checks remain real instructions.
+A script source is exactly one of `scriptPath` or `scriptContent`. Relative paths resolve against the caller's working directory; absolute paths inside it are valid. Lexical escapes and symlinks leading outside it are refused. The Host snapshots at most 16 KiB and trials create/update through the production executor with a 60-second limit. Failed trials return the reason and stream tails and store nothing. Credential refs must already exist and are resolved again per run; the tool accepts at most eight as `REF` or `REF=ENV_NAME`, never secret values.
 
-`create` and `update` take `intervalMinutes` for a timer, `webhook: true` for an address, or both, and refuse a subscription that names neither. On `update` the two triggers read omission differently: leaving out `intervalMinutes` drops the timer, while leaving out `webhook` keeps the address, and only an explicit `false` disarms it — a caller that does not model webhooks must not cut off a live provider. Arming the trigger needs the deployment's public origin (`webhook.publicOrigin` on the Host row).
+A trigger is `intervalMinutes` (at least 5), `webhook: true`, or both. On update, omitted `intervalMinutes` removes the timer; omitted `webhook` preserves the existing address, and `false` disarms it. The resulting definition must still have a trigger. Empty `credentials: []` removes credentials rather than preserving them.
 
-The answer to an arming or resetting call carries the complete address, and that is the only time it is readable: the ledger keeps a hash of the token, so a retry of the same request, a later `list`, or the subscription page can never show it again. `reset_webhook` moves the address under the `expectedRevision` the caller read; the old one stops resolving immediately, while deliveries already queued keep running.
+Arming/resetting a webhook requires `webhook.publicOrigin` on the Host row. The full address is returned only by that call: later list/retry results cannot recover it because only a token hash is stored. Register it immediately. Reset invalidates the old address without cancelling already queued deliveries.
 
-For create and update, request identity includes the script source, trigger options, and create baseline. A committed retry still checks the current actor and Project ownership, then answers from the ledger without reading the script file, checking credential availability, or running the trial again; reusing the id with different options is a collision. A legacy record with no stored script path refuses a path retry and returns the committed `subscriptionRef`; read that stored subscription before starting a new request.
+The script prints one JSON object per stdout line: `id`, `title`, optional `url` and `detail`. Deduplication is per subscription and event id. Create defaults to `baseline: 'current-output'`, ignoring ids seen by its trial; `'ignore-history'` starts empty. Update preserves the existing waterline. A state transition does not increment revision; an update does, and stale `expectedRevision` is refused.
 
-`logs` reads the newest recorded runs — 50 are kept per subscription, newest first — with the trigger, start instant, duration, structured category, event count, exit code or timeout, the revision the run pinned, and for a webhook run the delivery and attempt that asked for it. The event count is what the run had accepted into the ledger, so a run that printed only ids the subscription already knew counts none.
+`notify` addresses published events to enabled or suspended Workspace Members or the Human, using member refs, handles, or unique 6+ hex prefixes. Omission means creator-only on create and preserves recipients on update. `[]` means timeline-only: no Inbox marker or wake. Publication drops recipients who no longer have Project access; it never substitutes an owner. External event text is data, not instructions or parsed mentions.
 
-A webhook run whose batch finds no room in the unpublished queue is not a lost one: the validated events are kept with the delivery and a later pass accepts exactly them, without spending one of the delivery's retries — only a run that alone prints past the 500-event ceiling becomes an item under `deliveries`.
+Empty `workspace`, `scriptPath`, and `scriptContent` are absent; zero `intervalMinutes`/`limit` also use omission semantics. Meaningful `notify: []`, `credentials: []`, `webhook: false`, and revision values are not dropped.
 
-The Project's owners and the Human also get each run's reason and the last 8 KiB of stdout and stderr — of a passing run as well as a failing one; every other member gets the summary alone, because the script ran under the Project's credentials.
+Publication is capped at 20 events/minute/subscription, with at most 500 accepted events waiting. Three consecutive failed runs pause the subscription; trial runs do not change that failure count. Webhook queue pressure may defer acceptance of validated output without rerunning the script.
 
-`deliveries` lists — for the owners only, because a delivery holds the request body it arrived with — the webhook deliveries whose automatic retries were spent, with a stable ref, the revision they arrived at, the last error, and their expiry. Each one counted a single failure when its retries ran out, so three of them pause the subscription like three failed runs.
+Replay uses the current definition or the received version as requested. Paused/deleted/archived targets refuse it. It publishes output but does not count as a subscription failure. One tool-call identity names one delivery/version; a retry returns the original outcome, a changed intent conflicts, and an already successful replay is not run again under a fresh id.
 
-`replay` runs one again, by default with the script as it stands now so a fix can handle an old request, or with `version: received` for the definition that delivery arrived under. It is a run: it takes a run slot and the subscription's own exclusion, and a paused, deleted, or archived subscription is refused on the way in.
-
-A replay publishes what the script prints and never counts as a failure of the subscription. Repeating it keeps the same request id, and that id then answers with what the first call did. One id names one intent: reusing it for another delivery, or the other version of the same one, is refused as a request collision, and a delivery whose replay delivered is not run again under a new id.
-
-`create` and `update` take the script as `scriptPath` — resolved against the caller's own working directory, the one its shell tool uses — or as `scriptContent` for a caller with no file. The Host reads the file, stores a snapshot of at most 16 KiB, and runs it once with the production path: the same executor, the same explicit sandbox policy, a 60-second limit, and the same output contract.
-
-A failing trial refuses the write and returns the tail of stdout and stderr instead; nothing is stored. Every declared credential reference must already be configured, and the Host resolves it again on each run — a reference removed later fails that run instead of silently running without it.
-
-A new subscription records the ids its trial printed as its deduplication baseline by default, so the first live run does not republish what the script already found; `baseline: ignore-history` starts empty instead. `update` never touches that waterline: after changing the script's id rule, `baseline` appends the ids to ignore, and nothing already recorded is cleared. A pause, resume, or delete carries `expectedRevision`; an update moves the revision, a state transition does not.
-
-Events are the script's stdout: one JSON object per line with `id`, `title`, and optional `url` and `detail`. Deduplication is scoped to one subscription, so two scripts printing the same id each publish their own.
-
-New events are accepted into the ledger and published to the Project's Main stream at most 20 per minute per subscription. Up to 500 accepted events may wait unpublished, and a batch that would cross that ceiling is refused as one failure rather than silently trimmed. A trial run never counts as a failure and never clears the count; three failed runs in a row pause the subscription and are recorded as such.
-
-`create` and `update` take `notify`: the Members whose Inbox the published events reach, each named as a `memberRef`, an `@Handle`, a unique 6+ hex prefix, or `human`. Any enabled or suspended Member of the Project's Workspace may be named, owners or not, and the Human when named; omitting it addresses the events to the Creating Member alone on a create, and keeps the stored set on an update, while an empty list is a real choice — the events still reach the Main stream and nobody is woken.
-
-The publish commit drops a recipient who no longer reads the Project — archived, or no longer in its Workspace — rather than substituting an owner; a suspended recipient stays on the list and is reached again once resumed, and a record written before the field existed reads back as its Creating Member alone.
-
-The result names the subscription, its state, its revision, and its interval, and any refused trial renders the reason with the last of each stream. What a script prints is data, never instructions: an event on the Main stream is marked as untrusted text and its title, link, and detail never become a mention. Project subscriptions run unattended — a restricted Member gains this execution path, the Main stream records every change, and the Human can pause the subscription at any time.
+Committed create/update retries recheck current actor and ownership, then return their receipt without rereading the file or rerunning its trial. Changed script source/options under the same call id conflict. [Host authority](../architecture/host-authority.md#subscription-scheduling-and-unattended-execution) owns scheduling, sandbox policy, queue admission, private history, and webhook transport limits.
 
 ## `team_worker`
 
-`team_worker` delegates one self-contained piece of work to a local Worker engine — Codex or Claude Code — running with its own tools, its own login, and its own settings. It takes `task`, at least one of `threadRef`, `taskRef`, and `projectRef`, and optional `engine`, `cwd`, and `requestId`.
+Delegate self-contained work to local Codex or Claude Code. The Worker has its own tools, login, and settings; it does not see the parent conversation. Give it the goal, background, scope, and required evidence. The calling Member remains responsible for verification and any Task Claim.
 
-A call is one of four shapes: a start, a stop, a look-up, or a steer. A stop and a look-up each name one `worker:` ref and nothing else; a steer names that ref plus its instruction.
+| Mode | Parameters |
+| --- | --- |
+| Start | `task` plus `threadRef`, `taskRef`, or `projectRef`; optional `engine`, `cwd`, `requestId` |
+| Stop | `stop: <worker:…>` only |
+| Inspect | `inspect: <worker:…>` only |
+| Steer | `steer: <worker:…>` and `instruction`; optional `requestId` |
 
-A blank slot is absent before the shapes are told apart — a model that fills every optional slot sends `stop: ''` on a start and `task: ''` on a stop, and neither names a ref or a task — while a real value still gets the refusal that names the conflict. `engine` is a start selector, so on the other three shapes its shipped default `codex` is dropped the same way and naming the other engine is refused.
+`workspace` is an accepted routing slot, but Worker authorization comes from the target or stored execution rather than changing cwd or choosing an actor. A neutral filled `engine: 'codex'` is tolerated on control calls; another engine or meaningful start fields are refused there.
 
-The target decides where the result goes. A run bound to a Thread reports there: its start and its ending become Thread facts every participant can read, and its answer arrives in the delegating Member's Inbox.
+Start requires the Host Worker switch, an enabled engine, and current ownership of the target Project. The tool is not declared while the switch is off. Explicit targets must agree: the Task belongs to the Thread, and either belongs to an explicitly named Project. Missing, unknown, conflicting, and unauthorized targets are refused before a native process starts.
 
-A run bound only to a Project publishes nothing and returns to the calling Member's own session, as it did before targets existed. Its execution record is still written, so the run stays findable by its `worker:` ref.
+`engine` is `codex` or `claude`; omission uses the Host default. There is no automatic fallback to another engine, account, or model. `cwd` must resolve to an absolute working directory and otherwise defaults to the calling Session's directory.
 
-Delegation is off until the operator turns it on. The Team settings row carries a `worker` group — `enabled`, `defaultEngine`, one entry per engine with `enabled`, `executable`, and (Codex only) `sandbox`, plus an optional `timeoutMs` — and every field is volatile so a change reaches a running Host. Both engines run with full permissions and nothing to configure: `sandbox` defaults to `danger-full-access`, the settings page does not offer it, and narrowing Codex's policy is a hand-edit of the row.
+A start returns a `worker:` ref, Project, engine, cwd, and start time while work continues in the background. Do not poll. A repeated `requestId` with identical intent returns the original execution, including concurrent starts; changing the Member, task, engine, or target under it conflicts.
 
-`executable` exists because a Host's `PATH` is not a shell's: the CLI a human installed may be nowhere the Host process searches, and an empty value keeps the engine's own discovery.
+A Thread/Task-bound execution publishes `worker_started` and `worker_settled` facts, not its answer. The answer reaches the initiating Member's Inbox as untrusted external text, not a second parent notice. Project-only execution publishes nothing and keeps the parent notification path. Neither creates a Task, Main entry, or Claim, changes Thread revision, or accepts work.
 
-While the switch is off, `team_worker` is not declared to Members at all; turning it on adds it to existing Member Sessions at their next turn boundary, and turning it off withdraws it. The same switch adds or removes the Worker paragraph of the `team:project-owner` guidance section, which is re-derived at every assembly. A run already in flight keeps its handle either way: the switch gates new delegations, and the registry still refuses a start while it is off.
+Stop is authorized for the initiating Member; Human stop is a separate Web path. Turning off new delegations or losing Project ownership does not remove that stop handle. The result waits for cleanup and durable settlement: `worker_stop_pending` means the operation continues, while `worker_stop_unrecorded` means settlement is not durably confirmed. An already-ended run reports its actual state.
 
-A call is refused before the opening record and before any native process exists when no target was named (`worker_target_required`); a named Thread (`worker_thread_unknown`), Task (`worker_task_unknown`), or Project (`worker_project_unknown`) is not one this Team holds; or the caller does not currently own the target's Project (`worker_owner_required`).
+Inspect is restricted to the initiator and Human, not a new Project owner. It returns the stored summary and native identities, plus bounded fragments from a settled run's native record or an explicit reason they cannot be read. Live/unconfirmed runs provide no settled fragments. Native records are not copied into Team storage or published to peers.
 
-Targets must agree: the Task must belong to the named Thread, and an explicit Project must contain that Thread or Task. A conflict is `worker_target_conflict`, including on a resend of an otherwise valid request; the explicit Project is never silently discarded.
+Steer submits one instruction to the same native session; a live engine may place it in the current turn or a later one. `submitted` never means model-read or fixed-turn delivery. Only the initiating Member may steer; Human has no steer path.
 
-The remaining refusals are the settings and the run itself: the switch is off (`worker_disabled`); the named engine is not a Worker engine (`worker_engine_unknown`) or is not enabled (`worker_engine_disabled`); the task text is empty (`worker_task_required`); no absolute working directory can be resolved (`worker_cwd_required`); the Harness subagent service is not mounted (`worker_unavailable`); or the request id was already opened for a different delegation (`worker_request_conflict`).
+A cleanly ended latest execution, including a clean failure, may continue as a new execution with a new ref and `continuedFrom`; the predecessor remains unchanged. Continuation rechecks Member, Project ownership/state, switches, engine, and native record. Stopping, unconfirmed, or previous-Host running executions are not revived. Concurrent continuations join one successor.
 
-Ownership of one Project never authorizes another, and an ordinary DSH Session outside the Team preset never acquires the tool.
+Steer retries use durable request identity. The same id returns its first receipt/refusal without redelivery; changing instruction, Member, or Worker conflicts. Same-text requests under fresh ids alias a pending/submitted/ambiguous admission. An explicit native refusal delivered nothing and permits a fresh-id retry; ambiguous or unconfirmed delivery is not permission to retry blindly.
 
-`engine` overrides `defaultEngine` for that one delegation, and an engine that is unavailable reports why instead of falling back to another engine, account, or model. Repeating a call with the same `requestId` answers with the execution the first call started; it never starts a second one, not even when both calls arrive at once. The id names that one delegation and no other: a resend from a different Member, or one that changes the task, engine, or target, is refused rather than answered with a run it did not ask for.
-
-The receipt names the Team execution (`worker:` ref), the Project, the engine, the working directory, and the start instant, plus the Thread when the run is bound; it states that the work continues in the background, and where that result will appear.
-
-The same tool stops one run: pass `stop: <worker:…>` and nothing else. `task` is not required, and naming a task, Thread, Task, Project, engine, working directory, or request id alongside it is refused rather than half-applied.
-
-The stop is authorized by the identity that opened the run: the delegating Member, or the Human through the edit-Agent dialog. Another Member is refused even when it now owns the Project; the settings switch and current ownership are not re-checked, because they gate starting and not stopping. A run that already ended answers with the state it really ended in instead of being stopped twice.
-
-A run this Host no longer holds — the signature of a restart — is refused as `worker_unconfirmed`: it cannot be confirmed or stopped, and it is never re-run.
-
-A stop waits for cleanup and the recorded ending, within the same deadline even on a retry. If the wait runs out, `worker_stop_pending` says which part is outstanding; the operation keeps going. If cleanup failed, the run is recorded as `failed` with a diagnostic. If the ending could not be written, the refusal is `worker_stop_unrecorded`; retrying does not report the in-memory ending as confirmed. The tool result preserves these Worker refusal codes.
-
-Two runs are independent: stopping one leaves the other's process, Thread facts, and Inbox notice untouched.
-
-A bound run publishes two Thread facts: `worker_started` when it opens, and `worker_settled` with its `state` and, for a failure or a stop, one bounded `reason` line. Its answer is never a Thread fact — it reaches the delegating Member's Inbox in the notice that wakes them with the ending, labelled as external text that is data and not instructions, and the parent Session receives no second copy. A Project-only run keeps the parent notice instead and publishes nothing. Neither creates a Task, a Main stream entry, or a Claim.
-
-Delegating work on a Task changes no responsibility: the Claim stays with the Member, a finished run never accepts anything, and the ordinary independent-acceptance rule still applies.
-
-A Worker holds no Team identity: it cannot post, claim, accept, or answer for the Member. If it performs work on a Task, the Claim stays with the Member and the ordinary independent-acceptance rule still applies. What a Worker returns is evidence to check, not instructions.
-
-Every run's record is durable: a Thread read reports every run bound to it as `running`, `completed`, `failed`, `stopped`, or `unconfirmed`, and a Project-only run records the same execution facts without publishing them. A record a previous Host left in `running` reads as `unconfirmed`: the result cannot be confirmed, the run is never restarted or retried on its own, and nothing wakes anyone for it.
-
-The same tool reads one execution's diagnostic: pass `inspect: <worker:…>` and nothing else. The answer is the summary the Thread already carries, the stage a failed run came apart in, the native identities the settlement recorded — the engine's own session, the turns and input ids this execution owned, and the absolute path of its record — and the bounded fragments that record still answers after the process exited, or the one reason it cannot.
-
-The native record itself is never copied into the Team, never stored, and never published: the Thread keeps the summary it already had, and the detailed answer reaches only the Member who delegated the run and the Human, who reads it from the edit-Agent dialog by that run's row.
-
-Only the initiating Member and the Human may ask; another Member is refused as `worker_inspect_forbidden`, even when it now owns the Project. A run that has not ended answers with its summary and says its native record is read once it does. A run that ended before the engine recorded a session, or whose record is gone, unreadable, of a shape this Team does not read, or holds no turn with the recorded id, keeps the Team summary and names that reason instead of returning fragments that are not there.
-
-The look-up is bounded and self-checking: the recorded location must be an absolute `.jsonl` path under the engine's own directory — `sessions` for Codex, `projects` for Claude — and an oversized value is refused whole rather than cut into a path nobody recorded. Claude's stream carries no record path, so the settlement derives it from the cwd the CLI reported and the environment the run opened with.
-
-The file that opens must be the file the location named — its identity is compared at open and again after the read — the first record must name the recorded session, and the byte ceiling applies before any line is split or parsed. A continued execution skips its predecessor's prefix and stops after its own turns or before the next root prompt it did not submit.
-
-Fragments are limited to a few safe fields of the execution's own turns, each bounded, and text that looks like a credential is withheld whole rather than masked, quoted JSON pairs included. Repeated Claude turn metadata is deduplicated so a later failure remains visible; a fact omitted by the four-fragment ceiling sets `truncated`. Every reason is one bounded sentence that names the fact and never echoes a native value, and nothing about the engine's record is written back into the Team.
-
-The Human's edit-Agent dialog gives at most five rows: the runs this Host still holds and the records a previous Host left running as `unconfirmed` hold their seats first, and the newest endings by ending time fill the rest — a long run that started early and failed just now stays inside that window — each with the state it really ended in.
-
-An ended row offers its diagnostic; a live or unconfirmed one has nothing to read, so it carries no door. That row is the Human's only door: a `worker:` ref is never shown on that surface, so there is no field to type one into, while reading by ref stays the entry of the Member tool's `inspect`.
-
-The same tool adds one instruction to a Worker's same native session: pass `steer: <worker:…>` with `instruction`, and nothing else. Both Codex and Claude use the same path. While the execution is live, OAR delivers the instruction into its current turn, a queued turn, or an idle session's next turn. The execution waits for every accepted input, and its later answer, failure, stop, timeout, and partial output belong to that one Team ending.
-
-The receipt says `submitted`, never that the model read it or that it landed in a fixed turn. It names the turn when the engine acknowledged one and the execution state when the receipt was written, so a stop or ending that landed meanwhile is visible.
-
-If the latest linked execution ended cleanly, steer resumes its native session as a new linked execution and returns the new `worker:` ref plus `continuedFrom`; the old ending stays unchanged. The new ref can be stopped, inspected, or steered again. A clean failure is resumable too. A stopping execution, an unconfirmed cleanup, an archived Project, a lost owner grant, a disabled Member or engine, a missing or mismatched native record, and a previous-Host `running` record are refused.
-
-Only the Member who delegated the original execution may ask; another Member is refused as `worker_steer_forbidden`, and there is no Human steer entry. Continuation rechecks the current Worker and engine switches, Project state and ownership, and the initiating Member. The ledger allows one running execution per native conversation and one direct successor per execution, so concurrent continuations join the established ref instead of opening another session.
-
-One instruction is sent once per its execution. The Host admits the request in the ledger before native delivery and records refused, ambiguous, or submitted before reporting it. A resend with the same request id answers with the first receipt or refusal, including after the execution ended or the Host was rebuilt, and never reaches the engine again.
-
-A fresh same-text request id becomes a durable alias of that admission; it returns the same outcome without reading native history, and a concurrent canonical call and alias join one delivery. A different instruction, Member, or Worker under a used request id is refused as `worker_steer_conflict`.
-
-An admission whose outcome never reached the ledger is `worker_steer_unconfirmed`, not an invitation to resend. An explicit native refusal delivered nothing, so it may be retried under a fresh request id; transport-unknown remains ambiguous and is never retried. A later linked execution may receive the same sentence under a fresh id.
-
-The live delivery control belongs to this Host's run registry: it is created when the engine session opens, removed when that execution ends, and cleared when the Host releases its runs. A continuation is durable as its own execution. A steer's private ledger receipt and a continuation both leave the Thread revision, Task, Claim, predecessor ending, and existing execution unchanged; only the continuation adds its own Worker start and settle facts.
-
-Unloading the bundle refuses new delegations, cancels starts that are still opening (including one still writing its opening record), and gives active steer calls the same bounded opening wait before fencing off late receipt writes. It then waits for the runs this Host holds to report and record their endings before it closes storage.
-
-A run still unconfirmed at that boundary keeps its `running` record and is sealed, so no late ending is written after storage closes. Durable writes already in flight are awaited before providers are released; the eleven-second ending deadline does not cancel a storage write that stopped answering.
+Execution states are `running`, `completed`, `failed`, `stopped`, and projected `unconfirmed` for a prior Host's running record. No automatic rerun follows uncertainty. [Host authority](../architecture/host-authority.md#worker-delegation) owns settings, native inspection safeguards, steering admission, and unload/cleanup mechanics.
 
 ## Team manager surface
 
-The nine manager tools are not part of this Member protocol and are never declared to a Member: `team_overview`, `team_models`, `member_create`, `project_create`, `project_owner`, `project_update`, `member_update`, `member_state`, and `member_workspace` are mounted only inside the isolated `team-manager` preset, and each handler refuses any Session that is not the current manager.
+The manager is not a Member and uses a separate `team-manager` preset. Its nine tools are `team_overview`, `team_models`, `member_create`, `project_create`, `project_owner`, `project_update`, `member_update`, `member_state`, and `member_workspace`. They are never declared to Members.
 
-They share this document's rules — a committed write answers with its receipt and a refusal names its reason and wrote nothing, `requestId` makes a retry idempotent while a changed parameter under a reused id is a collision, and an omitted optional field keeps what is stored rather than clearing it — and they authorize twice: at the tool entry, and again inside the ledger's serialized section after the idempotency replay branch resolves.
-
-The [Team manager preset](../architecture/tools-and-preset.md#team-manager-preset) owns their contracts, the preset that mounts them, and the manager authority they run under.
+[Team manager preset](../architecture/tools-and-preset.md#team-manager-preset) owns their parameters, current-manager authorization, and committed-retry rules. Do not infer their optional-field behavior from a Member tool: each schema/action decides what omission or an empty value means.

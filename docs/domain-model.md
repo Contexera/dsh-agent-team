@@ -8,9 +8,9 @@ The single shared collaboration domain in one DSH home. It stores cross-member c
 
 ## Team manager
 
-The Host-owned, dedicated ordinary DSH Session that helps the Human understand and shape the Agent Team. It is not a Member: it has no Member ref, Team Workspace participation, Claims, Inbox, or ledger identity, and its conversation is not a Team fact. Its Session, private resources, and current-destination pointer are Host-owned; [Workspace and Session storage](architecture/workspace-session-storage.md#team-manager-session) owns their lifecycle, and [the Client boundary](architecture/client-and-remote.md#client-plugin-and-slot-composition) owns its entry.
+The Host-owned ordinary DSH Session that helps the Human understand and manage the Agent Team. It is not a Member: it has no Member ref, Workspace participation, Claims, or Member Inbox, and its conversation is not a Team fact.
 
-The manager uses the isolated `team-manager` preset rather than a Member composition. Its main area and composer remain the shipped DSH Conversation, composed through public surfaces without changing the Harness repository, agent loop, or shipped defaults. Replacing the manager stops and automatically archives the previous Session while retaining its history; the current Session stays visible in its Workspace's ordinary Session list, and replaced Sessions remain available in the archive view. That Session lifecycle does not rewrite the Team ledger.
+It uses the isolated `team-manager` preset. Its Session lifecycle and private resources belong to [Workspace and Session storage](architecture/workspace-session-storage.md#team-manager-session); its tools belong to [Tools and preset](architecture/tools-and-preset.md#team-manager-preset).
 
 ## Member
 
@@ -18,9 +18,9 @@ A stable identity authorized to read, speak, claim work, and receive Inbox hints
 
 ## Workspace Participation
 
-A join/leave relation between a Member and a Workspace, committed as ledger operations — the same relation shape as Project participation, one rung above it (Workspace participation → Project participation, derived from Threads → Thread Attention). A Member's `workspaceId` records where it was created and never changes; authorization everywhere reads the current participation set, not the creation field. Joining grants collaboration immediately; it does not move or create the Member's Session. Each Member retains one Session lineage in its creation Workspace.
+The durable join/leave relation between an Agent Member and a Workspace. Under current rules, Workspace participation grants Project visibility; enabled participants may collaborate, while starting or promoting a Thread additionally requires Project ownership. There is no separate Project membership to join.
 
-Joining does not create another Session; collaboration in other participated Workspaces uses the same Session, and the Member moves its own working directory into them with `working_directory`. The Human Member participates in every Workspace.
+A Member's immutable `workspaceId` records its creation Workspace. Joining another Workspace neither moves nor creates a Session: the Member keeps one Session lineage and changes its working directory with `working_directory`. The Human can access every Workspace. See [collaboration routing](team-collaboration/model-and-time.md#collaboration-model).
 
 ## Human Member
 
@@ -28,19 +28,17 @@ The special Member corresponding to the current Harness user. It participates in
 
 ## Agent Member
 
-A Member created and managed by Team. Created inside one Workspace (its creation record), it joins further Workspaces through Workspace Participation. It runs one explicit team-enabled preset Session at a time, rooted in its creation Workspace; ordinary Sessions and forks do not gain participation automatically.
+A Member created and managed by Team, with one live `team-member` preset Session at a time. Its creation Workspace anchors its Session lineage; Workspace participation lets that same identity collaborate elsewhere. Ordinary Sessions and forks do not acquire Team identity automatically.
 
 ## Worker Execution
 
-One Team-owned execution of a native Codex or Claude session, identified by an immutable `worker:` ref. It records the initiating Member, Project, optional Thread and Task, engine, cwd, start, one terminal state, result, and the native session/turn/input anchors the Host observed. A Worker holds no Team identity and cannot claim, accept, or answer for its initiator.
+A Team-owned execution of a native Codex or Claude session, identified by a `worker:` ref. It records the initiating Member, Project, optional Thread and Task, engine, cwd, and execution outcome. A Worker has no Team identity and cannot claim, accept, or answer for its initiator.
 
-A steer is input to the execution's same native session. While it runs, OAR may place the input in the current turn, queue it for the next turn, or prompt an idle native session; the execution remains one Team fact until every accepted input has ended. The receipt means submitted, not model-read or fixed-turn delivery.
-
-After the latest execution in a native-session chain ends cleanly, steer may resume that session as a new execution whose `continuedFrom` names the predecessor. The predecessor's terminal record never changes. If a continuation failed before opening its own native session, a later continuation may use the nearest readable predecessor anchor while still naming the failed execution directly. A native session has at most one running Team execution and each execution at most one direct successor; concurrent continuations join the established execution instead of forking the conversation.
+Steering supplies input to the same native session. Continuing a settled execution creates a new execution linked by `continuedFrom`, without rewriting the predecessor. [The Worker tool contract](team-collaboration/tools.md#team_worker) owns the caller-visible rules; [Host authority](architecture/host-authority.md#worker-delegation) owns execution and native-record handling.
 
 ## Member Capabilities
 
-Durable capability intent on the Member entity (optional `capabilities` field: `tools.allow` and `skills.allow`), carried verbatim through every lifecycle operation and restored by Host restart replay. Pure intent: allow-list names are not validated against any known-name set at commit time — a Harness upgrade that renames or removes tools can never make an old ledger unreplayable. Divergence from the names known at activation is derived as a runtime warning (`capabilityWarnings`, a projection-derived state, never persisted — persisted warnings would lie after Host restart or upgrades).
+Durable intent stored on a Member as optional `capabilities.tools.allow` and `capabilities.skills.allow` lists. Intent is not the effective tool or skill surface: current registrations, preset limits, and Host policy also apply. Unknown names become runtime warnings rather than invalidating old ledger records. [Host authority](architecture/host-authority.md#member-capabilities-and-skills) owns enforcement and isolated skill catalogs.
 
 ## Workspace
 
@@ -52,39 +50,31 @@ One Team-owned file per Workspace, outside every repository, holding the convent
 
 ## Project
 
-A persistent collaboration place in a Workspace. Under rules version 9 a Project keeps only two relations of its own — ownership and follow — and everything else comes from the Workspace: a Member who participates in the Project's Workspace reads its content, and an enabled one writes, whether or not it ever appeared in the Project. There is no membership to enroll in or grant. Human Members can view every Workspace Project.
+A persistent collaboration place inside a Workspace, containing a Main stream and single-level Threads.
 
-Every Workspace Member's `team_view` lists every active Project, its owners, the reader's `owner` / `following` / `none` role, and subscription counts, plus the complete Workspace Member roster. `following` means the reader follows that Project's Main stream and `none` withholds nothing — the same Workspace participant reads the Project and, when enabled, writes it; the role only reports what the reader owns and follows.
+Current rules separate three relationships:
 
-Once the ledger adopts rules version 2, a Project has owners: the Human owns every Project without being recorded, and the Human grants or withdraws Agent owners (`team/project-owner-added` / `team/project-owner-removed`) among Agents that participate in the Project's Workspace and are enabled or suspended. Leaving that Workspace, archival, or removal ends an Agent's ownership; suspension does not.
+| Relationship | Meaning |
+| --- | --- |
+| Workspace participation | Permission to read Project content and, when enabled, collaborate |
+| Project ownership | Authority to start or promote Threads and manage Project subscriptions |
+| Following | Attention to ordinary updates, not an access grant |
 
-From rules version 8 an Agent owner's grant also carries a `responsibility`: one bounded text, at most 2,000 characters, saying what that owner answers for in this Project. It is a third layer, not a rewrite of the other two — the Member's description stays global across Projects and the Project's own description stays shared by everyone in it, while the same Agent can answer for different outcomes in different Projects. The Host trims the text on write, and an empty value means unspecified.
+The Human owns every Project implicitly. An Agent owner may carry a Project-specific `responsibility`: trimmed text of at most 2,000 characters, distinct from the Member's global description and the Project's shared description. An absent responsibility means unspecified, not an error.
 
-A grant recorded without one, and every grant written before version 8, reads as unspecified. That is an ordinary fact about the grant rather than a fault to repair, so nothing reports it as missing and no reader treats absence as an error. The text changes through `team/project-owner-responsibility-updated` instead of a withdrawal and re-grant, so the grant's `since` and the Main stream Attention row it started survive the edit; the same operation notifies the owner through the owner Activity path, and a notification that never arrives does not change the committed text.
+The Main stream is conversation outside every Thread. Its Messages have `scope: 'main'` and no Thread or Task; a reply must target another Main stream Message in the same Project. Threads also appear there as current-state cards. Reading a card's Main entry does not read its Thread.
 
-Rules versions below 9 derived a Project membership instead — from version 2 owners and every Member ever mentioned in the Project counted too, and archived and inactive Members dropped out; everything visible under version 1 stayed visible. Version 9 removed the derivation: the memberships, mentions and Thread history in old records replay unchanged but decide nothing under the current rules.
+Rules version 9 replaced derived Project membership with Workspace access plus own/follow relations. Version 10 extended Task creation and promotion to accept the same accountable targets as transfer. The current ledger rules version is 10; [rules versions and replay](architecture/host-authority.md#rules-versions-and-replay) owns adoption and historical compatibility.
 
-Behind rules version 2 a Project also has a Main stream: a conversation of its own, outside every Thread. Under version 9 any enabled Member who participates in the Workspace may post to it — under earlier versions any Project member — (`team/main-message-posted`). A Main stream Message carries `scope: 'main'`, no Thread or Task, and may only answer another Main stream Message of the same Project. Mentioning a Member, or answering their Message (the Human included), gives them one Main stream marker; `@all` is plain text.
-
-A reader's ordinary Main stream unread comes from its own Main stream Attention — what other Members wrote after that row's read watermark — plus its markers. The Human's row is derived from the Project's creation and never stored; an Agent's is written by its ownership grant when it was not already following, and any other Member's by an explicit follow. Withdrawing ownership ends the row the grant started, while a row the Member started on its own stands; removal and archival end every row, while leaving the Workspace and archiving the Project do not.
-
-[Attention and messaging](team-collaboration/attention-and-messaging.md) owns the rows.
-
-A writer holding Main stream unread reads first (`main_unread_required`). `team/main-stream-read` advances the reader's own Main stream watermark and consumes markers, and writes nothing when it would change neither.
-
-Behind rules version 2 only a Project owner starts a Thread (`team/thread-started`, kind `discussion` or `task`) and the top-level `team/message-sent` is no longer written; anyone else gets `project_owner_required`, which points to the Main stream.
-
-A Thread appears in the Main stream as a card showing its current state: anchor preview, reply count, writers and newest activity for a discussion; Task number, status and live Claim owners for a Task. Version-1 top-level Threads appear as cards in creation order and are never unread.
-
-Behind rules version 2 any member of the Project may reply in any Thread — under version 9 any enabled Member who participates in the Workspace. A mention or an answer is one direct marker and never starts or resumes Attention, and the Human invitation confirmation no longer exists.
+Use [the tool contract](team-collaboration/tools.md) for discovery and posting, and [Attention and messaging](team-collaboration/attention-and-messaging.md#main-stream-attention) for Main stream unread behavior.
 
 ## Subscription
 
-A Project-level script the Host runs on a timer with no Session, introduced behind rules version 2. A subscription has a branded ref, name (≤ 80 characters), triggers (`interval.minutes`, at least 5), a script snapshot (`content`, `sha256`, and the shell family it was recorded under), credential references (`ref` → environment name, at most 8, values never stored), a revision, a state (`active`, `paused` with `manual` or `failures`, or `deleted`), and its creator.
+A Project-owned script definition that the Host runs without a Member Session, on an interval or webhook trigger. Its durable definition includes a script snapshot, credential references (never credential values), revision, and `active`, `paused`, or `deleted` state.
 
-The ledger records creation, update, pause, resume, deletion, re-baselinining, event acceptance, and event publication. Deduplication is `(subscription, id)`: the baseline plus every accepted event for that subscription, never global. Events are accepted under the revision and script hash the run pinned, so a run that crossed an edit is still recorded against the version it executed, and accepted-but-unpublished events keep publishing while the subscription is paused. Deletion and Project archival are terminal barriers: a late result is neither accepted nor published.
+Accepted events are deduplicated by subscription and event id, then published as addressed Main stream records, not Messages. Pausing does not discard accepted events; deletion and Project archival block later acceptance and publication.
 
-Only an Agent owner of the Project or the Human may change a subscription. Any Workspace Member may list Agent-facing metadata without the script, credential references, or webhook arm; run history stays with Project members, and the Human Client's script-bearing list keeps its existing authority. Three failed runs in a row pause it, recorded with no Member actor because the Host did it. The scheduled state a replay cannot rebuild — the next due instant, the failure count, the publication window — lives in a private checkpoint table, never in the ledger.
+Project owners and the Human manage subscriptions. [The tool contract](team-collaboration/tools.md#team_subscription) owns parameters and results; [Host authority](architecture/host-authority.md#subscription-scheduling-and-unattended-execution) owns scheduling, sandboxing, and private run history.
 
 ## Message
 
@@ -92,19 +82,15 @@ Immutable content explicitly sent in a Project or existing Thread. A Thread is c
 
 ## Task
 
-An optional work-tracking overlay attached to an existing Thread, not a prerequisite for a Thread. It can be created by explicit top-level task intent or added by Human promotion. Promotion also appends a public explanation Message. Task status is derived from Claims; acceptance and close are explicit facts. Human-facing `Task #N` is the durable Task creation ordinal within its home Project: taskful starts and promotions participate, while a taskless anchor's original position does not. It is not identity; stable cross-project references use branded `taskRef`.
+An optional work-tracking overlay on a Thread. An owner can create it with `kind: 'task'` or promote an existing taskless Thread. Promotion records one structured `promote` Activity, not an additional prose Message.
 
-One accountable Member carries responsibility for the Task. Its creator is accountable unless the start or promotion names another: under rules version 10 any target a transfer accepts. Before it an Agent named only itself, a Human start an enabled Project owner or itself, and a promotion recorded its promoter. A transfer may then hand it on.
+A Task has an explicit resolution (`open`, `accepted`, `closed`) and a projected status. Open status follows Claims (`todo`, `in_progress`, `in_review`); accepted and closed Tasks read as `done` and `closed`. Acceptance is not a Claim status. [Collaboration model](team-collaboration/model-and-time.md#collaboration-model) owns their transitions.
 
-Execution stays in Claims, so accountability is not ownership of the work. `sourceThreadRefs` immutably names the same Project's taskless source discussions; sourced Tasks appear as read-only current-state cards there rather than in the Main stream.
+One accountable Member carries responsibility; Claims carry execution. Under rules version 10, a start or promotion can name any target a transfer accepts; otherwise its creator is accountable. Transfer does not move Claims. [Task authority](team-collaboration/boundaries.md#ownership-and-task-authority) owns acceptance, transfer, close, and reopen permissions.
 
-Acceptance normally waits for every Claim to be done (`in_review`). The Human may also accept early from `in_progress`: the accept operation projects the Claims still active at that moment to done and records them in the activity as `completedClaimRefs`, notifying each owner without fabricating owner claim-done events. A `todo` Task that was never claimed is accepted directly, and its activity carries no claim list.
+`Task #N` is the durable creation ordinal within its Project, counting taskful starts and promotions. A taskless Thread's earlier position does not determine the number. Stable identity is `taskRef`, not this display number.
 
-An Agent can accept only in `in_review`, as a Project owner or as the Task's own accountable, and never when it held any Claim on that Task, including a released Claim. Otherwise an accountable that executed asks an uninvolved owner or the Human to verify, or transfers accountability. Close, reopen, and transfer belong to the Human or the current accountable; only the Human transfers a finished Task.
-
-A transfer target is any enabled Member who participates in the Workspace, or the Human — under versions below 9, any enabled Project member —; following the Thread is not required, the new accountable starts following it, and Claims stay with their executors. The transfer also ends only the follow the responsibility created: the previous accountable's `accountable`-source follow ends, while a `self`-chosen follow or one an active Claim holds stays.
-
-Under version 9 losing an owner grant never returns a Task — the Member still participates in the Workspace — and earlier versions returned it only when that grant was the Member's last Project participation; archiving, removing, or withdrawing the Workspace of an accountable Agent returns each open Task to the Human atomically, and suspension does not transfer it.
+`sourceThreadRefs` names immutable taskless source discussions in the same Project. The Task appears there as a read-only current-state card rather than as a Main stream card.
 
 ## Thread
 
@@ -120,7 +106,7 @@ A Member's commitment to one Direction in a Task overlay. Taskless Threads have 
 
 ## Direction
 
-Free-text work direction for a Claim. Comparisons apply Unicode normalization, trim, whitespace compression, and case folding; synonyms are not inferred.
+Free-text work direction for a Claim. Comparison applies NFKC normalization, trimming, whitespace compression, and lowercasing; synonyms are not inferred.
 
 ## Thread Attention
 
@@ -128,7 +114,7 @@ A private persistent attention period for one Member and Thread: the current per
 
 ## Thread Inbox
 
-Member-level unread projection derived from Thread Attention and direct mentions. It is not a Session queue, browser state, or per-message read table; its derivation and read semantics are in [attention-and-messaging.md](team-collaboration/attention-and-messaging.md), and the tool contract in [tools.md](team-collaboration/tools.md).
+A Member's unread collaboration projection, including Thread and Main stream unread, direct markers, and private reminders. It is not a Session queue, browser state, or per-Message read table. [Attention and messaging](team-collaboration/attention-and-messaging.md) owns derivation and delivery; [tools](team-collaboration/tools.md#team_inbox) owns model-facing triage.
 
 ## Follow
 
@@ -144,17 +130,11 @@ A safe-boundary hint derived from durable Thread Inbox state. A hint is bounded 
 
 ## Member Reminder
 
-A time promise a Member makes to itself, stored in the ledger and bound to the Member rather than to a Session, Thread, or Workspace. Its schedule is one of three kinds — `once` at an instant, `every` a whole number of minutes, or `cron` over five fields read in the fixed UTC+8 zone — plus a `note` of at most 2000 characters that is handed back when an occurrence fires. States are active, done, and cancelled. A reminder has exactly one recipient, so only its Member creates one; the Human may withdraw any Member's.
+A durable time promise a Member makes to itself, independent of its Session, Thread, or Workspace. A reminder has one recipient, a note, an `once`, `every`, or `cron` schedule, and `active`, `done`, or `cancelled` state.
 
-Each due moment is an occurrence with its own identity, and an unconsumed occurrence of the same recurring reminder is replaced by the next one instead of stacking. Occurrences travel the same private Inbox notice as every other unread fact, which [attention-and-messaging.md](team-collaboration/attention-and-messaging.md) owns; the tool contract is in [tools.md](team-collaboration/tools.md).
+Each due moment is an occurrence. A newer recurring occurrence replaces an unconsumed one instead of stacking. Unlike Thread unread, an occurrence is consumed when the notice that actually rendered it enters a turn. Omitted occurrences remain owed; a failed consumption write leaves them owed too.
 
-Consumption is recorded per occurrence, not per reminder: a notice answers for the occurrences its text actually rendered. One the detail cap or the character budget dropped was never delivered, so it stays unread and stays outside the notice's coverage, and the next notice answers it. A recovery instruction renders the same snapshot, so it consumes exactly what it rendered too, and an occurrence that came due after that instruction was queued is still owed rather than answered by it.
-
-A consumption write that fails leaves the occurrence owed, so the coverage that notice earned falls with it and the Host rederives the notice at once: the same durable facts must not read as already answered. That retry is bounded, and standing down leaves the occurrence unread and uncovered for the next Team fact that touches the Member.
-
-A reminder's ref is derived from the creating tool call, with the two characters the ref shape reserves percent-escaped, so a nested sub-call's id still yields one ref the durable schema parses back. A create whose request id already exists answers with the stored operation only when the normalized schedule and note match as well; a moved time or a rewritten note under a reused request id is a collision.
-
-A suspended Member's reminders keep timing and deliver when it resumes; archiving or removing the Member cancels them all. The Member Lifecycle table below derives that effect, so no second cleanup operation exists.
+Suspension keeps reminders timing for delivery on resume; archival or removal cancels them. [The reminder tool](team-collaboration/tools.md#team_reminder) owns schedule limits, retry identity, and management.
 
 ## Operation
 
@@ -162,7 +142,7 @@ One immutable atomic business commit in the Team ledger. Each operation has glob
 
 ## Revision
 
-The sequence of the latest operation relevant to a Thread. It is an optimistic concurrency fence, not a Message count.
+The global operation sequence of the latest write that revised a Thread's state. It is a concurrency fence, not a Message count or the Thread's latest public-fact sequence: Worker start/settlement facts do not advance it. Tools render it as a next-write token; copy it verbatim into `baseRevision` under [mutation fences](team-collaboration/boundaries.md#mutation-fences).
 
 ## Ref
 

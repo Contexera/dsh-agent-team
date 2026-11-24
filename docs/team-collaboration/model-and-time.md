@@ -3,49 +3,63 @@
 English | [中文](model-and-time.zh.md)
 
 ## Collaboration model
-`team_message.start` creates one Thread and its anchor. New model-facing starts are taskless by default; explicit task intent creates a Task overlay atomically, while an omitted field remains taskful for released Clients. A Human can promote a taskless Thread with one atomic Task activity. Replies append immutable Messages. Public Thread chronology consists of Messages, a bound Worker run's start and ending, and — only with a Task overlay — Claim changes, Human resolution, and promotion.
 
-Their global operation sequence orders the chronology. It is not the Thread revision: that number advances only with a write that changes Thread state, so a public fact that changes none — a bound Worker run's start or ending — sits past it.
+Choose the scope before choosing the tool:
 
-Agents discover every active Project only in Workspaces they participate in; Main stream, Thread, and Task content and all mutations still require the applicable Project authority. Tools resolve the actor from the exact live Agent; the model cannot choose an actor. The `workspace` selector must name a participated Workspace — an exact id, or a unique prefix of at least 6 hex characters, the same tolerance the branded refs have. A prefix matching several Workspaces is refused by naming every candidate.
+| Need | Scope and action |
+| --- | --- |
+| A question or update without a standing topic | Main stream: `team_message` with `action: 'post'` |
+| A durable discussion | Thread: a Project owner uses `action: 'start'`, default `kind: 'discussion'` |
+| Tracked work with accountability and verification | Task overlay: an owner starts with `kind: 'task'` or uses `team_task promote` |
+| Continue a discussion | `team_message reply` in its existing Thread |
 
-The selector can be omitted for a single participation. With multiple participations it is required on `team_view`, `team_thread`, `team_message`, and `team_task`, and rejection lists the available Workspace ids.
+The tool defaults a new start to taskless; the Host retains taskful defaults for older Clients that omit the kind. Promotion is one atomic operation that creates the Task and a structured `promote` Activity. It writes no additional prose Message.
 
-`team_inbox` instead merges all participations by default, with `workspace` as an optional filter applied before sorting and truncation. Inbox rows and notification details identify their source Workspace; `team_thread` renders Workspace/Project provenance before the outcome line. Multi-Workspace guidance supplies paths, the `working_directory` rule and per-checkout `AGENTS.md` pointers.
+A Task's resolution is explicit; its status follows this projection:
 
-Joining does not change Session cwd; entering a joined Workspace does, through `working_directory({cd})`, and that change is what makes the checkout's instructions load.
+| Resolution | Claim standing | Status |
+| --- | --- | --- |
+| `open` | Any active Claim | `in_progress` |
+| `open` | No active Claim, at least one done Claim | `in_review` |
+| `open` | Neither active nor done Claims | `todo` |
+| `accepted` | Irrelevant to status | `done` |
+| `closed` | Irrelevant to status | `closed` |
+
+Releasing a Claim is not completing it. A done Claim is evidence that its owner finished, not that the Task was accepted. Human acceptance may finish active Claims atomically; close releases them. Reopen removes the terminal resolution and derives status from the remaining Claims. [Task authority](boundaries.md#ownership-and-task-authority) defines who may perform those actions.
+
+Messages are immutable. Public Thread chronology includes Messages, Task/Claim Activities when taskful, and bound Worker start/settlement facts. Global operation sequence orders those facts; the Thread revision advances only for state-changing writes. A Worker fact can therefore sit past the revision without supplying a newer write token.
+
+Under current rules, Workspace participation permits Project reads and enabled participation permits collaboration. Ownership is an extra requirement for starting/promoting Threads and managing subscriptions, not for replying or claiming. The Host resolves the actor from the exact live Agent; a tool cannot choose another actor.
+
+The `workspace` selector names a participated Workspace by exact id or unique prefix of at least 6 hex characters. An ambiguous prefix is refused with the candidates. Most tools require a selector when the Member participates in several Workspaces; `team_inbox` instead merges them by default and applies an optional filter before sorting and truncation.
+
+Inbox rows and notices identify their source Workspace; Thread reads state Workspace/Project provenance. Joining does not change Session cwd or load that checkout's instructions. Enter the joined checkout with `working_directory({cd})`; directory changes do not grant Team authority. See [tool contracts](tools.md) for each action's address and selector rules.
 
 ## Member time awareness
-Every agent-facing collaboration surface carries absolute event instants; sequence and revision — never wall-clock time — remain the sole ordering and concurrency authority. Ledger storage keeps UTC ISO `occurredAt` on every operation; rendering converts through one fixed-offset formatter into the Team coordination zone UTC+8 with an explicit offset (`2026-09-08T17:00:00+08:00`).
 
-The fixed offset has no daylight-saving component, so the same stored instant renders byte-identically on every reread path (read, history paging, post-compaction rebuild, old-ledger replay) — the context-cache invariant. Only absolute timestamps are rendered; relative time text ("3 hours ago") never appears in durable facts. A future configuration layer may make the zone configurable; until then one deterministic formatter per stored instant is the contract, and the Web Client keeps its own browser-local rendering.
+Event time explains when a fact happened; sequence and revision remain the ordering and concurrency authority. Ledger operations store UTC ISO `occurredAt`. Model-facing collaboration renders stored instants in fixed UTC+8 with an explicit offset, for example `2026-09-08T17:00:00+08:00`. The same instant renders identically after paging, compaction, or replay. The Client uses browser-local time for its ordinary event display.
 
-- `team_thread` read/history facts and the anchor carry their committing operation's instant on the fact envelope (message and activity alike — activities have no instant of their own). Fact lines render `sequence instant [sender] body`; the anchor renders `Anchor sequence instant [sender]`.
-- `team_inbox` rows carry `newestOccurredAt` — the instant of the newest unread fact, taken from the same snapshot as `newestSequence`.
-- `team_view` Thread rows carry `lastActivityAt`, projected from the Thread's tail fact.
-- Automatic notifications state `Occurred at:` on direct mentions and activities, and the newest ordinary unread instant on digest routes.
-- DM relays state the sending instant; the prior-DM context line cites that DM's instant.
-- Committed mutations (`team_message` start/reply/dm, `team_task`) render `Committed at:` from the operation receipt; optimistic Client merges read the same receipt instant.
-- Ledgers written before fact-envelope instants existed normalize on replay: the instant is re-derived from the committing operation, never fabricated.
+The time fields serve different views:
 
-Besides event instants, the first model step of every eligible Team Member turn receives one durable clock snapshot (the `member-time-context` preset row): the current instant in UTC+8, the elapsed time since the preceding model-visible event, and the ordering-authority note.
+- Thread facts and anchors carry their committing operation's instant; Activities get it from the fact envelope.
+- Inbox rows carry `newestOccurredAt` from the same snapshot as `newestSequence`; directory Thread rows carry `lastActivityAt`.
+- Direct notices carry event instants; ordinary digests carry the newest unread instant.
+- DM relays carry sending time. Committed public mutation results carry `Committed at:` from their receipt.
 
-Later steps of the same turn stay quiet unless the turn has run longer than the refresh interval since the last landed snapshot. When it has, one snapshot lands per elapsed interval — a tool-dense turn of quick steps produces exactly one line, while a turn that outlives the interval still shows its real span. Skipped steps never backfill, and their span folds into the next snapshot's elapsed. The default interval is 30 minutes, overridable through the preset row's plugin config for a future configuration layer to take over.
+The first model step of each eligible Member turn also receives a durable clock snapshot from `member-time-context`: current UTC+8 time, elapsed time, and the ordering note. Later steps refresh only after 30 minutes since the last snapshot, configurable with `refreshIntervalMs` on that preset row. This is sampling at a model step, not a timer that starts a turn.
 
-The baseline folds from the Member Session's own events, so restart, resume, and compaction derive identical values without a second store; a generation swap starts a fresh log and renders elapsed as `unavailable` rather than guessing across generations; a wall-clock rollback clamps elapsed to `0s` without rewriting history. The shipped `@deepseek-ai/dsh-time-context` stays unmounted because its browser-zone policy would ask background-woken Members to confirm dates with an absent user.
+At the first step, elapsed is measured since the preceding model-visible event; a refresh measures since the preceding snapshot. Baselines come from that Session's own events. A fresh generation reports `unavailable` when no baseline exists; clock rollback clamps elapsed to `0s`. The Member preset does not mount Harness's browser-zone `dsh-time-context`.
 
-Time conditions are evaluated only when Team events occur: a ledger commit, Member activation, an Inbox read, or an existing wake. The Host owns no deadline, scheduler, SLA, or staleness-driven state change for those conditions, so a completely silent Team does not wake itself merely because a threshold passed.
+Task reminder conditions are checked on Team events, not by a deadline scheduler. A silent Team does not wake just because one of these thresholds passes:
 
-A Member's own reminders are the one exception, and it is a timer the Member asked for: the Host arms one wake for the next due occurrence of any active reminder and rearms it after every raise, cancel, or create. An occurrence due while the Host was down is made up once after recovery rather than dropped or repeated.
+| Task condition | Recipient and threshold |
+| --- | --- |
+| `in_review` | Eligible verifier: an Agent observably idle for at least 30 minutes, or a Human 30 minutes after entering review |
+| `in_progress` without public progress | Accountable: more than 24 hours since the latest public Thread fact |
+| `in_progress` with an idle executor | Accountable: an active Claim owner observably idle for more than 24 hours |
 
-Two private Task reminders exist. A Task in `in_review` reminds its eligible verifier after the Agent has been observably idle for 30 minutes. For a Human verifier, the condition is instead 30 minutes after entering review.
+Agent idle is process-local and survives generation replacement. After Host restart an unknown idle interval is skipped, not reconstructed from an old Session log. An unread responsibility event suppresses a duplicate reminder without spending its episode.
 
-A Task in `in_progress` reminds its accountable owner after 24 hours without public Thread progress. It also reminds when an active Claim owner has been observably idle for more than 24 hours. Agent idle is process-local and survives generation replacement; after a Host restart an unknown idle interval is skipped rather than inferred from an old Session log.
+Each `team/reminder-raised` is private, keyed by Task, kind, recipient, and condition baseline. It changes no Thread revision or progress baseline and is consumed by reading that Task's Thread. Read-time filtering hides markers whose durable status, recipient, visibility, or baseline no longer matches; it neither deletes the stored marker nor requires runtime idle again. Transfer does not move an old marker to the new accountable.
 
-Each `team/reminder-raised` operation is durable and private to its recipient, keyed by Task, kind, recipient, and condition baseline. It is not a public Thread fact, does not change revision or restart a stalled baseline, and is consumed only by reading that Task Thread.
-
-An existing unread responsibility event suppresses a duplicate nudge without consuming the episode. The first deployment may raise one reminder for each already-eligible historical episode on its next Team event.
-
-When an unread marker is read back, current durable conditions decide whether it still appears and participates in Agent delivery: the Task must remain open in a visible Project, with the expected status, recipient, and condition baseline. New public progress supersedes a stalled marker; a newer reminder in its episode supersedes the old one.
-
-Transfer does not move a private marker to the new recipient. Suspension retains it for resume. Filtering does not rewrite or delete the stored marker, and runtime idle is not required again at read time.
+These Task reminders differ from `team_reminder`: a Member's own scheduled reminder does arm a Host timer, and a missed due occurrence is made up once after recovery. [The reminder tool](tools.md#team_reminder) owns its schedule and consumption rules.
