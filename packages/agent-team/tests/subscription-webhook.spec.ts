@@ -32,6 +32,12 @@ describe('a token exists as an address and as a hash, never as both', () => {
     expect(sameWebhookTokenHash(hash, hash)).toBe(true)
     expect(sameWebhookTokenHash(hash, webhookTokenHash('b'.repeat(43)))).toBe(false)
     expect(sameWebhookTokenHash(hash, 'short')).toBe(false)
+    // Non-hex, odd-length, and empty strings must return false rather than throwing or matching truncated buffers.
+    expect(sameWebhookTokenHash('', '')).toBe(false)
+    expect(sameWebhookTokenHash('zz', 'aa')).toBe(false)
+    expect(sameWebhookTokenHash('zz', 'yy')).toBe(false)
+    expect(sameWebhookTokenHash('01zz', '01yy')).toBe(false)
+    expect(sameWebhookTokenHash('abc', 'abd')).toBe(false)
   })
 
   it('recognises only a well-formed hook path', () => {
