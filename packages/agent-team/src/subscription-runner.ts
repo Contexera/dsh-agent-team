@@ -140,32 +140,18 @@ async function readCapturedStdout(result: ShellRunResult, maxBytes: number): Pro
 }
 
 /**
- * The structured outcome of one run. The first two are successes; the rest name
- * what the owner has to change, so a Main stream line or a record never has to
- * parse prose to tell a timeout from a rejected script.
+ * The structured outcome of one run. The first three are successes (`verified`
+ * is a trial that published nothing); the rest name what the owner has to
+ * change, so a Main stream line or a record never has to parse prose to tell a
+ * timeout from a rejected script. `invalid-utf8` stays in the union for
+ * persisted run records from older releases; current runs do not produce it.
  */
-export type SubscriptionRunCategory =
-  | 'accepted'
-  | 'empty'
-  /** A trial run the caller asked for: its output was valid, and it published nothing. */
-  | 'verified'
-  | 'timeout'
-  | 'exit-code'
-  | 'stdout-truncated'
-  /** Persisted run records from older releases may carry this category; current runs do not produce it. */
-  | 'invalid-utf8'
-  | 'invalid-output'
-  | 'executor-missing'
-  | 'shell-mismatch'
-  | 'workspace-missing'
-  | 'credentials-missing'
-  | 'spawn-failed'
-  | 'backlog-full'
-
-export const SUBSCRIPTION_RUN_CATEGORIES: readonly SubscriptionRunCategory[] = Object.freeze([
+export const SUBSCRIPTION_RUN_CATEGORIES = Object.freeze([
   'accepted', 'empty', 'verified', 'timeout', 'exit-code', 'stdout-truncated', 'invalid-utf8', 'invalid-output',
   'executor-missing', 'shell-mismatch', 'workspace-missing', 'credentials-missing', 'spawn-failed', 'backlog-full',
-])
+] as const)
+
+export type SubscriptionRunCategory = (typeof SUBSCRIPTION_RUN_CATEGORIES)[number]
 
 /** A success is a run whose output was durably accepted, an empty one accepted nothing new, and a trial one published nothing at all. */
 export function runSucceeded(category: SubscriptionRunCategory): boolean {
@@ -301,73 +287,104 @@ async function resolveCredentials(
   return missing.length > 0 ? { missing } : { resolved }
 }
 
-/**
- * Run one snapshot under the Host's own policy and apply the output contract.
- * The report's `category` distinguishes what the owner must change: the
- * executor, the credentials, the Workspace, the script's exit, its output, or
- * the size it printed.
- */
-export async function runSubscriptionScript(request: SubscriptionRunRequest): Promise<SubscriptionRunReport> {
-  const script = request.subscription.script
-  if (request.executor === undefined) return failed('executor-missing', 'no shell executor is available for unattended runs')
+type RunPreflight =
+  | {
+      readonly ok: true
+      readonly executor: SubscriptionShellExecutor
+      readonly workspaceRoot: string
+      readonly resolved: Record<string, string>
+    }
+  | { readonly ok: false; readonly report: SubscriptionRunReport }
+
+async function preflightRun(request: SubscriptionRunRequest): Promise<RunPreflight> {
+  if (request.executor === undefined) {
+    return { ok: false, report: failed('executor-missing', 'no shell executor is available for unattended runs') }
+  }
   if (request.liveShell === undefined) {
     // An unattended run cannot widen its own policy, so a mounted executor that
     // cannot spawn the pinned mode runs nothing: name its own refusal.
-    return failed('spawn-failed',
-      `the Host's shell executor could not answer a probe, so this run never started: ${request.liveShellFailure ?? 'no reason was recorded'}`)
+    return {
+      ok: false,
+      report: failed('spawn-failed',
+        `the Host's shell executor could not answer a probe, so this run never started: ${request.liveShellFailure ?? 'no reason was recorded'}`),
+    }
   }
-  const mismatch = shellMismatchReason(script.shell, request.liveShell)
-  if (mismatch !== undefined) return failed('shell-mismatch', mismatch)
+  const mismatch = shellMismatchReason(request.subscription.script.shell, request.liveShell)
+  if (mismatch !== undefined) return { ok: false, report: failed('shell-mismatch', mismatch) }
   if (request.workspaceRoot === undefined) {
-    return failed('workspace-missing', 'the Project Workspace directory does not exist, so the script has nowhere to run')
+    return { ok: false, report: failed('workspace-missing', 'the Project Workspace directory does not exist, so the script has nowhere to run') }
   }
   const credentials = await resolveCredentials(request.credentials, request.subscription.credentials)
   if ('missing' in credentials) {
-    return failed('credentials-missing',
-      `the Host has no configured credential for ${credentials.missing.map(ref => `'${ref}'`).join(', ')}`)
+    return {
+      ok: false,
+      report: failed('credentials-missing',
+        `the Host has no configured credential for ${credentials.missing.map(ref => `'${ref}'`).join(', ')}`),
+    }
   }
+  return { ok: true, executor: request.executor, workspaceRoot: request.workspaceRoot, resolved: credentials.resolved }
+}
+
+type RunExecution =
+  | { readonly ok: true; readonly result: ShellRunResult }
+  | { readonly ok: false; readonly report: SubscriptionRunReport }
+
+async function executeScript(
+  request: SubscriptionRunRequest,
+  preflight: Extract<RunPreflight, { readonly ok: true }>,
+  timeoutMs: number,
+): Promise<RunExecution> {
+  const script = request.subscription.script
   const environment = subscriptionRunEnvironment({
     projectRef: request.subscription.projectRef,
     subscriptionRef: request.subscription.subscriptionRef,
     trigger: request.trigger,
     ...(request.lastSuccessAt === undefined ? {} : { lastSuccessAt: request.lastSuccessAt }),
     ...(request.deliveryId === undefined ? {} : { deliveryId: request.deliveryId }),
-    resolved: credentials.resolved,
+    resolved: preflight.resolved,
   })
   const stdin = request.stdin ?? (request.trigger === 'test' ? subscriptionTestStdin() : undefined)
   let spec: ShellExecSpec
   try {
-    spec = request.executor.resolve({
+    spec = preflight.executor.resolve({
       command: capturedCommand(script.content, script.shell),
-      workdir: request.workspaceRoot,
-      timeoutMs: request.timeoutMs ?? SUBSCRIPTION_RUN_TIMEOUT_MS,
+      workdir: preflight.workspaceRoot,
+      timeoutMs,
       stdoutMaxBytes: RAW_STDOUT_COLLECTOR_BYTES,
       env: environment,
       ...(stdin === undefined ? {} : { stdin }),
       // Explicit, non-escalating, and built from the Workspace the Host itself
       // recorded: an unattended run never inherits the process cwd, and never
       // asks for a mode a person would have to approve.
-      sandboxPolicy: { mode: 'workspace-write', workspaceRoot: request.workspaceRoot },
+      sandboxPolicy: { mode: 'workspace-write', workspaceRoot: preflight.workspaceRoot },
     })
   } catch (error) {
-    return failed('spawn-failed', `the Host could not prepare this run: ${failureDetail(error)}`)
+    return { ok: false, report: failed('spawn-failed', `the Host could not prepare this run: ${failureDetail(error)}`) }
   }
-  let result: ShellRunResult
   try {
-    result = await (await request.executor.execute(spec)).result()
+    return { ok: true, result: await (await preflight.executor.execute(spec)).result() }
   } catch (error) {
-    return failed('spawn-failed', `the shell executor failed before the script produced output: ${failureDetail(error)}`)
+    return {
+      ok: false,
+      report: failed('spawn-failed', `the shell executor failed before the script produced output: ${failureDetail(error)}`),
+    }
   }
-  const stdoutMaxBytes = request.stdoutMaxBytes ?? SUBSCRIPTION_STDOUT_MAX_BYTES
-  const captured = await readCapturedStdout(result, stdoutMaxBytes)
+}
+
+/** Classify a settled shell run and its recovered raw stdout into the structured report. */
+function classifyRunResult(
+  result: ShellRunResult,
+  captured: CapturedStdout,
+  limits: { readonly timeoutMs: number; readonly stdoutMaxBytes: number },
+): SubscriptionRunReport {
   const stdout = captured.ok ? captured.text : result.stdout.text
   const stderr = result.stderr.text
   if (result.timedOut) {
-    return failed('timeout', `the script exceeded ${Math.round((request.timeoutMs ?? SUBSCRIPTION_RUN_TIMEOUT_MS) / 1000)} seconds and was killed`,
+    return failed('timeout', `the script exceeded ${Math.round(limits.timeoutMs / 1000)} seconds and was killed`,
       stdout, stderr, result.exitCode, true)
   }
   if (captured.ok && captured.tooLarge) {
-    return failed('stdout-truncated', `the script printed more than ${stdoutMaxBytes} bytes of stdout; narrow what it prints`,
+    return failed('stdout-truncated', `the script printed more than ${limits.stdoutMaxBytes} bytes of stdout; narrow what it prints`,
       stdout, stderr, result.exitCode)
   }
   if (result.exitCode !== 0) {
@@ -383,7 +400,24 @@ export async function runSubscriptionScript(request: SubscriptionRunRequest): Pr
   return Object.freeze({ ok: true, stdout, stderr, exitCode: result.exitCode, timedOut: false, events: parsed.events })
 }
 
-/** Whether a trial output should seed the deduplication baseline. */
+/**
+ * Run one snapshot under the Host's own policy and apply the output contract.
+ * The report's `category` distinguishes what the owner must change: the
+ * executor, the credentials, the Workspace, the script's exit, its output, or
+ * the size it printed.
+ */
+export async function runSubscriptionScript(request: SubscriptionRunRequest): Promise<SubscriptionRunReport> {
+  const preflight = await preflightRun(request)
+  if (!preflight.ok) return preflight.report
+  const timeoutMs = request.timeoutMs ?? SUBSCRIPTION_RUN_TIMEOUT_MS
+  const execution = await executeScript(request, preflight, timeoutMs)
+  if (!execution.ok) return execution.report
+  const stdoutMaxBytes = request.stdoutMaxBytes ?? SUBSCRIPTION_STDOUT_MAX_BYTES
+  const captured = await readCapturedStdout(execution.result, stdoutMaxBytes)
+  return classifyRunResult(execution.result, captured, { timeoutMs, stdoutMaxBytes })
+}
+
+/** Deduplicated event ids from a trial output, in first-seen order. */
 export function baselineIdsOf(events: readonly SubscriptionEvent[]): readonly string[] {
   return Object.freeze([...new Set(events.map(event => event.id))])
 }
