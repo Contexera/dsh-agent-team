@@ -2,9 +2,9 @@
 
 English | [中文](README.zh.md)
 
-This document records the long-lived UI system for `packages/client-agent-team/src/client/`: principles, layout, typography, color and identity, component contracts, interaction patterns, accessibility, and verification. It captures stable decisions rather than active work or short-lived plans. Source and tests define behavior; fix this document when they disagree.
+Before changing a surface, use [Client and Remote](../architecture/client-and-remote.md) to locate the mount and data boundaries, then find the design contract below. Choose a targeted check in the [browser lane catalog](../development/e2e-lanes.md).
 
-The UI system is maintained in focused files:
+These pages record durable design contracts; source and tests determine actual behavior.
 
 | Page | Owns |
 | --- | --- |
@@ -12,5 +12,5 @@ The UI system is maintained in focused files:
 | [layout-and-typography.md](layout-and-typography.md) | the layout skeleton, typography, and colour and identity |
 | [components.md](components.md) | one contract per Team component: messages, runs, refs, capsule, rosters, profile, failures, and the Thread header band |
 | [thread-and-composer.md](thread-and-composer.md) | timeline scrolling, the composer and mentions, Thread/Task entry rows, and status pills |
-| [sidebar-browser.md](sidebar-browser.md) | the sidebar Workspace browser and the Inbox surface it hosts |
+| [sidebar-browser.md](sidebar-browser.md) | Workspace selection, sidebar destinations, and the cross-Workspace Inbox and Task board |
 | [refresh-copy-accessibility.md](refresh-copy-accessibility.md) | data refresh semantics, copy and localization, the accessibility baseline, and how the system evolves |

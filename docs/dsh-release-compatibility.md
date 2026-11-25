@@ -69,17 +69,18 @@ Build the certified Harness checkout first so Team TypeScript facades point at i
 
 In that checkout run `pnpm install --frozen-lockfile` and build it: `pnpm run build:lib`, `pnpm run build:native-system` for the native system addon the tests load, and `pnpm run build:web` for the browser lane's `apps/web/dist`.
 
-Mirror the daily repository's `node_modules/@deepseek-ai/*` link farm onto the candidate checkout, and point the bundle self-link at the copy: typecheck resolves through the facades, while the test suite and the browser lane resolve through those links.
-
-Then run in the isolated Team copy:
+In the isolated Team copy, install dependencies and point all commands at the candidate Harness. The link script creates package links and the Team self-link from the selected checkout; do not copy links from daily development.
 
 ```sh
+export DSH_HARNESS_DIR=deepseek-harness-CANDIDATE
+corepack pnpm install --frozen-lockfile
+node scripts/link-harness-packages.mjs
 node scripts/sync-paths.mjs
 npm run generate:typert
 npm run typecheck
 ```
 
-Typert output must be stable. Review generator output and the Remote contract before changing Team source; never hand-edit `packages/agent-team/lib/typert.*`.
+Replace `CANDIDATE` with the checkout's directory suffix and keep using the same shell for certification. Typert output must be stable. Review generator output and the Remote contract before changing Team source; never hand-edit `packages/agent-team/lib/typert.*`.
 
 ### 3.3 Automated verification
 
@@ -107,7 +108,7 @@ The following evidence is required:
 Any bundle, Client module, Remote activation, slot, or DSH Client package change requires:
 
 ```sh
-npm run test:browser
+npm run test:browser -- --deep
 ```
 
 Run it against the candidate Harness checkout and verify ordinary DSH → Team mode → ordinary DSH restoration. Cover Remote mounting, Team entry/reload/exit, existing Project/Thread/Member flows, 390×844 layout, keyboard focus/dialogs, and absence of Team tools, guidance, and UI in ordinary Sessions. Handle browser output as described in `development/generated-and-seams.md`; do not commit routine screenshots or temporary Harness tests.
@@ -186,15 +187,15 @@ Record candidate tag, symptom, affected interface, reproduction command, and nex
 
 The current certified baseline is DSH `0.2.2-rc.2`; the paragraphs below preserve the history that produced the preceding baselines.
 
-The DSH peers state exactly that certified line, `>=0.2.2-rc.2 <0.2.3`, so a line this repository has not verified falls outside the declared range instead of installing under an unverified compatibility claim. The removed `@deepseek-ai/dsh-tool-todo` peer left with the preset row it named when the Team surface dropped the session-local todo tool; the remaining peers keep the one certified range.
+The DSH peers state exactly that certified line, `>=0.2.2-rc.2 <0.2.3`. The lower bound is CI's pinned checkout, not the newest certified candidate. See the candidate records below for evidence on specific versions in the range.
 
 The removed `@deepseek-ai/dsh-invariants` peer likewise left with the registry row it named when the invariant companion began validating on its own.
 
-No dependency now sits outside the DSH line: the external context engine and its `jev` judge left with the tools that used them, so the bundle's own dependencies are `yaml` and `zod` alone and neither contributes a DSH peer declaration to the tree.
+Team's direct runtime dependencies are `@botiverse/oar`, `yaml`, and `zod`, listed separately from the Harness peers. The Worker runtime uses OAR for engine execution and observation.
 
 `zod` carries an exact pin (`4.6.6`), not a range. Typert generation puts this bundle's packages inside the host workspace for type analysis, and the DSH `0.2.2-rc.2` bundle declares that same exact version; a caret range there resolves a second copy and splits `ZodType` into two incompatible declarations. A zod patch therefore moves this pin deliberately, on the round that certifies the host carrying it, instead of drifting in through a caret.
 
-The routed sqlite backend is a vendored fork, not a dependency at all (GitHub issue #28). The upstream package stays a devDependency pinned at the fork source, 0.1.5-rc.2, as the byte-compatibility fixture reference, and every compat round diffs the fork against that version's file before anything else.
+The routed sqlite backend is a vendored fork, not a dependency at all (GitHub issue #28). The upstream package stays a devDependency pinned to the fork source, `0.2.2-rc.1`, as the byte-compatibility fixture reference, and every compat round diffs the fork against that version's file before anything else.
 
 The `0.1.5-rc.1` baseline this replaced was certified over Typert generation, full typecheck, 499 tests (1 skipped), build, pack checks, lint, and real browser composition with published-layout installation, Remote mount, Team entry/exit, and ordinary DSH restoration, on peers `>=0.1.5-rc.1 <0.1.6`. `0.1.5-rc.2` was certified on those same peers with no manifest change.
 

@@ -23,7 +23,7 @@
 - Agent 和 Project 编辑弹窗打开时聚焦名称，关闭时把焦点还给原列表行。负责人责任的编辑态打开时聚焦它的 textarea，取消或保存成功后焦点回到该行的「编辑」控件。
 - manager gate 重试成功后，若读者没有离开，就在 Session 解析完成时聚焦 shipped composer。gate 自己的失败态就是这个 Client 一直在画的那种整面失败——一行，消息在前、重试在行尾——重试重跑同一次解析。「新开对话」失败会恢复可点击的按钮，并通过自动消失的 Toast 报错，不留下常驻 inline alert。
 - listbox/option 完整键盘闭环（见 composer 一节）；Project composer 的「作为任务」使用原生 button 的 `aria-pressed`，Space/Enter 均可切换。
-- Project 页的 `项目 | 看板` 页签行是复合控件：整组只有一个 tab stop（未选中的那个 `tabIndex` 为 -1），Left/Right/Home/End 同时移动选中与焦点，每个页签用 `aria-controls`/`aria-labelledby` 指明自己控制的 panel。
+- Project 页的 `主对话 | 看板 | 订阅` 页签行是复合控件：整组只有一个 tab stop（未选中的那个 `tabIndex` 为 -1），Left/Right/Home/End 同时移动选中与焦点，每个页签用 `aria-controls`/`aria-labelledby` 指明自己控制的 panel。
 - 图标按钮均有 aria-label；装饰元素 `aria-hidden`。
 - Thread 入口的「开门」控件是一枚原生 button，label 同时携带 Thread 与它的未读数。旁边画出的胶囊 `aria-hidden`，头像叠放是单个带标签的 `role="img"`，且刻意留在按钮之外以保住它自己的可访问名。
 - 消息时间线区域使用专用 `timelineLabel`（"消息时间线"），不误用项目/参与者标签；Thread 内部事实分组段不带重复的区域标签。
@@ -31,6 +31,8 @@
 - 新增可见 UI 必须通过 `npm run test:browser` 的桌面 1440×960、窄屏 390×844 和键盘检查（见 `development/README.md`）。
 
 ## 验证与演进流程
+
+纯文档改动从 `npm run check:docs` 开始。更改浏览器用例说明时，另跑 `npm run check:e2e-docs`。界面改动先从 [用例目录](../development/e2e-lanes.zh.md) 选对应场景；单跑一个场景不能代替完整的浏览器验收。
 - 影响可见 UI、Client bundle、slot 或 Remote activation 的改动：`npm run typecheck && npm test && npm run lint && npm run build && npm run test:browser`。Thread-first 变更的 browser 验收还须覆盖默认 taskless 发送、default-off 「作为任务」键盘切换、promotion 后 Host reread、taskless header/Claim gating，以及桌面与 390×844。
 - 截图写入 Git 忽略的 `artifacts/browser/`，仅供本次审查；少量能说明验收结论的代表图复制进 `.scratch/archive/YYYY-MM/<work>/validation/` 并附 README 说明。
 - 本文档描述的行为变化必须在同一次改动中同步更新；历史设计来由归档到 `.scratch/archive/`，正式文档只链接不转述。

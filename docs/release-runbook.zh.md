@@ -2,7 +2,7 @@
 
 [English](release-runbook.md) | 中文
 
-本文是发布 `@contexera/dsh-agent-team` 版本的操作流程。它存在的意义是：维护者只看这一页就能跑完一次发布，包括那些因为曾经有缺陷流到用户手里才加上的检查。它不是行为规范——行为由源码与测试定义；而「这个 bundle 支持哪条 DSH 线」是另一个问题，由 [`dsh-release-compatibility.md`](dsh-release-compatibility.md) 负责。认证决定 peer 范围，本文决定承载该决定的版本如何到达 npm。
+本页用于发布 `@contexera/dsh-agent-team`。先确认 [DSH 兼容性认证](dsh-release-compatibility.zh.md) 的结果，再按本页审核文案、核验证据并发布。认证决定支持哪条 DSH 版本线；本手册只说明如何把承载该决定的 Team 版本交付到 npm。
 
 ## 1. 谁决定什么
 
@@ -25,16 +25,16 @@
 
 ## 3. 检查阶梯
 
-按此顺序执行；任何一步失败都中止发布，修好后从失败的那一步重跑。
+按顺序执行。部分 preset 测试会读取构建产物，所以先构建再跑测试。有失败就暂停发布；修复后，从受这次修复影响的最早一步重跑。
 
 | 命令 | 它拦下什么 |
 | --- | --- |
 | `npm run typecheck` | 针对已认证 harness checkout 的类型错误。 |
-| `npm test` | 测试失败，以及它捆绑的六道机械门：`check:facades`、`check:docs`、`check:core-skills`、`check:boundaries`、`check:versions`、`check:comments`。 |
 | `npm run build` | 构建错误；这也是发布时 `prepack` 会跑的东西。 |
+| `npm test` | 生成 Typert，检查 facade、文档、E2E 用例说明、核心技能、包边界、版本、注释和 scratch 目录，再运行 Vitest。 |
 | `npm run lint` | lint 错误。命令不带 `--deny-warnings`，所以警告不会让它失败。 |
-| `npm run test:browser -- --deep` | 组合、Remote 挂载、slot 接管、完整跨表面回归或普通 DSH 恢复被破坏。需要相邻的 `../deepseek-harness` checkout；浏览器验收是本地步骤，从不在 CI 运行。 |
-| `npm pack --dry-run` | 本身不拦什么——把文件数记进发布报告。 |
+| `npm run test:browser -- --deep` | 组合、Remote 挂载、slot 接管、完整跨表面回归或普通 DSH 恢复被破坏。使用已认证的 Harness checkout；这是本地发布检查，不由 CI 代跑。 |
+| `npm pack --dry-run` | 本身不拦什么——记录文件数，并核对 npm 包的内容；产物校验见下一步。 |
 | `npm run check:artifact` | 会以破损形态发布的产物：混入的 `.ts`/`.tsx`、缺失的 `cordis.patch.yml`，或目标不在 tarball 里的运行时相对导入。要在 `npm run build` **之后**跑。 |
 | `npm run check:public-baseline` | 与 manifest 的已认证基线发生漂移的公开面（两个 README 与置顶的兼容性讨论）。它通过 `gh` 读取该讨论，因此操作者需要已认证的 `gh`；`--offline` 只供本地迭代，发布前不能代替。 |
 | `git diff --check v<previous>..HEAD` | 发布改动集里任意位置的空白符损坏。裸 `git diff --check` 只看**未暂存**的改动，所以发布提交一旦落地它就静默通过——而梯子正是在那时跑的。 |
@@ -66,9 +66,11 @@
 
 1. tag 恰好是 `v<package.json version>`——manifest 与 tag 之间不得漂移。
 2. 预发布后缀与 GitHub Release 的 prerelease 标记一致；稳定版不得被标为 prerelease。
-3. 发布命令必须显式指名 dist-tag——`npm publish --tag <dist-tag> --access public`，稳定版用 `latest`、预发布用它自己的 tag。npm 会拒绝在默认 tag 下发布预发布，所以省略 `--tag` 根本表达不了这笔发布：运行会停在这里，而不会移动 `latest`。
+3. 发布时显式指定 dist-tag：预发布用自己的 tag；稳定版先按第 5 条确认是否能使用 `latest`，不能就用 `next`。不要依赖 npm 的默认 tag。
 4. 把某个版本发成 `latest` 时绝不把 tag 往回移：当前 `latest` 必须 semver 上低于即将发布的版本。
 5. 稳定版只有在它的声明区间接纳「DSH `latest` 解析到的那个版本」时才占用 `latest`（见 [§2.4](dsh-release-compatibility.zh.md)）。认证越过那个版本时，发到 `next`、`latest` 原地不动，等 DSH 自己的 `latest` 到了再移过去。
+
+先核对 `origin` 是否为获准发布的仓库。只暂存本次发布的文件；若预检修订了兼容性或安装说明，也明确加入相应路径。提交后确认暂存内容已全部进入发布提交。
 
 ```sh
 git add package.json CHANGELOG.md
@@ -86,7 +88,7 @@ git push origin vX.Y.Z
 npm publish --tag <dist-tag> --access public
 ```
 
-显式 refspec 与它们的 dry-run 栅栏是承重的，不是仪式。本地克隆可能带着改写前的备份分支与仅本地 tag，其提交是刻意不进远端的，而 `--all` / `--tags` 会把它们静默推上去。本仓库是公开的：推错的 ref 无法收回。如果某次 dry run 列出了第三个 ref，停下来查清那是谁的。
+显式 refspec 与它们的 dry-run 栅栏是承重的，不是仪式。本地克隆可能带着改写前的备份分支与仅本地 tag，其提交是刻意不进远端的，而 `--all` / `--tags` 会把它们静默推上去。本仓库是公开的：推错的 ref 无法收回。如果 dry run 列出了任何非预期的 ref，停下来查清那是谁的。
 
 先推 master 再打 tag 不花任何代价，却让 tag 的证据是诚实的：认证一个 tag 的那次运行，就是该 tag 所指提交自己的那次运行。只有当还没有任何东西引用这个 tag 时才允许重新指向它——没有 GitHub Release、没有 npm 版本、没有消费方。
 

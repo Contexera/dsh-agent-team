@@ -19,7 +19,7 @@ All visible copy comes from structurally matching zh/en locale keys, whose types
 Every other failure keeps the Host's own message verbatim: the localized layer is the frame naming the failed action (`restartFailed`, `archiveProjectFailed`) where the surface does not already name it, because the raw text is the only diagnostic for an unknown refusal and `isUncertainRemoteFailure` treats a dropped carrier and an ordinary Host exception alike.
 
 ## Accessibility baseline
-Section headers, expand/collapse buttons, menus, listbox/options, the 「作为任务」 control, and the Project page's `项目 | 看板` tab strip use native keyboard behavior and complete ARIA state. The tab strip is one tab stop for the group with Left/Right/Home/End moving selection and focus together, each tab naming its panel through `aria-controls`/`aria-labelledby`.
+Section headers, expand/collapse buttons, menus, listbox/options, the 「作为任务」 control, and the Project page's `主对话 | 看板 | 订阅` tab strip use native keyboard behavior and complete ARIA state. The tab strip is one tab stop for the group with Left/Right/Home/End moving selection and focus together, each tab naming its panel through `aria-controls`/`aria-labelledby`.
 
 Every icon button has an accessible label; decoration is hidden. A Thread entry's door is one native button whose label carries both the Thread and its unread count; the capsule drawn beside it is `aria-hidden`, and the owner stack is a single labeled `role="img"` that stays outside the button so its name survives. Timeline uses a dedicated message-timeline label.
 
@@ -30,6 +30,9 @@ A successful manager-gate retry focuses the shipped composer after its Session r
 Unread and run dividers have `role="separator"`; visible UI changes require desktop 1440×960, 390×844, and keyboard browser checks.
 
 ## Verification and evolution
+
+For prose-only changes, start with `npm run check:docs`; add `npm run check:e2e-docs` when changing browser lane documentation. For UI work, use the [lane catalog](../development/e2e-lanes.md) for targeted feedback. A targeted lane does not replace full browser acceptance.
+
 Visible UI, Client bundle, slot, or Remote activation changes require:
 
 ```sh

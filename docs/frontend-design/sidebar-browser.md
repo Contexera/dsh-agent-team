@@ -2,15 +2,15 @@
 
 English | [中文](sidebar-browser.zh.md)
 
-The Workspace is one selector line, not a list. Projects and Agents below it belong to exactly one Workspace; collapsing it into a single trigger makes the sidebar read as "you are in X, and here is X's content" and returns the rows a low-frequency switch was holding.
+## Workspace selector and lists
 
-Nothing is hidden by that collapse: Workspace rows carry no unread mark of their own, and cross-Workspace unread is summarized by the Inbox entry, which stays above the selector. That entry's total sums every visible Workspace, so it is the one destination the selector does not scope, and it must not read as one of the rows under the line that names a single Workspace. When there is no Workspace to state — an empty roster, or a selection the roster no longer carries — the browser says so in the selector's own seat instead of rendering a dead field.
+Projects and Agents list only the selected Workspace’s content. Inbox, Task board, and Team manager are global destinations placed above the selector. If there is no Workspace or the old selection is no longer available, show a message where the selector would be instead of an inactive field.
 
 The trigger is the bordered single-choice field shape the creation forms already use (`.workspaceTrigger`, 12px radius, 34px line, `aria-haspopup="menu"` plus `aria-expanded`), so the line that says where the reader is does not read as the first entry of the Projects list. It carries the selected folder tint permanently because it is always showing a selection, states the selection as its own text with the full path on `title`, and opens the public `Menu` with the current Workspace checked.
 
 The control's accessible name states both what the field is and which Workspace it shows (`工作区，Alpha`), because that value is invisible to a reader who cannot see the field.
 
-That menu is the only way to switch Workspaces, so it takes focus on open. A portaled list is placed a frame after it mounts, so the selector focuses the opened row once that list is on screen. It keeps `autoFocus` on the primitive for what the primitive owns — arrow-key movement between rows, which indexes from the focused row, and Escape's return to the trigger.
+That menu is the only way to switch Workspaces, so it takes focus on open. A portaled list is placed a frame after it mounts, so the selector focuses the first enabled option after mount if the menu has not already taken focus. It keeps `autoFocus` on the primitive for what the primitive owns — arrow-key movement between rows, which indexes from the focused row, and Escape's return to the trigger.
 
 The trigger takes `aria-current="page"` while the Workspace overview is the page on screen, exactly as the old selected row did, and takes the shared hover fill for it. The field's own layer is its resting background, so the fill is what marks the page.
 
@@ -101,8 +101,16 @@ What centres is the label, not the group it would lay out with the chevron. Cent
 
 The footer's settings seat (`sidebar.settings`) is deliberately left to the shipped Settings row, which keeps it in both modes. The Team's own settings page registers on `settings.section`, so it stays reachable from the sidebar it belongs to. The former 「成员 / Members」 entry and its read-only roster dialog are retired: the Agent panel already lists every Member with its actions, and the roster only restated that list.
 
+The three global cards and the Workspace selector read as one stack: every gap between them is that control's own 2px top step (the shipped list's within-group step), never the previous row's bottom, and the selector keeps its field chrome inside the same rhythm — the same unit, in the selector's own form. The Inbox card's 4px top is the stack's step off the exit slab above it, not part of the stack's internal rhythm.
+
+The browsing seat paints no bottom fade of its own. DSH 0.2.2-rc.2 moved the fade from the browsing tree into the shell's sidebar scroll region, which paints one 24px overlay over the slot content at the region's foot; a copy inside the seat would be a second gradient over the same seam, doubling the alpha mid-fade and stopping at a different inline edge. The journey asserts the seat paints no overlay of that shape, and the shell's own fade is the host's to test.
+
+The list keeps the shipped list's 16px bottom inset so the last row sits above the gradient at scroll end — the shipped list states the same clearance under the shell's fade. The seat states no trailing inset, as the shipped browsing region states none either.
+
+macOS desktop needs nothing from Team here: the shell hides its fade there, because the sidebar is translucent over window vibrancy and an opaque fill gradient would paint a solid smear instead of a fade.
+
 ## Inbox (收件箱)
-The Inbox entry is one card on the wide rail above the Workspace selector. Its total sums the unread of every visible Workspace, so it is the one destination that outlives the scope the selector names, and it leads the sidebar instead of standing inside that scope. On the narrow rail it is the rail's first icon, where no selector exists to lead.
+The Inbox sits above the Workspace selector in the expanded sidebar and narrow drawer. Its total spans all visible Workspaces. In the collapsed desktop rail it comes immediately after Conversation.
 
 Both mark unread the same way — a dot on the icon's top-left corner, standing for the sum of each visible Workspace's whole-unread Inbox total with mentions counted inside it rather than alone. It renders nothing at zero: no unread is the absence of the mark, not an empty dot.
 
@@ -120,20 +128,6 @@ While the Inbox page stands, the card/icon carries `aria-current="page"` — and
 
 `TeamConversation` also renders the manager gate before its Thread | Project | Inbox | Task board | welcome faces. The manager destination takes the main seat without clearing the Team face underneath; selecting Inbox or the Task board closes it and replaces that face. Selecting Inbox or the Task board also clears the Project/Thread faces and each other. From an Inbox row, Back lands on that row's Project — the Inbox is never pushed onto the back path; re-enter it through the card or the rail icon.
 
-## Task board (任务看板)
-
-The Task board entry is the Inbox entry's sibling: one card on the wide rail above the Workspace selector, its own checklist glyph at the same tertiary ink, and the rail's second icon. It opens the one cross-Workspace board (`TeamTaskBoardPage`), which groups every visible Workspace's open Tasks into the three open-status columns and carries the Project board's card language — dot, number, subject, accountable owner, and the 待验收 badge — without the Project board's unread badges, which stay per-Thread facts on the Project face.
-
-The page answers to the same empty rule as the Project board: when no Task is open, the empty message stands alone and no column head renders beside it. Its cards open the Task's Thread level, and while the page stands its sidebar row carries `aria-current="page"` — never the Workspace selector under it.
-
-The two cards and the Workspace selector read as one stack: every gap between them is that control's own 2px top step (the shipped list's within-group step), never the previous row's bottom, and the selector keeps its field chrome inside the same rhythm — the same unit, in the selector's own form. The Inbox card's 4px top is the stack's step off the exit slab above it, not part of the stack's internal rhythm.
-
-The browsing seat paints no bottom fade of its own. DSH 0.2.2-rc.2 moved the fade from the browsing tree into the shell's sidebar scroll region, which paints one 24px overlay over the slot content at the region's foot; a copy inside the seat would be a second gradient over the same seam, doubling the alpha mid-fade and stopping at a different inline edge. The journey asserts the seat paints no overlay of that shape, and the shell's own fade is the host's to test.
-
-The list keeps the shipped list's 16px bottom inset so the last row sits above the gradient at scroll end — the shipped list states the same clearance under the shell's fade. The seat states no trailing inset, as the shipped browsing region states none either.
-
-macOS desktop needs nothing from Team here: the shell hides its fade there, because the sidebar is translucent over window vibrancy and an opaque fill gradient would paint a solid smear instead of a fade.
-
 ### Page frame and header
 
 The page rides the shared conversation seat — the same header band, 880px centered reading column, `clamp(18px, 3vw, 36px)` gutters, and stable scrollbar gutter Project and Thread use. Its header carries the page h1 plus one count line built as segments rather than a sentence: the Thread count, the whole-unread total the page is about in primary 600 ink while its neighbours stay secondary, and the mention total only while the queue actually holds one.
@@ -150,7 +144,7 @@ It never acknowledges anything: opening the page is not a read; only a durable T
 
 ### Row anatomy
 
-Each row is one full-width 8px-radius queue row in the shipped two-line result-row shape — 8px inset, shared `--dsw-alias-interactive-bg-hover` fill, inset focus ring. It is laid out as a grid whose first track belongs to whoever is on the Thread and is exactly as wide as the cluster it draws, plus the line's 8px gap.
+Each row is one full-width queue row with `var(--dsw-radius-lg, 8px)` in the shipped two-line result-row shape — 8px inset, shared `--dsw-alias-interactive-bg-hover` fill, inset focus ring. It is laid out as a grid whose first track belongs to whoever is on the Thread and is exactly as wide as the cluster it draws, plus the line's 8px gap.
 
 A leading cluster hangs there on every row — counted or not, which is the point, because a track reserved for a count is empty on every Thread with nothing waiting.
 
@@ -199,3 +193,9 @@ A capped queue says so where the list ends: when the Host reports unread Threads
 The badge subscribes the same way for its totals and re-pulls only totals (`limit: 1`), never lists.
 
 The badge additionally refreshes from every completed durable read: the Host's changes stream deliberately never wakes on reads (a read changes no shared projection), but the read consumes this reader's unread facts, markers included. Both read paths count — a Thread's page and a Project's Main stream move the same private watermark, and the Host derives both Inbox slices from it, so a badge that listened to only one of them left a Project's unread standing after the read that consumed it.
+
+## Task board (任务看板)
+
+The Task board entry is the Inbox entry's sibling: one card on the wide rail above the Workspace selector, its own checklist glyph at the same tertiary ink, and the rail icon immediately after Inbox. It opens the one cross-Workspace board (`TeamTaskBoardPage`), which groups every visible Workspace's open Tasks into the three open-status columns and carries the Project board's card language — dot, number, subject, accountable owner, and the 待验收 badge — without the Project board's unread badges, which stay per-Thread facts on the Project face.
+
+The page answers to the same empty rule as the Project board: when no Task is open, the empty message stands alone and no column head renders beside it. Its cards open the Task's Thread level, and while the page stands its sidebar row carries `aria-current="page"` — never the Workspace selector under it.

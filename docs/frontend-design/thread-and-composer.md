@@ -20,7 +20,10 @@ The name and its time share one baseline, as in Raft's `items-baseline` row. The
 A continuation row has no identity line; its time rides in the avatar seat as described under [Timeline scrolling](#timeline-scrolling).
 
 ## Composer and mentions
-The textarea grows to 336px, autofocuses without moving the timeline, sends on Enter, and inserts a newline on Shift+Enter. IME composition suppresses send. During submit it stays focused and read-only; buttons do not steal focus. Replies never ask for confirmation at version 2: a mention delivers directly, so there is no second Enter to preserve a draft for.
+
+Start with `TeamMainStream.tsx` and `TeamThreadStartControls.tsx` for send modes. See the [send retry tests](../../packages/client-agent-team/tests/team-send-retry.client.spec.tsx) for request reuse and recovery.
+
+The textarea grows to 336px, autofocuses without moving the timeline, sends on Enter, and inserts a newline on Shift+Enter. IME composition suppresses send. During submit it stays focused and read-only; buttons do not steal focus. Replies do not require a second confirmation; the Host resolves and delivers mentions from the submitted body.
 
 The mention popup is an upward `role="listbox"` associated through `aria-controls`, `aria-activedescendant`, and `aria-expanded`; arrows cycle, Tab/Enter accept, Escape closes, and outside dismissal/max height use public hooks. The highlighted row is kept inside the scrollable popup (`scrollIntoView` with `block: 'nearest'`), so long rosters never hide the keyboard selection.
 
@@ -32,7 +35,7 @@ The popup offers every Workspace participant a mention can address: lifecycle en
 
 On a Thread the follower set comes from the Human-only `threadObservations` read (first paint plus every thread-scope wake); a Project send has no follow set, so it groups owners and the rest of the Workspace.
 
-Every candidate stays pickable, and within a group the order is online first, then handle, so the order no longer drifts with arrival. A typed `@all` is plain text under version 2 and expands to nothing, so it is not offered. Accepted text places the caret precisely; deleting mention text shrinks the notified set.
+Every candidate stays pickable, and within a group the order is online first, then handle, so the order no longer drifts with arrival. Neither composer offers `@all`; typing it sends plain text without expanding recipients. Accepted text places the caret precisely; deleting mention text shrinks the notified set.
 
 The `other` group carries the weight: its name drops to the secondary label alias through `data-mention-inside`. The group headings carry the structural difference colour cannot — owner, follow, the rest — so a Member outside this Thread is named by its heading rather than dimmed. Below 600px the description is dropped and the grouping stays.
 
@@ -44,19 +47,17 @@ An unchanged Project send or Thread reply can resume after reopening in the same
 
 Switching between discussions in the open panel leaves a write pending only on its original Thread; its response cannot change the other discussion. A Task start opens the Board only if the opening that submitted it is still active.
 
-The 「作为任务」 intent is not persisted and resets off after success. The mode chip keeps its word label at every width and narrows the toolbar gap below 560px rather than hiding the word.
+A new draft starts in Main-message mode. The thread-start chip keeps its label at every width; the toolbar narrows its gaps below 560px instead. A successful send resets the mode, and mode is not stored in localStorage.
 
 A Message that names the reader says so once, on the row, not on the chip: every mention chip renders alike and the card carries the 「Mentioned you」 notice. A body that wrote the reader's older handle still sets both — the scan follows the identity, not the spelling.
 
 The Project composer posts to the Main stream and its tool slot holds `讨论/任务`. The toggle is a pressed button; once on, it reveals a native `作为任务` checkbox.
 
-Off sends `postMainMessage`, with `replyToMessageRef` when a Main message is quoted. On sends `startThread` as a discussion, or as a Task when the box is checked; a committed Task moves the page to the `看板` tab with focus on it. Quoting turns the toggle off and turning it on drops the quote, since a new Thread has no quote target.
+Off sends `postMainMessage`, with `replyToMessageRef` when a Main message is quoted. On sends `startThread` as a discussion, or as a Task when the box is checked; a committed Task switches to `看板` and focuses the new card, or the tab if the card is unavailable. Quoting turns the toggle off and turning it on drops the quote, since a new Thread has no quote target.
 
 When the Host answers `main_unread_required` the draft stays, the stream is refreshed and read, and a status line asks the Human to look and send again; the retry is a new operation.
 
 A file reaches the draft three ways and lands on one list: the picker, a paste that carries files, or a drop on the composer. A drag that carries files states itself in the composer's own status line before it lands, and the drop cancels the browser's default so a file released beside the composer cannot navigate the page to it.
-
-Replies never ask for confirmation at version 2, and neither the Main stream nor Thread composers offer `@all` or expand it into recipients; a typed `@all` is plain text.
 
 ## Quoting a Message
 A Thread Message can be answered by picking the Message it answers. The affordance is unconditional: the reply action, the stored quote lines, and the composer banner are one feature the Host serves in full, so no surface asks whether quoting is available.
