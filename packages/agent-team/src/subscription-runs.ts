@@ -58,10 +58,14 @@ export function subscriptionRunKey(record: Pick<SubscriptionRunRecord, 'subscrip
   return `${record.subscriptionRef}|${String(started).padStart(15, '0')}|${record.runRef}`
 }
 
+function keysForSubscription(keys: Iterable<string>, subscriptionRef: AgentTeamSubscriptionRef): string[] {
+  const prefix = `${subscriptionRef}|`
+  return [...keys].filter(key => key.startsWith(prefix))
+}
+
 /** Keys of one subscription's runs, oldest first. */
 export function subscriptionRunKeysOf(keys: Iterable<string>, subscriptionRef: AgentTeamSubscriptionRef): readonly string[] {
-  const prefix = `${subscriptionRef}|`
-  return [...keys].filter(key => key.startsWith(prefix)).sort()
+  return keysForSubscription(keys, subscriptionRef).sort()
 }
 
 /** The keys an insert has to evict so that at most `limit` runs stay, oldest first. */
@@ -221,10 +225,9 @@ export function deliveryKey(subscriptionRef: AgentTeamSubscriptionRef, deliveryR
   return `${subscriptionRef}|${deliveryRef}`
 }
 
-/** Keys of one subscription's deliveries, newest last. */
+/** Keys of one subscription's deliveries. */
 export function deliveryKeysOf(keys: Iterable<string>, subscriptionRef: AgentTeamSubscriptionRef): readonly string[] {
-  const prefix = `${subscriptionRef}|`
-  return [...keys].filter(key => key.startsWith(prefix))
+  return keysForSubscription(keys, subscriptionRef)
 }
 
 /**
@@ -266,30 +269,20 @@ export function deliveryExpiresAt(receivedAt: number): string {
   return new Date(receivedAt + SUBSCRIPTION_DELIVERY_RETENTION_MS).toISOString()
 }
 
-/**
- * One requested replay, indexed by the request rather than by the delivery.
- *
- * The delivery row keeps the same answer for its own retention, but a delivery
- * row can only compare the request id of one delivery: the same id aimed at a
- * second delivery would run a second, different intent. This record is the whole
- * key — the request, the delivery it named, and the version it chose — so a
- * repeated call answers once, a concurrent one is refused, and reusing an id for
- * another intent collides instead of executing.
- */
-/** Whether a request may still be executing, or its answer is recorded. */
+/** Whether a replay request may still be executing, or its answer is recorded. */
 export const SUBSCRIPTION_REPLAY_STATES = ['running', 'settled'] as const
 
 export type SubscriptionReplayState = (typeof SUBSCRIPTION_REPLAY_STATES)[number]
 
 /**
- * One replay request: what it named, and what it answered.
+ * One requested replay, indexed by the request rather than by the delivery so
+ * reusing a request id for a different delivery or version collides instead of
+ * executing twice.
  *
- * The record exists twice in its life. It is written *before* the script runs,
- * carrying the delivery and version the request named — that is what makes one
- * request id one intent even when no answer survives — and it is settled after
- * the run with the outcome. A request still `running` is one whose answer never
- * landed: a retry cannot tell it from an attempt that died, so it is told what
- * happened instead of running the script again.
+ * The record exists twice in its life: written as `running` *before* the script
+ * runs (pinning the delivery and version even if no answer survives), then
+ * settled after the run with the outcome. A retry that finds `running` refuses
+ * to run the script again.
  */
 export interface SubscriptionReplayRecord {
   readonly subscriptionRef: AgentTeamSubscriptionRef
@@ -316,6 +309,5 @@ export function replayKey(subscriptionRef: AgentTeamSubscriptionRef, requestId: 
 
 /** Keys of one subscription's replays. */
 export function replayKeysOf(keys: Iterable<string>, subscriptionRef: AgentTeamSubscriptionRef): readonly string[] {
-  const prefix = `${subscriptionRef}|`
-  return [...keys].filter(key => key.startsWith(prefix))
+  return keysForSubscription(keys, subscriptionRef)
 }
