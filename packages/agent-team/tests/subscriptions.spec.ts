@@ -6,11 +6,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   credentialsProblem,
+  isScriptHash,
   nameProblem,
   parseSubscriptionOutput,
   scheduleAction,
   scriptHash,
+  scriptSnapshotProblem,
   snapshotScript,
+  subscriptionDefinitionProblem,
   SUBSCRIPTION_PENDING_MAX,
   SUBSCRIPTION_SCRIPT_MAX_BYTES,
   subscriptionRunEnvironment,
@@ -137,6 +140,46 @@ describe('the output contract', () => {
       ok: false, reason: "line 2: id 'a' repeats with a different payload",
     })
   })
+
+  it('enforces nesting depth, finite numbers, string escapes, and rejects trailing or non-object JSON', () => {
+    const nestedAtLimit = `{"id":"a","title":"A","x":${'['.repeat(32)}${']'.repeat(32)}}`
+    expect(parseSubscriptionOutput(bytes(nestedAtLimit))).toEqual({ ok: true, events: [{ id: 'a', title: 'A' }] })
+    const nestedTooDeep = `{"id":"a","title":"A","x":${'['.repeat(33)}${']'.repeat(33)}}`
+    expect(parseSubscriptionOutput(bytes(nestedTooDeep))).toEqual({ ok: false, reason: 'line 1: the JSON nests too deeply' })
+    expect(parseSubscriptionOutput(bytes('{"id":"a","title":"A","n":1e999}'))).toEqual({
+      ok: false, reason: "line 1: '1e999' is not a finite number",
+    })
+    expect(parseSubscriptionOutput(bytes('{"id":"a","title":"A","nested":{"k":1,"k":2}}'))).toEqual({
+      ok: false, reason: "line 1: the key 'k' appears twice",
+    })
+    expect(parseSubscriptionOutput(bytes('{"id":"a","title":"A","flags":[true,false,null,{}]}'))).toEqual({
+      ok: true, events: [{ id: 'a', title: 'A' }],
+    })
+    expect(parseSubscriptionOutput(bytes('{"id":"a","title":"A"} trailing'))).toEqual({
+      ok: false, reason: 'line 1: unexpected trailing text after the JSON value',
+    })
+    expect(parseSubscriptionOutput(bytes('{"id":"a","title":"unterminated'))).toEqual({
+      ok: false, reason: 'line 1: a string is unterminated',
+    })
+    expect(parseSubscriptionOutput(bytes('{"id":"a","title":"bad\\xescape"}'))).toEqual({
+      ok: false, reason: 'line 1: a string literal is malformed',
+    })
+    expect(parseSubscriptionOutput(bytes('["not","an","object"]'))).toEqual({
+      ok: false, reason: 'line 1: each line must be a JSON object',
+    })
+  })
+
+  it('bounds title and url length and rejects whitespace inside url', () => {
+    expect(parseSubscriptionOutput(bytes(JSON.stringify({ id: 'a', title: 't'.repeat(201) })))).toEqual({
+      ok: false, reason: 'line 1: the title is longer than 200 characters',
+    })
+    expect(parseSubscriptionOutput(bytes(JSON.stringify({ id: 'a', title: 'A', url: `https://example.test/${'x'.repeat(1980)}` })))).toEqual({
+      ok: false, reason: 'line 1: the url is longer than 2000 characters',
+    })
+    expect(parseSubscriptionOutput(bytes(JSON.stringify({ id: 'a', title: 'A', url: 'https://example.test/with space' })))).toEqual({
+      ok: false, reason: 'line 1: url must be an http(s) address',
+    })
+  })
 })
 
 describe('subscription definitions', () => {
@@ -164,6 +207,20 @@ describe('subscription definitions', () => {
     expect(credentialsProblem(Array.from({ length: 9 }, (_, index) => ({ ref: `R${index}`, env: `E${index}` }))))
       .toBe('a subscription may declare at most 8 credentials')
   })
+
+  it('validates stored script snapshots and whole definitions', () => {
+    const valid = snapshotScript('echo hi\n', 'bash')
+    if (!valid.ok) throw new Error('expected valid snapshot')
+    expect(isScriptHash(valid.script.sha256)).toBe(true)
+    expect(isScriptHash('not-a-hash')).toBe(false)
+    expect(scriptSnapshotProblem(valid.script)).toBeUndefined()
+    expect(scriptSnapshotProblem({ ...valid.script, shell: 'zsh' as never })).toBe("'zsh' is not a supported shell")
+    expect(scriptSnapshotProblem({ ...valid.script, sha256: 'short' })).toBe('the script hash is malformed')
+    expect(scriptSnapshotProblem({ ...valid.script, content: 'echo other\n' })).toBe('the script hash does not match its content')
+    expect(scriptSnapshotProblem({ content: '   ', sha256: scriptHash('   '), shell: 'bash' })).toBe('the script snapshot is not usable')
+    expect(subscriptionDefinitionProblem({ name: 'CI', triggers: { webhook: true }, script: valid.script, credentials: [] })).toBeUndefined()
+    expect(subscriptionDefinitionProblem({ name: '  ', triggers: {}, script: valid.script, credentials: [] })).toBe('the subscription needs a name')
+  })
 })
 
 describe('the run environment', () => {
@@ -183,6 +240,13 @@ describe('the run environment', () => {
       .toMatchObject({ DSH_TEAM_LAST_SUCCESS_AT: '', DSH_TEAM_TRIGGER: 'test' })
   })
 
+  it('includes deliveryId only when provided', () => {
+    expect(subscriptionRunEnvironment({ projectRef: 'project:p', subscriptionRef: 'subscription:s', trigger: 'webhook',
+      deliveryId: 'admission:1', resolved: {} })).toMatchObject({ DSH_TEAM_DELIVERY_ID: 'admission:1' })
+    expect(subscriptionRunEnvironment({ projectRef: 'project:p', subscriptionRef: 'subscription:s', trigger: 'interval', resolved: {} }))
+      .not.toHaveProperty('DSH_TEAM_DELIVERY_ID')
+  })
+
   it('ships a test envelope a webhook-only script can reject on its own terms', () => {
     expect(JSON.parse(subscriptionTestStdin())).toEqual({
       headers: { 'content-type': 'application/json', 'x-team-event': 'test', 'x-team-delivery': 'test' },
@@ -199,6 +263,7 @@ describe('the timer decision', () => {
   })
 
   it('waits before the due instant and skips a subscription that must not run', () => {
+    expect(scheduleAction({ ...base, dueAt: undefined })).toBe('wait')
     expect(scheduleAction({ ...base, dueAt: 1_001 })).toBe('wait')
     expect(scheduleAction({ ...base, paused: true })).toBe('skip')
     expect(scheduleAction({ ...base, deleted: true })).toBe('skip')

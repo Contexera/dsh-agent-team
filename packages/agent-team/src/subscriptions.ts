@@ -86,6 +86,9 @@ const SCRIPT_HASH = /^[0-9a-f]{64}$/
 /** The JSON number grammar (RFC 8259 §6), which `Number()` alone does not enforce. */
 const JSON_NUMBER = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/
 
+/** Nesting ceiling for one JSON-lines event object; prevents stack exhaustion on hostile output. */
+const JSON_MAX_DEPTH = 32
+
 export function isScriptHash(value: string): boolean {
   return SCRIPT_HASH.test(value)
 }
@@ -125,8 +128,9 @@ export function triggersProblem(triggers: SubscriptionTriggers): string | undefi
 export function nameProblem(name: string): string | undefined {
   const trimmed = name.trim()
   if (trimmed === '') return 'the subscription needs a name'
-  if (characterLength(trimmed) > SUBSCRIPTION_NAME_MAX_CHARACTERS) {
-    return `the name is ${characterLength(trimmed)} characters; the limit is ${SUBSCRIPTION_NAME_MAX_CHARACTERS}`
+  const length = characterLength(trimmed)
+  if (length > SUBSCRIPTION_NAME_MAX_CHARACTERS) {
+    return `the name is ${length} characters; the limit is ${SUBSCRIPTION_NAME_MAX_CHARACTERS}`
   }
   return undefined
 }
@@ -203,114 +207,167 @@ function sameEvent(left: SubscriptionEvent, right: SubscriptionEvent): boolean {
   return left.id === right.id && left.title === right.title && left.url === right.url && left.detail === right.detail
 }
 
-type JsonResult = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly reason: string }
+type JsonResult<T = unknown> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string }
 
 /**
- * Strict JSON for one line. `JSON.parse` accepts the last of two identical
- * keys, which would silently change a payload the provider meant to be
- * ambiguous, so duplicate keys are refused here.
+ * Strict JSON parser for one output line. `JSON.parse` accepts the last of two
+ * identical keys, which would silently change an ambiguous payload, so
+ * duplicate keys, `__proto__`, non-RFC-8259 numbers, and deep nesting are
+ * refused explicitly here.
  */
-function parseJsonLine(line: string): JsonResult {
-  let cursor = 0
-  const fail = (reason: string): JsonResult => ({ ok: false, reason })
-  const skipSpace = (): void => {
-    while (cursor < line.length && (line[cursor] === ' ' || line[cursor] === '\t')) cursor += 1
+class JsonLineParser {
+  private cursor = 0
+
+  constructor(private readonly line: string) {}
+
+  parse(): JsonResult {
+    const value = this.parseValue(0)
+    if (!value.ok) return value
+    this.skipSpace()
+    if (this.cursor !== this.line.length) return this.fail('unexpected trailing text after the JSON value')
+    return value
   }
-  const parseValue = (depth: number): { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly reason: string } => {
-    if (depth > 32) return fail('the JSON nests too deeply')
-    skipSpace()
-    const character = line[cursor]
-    if (character === '{') return parseObject(depth)
-    if (character === '[') return parseArray(depth)
-    if (character === '"') return parseString()
-    if (character === 't' && line.startsWith('true', cursor)) { cursor += 4; return { ok: true, value: true } }
-    if (character === 'f' && line.startsWith('false', cursor)) { cursor += 5; return { ok: true, value: false } }
-    if (character === 'n' && line.startsWith('null', cursor)) { cursor += 4; return { ok: true, value: null } }
-    return parseNumber()
+
+  private fail(reason: string): { readonly ok: false; readonly reason: string } {
+    return { ok: false, reason }
   }
-  const parseObject = (depth: number): JsonResult => {
-    cursor += 1
+
+  private skipSpace(): void {
+    while (this.cursor < this.line.length && (this.line[this.cursor] === ' ' || this.line[this.cursor] === '\t')) {
+      this.cursor += 1
+    }
+  }
+
+  private consumeLiteral(literal: string, value: boolean | null): JsonResult | undefined {
+    if (!this.line.startsWith(literal, this.cursor)) return undefined
+    this.cursor += literal.length
+    return { ok: true, value }
+  }
+
+  private parseValue(depth: number): JsonResult {
+    if (depth > JSON_MAX_DEPTH) return this.fail('the JSON nests too deeply')
+    this.skipSpace()
+    const character = this.line[this.cursor]
+    if (character === '{') return this.parseObject(depth)
+    if (character === '[') return this.parseArray(depth)
+    if (character === '"') return this.parseString()
+    if (character === 't') return this.consumeLiteral('true', true) ?? this.parseNumber()
+    if (character === 'f') return this.consumeLiteral('false', false) ?? this.parseNumber()
+    if (character === 'n') return this.consumeLiteral('null', null) ?? this.parseNumber()
+    return this.parseNumber()
+  }
+
+  private parseObject(depth: number): JsonResult {
+    this.cursor += 1
     // A prototype-less record: `{"__proto__": …}` would otherwise reach the
     // interpreter's setter and turn an unknown key into inherited `id`/`title`,
     // which is a forged event the script never printed.
     const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>
     const keys = new Set<string>()
-    skipSpace()
-    if (line[cursor] === '}') { cursor += 1; return { ok: true, value: result } }
+    this.skipSpace()
+    if (this.line[this.cursor] === '}') {
+      this.cursor += 1
+      return { ok: true, value: result }
+    }
     for (;;) {
-      skipSpace()
-      if (line[cursor] !== '"') return fail('an object key must be a string')
-      const key = parseString()
+      this.skipSpace()
+      if (this.line[this.cursor] !== '"') return this.fail('an object key must be a string')
+      const key = this.parseString()
       if (!key.ok) return key
-      if (key.value === '__proto__') return fail("the key '__proto__' is not a plain object member")
-      if (keys.has(key.value as string)) return fail(`the key '${String(key.value)}' appears twice`)
-      keys.add(key.value as string)
-      skipSpace()
-      if (line[cursor] !== ':') return fail('an object key must be followed by a colon')
-      cursor += 1
-      const value = parseValue(depth + 1)
+      if (key.value === '__proto__') return this.fail("the key '__proto__' is not a plain object member")
+      if (keys.has(key.value)) return this.fail(`the key '${key.value}' appears twice`)
+      keys.add(key.value)
+      this.skipSpace()
+      if (this.line[this.cursor] !== ':') return this.fail('an object key must be followed by a colon')
+      this.cursor += 1
+      const value = this.parseValue(depth + 1)
       if (!value.ok) return value
-      result[key.value as string] = value.value
-      skipSpace()
-      if (line[cursor] === ',') { cursor += 1; continue }
-      if (line[cursor] === '}') { cursor += 1; return { ok: true, value: result } }
-      return fail('an object needs a comma or a closing brace')
+      result[key.value] = value.value
+      this.skipSpace()
+      if (this.line[this.cursor] === ',') {
+        this.cursor += 1
+        continue
+      }
+      if (this.line[this.cursor] === '}') {
+        this.cursor += 1
+        return { ok: true, value: result }
+      }
+      return this.fail('an object needs a comma or a closing brace')
     }
   }
-  const parseArray = (depth: number): JsonResult => {
-    cursor += 1
+
+  private parseArray(depth: number): JsonResult {
+    this.cursor += 1
     const result: unknown[] = []
-    skipSpace()
-    if (line[cursor] === ']') { cursor += 1; return { ok: true, value: result } }
+    this.skipSpace()
+    if (this.line[this.cursor] === ']') {
+      this.cursor += 1
+      return { ok: true, value: result }
+    }
     for (;;) {
-      const value = parseValue(depth + 1)
+      const value = this.parseValue(depth + 1)
       if (!value.ok) return value
       result.push(value.value)
-      skipSpace()
-      if (line[cursor] === ',') { cursor += 1; continue }
-      if (line[cursor] === ']') { cursor += 1; return { ok: true, value: result } }
-      return fail('an array needs a comma or a closing bracket')
+      this.skipSpace()
+      if (this.line[this.cursor] === ',') {
+        this.cursor += 1
+        continue
+      }
+      if (this.line[this.cursor] === ']') {
+        this.cursor += 1
+        return { ok: true, value: result }
+      }
+      return this.fail('an array needs a comma or a closing bracket')
     }
   }
-  const parseString = (): JsonResult => {
-    const start = cursor
-    cursor += 1
+
+  private parseString(): JsonResult<string> {
+    const start = this.cursor
+    this.cursor += 1
     let escaped = false
-    for (; cursor < line.length; cursor += 1) {
-      const character = line[cursor]
-      if (escaped) { escaped = false; continue }
-      if (character === '\\') { escaped = true; continue }
+    for (; this.cursor < this.line.length; this.cursor += 1) {
+      const character = this.line[this.cursor]
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (character === '\\') {
+        escaped = true
+        continue
+      }
       if (character === '"') {
-        const slice = line.slice(start, cursor + 1)
+        const slice = this.line.slice(start, this.cursor + 1)
         try {
-          const value: unknown = JSON.parse(slice)
-          cursor += 1
+          const value = JSON.parse(slice) as string
+          this.cursor += 1
           return { ok: true, value }
         } catch {
-          return fail('a string literal is malformed')
+          return this.fail('a string literal is malformed')
         }
       }
     }
-    return fail('a string is unterminated')
+    return this.fail('a string is unterminated')
   }
-  const parseNumber = (): JsonResult => {
-    const start = cursor
-    if (line[cursor] === '-') cursor += 1
-    while (cursor < line.length && line[cursor] !== undefined && /[0-9eE+\-.]/.test(line[cursor]!)) cursor += 1
-    const slice = line.slice(start, cursor)
-    if (slice === '' || slice === '-') return fail('a value is missing')
+
+  private parseNumber(): JsonResult {
+    const start = this.cursor
+    if (this.line[this.cursor] === '-') this.cursor += 1
+    while (this.cursor < this.line.length && /[0-9eE+\-.]/.test(this.line[this.cursor]!)) {
+      this.cursor += 1
+    }
+    const slice = this.line.slice(start, this.cursor)
+    if (slice === '' || slice === '-') return this.fail('a value is missing')
     // `Number()` accepts `01`, `+1`, `.5`, and `1.`, none of which is JSON. The
     // grammar is checked first, and the numeric value only parsed once it holds.
-    if (!JSON_NUMBER.test(slice)) return fail(`'${slice}' is not a JSON number`)
+    if (!JSON_NUMBER.test(slice)) return this.fail(`'${slice}' is not a JSON number`)
     const value = Number(slice)
-    if (!Number.isFinite(value)) return fail(`'${slice}' is not a finite number`)
+    if (!Number.isFinite(value)) return this.fail(`'${slice}' is not a finite number`)
     return { ok: true, value }
   }
-  const value = parseValue(0)
-  if (!value.ok) return value
-  skipSpace()
-  if (cursor !== line.length) return fail('unexpected trailing text after the JSON value')
-  return value
+}
+
+function parseJsonLine(line: string): JsonResult {
+  return new JsonLineParser(line).parse()
 }
 
 function eventOf(value: unknown, lineNumber: number): { readonly ok: true; readonly event: SubscriptionEvent } | { readonly ok: false; readonly reason: string } {
@@ -384,7 +441,7 @@ export function subscriptionTestStdin(): string {
   })
 }
 
-/** Next due instant after `from`, or `undefined` for a subscription that has no timer. */
+/** Next due instant after `from`, in epoch milliseconds. */
 export function nextDueAfter(from: number, minutes: number): number {
   return from + minutes * 60_000
 }
