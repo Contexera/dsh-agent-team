@@ -8,6 +8,7 @@ import {
   sameWebhookTokenHash,
   webhookAddress,
   webhookOriginProblem,
+  webhookOriginRefusal,
   webhookRetryDelayMs,
   webhookStdin,
   webhookTokenHash,
@@ -66,6 +67,13 @@ describe('the public address is an origin, and an address is origin plus token',
     expect(webhookOriginProblem('https://team.example.com/base')).toMatch(/origin, without a path/)
     expect(webhookOriginProblem('https://team.example.com?x=1')).toMatch(/query or fragment/)
     expect(webhookOriginProblem('https://team.example.com#x')).toMatch(/query or fragment/)
+  })
+
+  it('explains missing or invalid configured origins via webhookOriginRefusal', () => {
+    expect(webhookOriginRefusal('')).toMatch(/webhook\.publicOrigin/)
+    expect(webhookOriginRefusal('   ')).toMatch(/webhook\.publicOrigin/)
+    expect(webhookOriginRefusal('https://team.example.com/subpath')).toMatch(/cannot carry hook addresses.*without a path/)
+    expect(webhookOriginRefusal('https://team.example.com')).toBeUndefined()
   })
 })
 
