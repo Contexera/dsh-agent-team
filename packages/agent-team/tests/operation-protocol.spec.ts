@@ -2073,6 +2073,28 @@ describe('operation protocol coverage', () => {
     }
   })
 
+  it.each([
+    ['team/message-sent', messageSent, 'message'],
+    ['team/thread-replied', threadReplied, 'message'],
+    ['team/thread-started', threadStarted, 'anchor'],
+  ] as const)('%s keeps a stored message instant and stamps a missing one from the operation', (kind, stored, field) => {
+    const message = messageOf(stored)
+    const { occurredAt: _omitted, ...bare } = message
+    const withMessage = (value: object): unknown => ({ ...stored, occurredAt: '2026-01-02T03:04:05.000Z', data: { ...stored.data, [field]: value } })
+    expect(messageOf(agentTeamOperationSchema.parse(withMessage(bare))).occurredAt,
+      `${kind}: a message written before it stored an instant takes the operation's`).toBe('2026-01-02T03:04:05.000Z')
+    expect(messageOf(agentTeamOperationSchema.parse(withMessage(message))).occurredAt,
+      `${kind}: a stored message instant wins over the operation's`).toBe(message.occurredAt)
+  })
+
+  it.each([
+    ['an id holding a colon', 'operationId', 'operation:protocol:extra'],
+    ['another kind\'s prefix', 'operationId', 'request:protocol-1'],
+    ['an empty request id', 'requestId', ''],
+  ] as const)('rejects a ref with %s', (_case, key, value) => {
+    expect(agentTeamOperationSchema.safeParse({ ...row('team/initialized').stored, [key]: value }).success).toBe(false)
+  })
+
   it('rejects a stored kind no protocol row and no schema declare', () => {
     const alien = { ...row('team/dm-sent').stored, kind: 'team/protocol-uncovered' }
     expect(agentTeamOperationSchema.safeParse(alien).success, 'an unlisted kind must fail the durable schema').toBe(false)
@@ -2086,6 +2108,12 @@ describe('operation protocol coverage', () => {
       'an unlisted data field must fail the durable schema').toBe(false)
   })
 })
+
+function messageOf(operation: AgentTeamOperation): { readonly occurredAt?: string | undefined } {
+  if (operation.kind === 'team/message-sent' || operation.kind === 'team/thread-replied') return operation.data.message
+  if (operation.kind === 'team/thread-started') return operation.data.anchor
+  throw new Error(`${operation.kind} carries no message`)
+}
 
 function row<K extends AgentTeamOperation['kind']>(kind: K): ProtocolRow {
   return protocol[kind]
