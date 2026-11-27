@@ -1,5 +1,5 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { join, sep } from 'node:path'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -83,28 +83,7 @@ async function runTurn(ctx: Context, agent: Agent, text: string): Promise<void> 
 }
 
 describe('Team manager skill discovery', () => {
-  it('resolves the shipped manager skills beside the built module, not the Member core skills', async () => {
-    // The production default is what the Host passes; a wrong relative path
-    // would leave the manager with no bundled catalog and no failing test.
-    expect(MANAGER_BUNDLED_SKILLS_DIRECTORY.endsWith(`${sep}manager-skills`)).toBe(true)
-    expect(MANAGER_BUNDLED_SKILLS_DIRECTORY).not.toContain(`${sep}core-skills`)
-    expect(await readdir(MANAGER_BUNDLED_SKILLS_DIRECTORY)).toContain('README.md')
-  })
-
-  it('ships the six guide skills in the bundled root and discovers all', async () => {
-    // The gate reads the same directories statically; this proves the manager's
-    // own provider loads them from the root the Host passes, so a rename or a
-    // dropped SKILL.md cannot ship as a silent empty catalog.
-    const shipped = (await readdir(MANAGER_BUNDLED_SKILLS_DIRECTORY, { withFileTypes: true }))
-      .filter(entry => entry.isDirectory()).map(entry => entry.name).sort()
-    expect(shipped).toEqual(['manager-domain-model', 'manager-memory', 'manager-session-evidence', 'team-event-loops', 'team-management-guide', 'team-operations'])
-    for (const name of shipped) {
-      // A Windows checkout can hand the file back with CRLF; the Harness
-      // frontmatter reader tolerates it, so the shipped shape is asserted on
-      // normalized text instead of the checkout's line endings.
-      const text = (await readFile(join(MANAGER_BUNDLED_SKILLS_DIRECTORY, name, 'SKILL.md'), 'utf8')).replaceAll('\r\n', '\n')
-      expect(text.startsWith(`---\nname: ${name}\n`)).toBe(true)
-    }
+  it('discovers all six guide skills through the shipped manager catalog', async () => {
     const fixture = await managerFixture({ bundledRoot: MANAGER_BUNDLED_SKILLS_DIRECTORY })
     expect(await catalogNames(fixture.ctx, fixture.agent))
       .toEqual(['manager-domain-model', 'manager-memory', 'manager-session-evidence', 'team-event-loops', 'team-management-guide', 'team-operations'])

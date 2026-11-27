@@ -82,7 +82,8 @@ class TeamSkillRouter implements SkillProvider {
   constructor(private readonly control: SkillProviderControl) {}
 
   mount(agentCtx: Context, config: MemberSkillsConfig): MemberSkillProviderMount {
-    this.unmount(agentCtx)
+    const previous = this.mounted.get(agentCtx)
+    if (previous !== undefined) this.unmount(agentCtx, previous)
     const lifecycle = new AbortController()
     const provider = new MemberPrivateSkillProvider(agentCtx, {
       signal: lifecycle.signal,
@@ -93,7 +94,7 @@ class TeamSkillRouter implements SkillProvider {
     this.control.invalidate()
     return {
       swap: allow => {
-        if (this.mounted.get(agentCtx) === mounted) provider.select(allow)
+        if (this.isCurrent(agentCtx, mounted)) provider.select(allow)
       },
       dispose: () => this.unmount(agentCtx, mounted),
     }
@@ -103,8 +104,7 @@ class TeamSkillRouter implements SkillProvider {
     const provider = this.providerFor(options)
     if (provider === undefined) return []
     const output = await provider.list(options)
-    if (!('candidates' in output)) return output.map(candidate => this.route(candidate))
-    return { candidates: output.candidates.map(candidate => this.route(candidate)), complete: output.complete }
+    return transformObservation(output, candidates => candidates.map(candidate => this.route(candidate)))
   }
 
   async get(candidate: SkillCandidate, options: Parameters<SkillProvider['get']>[1]): Promise<Awaited<ReturnType<SkillProvider['get']>>> {
@@ -119,7 +119,7 @@ class TeamSkillRouter implements SkillProvider {
   }
 
   dispose(): void {
-    for (const agentCtx of this.mounted.keys()) this.unmount(agentCtx)
+    for (const [agentCtx, mounted] of this.mounted) this.unmount(agentCtx, mounted)
   }
 
   private providerFor(options: Parameters<SkillProvider['list']>[0]): MemberPrivateSkillProvider | undefined {
@@ -127,9 +127,12 @@ class TeamSkillRouter implements SkillProvider {
     return scope?.ctx === undefined ? undefined : this.mounted.get(scope.ctx)?.provider
   }
 
-  private unmount(agentCtx: Context, expected?: MountedPrivateSkills): void {
-    const mounted = this.mounted.get(agentCtx)
-    if (mounted === undefined || expected !== undefined && mounted !== expected) return
+  private isCurrent(agentCtx: Context, mounted: MountedPrivateSkills): boolean {
+    return this.mounted.get(agentCtx) === mounted
+  }
+
+  private unmount(agentCtx: Context, mounted: MountedPrivateSkills): void {
+    if (!this.isCurrent(agentCtx, mounted)) return
     this.mounted.delete(agentCtx)
     mounted.lifecycle.abort(new Error(`Team skill provider "${mounted.provider.name}" disposed`))
     this.control.invalidate()
@@ -175,7 +178,7 @@ class MemberPrivateSkillProvider implements SkillProvider {
     const allow = this.allow
     if (allow === undefined) return output
     const allowed = new Set(allow)
-    return filterObservation(output, candidate => allowed.has(candidate.name))
+    return transformObservation(output, candidates => candidates.filter(candidate => allowed.has(candidate.name)))
   }
 
   async get(candidate: SkillCandidate, options: Parameters<SkillProvider['get']>[1]): Promise<Awaited<ReturnType<SkillProvider['get']>>> {
@@ -183,11 +186,11 @@ class MemberPrivateSkillProvider implements SkillProvider {
   }
 }
 
-/** Apply one name filter to either provider observation shape. */
-function filterObservation(
+/** Preserve incomplete discovery through routing and selection so the registry will retry it. */
+function transformObservation(
   output: readonly SkillCandidate[] | SkillProviderObservation,
-  keep: (candidate: SkillCandidate) => boolean,
+  transform: (candidates: readonly SkillCandidate[]) => readonly SkillCandidate[],
 ): readonly SkillCandidate[] | SkillProviderObservation {
-  if (!('candidates' in output)) return output.filter(keep)
-  return { candidates: output.candidates.filter(keep), complete: output.complete }
+  if (!('candidates' in output)) return transform(output)
+  return { candidates: transform(output.candidates), complete: output.complete }
 }

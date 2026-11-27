@@ -151,7 +151,7 @@ async function loadHarness(explicit) {
       continue
     }
     const [cordis, persistence, jsonl] = await Promise.all(resolved.map(path => import(pathToFileURL(path).href)))
-    return { anchor: candidate, Context: cordis.Context, errors: persistence, jsonl }
+    return { Context: cordis.Context, errors: persistence, jsonl }
   }
   usage(`cannot resolve the Harness Session backend from ${explicit === undefined ? 'this installation' : explicit}. `
     + `Pass --anchor with the reader.anchor path that team_overview returned. Tried: ${tried.length === 0 ? 'none' : tried.join(', ')}`)
@@ -241,13 +241,12 @@ async function readSession(harness, args) {
   const rootFlag = args.values.get('root')
   if (rootFlag === undefined && logPath === undefined) usage('--root or --log is required')
   const root = rootFlag === undefined ? rootOfLog(logPath) : resolve(rootFlag)
-  const harnessModules = await loadHarness(args.values.get('anchor'))
   checkRoot(root)
   let ctx
   let snapshot
   let events
   try {
-    const mounted = await mount(harnessModules, root)
+    const mounted = await mount(harness, root)
     ctx = mounted.ctx
     snapshot = await mounted.persistence.stat(sessionId)
     // A locator that names one artifact while the backend resolves another is a
@@ -268,7 +267,7 @@ async function readSession(harness, args) {
       refuse('mismatch', `${error.message}; re-read team_overview for this Member and use the locator it returns now`,
         { sessionId, root, log: resolve(logPath) })
     }
-    const classified = classify(error, harnessModules.errors)
+    const classified = classify(error, harness.errors)
     unreadable(classified.kind, classified.detail, {
       sessionId, root, ...(logPath === undefined ? {} : { log: resolve(logPath) }),
       ...(classified.location === undefined ? {} : { location: classified.location }),
@@ -413,7 +412,7 @@ function emitWindow(payload, events, targetSeq) {
       }
     }
     if (ordered.length > 1) {
-      // Drop the farthest event from the target, never the target itself.
+      // Trim from the right, skipping the target.
       const targetIndex = ordered.findIndex(event => event.seq === targetSeq)
       const last = ordered.length - 1
       ordered.splice(last === targetIndex ? last - 1 : last, 1)
@@ -423,7 +422,6 @@ function emitWindow(payload, events, targetSeq) {
     const only = ordered[0]
     const segment = only.dataSegment
     if (segment === undefined) {
-      // Unreachable with these caps: one event without a segment is small.
       console.log(text)
       return
     }
