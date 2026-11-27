@@ -33,7 +33,8 @@ agent-team       → neither tool nor Client implementation
 | 模块 | 职责 |
 | --- | --- |
 | `index.ts` | Host 组合、生命周期编排与 typed Remote 适配。 |
-| `member-runtime.ts` | 每个 Member 的工具限制、skill 挂载、能力警告与私有记忆目录准备。 |
+| `member-runtime.ts` | Member 的 Turn 等待、skill 挂载与私有记忆目录准备。 |
+| `member-tool-policy.ts` | Member 的工具限制、Turn 授权与能力警告。 |
 | `ledger.ts` | 持久提交、授权、重放校验与投影。 |
 | `spec.ts` | 已存 operation 的 schema 与 Team 存储 domain 定义。 |
 | `types.ts` | 公开类型入口，重新导出 `types/entities.ts`（id 与实体）、`types/operations.ts`（ledger 记录）和 `types/requests-results.ts`（按表面分文件的 Remote 请求、结果、回执与视图）。 |

@@ -48,7 +48,7 @@ This uses public Harness hooks rather than an enforced final request policy. Oth
 
 ### Tool roster and registration
 
-The `only` lists in `cordis.patch.yml` select registrations; `packages/agent-team/src/member-runtime.ts` and `manager-tool-policy.ts` maintain the runtime sets.
+The `only` lists in `cordis.patch.yml` select registrations; `member-tool-policy.ts` and `manager-tool-policy.ts` maintain the runtime sets.
 
 | preset | Team tools |
 | --- | --- |

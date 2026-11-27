@@ -112,7 +112,7 @@ describe('team_message attachment paths an Agent asks the Host to copy', () => {
     if (member === undefined) throw new Error('expected a live Member')
     // The seam a turn/start freeze reaches: the profile grant reopens the
     // baseline name the stored allow-list dropped.
-    test.ctx.agentTeam['memberRuntime'].applyMemberToolPolicy(agent.ctx, member, false, ['read'])
+    test.ctx.agentTeam['memberRuntime'].toolPolicy.applyMemberToolPolicy(agent.ctx, member, false, ['read'])
     const { inside } = attachFixtures(test.checkout)
     const posted = await test.ctx.agentTeam.postMainMessageForAgent(agent, {
       requestId: requestId('attach-grant'), workspaceId: test.workspaceId, projectRef, body: 'with a file', attachmentPaths: [inside] })

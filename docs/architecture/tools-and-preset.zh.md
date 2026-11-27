@@ -42,7 +42,7 @@ Team mode 不过滤其他官方或自定义插件注入的提示。当前 Harnes
 
 ### 工具名单与注册
 
-`cordis.patch.yml` 的 `only` 名单是注册入口；`packages/agent-team/src/member-runtime.ts` 与 `manager-tool-policy.ts` 分别维护运行时工具集合。
+`cordis.patch.yml` 的 `only` 名单是注册入口；`member-tool-policy.ts` 与 `manager-tool-policy.ts` 分别维护运行时工具集合。
 
 | preset | Team 工具 |
 | --- | --- |
