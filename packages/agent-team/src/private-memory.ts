@@ -34,22 +34,13 @@ export async function readPrivateMemoryIndex(root: string): Promise<PrivateMemor
  * The identity of what was injected. A digest of the bytes lets a later step
  * tell an unchanged index from a rewritten one without re-reading the text.
  */
-export function privateMemoryDigest(memory: PrivateMemoryState): string {
+function privateMemoryDigest(memory: PrivateMemoryState): string {
   return memory.kind === 'index' ? createHash('sha256').update(memory.raw).digest('hex') : memory.kind
 }
 
 /** Digest rendered memory text so its source tag can be checked after projection. */
 export function privateMemoryTextDigest(text: string): string {
   return createHash('sha256').update(text).digest('hex')
-}
-
-/**
- * Whether there is an index to inject at all. An over-budget index still
- * counts: its head is injected with a warning, because withholding the whole
- * body would make the Member lose its own continuity over one byte too many.
- */
-export function privateMemoryAvailable(memory: PrivateMemoryState): boolean {
-  return memory.kind === 'index'
 }
 
 /** The gauge line, rendered at every size so the reader sees the budget before it is exceeded. */
@@ -109,12 +100,32 @@ export interface PrivateMemoryTag {
   readonly textDigest: string
 }
 
+export interface VisiblePrivateMemory {
+  /** Digest from the newest intact block, which may be an update or unavailable notice. */
+  latestDigest?: string
+  /** A complete baseline may be older than the newest intact block. */
+  hasCompleteBaseline: boolean
+}
+
 /**
- * Whether a visible block is still the text its tag was written with. A
- * projection can rewrite or prune content while leaving the source tag in
- * place, so a block whose text no longer hashes to its tag can neither stand in
- * for a complete baseline nor vouch for an update digest.
+ * Observe blocks newest first. A projection can rewrite or prune content
+ * while leaving the source tag in place; only intact text is evidence.
  */
-export function privateMemoryTextMatches(tag: PrivateMemoryTag, text: string): boolean {
-  return privateMemoryTextDigest(text) === tag.textDigest
+export function observePrivateMemory(visible: VisiblePrivateMemory, tag: PrivateMemoryTag, text: string): void {
+  if (privateMemoryTextDigest(text) !== tag.textDigest) return
+  visible.latestDigest ??= tag.digest
+  if (tag.variant === 'baseline') visible.hasCompleteBaseline = true
+}
+
+export function planPrivateMemory(
+  memory: PrivateMemoryState,
+  visible: VisiblePrivateMemory,
+): Pick<PrivateMemoryTag, 'digest' | 'variant'> | undefined {
+  const digest = privateMemoryDigest(memory)
+  if (memory.kind !== 'index') {
+    return visible.latestDigest === digest ? undefined : { variant: 'unavailable', digest }
+  }
+  // Even a current update notice cannot replace a baseline lost to compaction.
+  if (!visible.hasCompleteBaseline) return { variant: 'baseline', digest }
+  return visible.latestDigest === digest ? undefined : { variant: 'update', digest }
 }

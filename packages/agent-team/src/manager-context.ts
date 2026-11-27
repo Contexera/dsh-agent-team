@@ -15,17 +15,17 @@ import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { matchesAnyProducerKind } from './context-source.ts'
 import {
   escapePrivateMemoryFraming,
+  observePrivateMemory,
+  planPrivateMemory,
   privateMemoryAnomaly,
-  privateMemoryAvailable,
   privateMemoryBody,
-  privateMemoryDigest,
   privateMemoryPathsBlock,
-  privateMemoryTextMatches,
   privateMemoryTextDigest,
   privateMemoryUsage,
   readPrivateMemoryIndex,
   type PrivateMemoryState,
   type PrivateMemoryTag,
+  type VisiblePrivateMemory,
 } from './private-memory.ts'
 
 export const name = 'contexera-agent-team-manager-context'
@@ -69,35 +69,19 @@ export function apply(ctx: Context): void {
 
 async function managerContextMessages(agent: Agent, memory: ManagerPrivateMemory): Promise<UserMessage[]> {
   const state = await readPrivateMemoryIndex(memory.root)
-  const visible = visibleManagerMemory(agent)
-  const digest = privateMemoryDigest(state)
-  const available = privateMemoryAvailable(state)
-  if (visible.latestDigest === digest && (!available || visible.hasCompleteBaseline)) return []
-  const variant = !available ? 'unavailable' : visible.hasCompleteBaseline ? 'update' : 'baseline'
-  const text = variant === 'update'
+  const plannedMemory = planPrivateMemory(state, visibleManagerMemory(agent))
+  if (plannedMemory === undefined) return []
+  const text = plannedMemory.variant === 'update'
     ? renderManagerMemoryUpdate(state, memory)
     : renderManagerMemoryState(state, memory)
   return [createUserMessage({
     content: [{ type: 'text', text }],
-    source: { kind: name, form: 'instructions', managerContext: { category: 'memory', variant, digest, textDigest: digestOfText(text) } },
+    source: { kind: name, form: 'instructions', managerContext: { category: 'memory', ...plannedMemory, textDigest: privateMemoryTextDigest(text) } },
   })]
 }
 
-interface VisibleManagerMemory {
-  /** Digest carried by the newest memory block whose visible text is still the text it was written with. */
-  readonly latestDigest?: string
-  /** Whether any complete baseline is still visible, whatever its age. */
-  readonly hasCompleteBaseline: boolean
-}
-
-/**
- * The newest manager memory block on the live surface. Reads the projected
- * message, not the raw event: a projection can rewrite or prune content while
- * leaving the source tag in place, and such a message can neither stand in for
- * a complete baseline nor vouch for an update digest.
- */
-function visibleManagerMemory(agent: Agent): VisibleManagerMemory {
-  const visible: { latestDigest?: string; hasCompleteBaseline: boolean } = { hasCompleteBaseline: false }
+function visibleManagerMemory(agent: Agent): VisiblePrivateMemory {
+  const visible: VisiblePrivateMemory = { hasCompleteBaseline: false }
   for (const sequence of agent.session.surface.nodes.toReversed()) {
     // `nodes` are event identities (SessionSeq); snapshotEvents takes log
     // offsets, so the two number domains stay explicit.
@@ -107,15 +91,9 @@ function visibleManagerMemory(agent: Agent): VisibleManagerMemory {
     if (derived?.role !== 'user') continue
     const tag = (derived.source as { readonly managerContext?: PrivateMemoryTag }).managerContext
     const text = derived.content[0]?.type === 'text' ? derived.content[0].text : undefined
-    if (tag === undefined || text === undefined || !privateMemoryTextMatches(tag, text)) continue
-    visible.latestDigest ??= tag.digest
-    if (tag.variant === 'baseline') visible.hasCompleteBaseline = true
+    if (tag !== undefined && text !== undefined) observePrivateMemory(visible, tag, text)
   }
   return visible
-}
-
-function digestOfText(text: string): string {
-  return privateMemoryTextDigest(text)
 }
 
 /**
