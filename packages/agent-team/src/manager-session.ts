@@ -44,6 +44,8 @@ import type {
   AgentTeamManagerSessionResult,
 } from './types.ts'
 
+type RecoverStoredPointer = () => AgentTeamManagerSessionResult | undefined | Promise<AgentTeamManagerSessionResult | undefined>
+
 /** The default Workspace as the Host Controller resolved it. */
 export interface ManagerWorkspaceValue {
   readonly workspaceId: WorkspaceId
@@ -256,15 +258,12 @@ export class ManagerSessionRuntime {
     }))!
   }
 
-  /**
-   * Resume the registered Session. Every failure here retains the pointer:
-   * only an archived or positively missing Session is replacement-eligible.
-   */
+  /** The caller decides whether an archived or missing pointer can be replaced. */
   private async resolveStoredPointer(
     pointer: ManagerSessionPointer,
     options: {
-      readonly archived: () => AgentTeamManagerSessionResult | undefined | Promise<AgentTeamManagerSessionResult | undefined>
-      readonly missing: () => AgentTeamManagerSessionResult | undefined | Promise<AgentTeamManagerSessionResult | undefined>
+      readonly archived: RecoverStoredPointer
+      readonly missing: RecoverStoredPointer
       readonly outsideMessage: string
     },
   ): Promise<AgentTeamManagerSessionResult | undefined> {
@@ -278,14 +277,15 @@ export class ManagerSessionRuntime {
       if (stored.failure.kind === 'missing') return await options.missing()
       return this.readFailure(stored.failure)
     }
-    return this.resumeLocked(pointer, stored.inspection)
+    return this.resumeLocked(pointer, stored.inspection, options.archived)
   }
 
   private async resumeLocked(
     pointer: ManagerSessionPointer,
     inspection: StoredSessionInspection,
-  ): Promise<AgentTeamManagerSessionResult> {
-    if (this.isArchived(pointer.sessionId)) return this.replaceLocked(pointer)
+    onPointerLost: RecoverStoredPointer,
+  ): Promise<AgentTeamManagerSessionResult | undefined> {
+    if (this.isArchived(pointer.sessionId)) return onPointerLost()
     const workspace = await this.workspaceForExisting(pointer, inspection)
     if (workspace === undefined) {
       if (!await this.anyUsableWorkspace()) return Object.freeze({ status: 'no-workspace' })
@@ -305,9 +305,7 @@ export class ManagerSessionRuntime {
     try {
       installed = await this.activate({ persisted: true, sessionId: pointer.sessionId, workspace })
     } catch (error) {
-      // A Session that vanished between the classified read and the write-open
-      // is positively missing, so the next generation may replace it.
-      if (sessionFailureOf(error, pointer.sessionId)?.kind === 'missing') return this.replaceLocked(pointer)
+      if (sessionFailureOf(error, pointer.sessionId)?.kind === 'missing') return onPointerLost()
       return this.activationFailure('session-resume', error, pointer.sessionId)
     }
 
