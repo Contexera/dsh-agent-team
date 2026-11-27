@@ -44,7 +44,9 @@ See [refresh semantics](refresh-copy-accessibility.md#data-refresh-semantics) fo
 | Entry state cluster | 11px/18px leading the entry row: 18px avatar circles, 8px status dot, status word, 18px unread capsule at 11px/600 |
 | Empty/loading | 13px tertiary; 8px pulsing dots, disabled for reduced motion |
 
-Message time comes from Host projection and shares the ledger operation instant. Consecutive same-sender messages form a run, and time is stated by the row itself: beside the name where the row has an identity line, in the avatar seat under the pointer where it is a continuation. A day boundary gets a centered date anchor, and the Project feed alone draws a `TeamRunDivider` hairline at a five-minute boundary, with no instant on it. `team-separators.ts` is the single authority for both decisions.
+Message time comes from the Host projection. When parsing a stored send, Thread reply, or Thread start, the Host preserves the Message or anchor's own `occurredAt` and uses the enclosing ledger operation's instant only if it is missing.
+
+Consecutive same-sender messages form a run, and time is stated by the row itself: beside the name where the row has an identity line, in the avatar seat under the pointer where it is a continuation. A day boundary gets a centered date anchor, and the Project feed alone draws a `TeamRunDivider` hairline at a five-minute boundary, with no instant on it. `team-separators.ts` is the single authority for both decisions.
 
 The identity line and the avatar seat do not state the same label. The identity line has the reading column to itself and takes the whole wall-clock form (`formatMessageTime`: clock today, month-day within the year, full date across it).
 

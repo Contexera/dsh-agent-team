@@ -36,7 +36,9 @@
 | 入口状态簇 | 11px/18px，领起入口行：18px 头像圈、8px 状态点、状态词、18px 未读胶囊（11px/600） |
 | 空/加载态 | 13px tertiary；加载点 8px 脉冲动画（reduced-motion 下关闭） |
 
-消息时间来自 Host 投影：`AgentTeamMessage.occurredAt` 与包裹它的 ledger 操作同源（旧账本在回放时归一化）。分组 run 只在 run 头部渲染名字与时间；run 内被折叠的消息由**行自己**说时刻——hover 或键盘焦点落在该行时，时刻出现在头像座，时间线上没有任何常驻时刻标签。间隔 ≥5 分钟的相邻消息，只有 Project feed 在两者之间画一条不写时刻的 `TeamRunDivider` 发丝线。判据是 `team-separators.ts` 的 `RUN_GAP_MINUTES`，`isRunGap` 是单一权威判断（见下）。
+消息时间来自 Host 投影。解析已存的发送消息、回复 Thread 或开启 Thread 的记录时，Host 保留 Message 或锚点自身的 `occurredAt`；仅在缺失时才取所在 ledger operation 的时刻。
+
+分组 run 只在 run 头部渲染名字与时间；run 内被折叠的消息由**行自己**说时刻——hover 或键盘焦点落在该行时，时刻出现在头像座，时间线上没有任何常驻时刻标签。间隔 ≥5 分钟的相邻消息，只有 Project feed 在两者之间画一条不写时刻的 `TeamRunDivider` 发丝线。判据是 `team-separators.ts` 的 `RUN_GAP_MINUTES`，`isRunGap` 是单一权威判断（见下）。
 
 **身份行与头像座写的不是同一个标签**。身份行独占正文列，用完整墙上时钟形态（`formatMessageTime`：当天只写时刻、同年带月日、跨年写完整日期）。
 
