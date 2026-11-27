@@ -199,6 +199,35 @@ describe('Team manager Session Host runtime', () => {
     expect(await restoring).toMatchObject({ status: 'unavailable' })
   })
 
+  it('leaves the current manager denied if its handle cannot stop at shutdown', async () => {
+    const { ctx, workspaceId, checkout, root, archived } = await realHarness()
+    const store = new MemoryPointerStore()
+    const runtime = runtimeFor(ctx, { store, root, workspace: { workspaceId, path: checkout } })
+    const originalCreate = ctx.agents.create.bind(ctx.agents)
+    let handle: AgentHandle | undefined
+    vi.spyOn(ctx.agents, 'create').mockImplementationOnce(async options => {
+      handle = await originalCreate(options)
+      return handle
+    })
+    const opened = await runtime.open()
+    if (opened.status !== 'ready' || handle === undefined) throw new Error('expected a ready manager handle')
+    const { agent } = handle
+    expect(await execute(ctx, agent, 'manager_fixture', 'manager-before-shutdown')).toMatchObject({ isError: false })
+    const stop = vi.spyOn(handle, 'dispose').mockRejectedValue(new Error('manager shutdown failed (test seam)'))
+    try {
+      await Promise.all([runtime.dispose(), runtime.dispose()])
+      expect(stop).toHaveBeenCalledTimes(1)
+      expect(store.pointer?.sessionId).toBe(opened.sessionId)
+      expect(archived).not.toContain(opened.sessionId)
+      expect(ctx.agents.get(opened.sessionId)).toBe(agent)
+      const denied = await execute(ctx, agent, 'manager_fixture', 'manager-after-failed-shutdown')
+      expect(denied).toMatchObject({ isError: true, error: { message: expect.stringContaining('not authorized') } })
+    } finally {
+      stop.mockRestore()
+      await handle.dispose()
+    }
+  })
+
   it('sets the default title only when absent and ignores a rename failure', async () => {
     const { ctx, workspaceId, checkout, root } = await realHarness()
     const store = new MemoryPointerStore()
@@ -470,6 +499,51 @@ describe('Team manager Session Host runtime', () => {
     presets.failingMount = false
     await broken.dispose()
     await runtime.dispose()
+  })
+
+  it('leaves an unpublished candidate denied when disposal and rollback archival both fail', async () => {
+    const { ctx, workspaceId, checkout, root, archived, archiveFailures } = await realHarness()
+    const store = new MemoryPointerStore()
+    const runtime = runtimeFor(ctx, { store, root, workspace: { workspaceId, path: checkout } })
+    const first = await runtime.open()
+    if (first.status !== 'ready') throw new Error('expected the current manager Session')
+    const current = ctx.agents.get(first.sessionId)!
+    const originalCreate = ctx.agents.create.bind(ctx.agents)
+    let candidate: AgentHandle | undefined
+    let restoreStop: (() => void) | undefined
+    let archiveFailuresAtStop: number | undefined
+    vi.spyOn(ctx.agents, 'create').mockImplementationOnce(async options => {
+      const handle = await originalCreate(options)
+      candidate = handle
+      const stop = vi.spyOn(handle, 'dispose').mockImplementation(async () => {
+        archiveFailuresAtStop = archiveFailures.remaining
+        throw new Error('candidate disposal failed (test seam)')
+      })
+      restoreStop = () => stop.mockRestore()
+      return handle
+    })
+    store.writeFailure = new Error('pointer store unavailable (test seam)')
+    archiveFailures.remaining = 1
+    try {
+      const result = await runtime.newConversation(first.sessionId)
+      if (candidate === undefined) throw new Error('expected a manager candidate handle')
+      expect(result).toMatchObject({
+        status: 'unavailable',
+        diagnostic: { class: 'pointer-persist', detail: store.writeFailure.message, sessionId: candidate.agent.id },
+      })
+      expect(archiveFailuresAtStop).toBe(1)
+      expect(archiveFailures.remaining).toBe(0)
+      expect(archived).not.toContain(candidate.agent.id)
+      expect(store.pointer?.sessionId).toBe(first.sessionId)
+      expect(ctx.agents.get(candidate.agent.id)).toBe(candidate.agent)
+      const denied = await execute(ctx, candidate.agent, 'manager_fixture', 'manager-unpublished-denied')
+      expect(denied).toMatchObject({ isError: true, error: { message: expect.stringContaining('not authorized') } })
+      expect(await execute(ctx, current, 'manager_fixture', 'manager-still-current')).toMatchObject({ isError: false })
+    } finally {
+      restoreStop?.()
+      await candidate?.dispose()
+      await runtime.dispose()
+    }
   })
 
   it('keeps a resumed Session when resume or attach fails and never archives the registered pointer', async () => {
