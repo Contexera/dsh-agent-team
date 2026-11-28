@@ -35,6 +35,10 @@ agent-team       → neither tool nor Client implementation
 | `index.ts` | Host 组合、生命周期编排与 typed Remote 适配。 |
 | `member-runtime.ts` | Member 的 Turn 等待、skill 挂载与私有记忆目录准备。 |
 | `member-tool-policy.ts` | Member 的工具限制、Turn 授权与能力警告。 |
+| `manager-session.ts` | manager 的代际生命周期与运行时资源。 |
+| `manager-session-store.ts` | 持久的 manager pointer 与保留的 Session lineage。 |
+| `private-memory.ts` | 共同的私有记忆索引读取与注入决策。 |
+| `member-skills.ts` | 两个 Team preset 的隔离 skill provider 路由与挂载生命周期。 |
 | `ledger.ts` | 持久提交、授权、重放校验与投影。 |
 | `spec.ts` | 已存 operation 的 schema 与 Team 存储 domain 定义。 |
 | `types.ts` | 公开类型入口，重新导出 `types/entities.ts`（id 与实体）、`types/operations.ts`（ledger 记录）和 Remote 类型目录入口 `types/requests-results.ts`。 |

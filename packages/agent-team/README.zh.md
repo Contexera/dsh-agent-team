@@ -42,7 +42,7 @@ Agent 的 Thread 与 Main stream read 根据当前 Session 可见性恢复缺失
 
 Host 还持有一个 [Team manager](../../docs/domain-model.zh.md#team-manager)：一条专用 DSH Session，使用隔离的 `team-manager` preset，没有 Member ref、Team 参与关系或 ledger 身份。`managerSession({})` 解析它，`newManagerSession({expectedSessionId})` 只替换调用方当前看到的 Session。当前目的地是独立 `agent_team_manager` domain 中唯一的私有 `pointer` 行，存 `{sessionId, workspaceId, previousSessionIds?}`，位于 operation ledger 之外。`sessionOwnership({sessionIds})` 结合这份 lineage 与 Member ledger，分类当前、archived 与 cold Team Session，供普通 blank 安全复用判断。
 
-首次创建先初始化 shipped 默认 Workspace，再回落到 registry 顺序中第一个可用 Workspace；没有可用项就返回 `no-workspace`，不创建 Session。open 与替换串行执行，所以并发首次 open 只建一条 Session，迟到替换只观察当前项。只有已归档或明确 `missing` 的 Session 可被替换；`refused`、`corrupt`、`io`、`unknown` 与 pointer 失败都保留 pointer，并返回结构化 `unavailable`。替换会停止旧 handle，但保留 Session 历史；Workspace 归档与 pointer 持久化在下一次 open 收敛，不依赖跨权威原子事务。
+open 可以替换缺失或已归档的 manager Session；启动恢复和已过期的新开对话请求不会替换。Host 如何处理竞态与不可读日志，见[打开与替换规则](../../docs/architecture/workspace-session-storage.zh.md#打开与替换规则)。
 
 manager 私有资源位于 `$DSH_HOME/agent-team/manager/`（`memory.md`、`notes/` 与 `skills/`），不是 ledger fact。manager 通过自己的 preset row（`manager-context`）读取这份索引：它先问 Host「这个 Agent 是不是当前 manager」，不经过 `memberForAgent`。注入块与 Member 的块同一套契约——先一份 baseline，文件变化后只给一条「旧副本已过期」的提示，同样 16 KiB 硬顶、同样的转义，超限时同样只注入开头并附警告——只是按本次 Session 的实际 cwd 说明私有 root 的位置。它的 skill provider 先扫随包发布的只读 `packages/agent-team/manager-skills/`，再扫可写的私有 `skills/`，所以同名的私有 skill 不会盖住内置的；这两处 root 都不会进入 Member 或普通 Session。生命周期归 [Workspace 与 Session storage](../../docs/architecture/workspace-session-storage.zh.md#team-manager-session)；隔离 composition 与确切 Agent 的执行 guard 归 [Tools and preset](../../docs/architecture/tools-and-preset.zh.md#team-manager-preset)。
 

@@ -216,6 +216,8 @@ The wake decision itself is a pure gate ladder in `wake-recycle.ts`: disabled, n
 
   The Host runtime passes its Team registry into the provider mount explicitly. An ordinary `agent.ctx` lookup resolves the Host registry when both exist and cannot find the Team mount.
 
+  A mount handle can change selection or unmount only its own provider. Once replaced, the old handle cannot affect its successor. Routing and filtering preserve incomplete discovery results, so the registry can show the candidates it found and retry discovery.
+
   Each Member provider scans exactly two Team-owned roots with default roots excluded: the plugin's bundled read-only core skills (`packages/agent-team/core-skills/`, first — a same-name bundled skill stays stable across upgrades) and the Member's writable `$DSH_HOME/agent-team/members/<member-directory>/skills/` (the Member id with `:` replaced by `-`).
 
   The Team manager Session gets the same isolated shape from its own runtime, with the two roots swapped for manager ones: the read-only `packages/agent-team/manager-skills/` (first, and checked by the same `check:core-skills` gate) and the writable `$DSH_HOME/agent-team/manager/skills/`. No Member root and no manager root crosses over.

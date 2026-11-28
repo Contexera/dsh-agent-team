@@ -201,6 +201,8 @@ carried-input 重放有界，且以 message id 为准。换代在 commit 时记�
 
   Host runtime 把自己拥有的 Team registry 显式传给 provider 挂载。两者同时存在时，经普通 `agent.ctx` 查找得到的是 Host registry，找不到 Team 的挂载。
 
+  挂载 handle 只能修改自己的 provider 的选择或卸载它。被替换后，旧 handle 无法影响后继。路由与过滤保留「发现未完成」的状态，因此 registry 可以展示已找到的候选项，并重试发现。
+
   每个 Member provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<member-directory>/skills/`（Member id 中的 `:` 替换为 `-`）。
 
   manager Session 由自己的 runtime 提供同构的隔离结构与两处 root：只读的 `packages/agent-team/manager-skills/`（排前，并由同一个 `check:core-skills` 检查）与可写的 `$DSH_HOME/agent-team/manager/skills/`。Member 的 root 与 manager 的 root 互不进入。

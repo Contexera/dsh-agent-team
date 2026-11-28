@@ -44,20 +44,28 @@ The Host owns one dedicated [Team manager](../domain-model.md#team-manager) Sess
 
 `workspaceId` is restoration and display metadata, not a second existence authority. A pointer-store open failure is logged and leaves the manager unavailable without failing Host boot or the Team ledger.
 
-First creation asks the shipped Workspace controller to initialize its default Workspace, then takes the first usable Workspace in registry order; when none is usable it returns `no-workspace` and creates no Session. An existing Session resumes only in the Workspace whose path exactly matches its stored cwd. Startup pre-restore resumes a readable registered Session but never creates one; an absent pointer or an archived registered Session is left for the next open.
+First creation prefers the default Workspace initialized by the Harness controller, then tries the registry in order; when none is usable it returns `no-workspace` and creates no Session. An existing Session resumes only in a Workspace whose path exactly matches its stored cwd.
 
 ### Open and replacement rules
 
-Public opens and replacements share one serialized chain. Concurrent first opens create one Session, and concurrent new-conversation requests under one expected id create one successor; a stale caller observes the current Session instead of creating another. For an existing pointer, only an archived Session or a stored read that positively reports `missing` is replacement-eligible. `refused`, `corrupt`, `io`, `unknown`, pointer-read, and pointer-write failures return `unavailable` and retain the pointer.
+Open, new conversation, and startup restore share one serialized chain. Concurrent first opens create one Session, and concurrent new-conversation requests with the same expected id create one successor.
+
+| Entry point | When the registered Session is archived or missing |
+| --- | --- |
+| Open | Creates a replacement. An absent pointer also allows creation. |
+| New conversation with a stale expected id | Looks up the current pointer. If its Session is lost, returns `unavailable` without creating a replacement. |
+| Startup restore | Leaves the pointer alone for the next open. Startup can resume a Session but never creates one. |
+
+These rules also apply if archival is discovered after the stored read, or if resume reports `missing` when opening the log for writing. An unreadable log (`refused`, `corrupt`, `io`, or `unknown`) is not a missing log. Those failures and pointer read/write errors return `unavailable`, not a replacement.
 
 ### Publication and archival
 
-Replacement persists the pointer, then publishes the successor and immediately denies the old manager. After the old handle stops, the Host archives the retired Session without deleting its log, so the successor stays in the active list and the predecessor moves to the Workspace's archive view.
+Replacement persists the pointer before publishing the successor, immediately denying the old manager. Each live generation owns its Agent handle, tool policy, and skill mount. Cleanup stops that handle before releasing its policy and mount. If the handle fails to stop, the guard stays installed and denies execution.
 
-Archival is best-effort after publication: a failure is warned about without rolling back the successor or deleting history. Workspace archival and pointer persistence are separate authorities, so a race can leave them briefly out of step; the next open converges by replacing an archived manager rather than by a cross-authority atomic transaction.
+The Host then tries to archive the retired Session without deleting its log. An archival failure logs a warning without rolling back the successor. Workspace archival and pointer persistence are separate, so a race can leave an archived Session registered; the next open can replace it.
 
 ### Private manager resources
 
 Manager-private resources live under `$DSH_HOME/agent-team/manager`: `memory.md`, `notes/`, and `skills/`. They are not ledger facts. [Host authority](host-authority.md#member-capabilities-and-skills) owns the isolated skill roots and their precedence.
 
-The manager's memory reaches its context through its own preset row, not through the Member context plugin: the row asks the Host whether this exact Agent is the current manager, reads `memory.md` from that private root, and injects the same bounded index block a Member gets — one complete baseline, then a stale-copy notice after the file changes. The block states where the private root sits relative to the Session's actual cwd, because the manager runs inside a Workspace rather than outside every one.
+The manager's preset row injects memory only for the exact current manager Agent, not through the Member context plugin. [Memory and context](../team-collaboration/memory-and-context.md#team-manager-memory-and-skills) owns the shared injection rules and the manager's cwd-relative wording.

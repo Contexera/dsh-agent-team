@@ -14,9 +14,11 @@ A Member's per-step context is assembled as four classified blocks: identity, Pr
 
 Ownership and participation are always stated in full, including an empty ownership list and a participation list that shrank from several Workspaces to one. Each ownership line names what that owner answers for in the Project, and an unspecified responsibility is stated as unspecified — a neutral fact about the grant, not a gap the Member is expected to close.
 
-Private memory has two shapes. The complete index is the baseline. After `memory.md` changes, the Member gets one compact notice that the earlier copy is stale, where the file is, and its current budget use. The newest memory event is compared with the file's current state, so an older matching notice cannot hide a later change. A notice is not an index: a compaction that leaves only the notice still triggers the latest complete baseline.
+Private memory starts with a baseline: the index within its byte budget. When `memory.md` changes and an intact baseline is still visible, the next step gets a short stale-copy notice with the path and current usage. The newest intact memory block determines whether the current file state has already been reported.
 
-A missing or unreadable index states that condition and its path instead of injecting content. An over-budget index still counts as a baseline: its leading whole lines within the budget are injected with a warning to read the file for the rest, and the file itself is never trimmed or summarized.
+Only blocks whose visible text still matches their recorded digest count. If compaction drops or rewrites the baseline, the next step receives a new baseline even when a matching notice survives. An over-budget baseline shows only leading whole lines and a warning. Framing markers in the injected content are escaped; the file itself is never trimmed or summarized.
+
+A missing or unreadable index produces a notice with that state and its path, not index content. An unchanged unavailable state appends nothing; a readable zero-byte file is a valid index, not a missing one.
 
 ## Workspace rules
 Each Workspace can carry one Team-owned rules file, `$DSH_HOME/agent-team/workspaces/<workspaceId>/rules.md`, outside every repository. It holds what only this Team shares in this Workspace: collaboration conventions, shared-checkout discipline, and local environment clues. Public engineering rules stay in the repository's `AGENTS.md`; live state stays in the ledger.
@@ -30,9 +32,7 @@ Unlike private memory, a changed file is injected in full again, because the rea
 ## Team manager memory and skills
 The Team manager Session keeps its own private space under `$DSH_HOME/agent-team/manager/` — `memory.md`, `notes/`, and `skills/` — and it is not a Member's. The directory outlives every manager Session: a restart, a reopen after archival, and "new conversation" all read the same files, so what the Human taught the manager survives the conversation that taught it.
 
-Its memory block is the Member block's contract with its own wording: one complete index as the baseline, one stale-copy notice after the file changes, the same 16 KiB ceiling, the same framing escape, and the same over-budget head with a warning instead of trimming the file. Only `memory.md` enters context; `notes/` is read on demand from the paths the block names.
-
-The one difference is the location sentence. The manager runs inside a Workspace, so the block states where the private root actually sits relative to that cwd instead of asserting it is outside every Workspace.
+The manager uses the same [private-memory injection rules](#member-context-injection) and 16 KiB ceiling as a Member, with its own wording. Its block describes the private root relative to the actual Session cwd. Only `memory.md` enters context; `notes/` is read on demand from the paths the block names.
 
 Upkeep follows the same bounded-index and private-skill rules at the manager's paths, and the bundled `manager-memory` skill owns the craft: what earns a line, the three tiers, the review points, and what must never be saved. Its six guide skills live in `packages/agent-team/manager-skills/`; the Member core-skill root is not mounted into its catalog.
 

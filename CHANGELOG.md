@@ -7,6 +7,9 @@ All notable changes to this project are documented in this file. The format foll
 **Fixed**
 
 - A fresh Thread reply uses the revision returned by the previous committed reply or Task action, even before another read succeeds. This applies to both the Task page and discussion panel; uncertain retries still replay their original request.
+- Opening Team manager still replaces an archived or missing Session, even if the Host discovers the loss during restore. Startup and stale new-conversation requests no longer create an unintended replacement.
+
+  简体中文：打开 Team manager 时，即使 Host 到恢复过程中才发现 Session 已归档或缺失，也可以替换它。Host 启动或收到已过期的新开对话请求时，不再意外创建后继。
 
 ## [0.2.9] - 2026-11-22
 

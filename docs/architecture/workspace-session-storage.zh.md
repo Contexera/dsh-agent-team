@@ -56,26 +56,28 @@ Host 持有一个专用 [Team manager](../domain-model.zh.md#team-manager) Sessi
 
 `workspaceId` 只用于恢复和展示，不是 Session 是否存在的第二权威。pointer store 打不开时记录日志，manager 保持 unavailable，不阻止 Host 启动或 Team ledger 打开。
 
-首次创建先让 Harness Workspace controller 初始化默认 Workspace，再按 registry 顺序选择第一个可用 Workspace。无可用项时返回 `no-workspace`，不创建 Session。
-
-已有 Session 只在路径与其存储 cwd 完全相同的 Workspace 中恢复。启动时只预恢复可读的已注册 Session，不创建新 Session；pointer 缺失或 Session 已归档时留待下一次 open。
+首次创建优先使用由 Harness Workspace controller 初始化的默认 Workspace，再按 registry 顺序尝试。无可用项时返回 `no-workspace`，不创建 Session。已有 Session 只在路径与其存储 cwd 完全相同的 Workspace 中恢复。
 
 ### 打开与替换规则
 
-公开 open 与替换共用一条串行链。并发首次 open 只创建一个 Session；同一 expected id 的并发替换只创建一个后继。过期调用方只观察当前 Session，不再创建。
+open、新开对话和启动恢复共用一条串行链。并发首次 open 只创建一个 Session；带同一 expected id 的并发新开对话只创建一个后继。
 
-已有 pointer 只在 Session 已归档，或存储读取明确报告 `missing` 时才允许替换。`refused`、`corrupt`、`io`、`unknown` 及 pointer 读写失败都返回 `unavailable`，保留 pointer。
+| 入口 | 已注册的 Session 已归档或缺失时 |
+| --- | --- |
+| open | 创建后继。没有 pointer 时也可以创建。 |
+| expected id 已过期的新开对话 | 查询当前 pointer。如果对应 Session 已丢失，返回 `unavailable`，不创建后继。 |
+| 启动恢复 | 不改 pointer，留待下一次 open。启动可以恢复 Session，但从不创建。 |
+
+如果在读取已存日志后才发现归档，或恢复时以写模式打开日志才报告 `missing`，同样遵循这些规则。日志不可读（`refused`、`corrupt`、`io` 或 `unknown`）不等于日志缺失。这些错误和 pointer 读写失败都返回 `unavailable`，不会触发替换。
 
 ### 发布与归档
 
-替换先持久化 pointer，再发布后继并立即取消旧 manager 的授权。旧 handle 停止后，Host 归档旧 Session，保留日志。后继留在活跃列表，前代进入 Workspace 归档视图。
+替换先持久化 pointer，再发布后继并立即取消旧 manager 的授权。每个运行中的代各自持有 Agent handle、工具策略与 skill 挂载。清理时先停止该 handle，再释放策略与挂载。如果 handle 未能停止，guard 保留并拒绝执行。
 
-发布后的归档尽力执行：失败只记警告，不回滚后继，不删除历史。Workspace 归档与 pointer 持久化属于不同权威，竞态中可能短暂不同步；下一次 open 通过替换已归档 manager 收敛，不依赖跨权威原子事务。
+Host 随后尝试归档退役 Session，不删除日志。归档失败只记警告，不回滚后继。Workspace 归档与 pointer 持久化彼此独立，竞态中可能留下仍指向已归档 Session 的 pointer；下一次 open 可以替换它。
 
 ### manager 私有资源
 
 manager 私有资源位于 `$DSH_HOME/agent-team/manager`：`memory.md`、`notes/` 和 `skills/`，都不是 ledger fact。隔离的 skill roots 及优先级见 [Host 权威](host-authority.zh.md#member-capabilities-与-skills)。
 
-manager 的记忆由专用 preset row 注入，不经过 Member context 插件。该 row 先向 Host 确认当前 Agent 正是现任 manager，再读取私有 `memory.md`，注入与 Member 同构的有界索引：先给完整基线，文件变化后只提示旧副本已过期。
-
-索引按 Session 的实际 cwd 说明私有目录的位置，因为 manager 在某个 Workspace 内运行，而不是在所有 Workspace 之外。
+manager 的专用 preset row 只为确切的当前 manager Agent 注入记忆，不经过 Member context 插件。共同的注入规则及 manager 如何按实际 cwd 描述路径，见[记忆与上下文](../team-collaboration/memory-and-context.zh.md#管理会话的记忆与-skills)。
