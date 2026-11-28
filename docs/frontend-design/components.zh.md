@@ -1,8 +1,8 @@
-按组件定位实现，再看调用方和状态测试：[消息行测试](../../packages/client-agent-team/tests/team-message.client.spec.tsx) 验证消息渲染，[讨论面板测试](../../packages/client-agent-team/tests/team-project-panel.client.spec.tsx) 验证 Project 内打开的讨论。颜色、间距等通用约定见 [设计语言](principles-and-language.zh.md)。
-
 # 组件合同
 
 [English](components.md) | 中文
+
+按组件定位实现，再看调用方和状态测试：[消息行测试](../../packages/client-agent-team/tests/team-message.client.spec.tsx) 验证消息渲染，[讨论面板测试](../../packages/client-agent-team/tests/team-project-panel.client.spec.tsx) 验证 Project 内打开的讨论。颜色、间距等通用约定见 [设计语言](principles-and-language.zh.md)。
 
 ## TeamMessage（消息行）
 - Props 有五组：`senderName`、`memberId`、`human`、`body`、`grouped`。
