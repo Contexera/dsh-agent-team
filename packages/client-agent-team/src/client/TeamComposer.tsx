@@ -1,35 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent, ReactNode } from 'react'
-import { startsMentionAt } from '@contexera/dsh-agent-team/mentions'
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
-import { IconPaperclipOutlineMedium, IconSendOutlineRegular, Tooltip, useAnchoredMaxHeight, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconPaperclipOutlineMedium, IconSendOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import type { ReplyTarget } from './composer-sends.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
-import { buildMentionGroups, mentionSurfaceOf, type MentionGroupKey } from './mention-presentation.ts'
+import { mentionSurfaceOf, type MentionGroupKey } from './mention-presentation.ts'
+import { useComposerFiles } from './composer-files.ts'
+import { useComposerMentions } from './composer-mentions.ts'
 import { HUMAN_MEMBER_ID, mentionedMemberIds, plainGist } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
-
-interface MentionMatch {
-  readonly start: number
-  readonly end: number
-  readonly query: string
-}
-
-function findMention(draft: string, caret: number): MentionMatch | undefined {
-  const beforeCaret = draft.slice(0, caret)
-  if (beforeCaret.length === 0 || /\s/u.test(beforeCaret.at(-1) ?? '')) return undefined
-  let tokenStart = beforeCaret.length
-  while (tokenStart > 0 && !/\s/u.test(beforeCaret[tokenStart - 1]!)) tokenStart -= 1
-  const at = beforeCaret.lastIndexOf('@')
-  if (at < tokenStart) return undefined
-  // The picker opens exactly where delivery reads a call, so a pick never lands
-  // as text the Host would keep prose.
-  if (!startsMentionAt(draft, at)) return undefined
-  return { start: at, end: caret, query: beforeCaret.slice(at + 1) }
-}
 
 /** One object URL per draft file; revoked when the draft file is removed. */
 const draftPreviewUrls = new WeakMap<File, string>()
@@ -89,30 +71,25 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
   readonly t: TeamConversationProps['t']
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLFormElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const activeOptionRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
-  /** Nested dragenter depth: a drag crossing the composer's children reports leaves it never left. */
-  const dragDepth = useRef(0)
   // Subscribing here, not in the hosting page, keeps a keystroke off the timeline.
   const { draft } = useSyncExternalStore(drafts.subscribe, () => drafts.getSnapshot(draftKey))
-  const [mention, setMention] = useState<MentionMatch>()
-  const [dropHover, setDropHover] = useState(false)
-  const [highlight, setHighlight] = useState(0)
-  const mentionSurface = mentionSurfaceOf(draftKey)
-  const groups = mention === undefined
-    ? []
-    : buildMentionGroups(members, mention.query, mentionSurface, { followers: followerMemberIds, projectMembers: projectMemberIds, owners: ownerMemberIds })
-  const options = groups.flatMap(group => group.options)
-  const optionIndexById = new Map(options.map((status, index) => [status.member.memberId, index]))
-  const menuOpen = mention !== undefined
-  const activeOption = options[highlight]
+  const writeDraft = (nextDraft: string): void => {
+    drafts.writeDraft(draftKey, nextDraft)
+    onEdit?.()
+  }
+  const { menuRef, menuMaxHeight, menuOpen, groups, options, activeOption, activeOptionRef, optionIndexById, highlight, updateMention, selectOption, handleKeyDown } =
+    useComposerMentions({
+      draft,
+      surface: mentionSurfaceOf(draftKey),
+      members,
+      roster: { followers: followerMemberIds, projectMembers: projectMemberIds, owners: ownerMemberIds },
+      rootRef,
+      inputRef,
+      writeDraft,
+    })
   const listId = 'team-mention-suggestions'
-  const menuMaxHeight = useAnchoredMaxHeight(menuRef, 320, menuOpen ? draft : null)
-
-  useDismissOnOutsidePointer(rootRef, menuOpen, open => { if (!open) setMention(undefined) })
 
   useLayoutEffect(() => {
     const input = inputRef.current
@@ -120,21 +97,6 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
     input.style.height = 'auto'
     input.style.height = `${Math.min(input.scrollHeight, 180)}px`
   }, [draft])
-
-  useEffect(() => {
-    if (mention === undefined || options.length === 0) {
-      setHighlight(0)
-      return
-    }
-    setHighlight(current => Math.min(current, options.length - 1))
-  }, [mention, options.length])
-
-  // Keeps the keyboard-highlighted row from hiding below the anchored height cap.
-  useLayoutEffect(() => {
-    if (!menuOpen) return
-    // Optional call: jsdom renders the menu without a layout engine.
-    activeOptionRef.current?.scrollIntoView?.({ block: 'nearest' })
-  }, [menuOpen, highlight, activeOption?.member.memberId])
 
   // Team data can load after navigation, so another control may already own focus; do not steal it.
   useEffect(() => {
@@ -149,6 +111,9 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
     inputRef.current?.focus({ preventScroll: true })
   }, [notice, pending])
 
+  const { fileInputRef, dropHover, onPickerChange, onPaste, dropHandlers } = useComposerFiles(pending, pendingFiles, onFilesChange)
+  const canSubmit = !pending && draft.trim() !== ''
+
   const memberHandles = new Map(members.map(status => [status.member.memberId, status.member.handle]))
 
   const notifiedIds = deliverableRecipients(draft, members, replyTo)
@@ -159,137 +124,19 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
         : key === 'project' ? t('mentionGroupProject')
           : t('mentionGroupOther')
 
-  const updateMention = (nextDraft: string, caret: number): void => {
-    const match = findMention(nextDraft, caret)
-    setMention(match)
-    if (match === undefined) setHighlight(0)
-  }
-
-  const onChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
-    const nextDraft = event.target.value
-    drafts.writeDraft(draftKey, nextDraft)
-    onEdit?.()
-    updateMention(nextDraft, event.target.selectionStart ?? nextDraft.length)
-  }
-
-  const commitMention = (nextDraft: string, nextCaret: number): void => {
-    drafts.writeDraft(draftKey, nextDraft)
-    onEdit?.()
-    setMention(undefined)
-    setHighlight(0)
-    requestAnimationFrame(() => {
-      const input = inputRef.current
-      if (input === null) return
-      input.focus({ preventScroll: true })
-      input.setSelectionRange(nextCaret, nextCaret)
-    })
-  }
-
-  const selectOption = (status: AgentTeamClientMemberStatus): void => {
-    if (mention === undefined) return
-    const inserted = `@${status.member.handle} `
-    const nextDraft = `${draft.slice(0, mention.start)}${inserted}${draft.slice(mention.end)}`
-    const nextCaret = mention.start + inserted.length
-    commitMention(nextDraft, nextCaret)
-  }
-
-  // Only a paste that carries files is intercepted, so plain text keeps native insertion.
-  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
-    if (pending || onFilesChange === undefined || pendingFiles === undefined) return
-    const files = Array.from(event.clipboardData.items)
-      .filter(item => item.kind === 'file')
-      .map(item => item.getAsFile())
-      .filter((file): file is File => file !== null)
-    if (files.length === 0) return
-    event.preventDefault()
-    onFilesChange([...pendingFiles, ...files])
-  }
-
-  // A file dragged over the composer is the same intake as a pasted one, so it
-  // lands on the same list; `dragDepth` survives the child elements a drag
-  // crosses, which would otherwise report a leave between every one of them.
-  const acceptsDrop = (event: DragEvent<HTMLElement>): boolean =>
-    onFilesChange !== undefined && pendingFiles !== undefined && !pending
-    && event.dataTransfer.types.includes('Files')
-  const onDragEnter = (event: DragEvent<HTMLDivElement>): void => {
-    if (!acceptsDrop(event)) return
-    event.preventDefault()
-    dragDepth.current += 1
-    setDropHover(true)
-  }
-  const onDragOver = (event: DragEvent<HTMLDivElement>): void => {
-    if (!acceptsDrop(event)) return
-    // Without this the browser navigates the tab to the dropped file.
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'copy'
-  }
-  const onDragLeave = (): void => {
-    if (dragDepth.current === 0) return
-    dragDepth.current -= 1
-    if (dragDepth.current === 0) setDropHover(false)
-  }
-  const onDrop = (event: DragEvent<HTMLDivElement>): void => {
-    if (!acceptsDrop(event) || onFilesChange === undefined || pendingFiles === undefined) return
-    event.preventDefault()
-    const dropped = [...event.dataTransfer.files]
-    dragDepth.current = 0
-    setDropHover(false)
-    if (dropped.length > 0) onFilesChange([...pendingFiles, ...dropped])
-  }
-
-  // A file dropped beside the composer must not navigate the tab to it either:
-  // the composer takes the drop, everything else declines it.
-  useEffect(() => {
-    if (onFilesChange === undefined || pendingFiles === undefined) return undefined
-    const guard = (event: globalThis.DragEvent): void => {
-      if (event.dataTransfer?.types.includes('Files') === true) event.preventDefault()
-    }
-    document.addEventListener('dragover', guard)
-    document.addEventListener('drop', guard)
-    return () => {
-      document.removeEventListener('dragover', guard)
-      document.removeEventListener('drop', guard)
-    }
-  }, [onFilesChange, pendingFiles])
-
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     const composing = composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
-    if (menuOpen && options.length > 0 && event.key === 'ArrowDown') {
-      event.preventDefault()
-      setHighlight(current => (current + 1) % options.length)
-      return
-    }
-    if (menuOpen && options.length > 0 && event.key === 'ArrowUp') {
-      event.preventDefault()
-      setHighlight(current => (current - 1 + options.length) % options.length)
-      return
-    }
-    if (event.key === 'Escape' && menuOpen) {
-      event.preventDefault()
-      setMention(undefined)
-      return
-    }
-    if (menuOpen && activeOption !== undefined && event.key === 'Tab' && !event.shiftKey) {
-      event.preventDefault()
-      selectOption(activeOption)
-      return
-    }
-    if (event.key !== 'Enter' || event.shiftKey || composing || event.repeat) return
-    if (menuOpen && activeOption !== undefined) {
-      event.preventDefault()
-      selectOption(activeOption)
-      return
-    }
+    const sendKey = event.key === 'Enter' && !event.shiftKey && !composing && !event.repeat
+    if (handleKeyDown(event, sendKey) || !sendKey) return
     event.preventDefault()
-    if (!pending && draft.trim() !== '') onSubmit()
+    if (canSubmit) onSubmit()
   }
 
   return <form ref={rootRef} className={css.root} onSubmit={event => {
     event.preventDefault()
-    if (!pending && draft.trim() !== '') onSubmit()
+    if (canSubmit) onSubmit()
   }}>
-    <div className={css.card} data-team-composer
-      onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+    <div className={css.card} data-team-composer {...dropHandlers}>
       {dropHover && <p className={css.notice} role="status" data-drop-active>{t('composerDropHint')}</p>}
       {notice !== undefined && <p className={css.notice} role="status">{notice}</p>}
       {replyTo !== undefined && <div className={css.replyBanner} data-reply-banner="">
@@ -342,7 +189,11 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
           readOnly={pending}
           placeholder={placeholder ?? t('messagePlaceholder')}
           rows={1}
-          onChange={onChange}
+          onChange={event => {
+            const nextDraft = event.target.value
+            writeDraft(nextDraft)
+            updateMention(nextDraft, event.target.selectionStart ?? nextDraft.length)
+          }}
           onPaste={onPaste}
           onKeyDown={onKeyDown}
           onSelect={event => { updateMention(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length) }}
@@ -371,11 +222,7 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
         {onFilesChange !== undefined && (
           <>
             <input ref={fileInputRef} type="file" multiple className={css.fileInput} aria-hidden="true" tabIndex={-1}
-              onChange={event => {
-                const chosen = [...event.target.files ?? []]
-                if (chosen.length > 0 && pendingFiles !== undefined) onFilesChange([...pendingFiles, ...chosen])
-                event.target.value = ''
-              }} />
+              onChange={onPickerChange} />
             <Tooltip label={t('attachFiles')} side="top" delayMs={500}>
               <button type="button" className={css.attachButton} aria-label={t('attachFiles')}
                 disabled={pending} onClick={() => { fileInputRef.current?.click() }}>
@@ -389,7 +236,7 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
           type="submit"
           className={css.sendButton}
           aria-label={pending ? t('sendingMessage') : t('sendMessage')}
-          disabled={pending || draft.trim() === ''}
+          disabled={!canSubmit}
           onMouseDown={event => {
             // Keep the composer focused when the send control is clicked.
             event.preventDefault()

@@ -42,7 +42,6 @@ describe('TeamComposer mention menu', () => {
     const texts = optionTexts(ui)
     expect(texts.some(text => text.includes('insider'))).toBe(true)
     expect(texts.some(text => text.includes('outsider'))).toBe(true)
-    // The Project member sorts before the Workspace peer a pick would enroll.
     expect(groups(ui)).toEqual(['project', 'other'])
   })
 
@@ -74,6 +73,41 @@ describe('TeamComposer mention menu', () => {
     openMenu(ui, '@')
     expect(optionTexts(ui).some(text => text.includes('通知所有成员'))).toBe(false)
     expect(optionTexts(ui).some(text => text.includes('@insider'))).toBe(true)
+
+    openMenu(ui, '@all')
+    expect(optionTexts(ui)).toEqual([])
+    expect(ui.getByRole('textbox')).toHaveProperty('value', '@all')
+    expect(ui.container.querySelector('[data-team-notify]')).toBeNull()
+  })
+
+  it('uses Enter to accept an active mention before it can submit', () => {
+    const onSubmit = vi.fn()
+    const ui = render(<TeamComposer members={[status('insider', 'member:insider')]} drafts={new TeamDraftStore()}
+      draftKey={'project:project:one' as never} pending={false} onSubmit={onSubmit} t={t} />)
+    const textarea = ui.getByRole('textbox')
+
+    openMenu(ui, 'hello @ins')
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(textarea).toHaveProperty('value', 'hello @insider ')
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    openMenu(ui, 'hello @insider rest')
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(onSubmit).toHaveBeenCalledOnce()
+  })
+
+  it('leaves Shift+Enter, key repeat, and IME confirmation to the editor', () => {
+    const onSubmit = vi.fn()
+    const ui = render(<TeamComposer members={[]} drafts={new TeamDraftStore()}
+      draftKey={'project:project:one' as never} pending={false} onSubmit={onSubmit} t={t} />)
+    const textarea = ui.getByRole('textbox')
+    openMenu(ui, 'draft')
+
+    expect(fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })).toBe(true)
+    expect(fireEvent.keyDown(textarea, { key: 'Enter', repeat: true })).toBe(true)
+    fireEvent.compositionStart(textarea)
+    expect(fireEvent.keyDown(textarea, { key: 'Enter' })).toBe(true)
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 
   it('opens on an @ typed straight after CJK prose, and stays shut inside an ASCII word', () => {
