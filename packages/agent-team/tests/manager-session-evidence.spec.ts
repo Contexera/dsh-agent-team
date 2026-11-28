@@ -333,6 +333,18 @@ describe('manager Session evidence reader', () => {
     expect(result.stdout).toBe('')
   })
 
+  it('resolves the Harness before validating command-specific options', async () => {
+    const unresolved = await reader('window')
+    expect(unresolved.code).toBe(1)
+    expect(unresolved.stdout).toBe('')
+    expect(unresolved.stderr).toContain('cannot resolve the Harness Session backend')
+
+    const invalid = await reader('window', '--anchor', anchor)
+    expect(invalid.code).toBe(1)
+    expect(invalid.stdout).toBe('')
+    expect(invalid.stderr).toContain('--seq is required')
+  })
+
   it('derives the storage root from the locator log path', async () => {
     const [project] = await readdir(sessionsRoot)
     const [sessionDirectory] = await readdir(join(sessionsRoot, project!))

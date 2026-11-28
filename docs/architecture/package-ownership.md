@@ -33,7 +33,8 @@ Under `packages/agent-team/src/`, the main responsibilities are:
 | Module | Owns |
 | --- | --- |
 | `index.ts` | Host composition, lifecycle orchestration, and typed Remote adapters. |
-| `member-runtime.ts` | Per-Member tool restrictions, skill mounts, capability warnings, and private-memory provisioning. |
+| `member-runtime.ts` | Member turn waits, skill mounts, and private-memory provisioning. |
+| `member-tool-policy.ts` | Member tool restrictions, turn grants, and capability warnings. |
 | `ledger.ts` | Durable commits, authorization, replay validation, and projections. |
 | `spec.ts` | Stored operation schemas and the Team storage-domain specification. |
 | `types.ts` | Public type barrel over `types/entities.ts` (ids and entities), `types/operations.ts` (ledger records), and `types/requests-results.ts` (Remote requests, results, receipts, and views, one file per surface). |

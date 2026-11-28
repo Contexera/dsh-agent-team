@@ -1,9 +1,9 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { agentEvents, type Agent, type PreStepDecision } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import { freezeMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { PrivateMemoryTag } from '../src/private-memory.ts'
 import { realHarness, requestId } from './helpers/member-harness.ts'
@@ -74,6 +74,46 @@ describe('Team manager private memory injection', () => {
     expect(update[0]!.text).toContain(indexPath)
     expect(update[0]!.text).not.toContain('Prefer the reversible option.')
     expect(managerBlocks(await step(ctx, agent))).toHaveLength(0)
+  })
+
+  it('restores a complete baseline when only the current notice and a truncated baseline survive', async () => {
+    const { ctx } = await realHarness()
+    const agent = await openManager(ctx)
+    const indexPath = join(managerRoot(), 'memory.md')
+    const baseline = managerBlocks(await step(ctx, agent))[0]
+    if (baseline?.tag.variant !== 'baseline') throw new Error('expected an initial manager memory baseline')
+    await writeFile(indexPath, 'Current manager index')
+    expect(managerBlocks(await step(ctx, agent))[0]?.tag.variant).toBe('update')
+
+    const derive = agent.session.deriveEventMessage.bind(agent.session)
+    const projection = vi.spyOn(agent.session, 'deriveEventMessage').mockImplementation(event => {
+      const message = derive(event)
+      if (message?.role !== 'user' || message.content[0]?.type !== 'text' || message.content[0].text !== baseline.text) return message
+      return freezeMessage({ ...message, content: [{ type: 'text', text: '[Truncated by compaction]' }] })
+    })
+    onTestFinished(() => { projection.mockRestore() })
+
+    const recovered = managerBlocks(await step(ctx, agent))
+    expect(recovered).toHaveLength(1)
+    expect(recovered[0]?.tag.variant).toBe('baseline')
+    expect(recovered[0]?.text).toContain('Current manager index')
+    expect(managerBlocks(await step(ctx, agent))).toEqual([])
+  })
+
+  it('distinguishes an absent index from a readable zero-byte index', async () => {
+    const { ctx } = await realHarness()
+    const agent = await openManager(ctx)
+    const indexPath = join(managerRoot(), 'memory.md')
+    await rm(indexPath)
+    expect(managerBlocks(await step(ctx, agent))[0]?.tag.variant).toBe('unavailable')
+    expect(managerBlocks(await step(ctx, agent))).toEqual([])
+
+    await writeFile(indexPath, '')
+    const empty = managerBlocks(await step(ctx, agent))
+    expect(empty).toHaveLength(1)
+    expect(empty[0]?.tag.variant).toBe('baseline')
+    expect(empty[0]?.text).toContain('Private memory index: 0.0 KiB / 16 KiB (0%).')
+    expect(managerBlocks(await step(ctx, agent))).toEqual([])
   })
 
   it('keeps notes out of context and reads them only when the index names them', async () => {

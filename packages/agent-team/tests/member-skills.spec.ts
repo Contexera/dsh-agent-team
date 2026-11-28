@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -9,6 +9,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import AgentTeam from '../src/index.ts'
+import { mountMemberSkillProvider } from '../src/member-skills.ts'
 import type { AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { mountTeamMemberHost, provideQuietTokenMeter, skillRegistryFor, TEAM_SKILLS_PRESET_ROW } from './helpers/team-host-fixture.ts'
 
@@ -101,9 +102,6 @@ describe('Agent Team member-private skills', () => {
     onTestFinished(async () => { await ordinary.dispose() })
     expect(await catalogNames(ctx, ordinary.agent)).toEqual([])
 
-    // Self-install: a SKILL.md written into the private directory is
-    // discovered by the next catalog query of that Member alone. The
-    // The first catalog read discovers the private root and its installed file.
     await writeFile(join(member.privateMemoryPath, 'skills', 'code-review.md'), SKILL_MD('code-review', 'Review changes', 'Review the diff carefully.'))
     expect(await catalogNames(ctx, agent)).toEqual(['code-review', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
 
@@ -281,12 +279,71 @@ describe('Agent Team member-private skills', () => {
     })
     expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta'])
 
+    await ctx.agentTeam.updateMember({
+      requestId: requestId('select-none'), memberId: member.memberId, handle: 'picky', description: 'Skills member',
+      capabilities: { skills: { allow: [] } },
+    })
+    expect(await catalogNames(ctx, agent)).toEqual([])
+    expect(await skillRegistryFor(ctx, agent).get('alpha', { scope: agent as never })).toBeUndefined()
+
     // Clearing the override returns to auto (bundled plus discovered).
     await ctx.agentTeam.updateMember({
       requestId: requestId('select-auto'), memberId: member.memberId, handle: 'picky', description: 'Skills member',
       capabilities: null,
     })
     expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta', 'member-memory-manager', 'member-skill-manager', 'project-subscriptions', 'team-domain-model'])
+  })
+
+  it('does not let a stale mount handle reselect or remove its replacement', async () => {
+    const { ctx, workspaceId } = await memberSkillsHarness()
+    const member = await addMember(ctx, workspaceId, 'remounted')
+    const agent = liveAgent(ctx, member.sessionId)
+    const skillsDirectory = join(member.privateMemoryPath, 'skills')
+    await writeFile(join(skillsDirectory, 'alpha.md'), SKILL_MD('alpha', 'Alpha skill', 'Alpha body.'))
+    await writeFile(join(skillsDirectory, 'beta.md'), SKILL_MD('beta', 'Beta skill', 'Beta body.'))
+    const mount = (allow: readonly string[]) => mountMemberSkillProvider(agent.ctx, ctx.agentPresets, {
+      skillsDirectory, bundledSkillsDirectory: undefined, initialSelection: allow,
+    })
+    const previous = mount(['alpha'])
+    const current = mount(['beta'])
+    if (previous === undefined || current === undefined) throw new Error('expected a Team skill router')
+    onTestFinished(() => current.dispose())
+    expect(await catalogNames(ctx, agent)).toEqual(['beta'])
+
+    previous.swap(['alpha'])
+    previous.dispose()
+    expect(await catalogNames(ctx, agent)).toEqual(['beta'])
+    expect((await skillRegistryFor(ctx, agent).get('beta', { scope: agent as never }))?.content).toContain('Beta body.')
+    current.dispose()
+    expect(await catalogNames(ctx, agent)).toEqual([])
+  })
+
+  it('keeps filtered partial discovery visible without marking it complete', async () => {
+    const { ctx, workspaceId } = await memberSkillsHarness()
+    const member = await addMember(ctx, workspaceId, 'partial')
+    const agent = liveAgent(ctx, member.sessionId)
+    const skillsDirectory = join(member.privateMemoryPath, 'skills')
+    const bundledSkillsDirectory = join(member.privateMemoryPath, 'fixture-bundled')
+    const brokenSkill = join(skillsDirectory, 'broken')
+    await mkdir(bundledSkillsDirectory)
+    await writeFile(join(bundledSkillsDirectory, 'alpha.md'), SKILL_MD('alpha', 'Alpha skill', 'Alpha body.'))
+    await writeFile(join(bundledSkillsDirectory, 'beta.md'), SKILL_MD('beta', 'Beta skill', 'Beta body.'))
+    // Reading a directory as SKILL.md fails the private root without hiding the bundled candidates.
+    await mkdir(join(brokenSkill, 'SKILL.md'), { recursive: true })
+    const mount = mountMemberSkillProvider(agent.ctx, ctx.agentPresets, {
+      skillsDirectory, bundledSkillsDirectory, initialSelection: ['alpha'],
+    })
+    if (mount === undefined) throw new Error('expected a Team skill router')
+    onTestFinished(() => mount.dispose())
+
+    const registry = skillRegistryFor(ctx, agent)
+    const partial = await registry.snapshot({ scope: agent as never })
+    expect(partial.skills.map(skill => skill.name)).toEqual(['alpha'])
+    expect(partial.complete).toBe(false)
+    await rm(brokenSkill, { recursive: true })
+    const retried = await registry.snapshot({ scope: agent as never })
+    expect(retried.skills.map(skill => skill.name)).toEqual(['alpha'])
+    expect(retried.complete).toBe(true)
   })
 
   it('provisions skills/ on activation and removes it with the Member', async () => {

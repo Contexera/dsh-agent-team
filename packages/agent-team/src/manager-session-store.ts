@@ -10,8 +10,7 @@ import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storag
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 
-/** The one row in the manager pointer table. */
-export const MANAGER_SESSION_POINTER_KEY = 'current' as const
+const MANAGER_SESSION_POINTER_KEY = 'current' as const
 
 /** Durable manager destination. `workspaceId` is metadata for restoration and display, not a second existence authority. */
 export interface ManagerSessionPointer {

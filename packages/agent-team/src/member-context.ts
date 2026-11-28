@@ -6,16 +6,17 @@ import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { matchesAnyProducerKind } from './context-source.ts'
 import {
   escapePrivateMemoryFraming,
+  observePrivateMemory,
+  planPrivateMemory,
   privateMemoryAnomaly,
-  privateMemoryAvailable,
   privateMemoryBody,
-  privateMemoryDigest,
   privateMemoryPathsBlock,
-  privateMemoryTextMatches,
   privateMemoryTextDigest,
   privateMemoryUsage,
   readPrivateMemoryIndex,
   type PrivateMemoryState,
+  type PrivateMemoryTag,
+  type VisiblePrivateMemory,
 } from './private-memory.ts'
 import type { AgentTeamAgentMember, AgentTeamOwnedProject } from './types.ts'
 import { memberMemoryDirectoryPath } from './member-runtime.ts'
@@ -36,7 +37,7 @@ export const PRODUCER_NAMES = [name, LEGACY_NAME] as const
  */
 export type MemberContextTag =
   | { readonly category: 'identity' | 'ownership' | 'workspaces' }
-  | { readonly category: 'memory'; readonly variant: 'baseline' | 'update' | 'unavailable'; readonly digest: string; readonly textDigest: string }
+  | PrivateMemoryTag
 
 /** This producer's attribution; `kind` must be producer-owned (Session format V4). The `plugin:` member of each pair is the read-side rename of that producer's released V3 history. */
 declare module '@deepseek-ai/dsh-llm' {
@@ -110,12 +111,10 @@ async function memberContextMessages(
   const workspaces = renderMemberWorkspaces(host.workspacesForAgent(agent))
   if (visible.workspaces !== workspaces) messages.push(injectionMessage({ category: 'workspaces' }, workspaces))
 
-  const digest = privateMemoryDigest(memory)
-  const available = privateMemoryAvailable(memory)
-  if (visible.latestMemoryDigest !== digest || (available && !visible.hasCompleteMemoryBaseline)) {
-    const variant = !available ? 'unavailable' : visible.hasCompleteMemoryBaseline ? 'update' : 'baseline'
-    const text = variant === 'update' ? renderMemberMemoryUpdate(memory, memoryPath) : renderMemberMemoryState(memory, memoryPath)
-    messages.push(injectionMessage({ category: 'memory', variant, digest, textDigest: privateMemoryTextDigest(text) }, text))
+  const plannedMemory = planPrivateMemory(memory, visible.memory)
+  if (plannedMemory !== undefined) {
+    const text = plannedMemory.variant === 'update' ? renderMemberMemoryUpdate(memory, memoryPath) : renderMemberMemoryState(memory, memoryPath)
+    messages.push(injectionMessage({ category: 'memory', ...plannedMemory, textDigest: privateMemoryTextDigest(text) }, text))
   }
   return messages
 }
@@ -131,10 +130,7 @@ interface VisibleMemberContext {
   identity?: string
   ownership?: string
   workspaces?: string
-  /** Digest carried by the newest memory event whose visible text is still the text it was written with. */
-  latestMemoryDigest?: string
-  /** Whether any complete memory baseline is still visible, whatever its age. */
-  hasCompleteMemoryBaseline: boolean
+  memory: VisiblePrivateMemory
 }
 
 /**
@@ -145,7 +141,7 @@ interface VisibleMemberContext {
  * neither stand in for a complete baseline nor vouch for an update digest.
  */
 function visibleMemberContext(agent: Agent): VisibleMemberContext {
-  const visible: VisibleMemberContext = { hasCompleteMemoryBaseline: false }
+  const visible: VisibleMemberContext = { memory: { hasCompleteBaseline: false } }
   for (const sequence of agent.session.surface.nodes.toReversed()) {
     // `nodes` are event identities (SessionSeq); snapshotEvents takes log
     // offsets. Re-entering through the validating constructor keeps the two
@@ -158,9 +154,7 @@ function visibleMemberContext(agent: Agent): VisibleMemberContext {
     const text = derived.content[0]?.type === 'text' ? derived.content[0].text : undefined
     if (tag === undefined || text === undefined) continue
     if (tag.category === 'memory') {
-      if (!privateMemoryTextMatches(tag, text)) continue
-      visible.latestMemoryDigest ??= tag.digest
-      if (tag.variant === 'baseline') visible.hasCompleteMemoryBaseline = true
+      observePrivateMemory(visible.memory, tag, text)
     } else {
       visible[tag.category] ??= text
     }

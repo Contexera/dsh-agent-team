@@ -1563,6 +1563,38 @@ describe('profile extra tool-name grants', () => {
     expect(lateBody).toHaveBeenCalledTimes(1)
   })
 
+  it('uses the last accepted baseline when reading grants fails for the next turn', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const grant = 't28_read_failure'
+    testCleanups.push(ctx.tools.register(defineContentToolFixture({
+      name: grant, description: 'extra', parameters: {}, execute: async () => [{ type: 'text', text: 'ok' }],
+    })))
+    const setGrants = useExtraToolGrants(ctx, [grant])
+    const member = await addMember(ctx, workspaceId, 't28-read-failure')
+    const agent = liveAgent(ctx, member)
+    const config = ctx.agentTeam.config as unknown as { extraToolGrants: { get(): readonly string[] } }
+
+    const turnTools = async (text: string) => {
+      adapter.enqueue(stopResponse(text))
+      const idle = waitForIdle(ctx, agent)
+      agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
+      await idle
+      return adapter.requests.at(-1)?.tools?.map(tool => tool.name)
+    }
+
+    expect(await turnTools('granted')).toContain(grant)
+    config.extraToolGrants = { get: () => { throw new Error('grants read failed') } }
+    const fallback = await turnTools('baseline')
+    expect(fallback).toContain('ordinary_tool')
+    expect(fallback).not.toContain(grant)
+    expect(toolNames(ctx, agent)).not.toContain(grant)
+    setGrants([grant])
+    expect(await turnTools('recovered')).toContain(grant)
+    expect(adapter.requests).toHaveLength(3)
+  })
+
   it('tightens to the no-grant baseline when a grant install fails, then retries the saved grant next turn', async () => {
     const adapter = new ScriptedAdapter()
     useAdapter(adapter)

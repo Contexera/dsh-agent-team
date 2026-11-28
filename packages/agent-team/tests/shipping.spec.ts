@@ -12,7 +12,7 @@ import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { HUMAN_PROFILE_SETTINGS_SCHEMA } from '../src/human-profile.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA } from '../src/index.ts'
-import { AGENT_TEAM_TOOL_NAMES } from '../src/member-runtime.ts'
+import { AGENT_TEAM_TOOL_NAMES } from '../src/member-tool-policy.ts'
 import { dshPeerRanges } from '../../../scripts/dsh-peers.mjs'
 import { teamTools } from '../../tool-agent-team/tests/render-text.ts'
 

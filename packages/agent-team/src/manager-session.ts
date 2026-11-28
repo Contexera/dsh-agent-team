@@ -44,6 +44,8 @@ import type {
   AgentTeamManagerSessionResult,
 } from './types.ts'
 
+type RecoverStoredPointer = () => AgentTeamManagerSessionResult | undefined | Promise<AgentTeamManagerSessionResult | undefined>
+
 /** The default Workspace as the Host Controller resolved it. */
 export interface ManagerWorkspaceValue {
   readonly workspaceId: WorkspaceId
@@ -69,17 +71,9 @@ export interface ManagerSessionRuntimeDeps {
   readonly initializeDefaultWorkspace: (signal: AbortSignal) => Promise<ManagerWorkspaceValue | undefined>
 }
 
-/** One activated successor plus the resources owned by its generation. */
-interface InstalledManager {
+interface ManagerGeneration {
   readonly handle: AgentHandle
   readonly policy: ManagerToolPolicy
-  readonly skills: MemberSkillProviderMount | undefined
-}
-
-/** A replaced generation whose guard stays installed until its handle has stopped. */
-interface RetiredManager {
-  readonly handle: AgentHandle
-  readonly policy: ManagerToolPolicy | undefined
   readonly skills: MemberSkillProviderMount | undefined
 }
 
@@ -95,9 +89,7 @@ type PointerRead =
  */
 export class ManagerSessionRuntime {
   private tail: Promise<void> = Promise.resolve()
-  private current: AgentHandle | undefined
-  private policy: ManagerToolPolicy | undefined
-  private skills: MemberSkillProviderMount | undefined
+  private current: ManagerGeneration | undefined
   private disposed = false
   private disposal: Promise<void> | undefined
   private readonly abort = new AbortController()
@@ -116,8 +108,9 @@ export class ManagerSessionRuntime {
         if (!read.ok) return read.result
         const pointer = read.pointer
         if (pointer === undefined || this.isArchived(pointer.sessionId)) return undefined
-        if (this.current?.agent.id === pointer.sessionId) {
-          return this.compositionIsManager(this.current.agent)
+        const agent = this.current?.handle.agent
+        if (agent?.id === pointer.sessionId) {
+          return this.compositionIsManager(agent)
             ? this.ready(pointer)
             : this.unavailable(
               'preset-composition',
@@ -180,7 +173,7 @@ export class ManagerSessionRuntime {
    */
   isCurrentManagerAgent(agent: Agent): boolean {
     if (this.disposed) return false
-    if (this.current?.agent !== agent) return false
+    if (this.current?.handle.agent !== agent) return false
     try {
       if (this.deps.store.read()?.sessionId !== agent.id) return false
     } catch {
@@ -195,19 +188,10 @@ export class ManagerSessionRuntime {
     this.disposed = true
     this.abort.abort({ kind: 'disposed' })
     this.disposal = this.tail.then(async () => {
-      const handle = this.current
+      const current = this.current
       this.current = undefined
-      if (handle === undefined) {
-        this.releaseManagedResources()
-        return
-      }
-      try {
-        await handle.dispose()
-        this.releaseManagedResources()
-      } catch (error) {
-        // Keep the now-denying guard installed if the Agent is somehow still
-        // live; the context owns its eventual teardown.
-        this.warn(`current manager Session disposal failed: ${messageOf(error)}`)
+      if (current !== undefined) {
+        await this.stopGeneration(current, 'current manager Session disposal failed')
       }
     })
     return this.disposal
@@ -227,9 +211,10 @@ export class ManagerSessionRuntime {
     if (!read.ok) return read.result
     const pointer = read.pointer
     if (pointer === undefined) return this.replaceLocked(undefined)
-    if (this.current?.agent.id === pointer.sessionId) {
+    const agent = this.current?.handle.agent
+    if (agent?.id === pointer.sessionId) {
       if (this.isArchived(pointer.sessionId)) return this.replaceLocked(pointer)
-      if (this.compositionIsManager(this.current.agent)) return this.ready(pointer)
+      if (this.compositionIsManager(agent)) return this.ready(pointer)
       return this.unavailable(
         'preset-composition',
         'the live manager Agent has lost its team-manager composition',
@@ -249,11 +234,12 @@ export class ManagerSessionRuntime {
    * never silently replaced by a stale caller.
    */
   private async currentStatusLocked(pointer: ManagerSessionPointer): Promise<AgentTeamManagerSessionResult> {
-    if (this.current?.agent.id === pointer.sessionId) {
+    const agent = this.current?.handle.agent
+    if (agent?.id === pointer.sessionId) {
       if (this.isArchived(pointer.sessionId)) {
         return this.unavailable('runtime', 'the current manager Session was archived', pointer.sessionId)
       }
-      return this.compositionIsManager(this.current.agent)
+      return this.compositionIsManager(agent)
         ? this.ready(pointer)
         : this.unavailable(
           'preset-composition',
@@ -272,15 +258,12 @@ export class ManagerSessionRuntime {
     }))!
   }
 
-  /**
-   * Resume the registered Session. Every failure here retains the pointer:
-   * only an archived or positively missing Session is replacement-eligible.
-   */
+  /** The caller decides whether an archived or missing pointer can be replaced. */
   private async resolveStoredPointer(
     pointer: ManagerSessionPointer,
     options: {
-      readonly archived: () => AgentTeamManagerSessionResult | undefined | Promise<AgentTeamManagerSessionResult | undefined>
-      readonly missing: () => AgentTeamManagerSessionResult | undefined | Promise<AgentTeamManagerSessionResult | undefined>
+      readonly archived: RecoverStoredPointer
+      readonly missing: RecoverStoredPointer
       readonly outsideMessage: string
     },
   ): Promise<AgentTeamManagerSessionResult | undefined> {
@@ -294,14 +277,18 @@ export class ManagerSessionRuntime {
       if (stored.failure.kind === 'missing') return await options.missing()
       return this.readFailure(stored.failure)
     }
-    return this.resumeLocked(pointer, stored.inspection)
+    return this.resumeLocked(pointer, stored.inspection, options)
   }
 
   private async resumeLocked(
     pointer: ManagerSessionPointer,
     inspection: StoredSessionInspection,
-  ): Promise<AgentTeamManagerSessionResult> {
-    if (this.isArchived(pointer.sessionId)) return this.replaceLocked(pointer)
+    recovery: {
+      readonly archived: RecoverStoredPointer
+      readonly missing: RecoverStoredPointer
+    },
+  ): Promise<AgentTeamManagerSessionResult | undefined> {
+    if (this.isArchived(pointer.sessionId)) return recovery.archived()
     const workspace = await this.workspaceForExisting(pointer, inspection)
     if (workspace === undefined) {
       if (!await this.anyUsableWorkspace()) return Object.freeze({ status: 'no-workspace' })
@@ -317,13 +304,11 @@ export class ManagerSessionRuntime {
       return this.unavailable('runtime', `manager private assets could not be provisioned: ${messageOf(error)}`, pointer.sessionId)
     }
 
-    let installed: InstalledManager
+    let installed: ManagerGeneration
     try {
       installed = await this.activate({ persisted: true, sessionId: pointer.sessionId, workspace })
     } catch (error) {
-      // A Session that vanished between the classified read and the write-open
-      // is positively missing, so the next generation may replace it.
-      if (sessionFailureOf(error, pointer.sessionId)?.kind === 'missing') return this.replaceLocked(pointer)
+      if (sessionFailureOf(error, pointer.sessionId)?.kind === 'missing') return recovery.missing()
       return this.activationFailure('session-resume', error, pointer.sessionId)
     }
 
@@ -366,7 +351,7 @@ export class ManagerSessionRuntime {
     if (workspace === undefined) return Object.freeze({ status: 'no-workspace' })
 
     const sessionId = `agent-team-manager-${randomUUID()}` as SessionId
-    let installed: InstalledManager
+    let installed: ManagerGeneration
     try {
       await this.initializePrivateAssets()
       installed = await this.activate({ persisted: false, sessionId, workspace })
@@ -413,8 +398,6 @@ export class ManagerSessionRuntime {
         : this.currentStatusLocked(current.pointer)
     }
 
-    // Publish synchronously: the old Agent loses authorization at this
-    // assignment even while its disposal is still draining.
     const previous = this.publish(installed)
     this.nameSession(installed.handle.agent)
     if (this.isArchived(sessionId)) {
@@ -430,7 +413,7 @@ export class ManagerSessionRuntime {
     readonly persisted: boolean
     readonly sessionId: SessionId
     readonly workspace: Workspace
-  }): Promise<InstalledManager> {
+  }): Promise<ManagerGeneration> {
     let installedPolicy: ManagerToolPolicy | undefined
     const setup = async (agentCtx: Context, agent: Agent) => {
       try {
@@ -440,7 +423,7 @@ export class ManagerSessionRuntime {
         }
         installedPolicy = installManagerToolPolicy(agentCtx, agent, {
           ctx: this.deps.ctx,
-          isCurrentAgent: subject => this.current?.agent === subject,
+          isCurrentAgent: subject => this.current?.handle.agent === subject,
           pointerSessionId: () => this.deps.store.read()?.sessionId,
           isArchived: sessionId => this.isArchived(sessionId),
         })
@@ -548,28 +531,15 @@ export class ManagerSessionRuntime {
     return false
   }
 
-  /** Make one activated generation current and return the generation it replaced. */
-  private publish(installed: InstalledManager): RetiredManager | undefined {
-    const previous = this.current === undefined
-      ? undefined
-      : { handle: this.current, policy: this.policy, skills: this.skills }
-    this.current = installed.handle
-    this.policy = installed.policy
-    this.skills = installed.skills
+  private publish(installed: ManagerGeneration): ManagerGeneration | undefined {
+    const previous = this.current
+    // The old Agent loses authorization here, before its handle stops.
+    this.current = installed
     return previous
   }
 
-  private releaseManagedResources(): void {
-    const policy = this.policy
-    this.policy = undefined
-    policy?.dispose()
-    const skills = this.skills
-    this.skills = undefined
-    skills?.dispose()
-  }
-
   /** Release a candidate that never became current; archive only an unpublished fresh Session. */
-  private async rollbackCandidate(installed: InstalledManager, detail: string): Promise<void> {
+  private async rollbackCandidate(installed: ManagerGeneration, detail: string): Promise<void> {
     const sessionId = installed.handle.agent.id
     await this.disposeCandidate(installed)
     if (this.isArchived(sessionId)) return
@@ -592,32 +562,29 @@ export class ManagerSessionRuntime {
     }
   }
 
-  private async disposeCandidate(installed: InstalledManager): Promise<void> {
-    try {
-      await installed.handle.dispose()
-      installed.policy.dispose()
-      installed.skills?.dispose()
-    } catch (error) {
-      // The guard remains installed and denies the never-published candidate.
-      this.warn(`candidate manager Session disposal failed: ${messageOf(error)}`)
-    }
+  private disposeCandidate(installed: ManagerGeneration): Promise<void> {
+    return this.stopGeneration(installed, 'candidate manager Session disposal failed')
   }
 
-  private async disposeRetired(previous: RetiredManager | undefined): Promise<void> {
-    if (previous === undefined) return
+  private disposeRetired(previous: ManagerGeneration | undefined): Promise<void> {
+    return previous === undefined
+      ? Promise.resolve()
+      : this.stopGeneration(previous, 'retired manager Session disposal failed after the successor was current')
+  }
+
+  private async stopGeneration(generation: ManagerGeneration, warning: string): Promise<void> {
     try {
-      await previous.handle.dispose()
-      previous.policy?.dispose()
-      previous.skills?.dispose()
+      // A handle that fails to stop still needs its guard to deny execution.
+      await generation.handle.dispose()
+      generation.policy.dispose()
+      generation.skills?.dispose()
     } catch (error) {
-      // The successor is current, while the retained guard denies the old
-      // Agent until its handle has actually stopped.
-      this.warn(`retired manager Session disposal failed after the successor was current: ${messageOf(error)}`)
+      this.warn(`${warning}: ${messageOf(error)}`)
     }
   }
 
   /** Archive the replaced Session without deleting its log or rolling back the published successor. */
-  private async archiveRetired(previous: RetiredManager | undefined): Promise<void> {
+  private async archiveRetired(previous: ManagerGeneration | undefined): Promise<void> {
     if (previous === undefined) return
     const sessionId = previous.handle.agent.id
     if (this.isArchived(sessionId)) return
@@ -683,7 +650,7 @@ export class ManagerSessionRuntime {
 
   private liveOutsideManager(sessionId: SessionId): boolean {
     const live = this.deps.ctx.agents.get(sessionId)
-    return live !== undefined && live !== this.current?.agent
+    return live !== undefined && live !== this.current?.handle.agent
   }
 
   private isArchived(sessionId: SessionId): boolean {

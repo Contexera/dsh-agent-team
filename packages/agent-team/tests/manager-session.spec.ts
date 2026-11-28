@@ -5,6 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { defineContentToolFixture, executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import {
@@ -199,6 +200,35 @@ describe('Team manager Session Host runtime', () => {
     expect(await restoring).toMatchObject({ status: 'unavailable' })
   })
 
+  it('leaves the current manager denied if its handle cannot stop at shutdown', async () => {
+    const { ctx, workspaceId, checkout, root, archived } = await realHarness()
+    const store = new MemoryPointerStore()
+    const runtime = runtimeFor(ctx, { store, root, workspace: { workspaceId, path: checkout } })
+    const originalCreate = ctx.agents.create.bind(ctx.agents)
+    let handle: AgentHandle | undefined
+    vi.spyOn(ctx.agents, 'create').mockImplementationOnce(async options => {
+      handle = await originalCreate(options)
+      return handle
+    })
+    const opened = await runtime.open()
+    if (opened.status !== 'ready' || handle === undefined) throw new Error('expected a ready manager handle')
+    const { agent } = handle
+    expect(await execute(ctx, agent, 'manager_fixture', 'manager-before-shutdown')).toMatchObject({ isError: false })
+    const stop = vi.spyOn(handle, 'dispose').mockRejectedValue(new Error('manager shutdown failed (test seam)'))
+    try {
+      await Promise.all([runtime.dispose(), runtime.dispose()])
+      expect(stop).toHaveBeenCalledTimes(1)
+      expect(store.pointer?.sessionId).toBe(opened.sessionId)
+      expect(archived).not.toContain(opened.sessionId)
+      expect(ctx.agents.get(opened.sessionId)).toBe(agent)
+      const denied = await execute(ctx, agent, 'manager_fixture', 'manager-after-failed-shutdown')
+      expect(denied).toMatchObject({ isError: true, error: { message: expect.stringContaining('not authorized') } })
+    } finally {
+      stop.mockRestore()
+      await handle.dispose()
+    }
+  })
+
   it('sets the default title only when absent and ignores a rename failure', async () => {
     const { ctx, workspaceId, checkout, root } = await realHarness()
     const store = new MemoryPointerStore()
@@ -358,6 +388,105 @@ describe('Team manager Session Host runtime', () => {
     await runtime.dispose()
   })
 
+  it.each([
+    { caller: 'stale new-conversation', timing: 'before the status lookup' },
+    { caller: 'stale new-conversation', timing: 'during the stored read' },
+    { caller: 'pre-restore', timing: 'during the stored read' },
+    { caller: 'open', timing: 'during the stored read' },
+    { caller: 'stale new-conversation', timing: 'at write-open' },
+    { caller: 'pre-restore', timing: 'at write-open' },
+    { caller: 'open', timing: 'at write-open' },
+  ] as const)(
+    'honors $caller recovery when the current Session is lost $timing',
+    async ({ caller, timing }) => {
+      const { ctx, workspaceId, checkout, root } = await realHarness()
+      const store = new MemoryPointerStore()
+      const options = { store, root, workspace: { workspaceId, path: checkout } }
+      const original = runtimeFor(ctx, options)
+      onTestFinished(() => original.dispose())
+      const first = await original.open()
+      if (first.status !== 'ready') throw new Error('expected the first manager Session')
+      const current = await original.newConversation(first.sessionId)
+      if (current.status !== 'ready') throw new Error('expected the replacement manager Session')
+      await original.dispose()
+      expect(managerAgents(ctx)).toEqual([])
+      expect(ctx.workspaceRegistry.archivedSessionIds).not.toContain(current.sessionId)
+
+      const reader = new StoredSessionReader(ctx)
+      const inspected = Promise.withResolvers<StoredSessionReadResult>()
+      const release = Promise.withResolvers<void>()
+      const read = vi.fn(async (sessionId: SessionId, signal?: AbortSignal) => {
+        const result = await reader.read(sessionId, signal)
+        inspected.resolve(result)
+        await release.promise
+        return result
+      })
+      const runtime = runtimeFor(ctx, { ...options, reader: { read } })
+      onTestFinished(() => runtime.dispose())
+      const archive = async () => {
+        await ctx.workspaceRegistry.archiveSession(current.sessionId, { stopActivity: true })
+        expect(ctx.workspaceRegistry.archivedSessionIds).toContain(current.sessionId)
+      }
+      const writesBefore = store.writes
+      if (timing === 'before the status lookup') await archive()
+
+      const persistence = ctx.sessionPersistence
+      const originalOpen = persistence.open.bind(persistence)
+      const failedWriteOpen = vi.fn(() => new SessionPersistenceNotFoundError(current.sessionId))
+      if (timing === 'at write-open') {
+        const open = vi.spyOn(persistence, 'open').mockImplementation(async (id, access, options) => {
+          if (id === current.sessionId && access === 'write') throw failedWriteOpen()
+          return originalOpen(id, access, options)
+        })
+        onTestFinished(() => { open.mockRestore() })
+      }
+
+      const status = caller === 'open' ? runtime.open()
+        : caller === 'pre-restore' ? runtime.preRestore()
+        : runtime.newConversation(first.sessionId)
+      try {
+        if (timing !== 'before the status lookup') {
+          await vi.waitFor(() => expect(read).toHaveBeenCalledWith(current.sessionId, expect.any(AbortSignal)))
+          expect(await inspected.promise).toMatchObject({ ok: true })
+          if (timing === 'during the stored read') await archive()
+        }
+      } finally {
+        release.resolve()
+      }
+      const result = await status
+      if (timing === 'before the status lookup') expect(read).not.toHaveBeenCalled()
+      if (timing === 'at write-open') expect(failedWriteOpen).toHaveBeenCalledOnce()
+
+      if (caller === 'open') {
+        if (result?.status !== 'ready') throw new Error('expected open to replace the lost manager Session')
+        expect(result.sessionId).not.toBe(current.sessionId)
+        expect(store.pointer?.sessionId).toBe(result.sessionId)
+        expect(store.writes - writesBefore).toBe(1)
+        expect(managerAgents(ctx).map(agent => agent.id)).toEqual([result.sessionId])
+        return
+      }
+
+      expect(store.pointer?.sessionId).toBe(current.sessionId)
+      expect(store.writes - writesBefore).toBe(0)
+      expect(managerAgents(ctx)).toEqual([])
+      if (caller === 'pre-restore') expect(result).toBeUndefined()
+      else expect(result).toMatchObject({
+        status: 'unavailable',
+        diagnostic: timing === 'at write-open'
+          ? {
+            class: 'session-unreadable',
+            detail: 'the current manager Session is missing; reopen the destination to replace it',
+            sessionId: current.sessionId,
+          }
+          : {
+            class: 'runtime',
+            detail: 'the current manager Session was archived',
+            sessionId: current.sessionId,
+          },
+      })
+    },
+  )
+
   it('replaces only a missing or archived pointer and keeps every unreadable pointer intact', async () => {
     const { ctx, workspaceId, checkout, root } = await realHarness()
     const store = new MemoryPointerStore()
@@ -470,6 +599,51 @@ describe('Team manager Session Host runtime', () => {
     presets.failingMount = false
     await broken.dispose()
     await runtime.dispose()
+  })
+
+  it('leaves an unpublished candidate denied when disposal and rollback archival both fail', async () => {
+    const { ctx, workspaceId, checkout, root, archived, archiveFailures } = await realHarness()
+    const store = new MemoryPointerStore()
+    const runtime = runtimeFor(ctx, { store, root, workspace: { workspaceId, path: checkout } })
+    const first = await runtime.open()
+    if (first.status !== 'ready') throw new Error('expected the current manager Session')
+    const current = ctx.agents.get(first.sessionId)!
+    const originalCreate = ctx.agents.create.bind(ctx.agents)
+    let candidate: AgentHandle | undefined
+    let restoreStop: (() => void) | undefined
+    let archiveFailuresAtStop: number | undefined
+    vi.spyOn(ctx.agents, 'create').mockImplementationOnce(async options => {
+      const handle = await originalCreate(options)
+      candidate = handle
+      const stop = vi.spyOn(handle, 'dispose').mockImplementation(async () => {
+        archiveFailuresAtStop = archiveFailures.remaining
+        throw new Error('candidate disposal failed (test seam)')
+      })
+      restoreStop = () => stop.mockRestore()
+      return handle
+    })
+    store.writeFailure = new Error('pointer store unavailable (test seam)')
+    archiveFailures.remaining = 1
+    try {
+      const result = await runtime.newConversation(first.sessionId)
+      if (candidate === undefined) throw new Error('expected a manager candidate handle')
+      expect(result).toMatchObject({
+        status: 'unavailable',
+        diagnostic: { class: 'pointer-persist', detail: store.writeFailure.message, sessionId: candidate.agent.id },
+      })
+      expect(archiveFailuresAtStop).toBe(1)
+      expect(archiveFailures.remaining).toBe(0)
+      expect(archived).not.toContain(candidate.agent.id)
+      expect(store.pointer?.sessionId).toBe(first.sessionId)
+      expect(ctx.agents.get(candidate.agent.id)).toBe(candidate.agent)
+      const denied = await execute(ctx, candidate.agent, 'manager_fixture', 'manager-unpublished-denied')
+      expect(denied).toMatchObject({ isError: true, error: { message: expect.stringContaining('not authorized') } })
+      expect(await execute(ctx, current, 'manager_fixture', 'manager-still-current')).toMatchObject({ isError: false })
+    } finally {
+      restoreStop?.()
+      await candidate?.dispose()
+      await runtime.dispose()
+    }
   })
 
   it('keeps a resumed Session when resume or attach fails and never archives the registered pointer', async () => {
