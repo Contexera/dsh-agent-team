@@ -174,16 +174,15 @@ describe('Team Client slot takeover', () => {
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
 
-    // The mark rides the shell's own icon seat, addressed by the Team section id, so
-    // the nav row draws the bundle's mark instead of the generic gear — and the two
-    // ids stay tied, because an icon registered under any other id never renders.
     const section = slots.entries('settings.section')
     expect(section).toHaveLength(1)
+    expect(section[0]!.options.order).toBe(5)
     const icons = slots.entries('settings.section.icon')
     expect(icons).toHaveLength(1)
     expect(icons[0]!.options.id).toBe(section[0]!.options.id)
 
     await fiber.dispose()
+    expect(slots.entries('settings.section')).toHaveLength(0)
     expect(slots.entries('settings.section.icon')).toHaveLength(0)
   })
 

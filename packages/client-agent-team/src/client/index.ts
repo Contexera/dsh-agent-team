@@ -475,15 +475,7 @@ function registerModeShadow<T extends object>(
   })
 }
 
-function applyUi(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'agent-team: dictionaries')
-  ctx.effect(() => protectOrdinarySessionReuse(ctx), 'agent-team: ordinary blank reuse')
-
-  const navigation = new TeamNavigation()
-  const disposeNavigation = ctx.reflect.provide('teamNavigation', navigation)
-  const drafts = new TeamDraftStore()
-  const disposeDrafts = ctx.reflect.provide('teamDrafts', drafts)
-  // One identity projection for every seat, re-read after a profile write. Reads are demand-driven: the first subscriber starts the read.
+function prepareTeamSettings(ctx: ClientContext) {
   const humanIdentity = new TeamHumanIdentity({
     loadProfile: () => ctx.remote.agentTeam.humanProfile({}),
     loadAvatarUrl: async (avatarRef: string) => {
@@ -515,15 +507,10 @@ function applyUi(ctx: ClientContext): void {
     load: () => ctx.remote.agentTeam.sidebarOrder({}),
     save: request => ctx.remote.agentTeam.setSidebarOrder(request),
   })
-  // An installation fact, not part of the Human's identity. Read once on the first subscriber; never written back.
   const environment = new TeamEnvironmentCheck({
     loadEnvironment: () => ctx.remote.agentTeam.environment({}),
   })
-  // The Host row's two configuration groups. The shared settings form addresses
-  // top-level section fields only, so each scope flattens one group this page
-  // edits and maps its writes back onto that group's child paths — saving a
-  // threshold never restates the sibling fields beside it, and saving a Worker
-  // setting never restates the group's own siblings either.
+  // Each scope translates form writes to leaf paths so an edit never restates sibling settings.
   const rowForm = ctx.configForms?.get<TeamConfigSection>(HUMAN_PROFILE_SETTINGS_NAMESPACE)
   const teamConfig = rowForm === undefined ? undefined : new TeamConfigController(teamConfigScope(rowForm, refreshSettingsRowFence))
   const workerConfig = rowForm === undefined ? undefined : new WorkerConfigController(workerConfigScope(rowForm, refreshSettingsRowFence))
@@ -540,17 +527,53 @@ function applyUi(ctx: ClientContext): void {
       load: () => ctx.remote.agentTeam.toolCatalog({}),
     },
   })
-  ctx.effect(() => () => {
-    navigation.dispose()
-    drafts.dispose()
-    humanIdentity.dispose()
-    environment.dispose()
-    teamConfig?.dispose()
-    workerConfig?.dispose()
-    void disposeNavigation()
-    void disposeDrafts()
-  }, 'agent-team: navigation service')
+  return {
+    humanIdentity,
+    dispose: () => {
+      humanIdentity.dispose()
+      environment.dispose()
+      teamConfig?.dispose()
+      workerConfig?.dispose()
+    },
+    inject: () => ({
+      identity: humanIdentity,
+      environment,
+      teamConfig,
+      workerConfig,
+      extraToolGrants,
+      saveName: async (name: string) => humanProfileWriter.setName(name, await currentSettingsFence()),
+      uploadAvatar: async (file: File) => {
+        const expectedFence = await currentSettingsFence()
+        return humanProfileWriter.replaceAvatar({
+          name: file.name,
+          ...(file.type === '' ? {} : { mediaType: file.type }),
+          bytesBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
+        }, expectedFence)
+      },
+      removeAvatar: async () => humanProfileWriter.removeAvatar(await currentSettingsFence()),
+    }),
+  }
+}
 
+function registerTeamSettings(ctx: ClientContext, inject: ReturnType<typeof prepareTeamSettings>['inject']): void {
+  const id = 'team-settings'
+  // Ordered between General (0) and Models (10).
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id,
+    order: 5,
+    label: () => ctx.locale.bind(NS)('teamSettingsNav'),
+    locale: NS,
+    inject,
+  }, TeamSettingsSection as never))
+
+  ctx.slots.inject('settings.section.icon', () => ctx.slots.register({
+    name: 'settings.section.icon',
+    id,
+  }, TeamSettingsNavIcon as never))
+}
+
+function registerEmbeddedSessionRestore(ctx: ClientContext, navigation: TeamNavigation): void {
   // Leaving an embedded Session rebinds the ordinary return target, or a departed Session would stay retained as `mainView`.
   // Takeover is conditional so a selection made in the meantime survives. A manager without a return target uses the shipped blank flow.
   ctx.effect(() => {
@@ -579,24 +602,21 @@ function applyUi(ctx: ClientContext): void {
       restore()
     }
   }, 'agent-team: embedded session restore')
+}
 
+function registerSharedReads(ctx: ClientContext): TeamQueries {
   const changes = new TeamChangeStream(ctx.remote)
   ctx.effect(() => () => changes.dispose(), 'agent-team: change subscriptions')
-  // One owner for data reads: shares in-flight reads per query, folds changes into invalidations before consumers
-  // re-read, and drops superseded responses.
   const queries = new TeamQueries(changes)
   const disposeQueries = ctx.reflect.provide('teamQueries', queries)
   ctx.effect(() => () => { void disposeQueries(); queries.dispose() }, 'agent-team: shared reads')
   // A stream that ended for good must be rebuilt here; a new Host generation also restarts the presence epoch,
   // so watermarks reset and in-flight reads stop being joinable.
   ctx.on('connection/reset', () => { changes.recover(); queries.newGeneration() })
-  const reads = new TeamReadStream()
+  return queries
+}
 
-  registerTeamPanel(ctx, navigation, queries, reads, drafts, humanIdentity)
-
-  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
-  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'main', TeamConversation as never, 'conversation')
-
+function registerManagerSessionControls(ctx: ClientContext, navigation: TeamNavigation): void {
   // Presentation-only replacements; composition and authorization stay Host-owned.
   ctx.effect(() => registerManagerChrome(ctx, navigation, async expectedSessionId => {
     const response = await ctx.remote.agentTeam.newManagerSession({ expectedSessionId })
@@ -611,7 +631,9 @@ function applyUi(ctx: ClientContext): void {
     const returnTo = await openResolvedManagerSessionImpl(ctx, navigation, sessionId, response.value.workspaceId)
     if (navigation.getSnapshot().manager === true) navigation.actions().resolveManagerSession(sessionId, returnTo)
   }), 'agent-team: manager chrome')
+}
 
+function registerPanelOwnership(ctx: ClientContext, navigation: TeamNavigation): void {
   // Rail selection and Team mode are one fact: selecting the Team panel enters the mode, another panel leaves it.
   // A null selection is left alone, since a Member Session view clears the panel to own the column.
   ctx.effect(() => {
@@ -634,7 +656,9 @@ function applyUi(ctx: ClientContext): void {
     sync()
     return unsubscribe
   }, 'agent-team: panel ownership')
+}
 
+function registerShortcutCommands(ctx: ClientContext, navigation: TeamNavigation): void {
   // Team mode's commands come from the shell's own registry, so they appear in
   // the shortcut reference and stay rebindable instead of being a private listener.
   ctx.inject(['shortcuts'], (ready) => {
@@ -647,7 +671,9 @@ function applyUi(ctx: ClientContext): void {
       t,
     }, scoped.shortcuts), 'agent-team: shortcuts')
   })
+}
 
+function registerTeamModeMarker(ctx: ClientContext, navigation: TeamNavigation): void {
   // The Team sidebar's CSS keys off this marker (the shell's New Session button stands down).
   ctx.effect(() => {
     const apply = (): void => {
@@ -662,42 +688,36 @@ function applyUi(ctx: ClientContext): void {
       if (typeof document !== 'undefined') delete document.documentElement.dataset.agentTeamMode
     }
   }, 'agent-team: mode marker')
+}
 
-  // Ordered between General (0) and Models (10). The Team Remote returns the Host's own rejection reason;
-  // the shared identity re-reads afterwards.
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'team-settings',
-    order: 5,
-    label: () => ctx.locale.bind(NS)('teamSettingsNav'),
-    locale: NS,
-    inject: () => ({
-      identity: humanIdentity,
-      environment,
-      teamConfig,
-      workerConfig,
-      extraToolGrants,
-      saveName: async (name: string) => humanProfileWriter.setName(name, await currentSettingsFence()),
-      uploadAvatar: async (file: File) => {
-        const expectedFence = await currentSettingsFence()
-        return humanProfileWriter.replaceAvatar({
-          name: file.name,
-          ...(file.type === '' ? {} : { mediaType: file.type }),
-          bytesBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
-        }, expectedFence)
-      },
-      removeAvatar: async () => humanProfileWriter.removeAvatar(await currentSettingsFence()),
-    }),
-  }, TeamSettingsSection as never))
+function applyUi(ctx: ClientContext): void {
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'agent-team: dictionaries')
+  ctx.effect(() => protectOrdinarySessionReuse(ctx), 'agent-team: ordinary blank reuse')
 
-  // The nav mark rides the shell's own icon seat, addressed by the section id above, so
-  // the row draws the bundle's mark instead of the generic gear. Registered beside the
-  // section rather than observed in the DOM: the shell renders the icon it is given and
-  // drops it with the registration, so nothing is left to clean up on unload.
-  ctx.slots.inject('settings.section.icon', () => ctx.slots.register({
-    name: 'settings.section.icon',
-    id: 'team-settings',
-  }, TeamSettingsNavIcon as never))
+  const navigation = new TeamNavigation()
+  const disposeNavigation = ctx.reflect.provide('teamNavigation', navigation)
+  const drafts = new TeamDraftStore()
+  const disposeDrafts = ctx.reflect.provide('teamDrafts', drafts)
+  const settings = prepareTeamSettings(ctx)
+  ctx.effect(() => () => {
+    navigation.dispose()
+    drafts.dispose()
+    settings.dispose()
+    void disposeNavigation()
+    void disposeDrafts()
+  }, 'agent-team: navigation service')
+
+  registerEmbeddedSessionRestore(ctx, navigation)
+  const queries = registerSharedReads(ctx)
+  const reads = new TeamReadStream()
+  registerTeamPanel(ctx, navigation, queries, reads, drafts, settings.humanIdentity)
+  registerModeShadow(ctx, navigation, queries, reads, drafts, settings.humanIdentity, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
+  registerModeShadow(ctx, navigation, queries, reads, drafts, settings.humanIdentity, 'main', TeamConversation as never, 'conversation')
+  registerManagerSessionControls(ctx, navigation)
+  registerPanelOwnership(ctx, navigation)
+  registerShortcutCommands(ctx, navigation)
+  registerTeamModeMarker(ctx, navigation)
+  registerTeamSettings(ctx, settings.inject)
 }
 
 export async function apply(ctx: ClientContext): Promise<void> {
