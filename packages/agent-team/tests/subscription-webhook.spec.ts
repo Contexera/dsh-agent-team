@@ -8,6 +8,7 @@ import {
   sameWebhookTokenHash,
   webhookAddress,
   webhookOriginProblem,
+  webhookOriginRefusal,
   webhookRetryDelayMs,
   webhookStdin,
   webhookTokenHash,
@@ -32,6 +33,12 @@ describe('a token exists as an address and as a hash, never as both', () => {
     expect(sameWebhookTokenHash(hash, hash)).toBe(true)
     expect(sameWebhookTokenHash(hash, webhookTokenHash('b'.repeat(43)))).toBe(false)
     expect(sameWebhookTokenHash(hash, 'short')).toBe(false)
+    // Non-hex, odd-length, and empty strings must return false rather than throwing or matching truncated buffers.
+    expect(sameWebhookTokenHash('', '')).toBe(false)
+    expect(sameWebhookTokenHash('zz', 'aa')).toBe(false)
+    expect(sameWebhookTokenHash('zz', 'yy')).toBe(false)
+    expect(sameWebhookTokenHash('01zz', '01yy')).toBe(false)
+    expect(sameWebhookTokenHash('abc', 'abd')).toBe(false)
   })
 
   it('recognises only a well-formed hook path', () => {
@@ -60,6 +67,13 @@ describe('the public address is an origin, and an address is origin plus token',
     expect(webhookOriginProblem('https://team.example.com/base')).toMatch(/origin, without a path/)
     expect(webhookOriginProblem('https://team.example.com?x=1')).toMatch(/query or fragment/)
     expect(webhookOriginProblem('https://team.example.com#x')).toMatch(/query or fragment/)
+  })
+
+  it('explains missing or invalid configured origins via webhookOriginRefusal', () => {
+    expect(webhookOriginRefusal('')).toMatch(/webhook\.publicOrigin/)
+    expect(webhookOriginRefusal('   ')).toMatch(/webhook\.publicOrigin/)
+    expect(webhookOriginRefusal('https://team.example.com/subpath')).toMatch(/cannot carry hook addresses.*without a path/)
+    expect(webhookOriginRefusal('https://team.example.com')).toBeUndefined()
   })
 })
 

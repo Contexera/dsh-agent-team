@@ -100,7 +100,6 @@ function harness(options: {
       return stored.get(ref)
     },
     projectActive: () => !control.archived,
-    workspacePath: () => '/tmp/workspace',
     pending: ref => {
       if (control.pendingThrows) throw new Error('injected backlog failure')
       return pending[ref] ?? []

@@ -17,7 +17,7 @@ import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { MemoryMediaPool } from './helpers/memory-backend.ts'
 import { harness } from './helpers/host-harness.ts'
 import * as WebhookEntry from '../src/webhook.ts'
-import { WEBHOOK_BODY_MAX_BYTES } from '../src/subscription-webhook.ts'
+import { WEBHOOK_BODY_MAX_BYTES, WEBHOOK_HEADER_VALUE_MAX_BYTES } from '../src/subscription-webhook.ts'
 import type { AgentTeamProjectRef, AgentTeamRequestId } from '../src/types.ts'
 
 const workspaceId = WorkspaceId('workspace:alpha')
@@ -177,5 +177,28 @@ describe('the public webhook entry', () => {
     pumpSpy.mockRestore()
     expect(full.status, 'the eleventh delivery').toBe(429)
     expect(full.headers.get('retry-after')).toBe('60')
+  })
+
+  it('refuses an oversized forwarded header with 431, accepts identity encoding, and answers 503 on intake failure', async () => {
+    const entry = await bootEntry()
+    const tooLong = 'x'.repeat(WEBHOOK_HEADER_VALUE_MAX_BYTES + 1)
+    const headerRefused = await post(entry.base, `/team/hooks/${entry.token}`, {
+      headers: { 'x-hub-signature-256': tooLong },
+      body: '{}',
+    })
+    expect(headerRefused.status).toBe(431)
+    expect(entry.admissions()).toHaveLength(0)
+
+    const identity = await post(entry.base, `/team/hooks/${entry.token}`, {
+      headers: { 'content-encoding': 'identity' },
+      body: '{"ok":true}',
+    })
+    expect(identity.status).toBe(202)
+    expect(entry.admissions()).toHaveLength(1)
+
+    const intakeSpy = vi.spyOn(entry.ctx.agentTeam, 'intakeWebhookDelivery').mockRejectedValueOnce(new Error('disk full'))
+    const storageFailed = await post(entry.base, `/team/hooks/${entry.token}`, { body: '{}' })
+    intakeSpy.mockRestore()
+    expect(storageFailed.status).toBe(503)
   })
 })

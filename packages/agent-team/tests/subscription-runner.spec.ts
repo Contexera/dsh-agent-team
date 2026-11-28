@@ -15,7 +15,10 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { failureTail, probeShellFamily, runSubscriptionScript, type SubscriptionCredentials } from '../src/subscription-runner.ts'
+import {
+  baselineIdsOf, failureCategory, failureTail, missingCredentials, probeShellFamily, runSubscriptionScript, runSucceeded,
+  type SubscriptionCredentials,
+} from '../src/subscription-runner.ts'
 import { SUBSCRIPTION_RUN_TIMEOUT_MS, SUBSCRIPTION_STDOUT_MAX_BYTES, snapshotScript } from '../src/subscriptions.ts'
 import type { AgentTeamSubscription, AgentTeamSubscriptionRef } from '../src/types.ts'
 
@@ -57,8 +60,8 @@ afterAll(() => {
 
 type ExecutorAnswer = Partial<ShellRunResult> & {
   readonly stdoutText?: string
-  /** A regular file is the provider contract; the broken link exercises cleanup after a read failure. */
-  readonly spill?: 'file' | 'unreadable' | 'missing'
+  /** A regular file is the provider contract; the broken link and raw-without-marker cases exercise capture failure paths. */
+  readonly spill?: 'file' | 'unreadable' | 'missing' | 'no-marker'
 }
 
 function executor(answer: (spec: ShellExecSpec) => ExecutorAnswer) {
@@ -75,6 +78,7 @@ function executor(answer: (spec: ShellExecSpec) => ExecutorAnswer) {
       const spillPath = join(fakeSpillRoot, `${fakeSpillId++}.log`)
       record.spillPath = spillPath
       if (answered.spill === 'unreadable') symlinkSync(join(fakeSpillRoot, 'missing'), spillPath)
+      else if (answered.spill === 'no-marker') writeFileSync(spillPath, answered.stdoutText ?? '')
       else if (answered.spill !== 'missing') writeFileSync(spillPath, `__DSH_TEAM_RAW_STDOUT__${answered.stdoutText ?? ''}`)
       return { result: async (): Promise<ShellRunResult> => ({
         exitCode: answered.exitCode ?? 0,
@@ -215,10 +219,27 @@ describe('what one run is handed', () => {
     expect(report.reason).toMatch(/no shell executor/)
   })
 
-  it('answers a probe with the family the executor really runs', async () => {
+  it('answers a probe with the family the executor really runs, falling back to pwsh when bash fails', async () => {
     const bash = executor(() => ({ stdoutText: '5.2.15' }))
     await expect(probeShellFamily(bash)).resolves.toEqual({ family: 'bash' })
     await expect(probeShellFamily(undefined)).resolves.toEqual({})
+    const pwsh = executor(spec => spec.command.includes('BASH_VERSION')
+      ? { exitCode: 127, stderr: { text: 'bash not found', truncated: false } as never }
+      : { stdoutText: 'pwsh' })
+    await expect(probeShellFamily(pwsh)).resolves.toEqual({ family: 'pwsh' })
+  })
+
+  it('reports spawn-failed when executor.resolve throws during preparation', async () => {
+    const broken = {
+      resolve(): ShellExecSpec { throw new Error('invalid workdir') },
+      execute: async () => ({ result: async () => { throw new Error('unreachable') } }),
+    }
+    const report = await runSubscriptionScript({
+      executor: broken, credentials: credentials({}), liveShell: 'bash', subscription: subscription(),
+      trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
+    })
+    expect(report).toMatchObject({ ok: false, category: 'spawn-failed' })
+    expect(report.reason).toContain('invalid workdir')
   })
 
   it('fails the run when a declared credential is not configured', async () => {
@@ -406,6 +427,17 @@ exit 7`) }),
     expect(existsSync(unreadable.recorded[0]!.spillPath!)).toBe(false)
   })
 
+  it('rejects a raw spill that lacks the expected capture marker', async () => {
+    const shell = executor(() => ({ stdoutText: validOutput, spill: 'no-marker' }))
+    const report = await runSubscriptionScript({
+      executor: shell, credentials: credentials({}), liveShell: 'bash', subscription: subscription(),
+      trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
+    })
+    expect(report).toMatchObject({ ok: false, category: 'invalid-output', events: [] })
+    expect(report.reason).toMatch(/expected raw stdout stream/)
+    expect(existsSync(shell.recorded[0]!.spillPath!)).toBe(false)
+  })
+
   it('fails a workspace that is gone instead of falling back to the process cwd', async () => {
     const shell = executor(() => ({ stdoutText: validOutput }))
     const report = await runSubscriptionScript({
@@ -426,5 +458,25 @@ describe('the failure tail', () => {
     expect(Buffer.byteLength(tail, 'utf8')).toBeLessThanOrEqual(8)
     expect(tail).not.toContain('\uFFFD')
     expect(long.endsWith(tail)).toBe(true)
+  })
+})
+
+describe('runner helpers', () => {
+  it('lists every declared credential ref the Host cannot describe as configured', async () => {
+    await expect(missingCredentials(undefined, [])).resolves.toEqual([])
+    await expect(missingCredentials(undefined, [{ ref: 'A', env: 'A' }, { ref: 'B', env: 'B' }])).resolves.toEqual(['A', 'B'])
+    await expect(missingCredentials(credentials({ A: '1' }), [{ ref: 'A', env: 'A' }, { ref: 'B', env: 'B' }])).resolves.toEqual(['B'])
+  })
+
+  it('classifies success categories, requires failure categories, and deduplicates baseline ids in order', () => {
+    expect(runSucceeded('accepted')).toBe(true)
+    expect(runSucceeded('empty')).toBe(true)
+    expect(runSucceeded('verified')).toBe(true)
+    expect(runSucceeded('exit-code')).toBe(false)
+    expect(runSucceeded('backlog-full')).toBe(false)
+    expect(failureCategory({ ok: false, category: 'timeout', stdout: '', stderr: '', exitCode: null, timedOut: true, events: [] })).toBe('timeout')
+    expect(() => failureCategory({ ok: true, stdout: '', stderr: '', exitCode: 0, timedOut: false, events: [] }))
+      .toThrow(/must name the category/)
+    expect(baselineIdsOf([{ id: 'b', title: 'B' }, { id: 'a', title: 'A' }, { id: 'b', title: 'B' }])).toEqual(['b', 'a'])
   })
 })

@@ -65,7 +65,6 @@ export interface SubscriptionRuntimePorts {
   readonly current: (subscriptionRef: AgentTeamSubscriptionRef) => AgentTeamSubscription | undefined
   /** Whether the Project that owns a subscription still runs. */
   readonly projectActive: (subscription: AgentTeamSubscription) => boolean
-  readonly workspacePath: (subscription: AgentTeamSubscription) => string | undefined
   /** Accepted-but-unpublished events of one subscription, oldest first. */
   readonly pending: (subscriptionRef: AgentTeamSubscriptionRef) => readonly { readonly acceptedSequence: number; readonly eventId: string }[]
   /** Execute one timer run end to end (execute, validate, accept). */
@@ -115,6 +114,10 @@ interface QueuedRun {
 }
 
 const TICK_MS = 1_000
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 /**
  * Owns the timer loop, the four run slots, and the per-minute publication
@@ -170,7 +173,7 @@ export class SubscriptionScheduler {
     if (this.ticking !== undefined) return
     this.ticking = this.runTick()
       .catch((error: unknown) => {
-        this.ports.log(`subscription tick failed: ${error instanceof Error ? error.message : String(error)}`)
+        this.ports.log(`subscription tick failed: ${errorMessage(error)}`)
       })
       .finally(() => { this.ticking = undefined })
   }
@@ -333,7 +336,7 @@ export class SubscriptionScheduler {
     this.inFlight.add(work)
     void work
       .catch((error: unknown) => {
-        this.ports.log(`subscription run failed: ${error instanceof Error ? error.message : String(error)}`)
+        this.ports.log(`subscription run failed: ${errorMessage(error)}`)
       })
       .finally(() => { this.inFlight.delete(work) })
   }
@@ -345,7 +348,7 @@ export class SubscriptionScheduler {
    */
   private kickAdmission(): void {
     void this.admit().catch((error: unknown) => {
-      this.ports.log(`subscription admission failed: ${error instanceof Error ? error.message : String(error)}`)
+      this.ports.log(`subscription admission failed: ${errorMessage(error)}`)
     })
   }
 
@@ -378,13 +381,13 @@ export class SubscriptionScheduler {
       try {
         outcome = await this.ports.run(subscription)
       } catch (error) {
-        this.ports.log(`subscription '${ref}' run failed: ${error instanceof Error ? error.message : String(error)}`)
+        this.ports.log(`subscription '${ref}' run failed: ${errorMessage(error)}`)
       }
       // Recording the outcome and publishing are each best-effort steps of their
       // own: a checkpoint write or a publication that throws must not skip the
       // other, and must never surface as an unhandled rejection.
       await this.settleOutcome(subscription, outcome, interval).catch((error: unknown) => {
-        this.ports.log(`subscription '${ref}' could not record its outcome: ${error instanceof Error ? error.message : String(error)}`)
+        this.ports.log(`subscription '${ref}' could not record its outcome: ${errorMessage(error)}`)
       })
     } finally {
       this.running.delete(ref)
@@ -394,7 +397,7 @@ export class SubscriptionScheduler {
       this.kickAdmission()
     }
     await this.publishPass().catch((error: unknown) => {
-      this.ports.log(`subscription '${ref}' could not publish after its run: ${error instanceof Error ? error.message : String(error)}`)
+      this.ports.log(`subscription '${ref}' could not publish after its run: ${errorMessage(error)}`)
     })
   }
 
@@ -417,11 +420,12 @@ export class SubscriptionScheduler {
     const ref = subscription.subscriptionRef
     const now = this.ports.now()
     const due = interval === undefined ? {} : { dueAt: nextDueAfter(now, interval.minutes) }
-    const settled = await this.ports.save(ref, outcome === 'accepted' || outcome === 'empty'
+    const succeeded = outcome === 'accepted' || outcome === 'empty'
+    const settled = await this.ports.save(ref, succeeded
       ? checkpoint => ({ ...checkpoint, ...due })
       : checkpoint => ({ ...checkpoint, consecutiveFailures: checkpoint.consecutiveFailures + 1, ...due }))
     if (settled === undefined) return
-    if (outcome !== 'accepted' && outcome !== 'empty' && settled.consecutiveFailures >= SUBSCRIPTION_FAILURES_BEFORE_PAUSE) {
+    if (!succeeded && settled.consecutiveFailures >= SUBSCRIPTION_FAILURES_BEFORE_PAUSE) {
       await this.ports.pauseForFailures(subscription)
     }
   }
@@ -448,7 +452,7 @@ export class SubscriptionScheduler {
       try {
         await this.publishOne(subscription)
       } catch (error) {
-        this.ports.log(`subscription '${subscription.subscriptionRef}' could not publish: ${error instanceof Error ? error.message : String(error)}`)
+        this.ports.log(`subscription '${subscription.subscriptionRef}' could not publish: ${errorMessage(error)}`)
       }
     }
   }
@@ -493,7 +497,7 @@ export class SubscriptionScheduler {
       try {
         await this.ports.publish(live, entry.acceptedSequence, entry.eventId)
       } catch (error) {
-        this.ports.log(`subscription '${subscription.subscriptionRef}' could not publish '${entry.eventId}': ${error instanceof Error ? error.message : String(error)}`)
+        this.ports.log(`subscription '${subscription.subscriptionRef}' could not publish '${entry.eventId}': ${errorMessage(error)}`)
         break
       }
       checkpoint = await this.ports.save(subscription.subscriptionRef, current => ({ ...current,

@@ -4688,7 +4688,6 @@ export default class AgentTeam extends TypertRemoteService {
       // reconcile against.
       current: subscriptionRef => this.ledger?.subscription(subscriptionRef),
       projectActive: subscription => this.requireLedger().getProject(subscription.projectRef)?.state === 'active',
-      workspacePath: subscription => this.subscriptionWorkspaceRoot(subscription),
       pending: subscriptionRef => this.requireLedger().pendingSubscriptionEvents(subscriptionRef)
         .map(entry => ({ acceptedSequence: entry.acceptedSequence, eventId: entry.event.id })),
       run: subscription => this.runTimerSubscription(subscription),

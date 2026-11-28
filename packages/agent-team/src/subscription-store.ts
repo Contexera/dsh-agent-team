@@ -18,22 +18,28 @@ import {
 } from './subscription-runs.ts'
 
 const subscriptionRefSchema = z.string().regex(/^subscription:[^:]+$/).transform(value => value as AgentTeamSubscriptionRef)
+const projectRefSchema = z.string().regex(/^project:[^:]+$/)
+const runRefSchema = z.string().regex(/^run:[^:]+$/)
+const deliveryRefSchema = z.string().regex(/^delivery:[^:]+$/)
+const admissionRefSchema = z.string().regex(/^admission:[^:]+$/)
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/)
+const nonNegativeInt = z.number().int().nonnegative()
 
 const checkpointSchema = z.object({
   subscriptionRef: subscriptionRefSchema,
-  dueAt: z.number().int().nonnegative().optional(),
-  consecutiveFailures: z.number().int().nonnegative(),
-  failureResumeSequence: z.number().int().nonnegative().optional(),
-  failureSuccessEpoch: z.number().int().nonnegative().optional(),
-  countedAdmissionRef: z.string().regex(/^admission:[^:]+$/).optional(),
+  dueAt: nonNegativeInt.optional(),
+  consecutiveFailures: nonNegativeInt,
+  failureResumeSequence: nonNegativeInt.optional(),
+  failureSuccessEpoch: nonNegativeInt.optional(),
+  countedAdmissionRef: admissionRefSchema.optional(),
   lastSuccessAt: z.string().datetime().optional(),
-  publishWindowMinute: z.number().int().nonnegative().optional(),
-  publishedInWindow: z.number().int().nonnegative(),
+  publishWindowMinute: nonNegativeInt.optional(),
+  publishedInWindow: nonNegativeInt,
 }).strict().transform((value): SubscriptionCheckpoint => Object.freeze(value as SubscriptionCheckpoint))
 
 const scriptSchema = z.object({
   content: z.string(),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  sha256: sha256Schema,
   shell: z.union([z.literal('bash'), z.literal('pwsh')]),
 }).strict()
 
@@ -49,39 +55,39 @@ const runCategorySchema = z.enum(SUBSCRIPTION_RUN_CATEGORIES as unknown as reado
  * an owner does. The tails are already capped at 8 KiB each by the recorder.
  */
 const runSchema = z.object({
-  runRef: z.string().regex(/^run:[^:]+$/),
+  runRef: runRefSchema,
   subscriptionRef: subscriptionRefSchema,
-  projectRef: z.string().regex(/^project:[^:]+$/),
+  projectRef: projectRefSchema,
   trigger: z.union([z.literal('interval'), z.literal('webhook'), z.literal('test')]),
   startedAt: z.string().datetime(),
-  durationMs: z.number().int().nonnegative(),
+  durationMs: nonNegativeInt,
   category: runCategorySchema,
   reason: z.string().optional(),
   exitCode: z.number().int().nullable(),
   timedOut: z.boolean(),
-  eventCount: z.number().int().nonnegative(),
+  eventCount: nonNegativeInt,
   stdoutTail: z.string(),
   stderrTail: z.string(),
   subscriptionRevision: z.number().int().positive(),
-  scriptHash: z.string().regex(/^[0-9a-f]{64}$/),
+  scriptHash: sha256Schema,
   deliveryRef: z.string().min(1).optional(),
-  attempt: z.number().int().nonnegative(),
+  attempt: nonNegativeInt,
 }).strict().transform((value): SubscriptionRunRecord => Object.freeze(value as SubscriptionRunRecord))
 
 const deliverySchema = z.object({
-  deliveryRef: z.string().regex(/^delivery:[^:]+$/),
+  deliveryRef: deliveryRefSchema,
   /** The Host admission this delivery came from: the id a replay hands the script again. */
   admissionRef: z.string().min(1).optional(),
   subscriptionRef: subscriptionRefSchema,
-  projectRef: z.string().regex(/^project:[^:]+$/),
+  projectRef: projectRefSchema,
   receivedRevision: z.number().int().positive(),
-  receivedScriptHash: z.string().regex(/^[0-9a-f]{64}$/),
+  receivedScriptHash: sha256Schema,
   script: scriptSchema,
   credentials: z.array(credentialSchema).max(8),
   body: z.string(),
   receivedAt: z.string().datetime(),
   expiresAt: z.string().datetime(),
-  attempts: z.number().int().nonnegative(),
+  attempts: nonNegativeInt,
   lastError: z.string(),
   replay: z.object({
     requestId: z.string().min(1),
@@ -100,15 +106,15 @@ const deliverySchema = z.object({
  */
 const replaySchema = z.object({
   subscriptionRef: subscriptionRefSchema,
-  projectRef: z.string().regex(/^project:[^:]+$/),
+  projectRef: projectRefSchema,
   requestId: z.string().min(1),
-  deliveryRef: z.string().regex(/^delivery:[^:]+$/),
+  deliveryRef: deliveryRefSchema,
   version: z.union([z.literal('current'), z.literal('received')]),
   state: z.enum(SUBSCRIPTION_REPLAY_STATES as unknown as readonly [SubscriptionReplayState, ...SubscriptionReplayState[]])
     .optional().transform(value => value ?? 'settled'),
-  runRef: z.string().regex(/^run:[^:]+$/).optional(),
+  runRef: runRefSchema.optional(),
   succeeded: z.boolean().optional(),
-  eventCount: z.number().int().nonnegative().optional(),
+  eventCount: nonNegativeInt.optional(),
   reason: z.string().optional(),
   expiresAt: z.string().datetime(),
 }).strict().transform((value): SubscriptionReplayRecord => Object.freeze(value as SubscriptionReplayRecord))
@@ -127,25 +133,25 @@ const heldEventSchema = z.object({
  * never carry a credential header a later version might learn to forward.
  */
 const admissionSchema = z.object({
-  admissionRef: z.string().regex(/^admission:[^:]+$/),
+  admissionRef: admissionRefSchema,
   subscriptionRef: subscriptionRefSchema,
-  projectRef: z.string().regex(/^project:[^:]+$/),
-  deliveryRef: z.string().regex(/^delivery:[^:]+$/),
+  projectRef: projectRefSchema,
+  deliveryRef: deliveryRefSchema,
   receivedRevision: z.number().int().positive(),
-  receivedScriptHash: z.string().regex(/^[0-9a-f]{64}$/),
+  receivedScriptHash: sha256Schema,
   script: scriptSchema,
   credentials: z.array(credentialSchema).max(8),
   headers: z.record(z.string(), z.string()),
   body: z.string(),
   receivedAt: z.string().datetime(),
-  attempts: z.number().int().nonnegative(),
+  attempts: nonNegativeInt,
   state: z.enum(SUBSCRIPTION_ADMISSION_STATES as unknown as readonly [SubscriptionAdmissionState, ...SubscriptionAdmissionState[]]),
   nextAttemptAt: z.string().datetime().optional(),
   lastError: z.string().optional(),
   heldEvents: z.array(heldEventSchema).optional(),
   failureStreak: z.object({
-    resumeSequence: z.number().int().nonnegative(),
-    successEpoch: z.number().int().nonnegative(),
+    resumeSequence: nonNegativeInt,
+    successEpoch: nonNegativeInt,
   }).strict().optional(),
 }).strict().refine(value => value.state === 'exhausted'
   ? value.lastError !== undefined && value.nextAttemptAt === undefined && value.heldEvents === undefined

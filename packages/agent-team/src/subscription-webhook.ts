@@ -49,9 +49,14 @@ export function webhookTokenHash(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex')
 }
 
+const HEX_HASH_PATTERN = /^[0-9a-f]+$/i
+
 /** Whether two hex hashes name the same token, compared without leaking where they diverge. */
 export function sameWebhookTokenHash(left: string, right: string): boolean {
-  if (left.length !== right.length) return false
+  // Buffer.from(str, 'hex') stops at the first non-hex character and drops a trailing odd nibble,
+  // which would make timingSafeEqual throw on unequal decoded lengths or match truncated prefixes.
+  if (left.length === 0 || left.length !== right.length || left.length % 2 !== 0) return false
+  if (!HEX_HASH_PATTERN.test(left) || !HEX_HASH_PATTERN.test(right)) return false
   return timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'))
 }
 
