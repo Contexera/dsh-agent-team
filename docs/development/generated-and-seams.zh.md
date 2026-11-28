@@ -61,13 +61,13 @@ types/operations.ts   operation record 类型
 spec.ts               该 kind 的 record schema
 ledger.ts             commit 方法 + per-kind change scope + 校验 + projection application
 index.ts              授权并分派的 @Remote(...) action
-types/requests-results.ts   公开的 request 与 result 形状
+types/*-requests.ts   公开的 request 与 result 形状，每个 Remote 表面一个文件
 ```
 
 必须同时改动的六个机械表面：
 
 1. **Kind 与 record。** 在 `spec.ts` 中把 operation kind 作为 `z.literal` 加进它的 record schema，并在 `types/operations.ts` 加上带类型的 record。
-2. **公开形状。** 在 `types/requests-results.ts` 加上 request 与 result 类型；`types.ts` 是公开 barrel 会自动 re-export，不需要逐 operation 编辑。
+2. **公开形状。** 在所属表面的 `types/*-requests.ts` 加上 request 与 result 类型；`types/requests-results.ts` 与 `types.ts` 是 barrel 会自动 re-export，两者都不需要逐 operation 编辑。
 3. **Commit。** 加上由 `operationBase(...)` 与下一个 sequence 构造 record 的 ledger 方法，以及它会唤醒的 change scope。
 4. **校验与 projection。** 扩展 ledger 的 per-kind commit 校验与校验入口，并加上把该 record 应用到 projection 的 case。replay 正确性就在这里——加载时没有应用的 projection 会与 durable table 分叉。
 5. **Host 与 Remote。** 把调用接到 Host。若 Client 需要调用，在 `index.ts` 用 `@Remote('<action>')` 暴露入口。校验操作者的权限，交给 ledger 处理，再发出提交回执。
