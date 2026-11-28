@@ -55,7 +55,8 @@ export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './s
 export { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
 import { carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY, type TeamContextProjectionState } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor, type AgentTeamLedgerResult, type AgentTeamThreadReadOutcome } from './ledger.ts'
-import { deepCopyCapabilities, memberMemoryDirectoryName, memberMemoryDirectoryPath, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import { deepCopyCapabilities, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
+import { initializeMemberPrivateMemory, localMemberMemoryDirectory, memberMemoryDirectoryPath } from './private-assets.ts'
 import { AGENT_TEAM_TOOL_NAMES, FILE_READ_TOOL_NAMES, isExtraToolGrantCandidate, SHELL_TOOL_NAMES } from './member-tool-policy.ts'
 import {
   EXTRA_TOOL_GRANTS_FIELD, extraToolGrantsFrom, sanitizeExtraToolGrants,
@@ -1884,7 +1885,7 @@ export default class AgentTeam extends TypertRemoteService {
         presetId: request.presetId,
         ...(request.model === undefined ? {} : { model: Object.freeze({ ...request.model }) }),
         ...(request.capabilities === undefined ? {} : { capabilities: Object.freeze(deepCopyCapabilities(request.capabilities)) }),
-        privateMemoryPath: dshHomePath('agent-team', 'members', memberMemoryDirectoryName(memberId)),
+        privateMemoryPath: localMemberMemoryDirectory(memberId),
         state: 'enabled',
       })
       const result = await ledger.addMember({ ...request, actor: agentTeamHumanActor(), member },
@@ -4294,8 +4295,10 @@ export default class AgentTeam extends TypertRemoteService {
     const workspacePath = options.knownWorkspacePath ?? workspace.path
     // Existing Members carry the pre-sanitization ledger path; activation
     // migrates it onto the sanitized directory before provisioning.
-    const sanitizedMemoryPath = dshHomePath('agent-team', 'members', memberMemoryDirectoryName(member.memberId))
-    await this.memberRuntime.initializePrivateMemory(sanitizedMemoryPath, member.privateMemoryPath)
+    await initializeMemberPrivateMemory(localMemberMemoryDirectory(member.memberId), {
+      legacyPath: member.privateMemoryPath,
+      warn: message => this.ctx.logger.warn(message),
+    })
     const persisted = options.knownSessions !== undefined ? options.knownSessions.has(member.sessionId)
       : await this.sessionPersisted(member.sessionId)
     return { workspace, workspacePath, persisted }

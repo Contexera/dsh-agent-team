@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { writeFile } from 'node:fs/promises'
 import type { AgentTeamMemberId } from '../src/types.ts'
+import { initializeMemberPrivateMemory, memberMemoryDirectoryName, memberMemoryDirectoryPath } from '../src/private-assets.ts'
 
 import { access, mkdir, readFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
@@ -17,20 +18,18 @@ import { addLedgerMember, harness, ledgerAtBoot } from './helpers/host-harness.t
 import { MemoryMediaPool } from './helpers/memory-backend.ts'
 
 describe('Agent Team Member private memory directory sanitization (issue #7)', () => {
-  it('derives a Windows-safe directory segment without touching the member ref', async () => {
-    const { memberMemoryDirectoryName } = await import('../src/member-runtime.ts')
+  it('derives a Windows-safe directory segment without touching the member ref', () => {
     const memberId = 'member:9d903b7c-0f9f-4d7c-8be9-3f5c0f8f1a2b' as AgentTeamMemberId
     expect(memberMemoryDirectoryName(memberId)).toBe('member-9d903b7c-0f9f-4d7c-8be9-3f5c0f8f1a2b')
     // No path-segment-forbidden characters remain on any platform.
     expect(memberMemoryDirectoryName(memberId)).not.toContain(':')
   })
 
-  it('sanitizes only the final segment of a legacy colon path on any platform', async () => {
+  it('sanitizes only the final segment of a legacy colon path on any platform', () => {
     // F8: the fallback must be segment arithmetic, not whole-string length
     // math on the memberId. A Windows drive-letter prefix keeps its colon; a
     // recorded path whose final segment is not the memberId no longer
     // crashes and still resolves to the member's sanitized directory.
-    const { memberMemoryDirectoryPath } = await import('../src/member-runtime.ts')
     const memberId = 'member:1a2b3c4d-0000-4000-8000-000000000001' as AgentTeamMemberId
     expect(memberMemoryDirectoryPath({ memberId, privateMemoryPath: '/home/yu/.dsh/agent-team/members/member:1a2b3c4d-0000-4000-8000-000000000001' }))
       .toBe('/home/yu/.dsh/agent-team/members/member-1a2b3c4d-0000-4000-8000-000000000001')
@@ -84,9 +83,7 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
       await writeFile(join(legacyPath, 'memory.md'), '# Member memory\n\n## Stable facts\n- legacy fact\n')
     }
 
-    const { MemberRuntime } = await import('../src/member-runtime.ts')
-    const runtime = new MemberRuntime({ ctx: ctx as never, liveMemberContext: () => { throw new Error('unused') }, runningAgents: new Set() })
-    await runtime.initializePrivateMemory(sanitized, legacyPath)
+    await initializeMemberPrivateMemory(sanitized, { legacyPath, warn: message => ctx.logger.warn(message) })
 
     if (legacyDirectoryExists) {
       // The sanitized directory now holds the migrated memory; the colon
@@ -101,10 +98,22 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
     }
 
     // Re-running activation is idempotent: sanitized wins, no throw.
-    await runtime.initializePrivateMemory(sanitized, legacyPath)
+    await initializeMemberPrivateMemory(sanitized, { legacyPath, warn: message => ctx.logger.warn(message) })
     if (legacyDirectoryExists) {
       await expect(readFile(join(sanitized, 'notes', 'kept.md'), 'utf8')).resolves.toBe('persistent note')
     }
+  })
+
+  it('rejects a legacy path that is a file without provisioning a replacement', async () => {
+    const { root, ctx } = await realHarness()
+    const legacyPath = join(root, 'legacy-memory')
+    const sanitized = join(root, 'sanitized-memory')
+    await writeFile(legacyPath, 'untouched memory')
+
+    await expect(initializeMemberPrivateMemory(sanitized, { legacyPath, warn: message => ctx.logger.warn(message) }))
+      .rejects.toThrow(`legacy Member memory path '${legacyPath}' exists but is not a directory`)
+    await expect(readFile(legacyPath, 'utf8')).resolves.toBe('untouched memory')
+    await expect(access(sanitized)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('refuses to migrate recorded private memory that lives under another DSH home', async () => {
@@ -121,9 +130,7 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
     await writeFile(join(legacyPath, 'notes', 'kept.md'), 'real private memory')
     const sanitized = join(process.env.DSH_HOME!, 'agent-team', 'members', memberId.replaceAll(':', '-'))
 
-    const { MemberRuntime } = await import('../src/member-runtime.ts')
-    const runtime = new MemberRuntime({ ctx: ctx as never, liveMemberContext: () => { throw new Error('unused') }, runningAgents: new Set() })
-    await runtime.initializePrivateMemory(sanitized, legacyPath)
+    await initializeMemberPrivateMemory(sanitized, { legacyPath, warn: message => ctx.logger.warn(message) })
 
     // The foreign directory is untouched — not moved, and not copied either: a
     // copy would leak the Member's private memory into the foreign home.
@@ -193,10 +200,8 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
       await writeFile(join(twin, 'skills', 'probe', 'SKILL.md'), 'twin skill')
     }
 
-    const { MemberRuntime } = await import('../src/member-runtime.ts')
-    const runtime = new MemberRuntime({ ctx: ctx as never, liveMemberContext: () => { throw new Error('unused') }, runningAgents: new Set() })
     // No legacyPath argument: the ledger never recorded the twin.
-    await runtime.initializePrivateMemory(sanitized)
+    await initializeMemberPrivateMemory(sanitized, { warn: message => ctx.logger.warn(message) })
 
     if (twinDirectoryExists) {
       // Content preservation: every twin-only file moved into the live root.
@@ -213,7 +218,7 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
 
     // Idempotent: a second activation without any twin present is a no-op
     // and keeps every merged file.
-    await runtime.initializePrivateMemory(sanitized)
+    await initializeMemberPrivateMemory(sanitized, { warn: message => ctx.logger.warn(message) })
     if (twinDirectoryExists) {
       await expect(readFile(join(sanitized, 'notes', 'twin-only.md'), 'utf8')).resolves.toBe('twin note')
       await expect(readFile(join(sanitized, 'memory.md'), 'utf8')).resolves.toContain('live root fact')

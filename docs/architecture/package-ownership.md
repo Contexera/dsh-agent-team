@@ -33,7 +33,8 @@ Under `packages/agent-team/src/`, the main responsibilities are:
 | Module | Owns |
 | --- | --- |
 | `index.ts` | Host composition, lifecycle orchestration, and typed Remote adapters. |
-| `member-runtime.ts` | Member turn waits, skill mounts, and private-memory provisioning. |
+| `member-runtime.ts` | Member turn waits and skill mounts. |
+| `private-assets.ts` | Manager and Member private directory provisioning, plus Member path normalization, migration, and deletion. |
 | `member-tool-policy.ts` | Member tool restrictions, turn grants, and capability warnings. |
 | `ledger.ts` | Durable commits, authorization, replay validation, and projections. |
 | `spec.ts` | Stored operation schemas and the Team storage-domain specification. |

@@ -8,7 +8,6 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
@@ -24,6 +23,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Workspace, WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import type { MemberSkillProviderMount } from './member-skills.ts'
+import { initializeManagerPrivateAssets } from './private-assets.ts'
 import { mountMemberSkillProvider } from './member-skills.ts'
 import {
   sessionFailureOf,
@@ -299,7 +299,7 @@ export class ManagerSessionRuntime {
       )
     }
     try {
-      await this.initializePrivateAssets()
+      await initializeManagerPrivateAssets(this.deps.managerPrivateRoot)
     } catch (error) {
       return this.unavailable('runtime', `manager private assets could not be provisioned: ${messageOf(error)}`, pointer.sessionId)
     }
@@ -353,7 +353,7 @@ export class ManagerSessionRuntime {
     const sessionId = `agent-team-manager-${randomUUID()}` as SessionId
     let installed: ManagerGeneration
     try {
-      await this.initializePrivateAssets()
+      await initializeManagerPrivateAssets(this.deps.managerPrivateRoot)
       installed = await this.activate({ persisted: false, sessionId, workspace })
     } catch (error) {
       await this.archiveFailedFreshSession(sessionId)
@@ -592,31 +592,6 @@ export class ManagerSessionRuntime {
       await this.deps.ctx.workspaceRegistry.archiveSession(sessionId, { stopActivity: true })
     } catch (error) {
       this.warn(`retired manager Session archival failed after the successor was current: ${messageOf(error)}`)
-    }
-  }
-
-  private async initializePrivateAssets(): Promise<void> {
-    const root = this.deps.managerPrivateRoot
-    await mkdir(join(root, 'notes'), { recursive: true })
-    await mkdir(join(root, 'skills'), { recursive: true })
-    try {
-      await writeFile(join(root, 'memory.md'), [
-        '# Team manager memory',
-        '',
-        'Cold-start recovery index for the Team manager. Writing and review rules: the bundled `manager-memory` skill.',
-        '',
-        '## Durable rules',
-        '- <rule>',
-        '',
-        '## On-demand notes',
-        '- <scenario> → `notes/<cluster>/README.md`',
-        '',
-        '## Open local state',
-        '- <unfinished local state> (<path or ref>)',
-        '',
-      ].join('\n'), { flag: 'wx' })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
   }
 

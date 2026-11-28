@@ -19,7 +19,7 @@ import {
   type VisiblePrivateMemory,
 } from './private-memory.ts'
 import type { AgentTeamAgentMember, AgentTeamOwnedProject } from './types.ts'
-import { memberMemoryDirectoryPath } from './member-runtime.ts'
+import { memberMemoryDirectoryPath } from './private-assets.ts'
 
 export const name = 'contexera-agent-team-member-context'
 
