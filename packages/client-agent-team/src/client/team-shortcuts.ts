@@ -1,10 +1,8 @@
-/** Team mode's keyboard commands: the rail row, the two sidebar cards, the composer, the project list, and Inbox rows. */
 import type { ShortcutCommand, ShortcutCommandId, Shortcuts } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { AgentTeamProjectRef } from '@contexera/dsh-agent-team/types'
 import { TEAM_PANEL_ID, type TeamNavigation } from './navigation.ts'
 import type { TeamKey } from './locales.ts'
 
-/** What the commands act on: Team navigation, the rail's panel selection, and the Team dictionary. */
 export interface TeamShortcutHost {
   readonly navigation: TeamNavigation
   /** The shipped layout's panel selection; the rail row and these commands share it. */
@@ -14,46 +12,25 @@ export interface TeamShortcutHost {
   readonly t: (key: TeamKey, params?: Record<string, string>) => string
 }
 
-/**
- * One chord for every device. Web keeps Alt in the chord because the browser
- * owns the bare Command combinations (N, W, T) and never delivers them here.
- * @param code - physical key code.
- * @param options - `linux: false` leaves Linux Desktop unbound; it reserves arrow chords.
- * @returns defaults for the Desktop and Web profiles this Client ships on.
- */
-function altPrimary(code: string, options: { readonly linux?: boolean } = {}): ShortcutCommand['defaults'] {
-  const binding = { code, modifiers: ['primary', 'alt'] as const }
+function shortcutDefaults(code: string, modifiers: readonly ('primary' | 'alt' | 'shift')[], linuxDesktop: boolean): ShortcutCommand['defaults'] {
+  const binding = { code, modifiers }
   return {
     'desktop:macos': binding,
     'desktop:windows': binding,
-    ...(options.linux === false ? {} : { 'desktop:linux': binding }),
+    ...(linuxDesktop ? { 'desktop:linux': binding } : {}),
     'web:macos': binding,
     'web:windows': binding,
   }
 }
 
-/**
- * A digit chord with every modifier. macOS keeps Command+Shift+3, 4, and 5 for
- * screenshots and never delivers them, so the whole family carries Alt instead
- * of leaving three of its nine members dead.
- * @param code - physical key code.
- * @returns defaults for the Desktop and Web profiles this Client ships on.
- */
-function altShiftPrimary(code: string): ShortcutCommand['defaults'] {
-  const binding = { code, modifiers: ['primary', 'alt', 'shift'] as const }
-  return {
-    'desktop:macos': binding,
-    'desktop:windows': binding,
-    'desktop:linux': binding,
-    'web:macos': binding,
-    'web:windows': binding,
-  }
+function altPrimary(code: string, linuxDesktop = true): ShortcutCommand['defaults'] {
+  // The browser never delivers bare Command combinations like Command+T.
+  return shortcutDefaults(code, ['primary', 'alt'], linuxDesktop)
 }
 
-/** The Team composer's editable element, or undefined on a face that carries none (Inbox, Task board). */
-function composerInput(): HTMLTextAreaElement | undefined {
-  if (typeof document === 'undefined') return undefined
-  return document.querySelector<HTMLTextAreaElement>('[data-team-composer] textarea') ?? undefined
+function focusComposer(): void {
+  if (typeof document === 'undefined') return
+  document.querySelector<HTMLTextAreaElement>('[data-team-composer] textarea')?.focus()
 }
 
 /** Project rows in the order the sidebar shows them: the visible list is the order a reader means. */
@@ -63,142 +40,132 @@ function projectRows(): readonly AgentTeamProjectRef[] {
     .flatMap(row => row.dataset.teamProjectRow === undefined ? [] : [row.dataset.teamProjectRow as AgentTeamProjectRef])
 }
 
-/** Inbox rows in the order the page shows them. */
-function inboxRows(): readonly HTMLElement[] {
-  if (typeof document === 'undefined') return []
-  return [...document.querySelectorAll<HTMLElement>('[data-team-inbox-row]')]
+function openInboxRow(offset: number): void {
+  if (typeof document === 'undefined') return
+  document.querySelectorAll<HTMLElement>('[data-team-inbox-row]')[offset]?.click()
 }
 
-/**
- * Register Team mode's commands against the window's shortcut service.
- * @param host - Team navigation, rail selection, and dictionary.
- * @param shortcuts - the Client's command service.
- * @returns disposer removing every command.
- */
-export function registerTeamShortcuts(host: TeamShortcutHost, shortcuts: Shortcuts): () => void {
-  // The rail row is a destination: leaving Team mode also hands the column back to the conversation.
-  const leave = (): void => {
-    host.navigation.actions().leaveTeamForConversation(() => { host.selectPanel(null) })
-  }
+function openTeamDestination(host: TeamShortcutHost, select: () => void): void {
   // A face is a destination too: the mode and the rail selection are one fact,
   // so asking for the mode first keeps a Member Session view from swallowing it.
-  const open = (select: () => void): void => {
-    host.navigation.actions().enterTeam()
-    host.selectPanel(TEAM_PANEL_ID)
-    select()
+  host.navigation.actions().enterTeam()
+  host.selectPanel(TEAM_PANEL_ID)
+  select()
+}
+
+function stepProject(host: TeamShortcutHost, delta: 1 | -1): void {
+  const refs = projectRows()
+  if (refs.length === 0) return
+  const current = host.navigation.getSnapshot().projectRef
+  const index = current === undefined ? -1 : refs.indexOf(current)
+  const next = index === -1
+    ? (delta === 1 ? 0 : refs.length - 1)
+    : (index + delta + refs.length) % refs.length
+  openTeamDestination(host, () => { host.navigation.actions().selectProject(refs[next]!) })
+}
+
+type TeamCommand = Omit<ShortcutCommand, 'id' | 'regions' | 'modals' | 'resolve'> & {
+  readonly id: `team.${string}`
+  readonly run: () => void
+}
+
+function teamCommand({ id, run, ...command }: TeamCommand): ShortcutCommand {
+  return {
+    ...command,
+    id: id as ShortcutCommandId,
+    regions: ['page', 'editable'],
+    modals: [],
+    resolve: () => ({ status: 'handled', run }),
   }
-  // The list wraps, so one chord reaches every Project without a second gesture.
-  const step = (delta: 1 | -1): void => {
-    const refs = projectRows()
-    if (refs.length === 0) return
-    const current = host.navigation.getSnapshot().projectRef
-    const index = current === undefined ? -1 : refs.indexOf(current)
-    const next = index === -1
-      ? (delta === 1 ? 0 : refs.length - 1)
-      : (index + delta + refs.length) % refs.length
-    open(() => { host.navigation.actions().selectProject(refs[next]!) })
-  }
-  const commands: ShortcutCommand[] = [
+}
+
+function teamCommands(host: TeamShortcutHost): TeamCommand[] {
+  const open = (select: () => void): void => { openTeamDestination(host, select) }
+  return [
     {
-      id: 'team.mode.toggle' as ShortcutCommandId,
+      id: 'team.mode.toggle',
       label: () => host.t('shortcutTeamMode'),
       aliases: ['team mode', 'toggle team'],
       defaults: altPrimary('KeyT'),
-      regions: ['page', 'editable'],
-      modals: [],
-      resolve: () => ({ status: 'handled', run: () => {
-        if (host.navigation.getSnapshot().mode === 'team') leave()
+      run: () => {
+        if (host.navigation.getSnapshot().mode === 'team') {
+          host.navigation.actions().leaveTeamForConversation(() => { host.selectPanel(null) })
+        }
         else host.selectPanel(TEAM_PANEL_ID)
-      } }),
+      },
     },
     {
-      id: 'team.inbox' as ShortcutCommandId,
+      id: 'team.inbox',
       label: () => host.t('inboxTitle'),
       aliases: ['inbox', 'unread'],
       defaults: altPrimary('Digit1'),
-      regions: ['page', 'editable'],
-      modals: [],
-      resolve: () => ({ status: 'handled', run: () => { open(() => { host.navigation.actions().selectInbox() }) } }),
+      run: () => { open(() => { host.navigation.actions().selectInbox() }) },
     },
     {
-      id: 'team.board' as ShortcutCommandId,
+      id: 'team.board',
       label: () => host.t('taskBoard'),
       aliases: ['task board', 'board'],
       defaults: altPrimary('Digit2'),
-      regions: ['page', 'editable'],
-      modals: [],
-      resolve: () => ({ status: 'handled', run: () => { open(() => { host.navigation.actions().selectBoard() }) } }),
+      run: () => { open(() => { host.navigation.actions().selectBoard() }) },
     },
     {
-      // The third global face, so it takes the third digit: the rail's order is the chord's order.
-      id: 'team.manager' as ShortcutCommandId,
+      id: 'team.manager',
       label: () => host.t('teamManager'),
       aliases: ['team manager', 'manager', 'management'],
       defaults: altPrimary('Digit3'),
-      regions: ['page', 'editable'],
-      modals: [],
-      resolve: () => ({ status: 'handled', run: () => { open(host.selectManager) } }),
+      run: () => { open(host.selectManager) },
     },
     {
-      id: 'team.composer.focus' as ShortcutCommandId,
+      id: 'team.composer.focus',
       label: () => host.t('shortcutFocusComposer'),
       aliases: ['composer', 'focus input', 'reply'],
       // Not KeyI: Chrome and Safari keep Command+Alt+I for DevTools and never deliver it to the page.
       defaults: altPrimary('KeyM'),
-      regions: ['page', 'editable'],
-      modals: [],
-      resolve: () => ({ status: 'handled', run: () => { composerInput()?.focus() } }),
+      run: focusComposer,
     },
     {
-      id: 'team.back' as ShortcutCommandId,
+      id: 'team.back',
       label: () => host.t('shortcutBack'),
       aliases: ['back', 'go back', 'up'],
-      // ArrowLeft pairs with the Project stepping chords; Linux Desktop reserves arrow chords.
-      defaults: altPrimary('ArrowLeft', { linux: false }),
-      regions: ['page', 'editable'],
-      modals: [],
-      resolve: () => ({ status: 'handled', run: () => { host.navigation.actions().back() } }),
+      // Linux Desktop reserves these arrow chords.
+      defaults: altPrimary('ArrowLeft', false),
+      run: () => { host.navigation.actions().back() },
     },
     {
-      id: 'team.forward' as ShortcutCommandId,
+      id: 'team.forward',
       label: () => host.t('shortcutForward'),
       aliases: ['forward', 'go forward', 'down'],
-      defaults: altPrimary('ArrowRight', { linux: false }),
-      regions: ['page', 'editable'],
-      modals: [],
-      resolve: () => ({ status: 'handled', run: () => { host.navigation.actions().forward() } }),
+      defaults: altPrimary('ArrowRight', false),
+      run: () => { host.navigation.actions().forward() },
     },
     {
-      id: 'team.project.previous' as ShortcutCommandId,
+      id: 'team.project.previous',
       label: () => host.t('shortcutPreviousProject'),
       aliases: ['previous project', 'project up'],
-      defaults: altPrimary('ArrowUp', { linux: false }),
-      regions: ['page', 'editable'],
-      modals: [],
-      resolve: () => ({ status: 'handled', run: () => { step(-1) } }),
+      defaults: altPrimary('ArrowUp', false),
+      run: () => { stepProject(host, -1) },
     },
     {
-      id: 'team.project.next' as ShortcutCommandId,
+      id: 'team.project.next',
       label: () => host.t('shortcutNextProject'),
       aliases: ['next project', 'project down'],
-      defaults: altPrimary('ArrowDown', { linux: false }),
-      regions: ['page', 'editable'],
-      modals: [],
-      resolve: () => ({ status: 'handled', run: () => { step(1) } }),
+      defaults: altPrimary('ArrowDown', false),
+      run: () => { stepProject(host, 1) },
     },
     // One command per digit: the registry matches exact combinations, so a
     // family of nine is nine rows in the reference and nine rebindable actions.
-    ...Array.from({ length: 9 }, (_, offset): ShortcutCommand => ({
-      id: `team.inbox.item.${offset + 1}` as ShortcutCommandId,
+    ...Array.from({ length: 9 }, (_, offset): TeamCommand => ({
+      id: `team.inbox.item.${offset + 1}`,
       label: () => host.t('shortcutInboxItem', { index: String(offset + 1) }),
       aliases: [`inbox item ${offset + 1}`],
-      defaults: altShiftPrimary(`Digit${offset + 1}`),
-      regions: ['page', 'editable'],
-      modals: [],
-      // The row opens exactly as a click on it does; a face without that row does nothing.
-      resolve: () => ({ status: 'handled', run: () => { inboxRows()[offset]?.click() } }),
+      // macOS reserves Command+Shift+3 through 5 for screenshots.
+      defaults: shortcutDefaults(`Digit${offset + 1}`, ['primary', 'alt', 'shift'], true),
+      run: () => { openInboxRow(offset) },
     })),
   ]
-  const disposers = commands.map(command => shortcuts.register(command))
+}
+
+export function registerTeamShortcuts(host: TeamShortcutHost, shortcuts: Shortcuts): () => void {
+  const disposers = teamCommands(host).map(command => shortcuts.register(teamCommand(command)))
   return () => { for (const dispose of disposers) dispose() }
 }

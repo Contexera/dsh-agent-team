@@ -112,6 +112,20 @@ describe('Team mode shortcuts', () => {
     }
   })
 
+  it('unregisters every command, including the numbered Inbox rows', () => {
+    const { shortcuts, commands } = fakeShortcuts()
+    const dispose = registerTeamShortcuts({
+      navigation: new TeamNavigation(),
+      selectPanel: vi.fn(),
+      selectManager: vi.fn(),
+      t: key => zh[key],
+    }, shortcuts)
+
+    expect(byId(commands, 'team.inbox.item.9')).toBeDefined()
+    dispose()
+    expect(commands).toEqual([])
+  })
+
   it('toggles the mode through the rail selection the shipped layout owns', () => {
     const { navigation, commands, selectPanel } = register()
     const toggle = byId(commands, 'team.mode.toggle')
@@ -271,6 +285,10 @@ describe('Team mode shortcuts', () => {
     expect(navigation.getSnapshot().projectRef).toBe('project:a')
     run(previous)
     expect(navigation.getSnapshot().projectRef).toBe('project:c')
+
+    projectRows('project:a', 'project:b')
+    run(previous)
+    expect(navigation.getSnapshot().projectRef).toBe('project:b')
   })
 
   it('opens the Inbox row a digit names, and nothing on a face without rows', () => {
