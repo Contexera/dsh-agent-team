@@ -472,11 +472,17 @@ describe('Team manager Session Host runtime', () => {
       if (caller === 'pre-restore') expect(result).toBeUndefined()
       else expect(result).toMatchObject({
         status: 'unavailable',
-        diagnostic: {
-          class: 'runtime',
-          detail: 'the current manager Session was archived',
-          sessionId: current.sessionId,
-        },
+        diagnostic: timing === 'at write-open'
+          ? {
+            class: 'session-unreadable',
+            detail: 'the current manager Session is missing; reopen the destination to replace it',
+            sessionId: current.sessionId,
+          }
+          : {
+            class: 'runtime',
+            detail: 'the current manager Session was archived',
+            sessionId: current.sessionId,
+          },
       })
     },
   )

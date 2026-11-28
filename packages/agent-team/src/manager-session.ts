@@ -277,15 +277,18 @@ export class ManagerSessionRuntime {
       if (stored.failure.kind === 'missing') return await options.missing()
       return this.readFailure(stored.failure)
     }
-    return this.resumeLocked(pointer, stored.inspection, options.archived)
+    return this.resumeLocked(pointer, stored.inspection, options)
   }
 
   private async resumeLocked(
     pointer: ManagerSessionPointer,
     inspection: StoredSessionInspection,
-    onPointerLost: RecoverStoredPointer,
+    recovery: {
+      readonly archived: RecoverStoredPointer
+      readonly missing: RecoverStoredPointer
+    },
   ): Promise<AgentTeamManagerSessionResult | undefined> {
-    if (this.isArchived(pointer.sessionId)) return onPointerLost()
+    if (this.isArchived(pointer.sessionId)) return recovery.archived()
     const workspace = await this.workspaceForExisting(pointer, inspection)
     if (workspace === undefined) {
       if (!await this.anyUsableWorkspace()) return Object.freeze({ status: 'no-workspace' })
@@ -305,7 +308,7 @@ export class ManagerSessionRuntime {
     try {
       installed = await this.activate({ persisted: true, sessionId: pointer.sessionId, workspace })
     } catch (error) {
-      if (sessionFailureOf(error, pointer.sessionId)?.kind === 'missing') return onPointerLost()
+      if (sessionFailureOf(error, pointer.sessionId)?.kind === 'missing') return recovery.missing()
       return this.activationFailure('session-resume', error, pointer.sessionId)
     }
 
