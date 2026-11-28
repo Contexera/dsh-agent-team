@@ -3,7 +3,7 @@
 English | [中文](layout-and-typography.zh.md)
 
 ## Layout skeleton
-Project and Thread surfaces use `display:grid; grid-template-rows: auto 1fr auto` for header, scrollable timeline, and composer at `height:100%`, with contained inner scrolling. The content column is centered at `max-width: 880px`; timeline padding is `clamp(18px, 3vw, 36px)`.
+Project and Thread surfaces use `display:grid; grid-template-rows: auto minmax(0, 1fr) auto` for header, scrollable timeline, and composer at `height:100%`, with contained inner scrolling. The content column is centered at `max-width: 880px`; timeline padding is `clamp(18px, 3vw, 36px)`.
 
 The Project page's feed stage takes the content and composer rows together (`grid-row: 2 / 4`) so an open discussion panel can span both. At `max-width: 600px`, padding tightens and the header stacks; acceptance covers 390×844 without horizontal overflow. The host sidebar controls wide/rail widths; rail renders Team icon buttons.
 
@@ -15,7 +15,9 @@ The Project band is the shipped session header's shape at its own rhythm — a 3
 
 The band is pane chrome and does **not** share the reading column's edge. The shipped session header leaks left to a 20px inset (`padding: 10px 28px 0 20px`) while its transcript stays a centered column, so on that page the title and the words under it deliberately sit on different x positions; the Team surfaces copy that arrangement rather than centering the band over the column. The band carries no back row either: the browsing sidebar already lists every Project, so a second way back would be a duplicate control on the page.
 
-The Project page additionally seats a `项目 | 看板` tab strip on its header's closing rule and, for a taskless discussion, a 360px right-hand panel whose seat is reserved only while it is open; the board is the one Team surface allowed past the reading column, up to 1240px.
+The Project page additionally seats a `主对话 | 看板 | 订阅` tab strip on its header's closing rule and, for a taskless discussion, a right-hand panel that reserves space only while open; the board is the one Team surface allowed past the reading column, up to 1240px.
+
+On wide surfaces, [`panel-width.ts`](../../packages/client-agent-team/src/client/panel-width.ts) defaults to 52% of the surface, bounded to 420–960px while leaving a 420px feed where possible. The drag width is a local preference. At 600px and below, the panel overlays the feed instead of reserving a column.
 
 A whole-surface state — a projection still loading, one that came back empty, a failure that replaced it — rides one box, `.emptySurface`, and centres in the free space it stands in.
 
@@ -25,9 +27,7 @@ The reading surfaces are flex columns, where an auto margin already has vertical
 
 Where the parent's height is indefinite the percentage resolves to `auto` and the auto margin still centres, so neither family depends on the other's mechanism.
 
-Successful Project refreshes clear load errors without clearing unrelated action errors. Project top-level and Thread replies are idempotent by request ID. The Project 「作为任务」 control is a default-off native pressed control, sends explicit taskless intent unless selected, and resets off after success.
-
-It sits beside the attach control as the labeled mode chip of the language table above, keeping its word at every width — the composer narrows its control gaps below 560px instead of dropping the label.
+See [refresh semantics](refresh-copy-accessibility.md#data-refresh-semantics) for projection updates and [composer behavior](thread-and-composer.md#composer-and-mentions) for send modes and retry.
 
 ## Typography and identity
 | Element | Specification |
@@ -44,7 +44,9 @@ It sits beside the attach control as the labeled mode chip of the language table
 | Entry state cluster | 11px/18px leading the entry row: 18px avatar circles, 8px status dot, status word, 18px unread capsule at 11px/600 |
 | Empty/loading | 13px tertiary; 8px pulsing dots, disabled for reduced motion |
 
-Message time comes from Host projection and shares the ledger operation instant. Consecutive same-sender messages form a run, and time is stated by the row itself: beside the name where the row has an identity line, in the avatar seat under the pointer where it is a continuation. A day boundary gets a centered date anchor, and the Project feed alone draws a `TeamRunDivider` hairline at a five-minute boundary, with no instant on it. `team-separators.ts` is the single authority for both decisions.
+Message time comes from the Host projection. When parsing a stored send, Thread reply, or Thread start, the Host preserves the Message or anchor's own `occurredAt` and uses the enclosing ledger operation's instant only if it is missing.
+
+Consecutive same-sender messages form a run, and time is stated by the row itself: beside the name where the row has an identity line, in the avatar seat under the pointer where it is a continuation. A day boundary gets a centered date anchor, and the Project feed alone draws a `TeamRunDivider` hairline at a five-minute boundary, with no instant on it. `team-separators.ts` is the single authority for both decisions.
 
 The identity line and the avatar seat do not state the same label. The identity line has the reading column to itself and takes the whole wall-clock form (`formatMessageTime`: clock today, month-day within the year, full date across it).
 

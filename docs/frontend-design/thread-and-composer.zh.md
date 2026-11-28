@@ -22,7 +22,10 @@
 续行没有身份行，它的时间按上面[时间线滚动](#时间线滚动timeline-scroll)所述坐在头像座位里。
 
 ## Composer 与 @mention
-- textarea 自增高（上限 336px），Project / Thread composer 出现时自动聚焦且不滚动时间线。Enter 发送、Shift+Enter 换行。IME composition 期间 Enter 不触发发送。发送期间输入框保持聚焦但只读，避免重复提交。发送按钮点击不抢走焦点，发送完成后可直接继续输入。版本 2 的回复从不要求确认：mention 直接送达，不存在需要保留草稿等待的第二次 Enter。composer 卡片沿用 DSH 默认静态表面描边（`border: 0` + l2 elevation 发丝线 + `--dsw-elevation-soft`）。`focus-within` 不改它的颜色。
+
+修改发送分支时，从 `TeamMainStream.tsx` 和 `TeamThreadStartControls.tsx` 查起；重试与幂等见 [发送重试测试](../../packages/client-agent-team/tests/team-send-retry.client.spec.tsx)。
+
+- textarea 自增高（上限 336px），Project / Thread composer 出现时自动聚焦且不滚动时间线。Enter 发送、Shift+Enter 换行。IME composition 期间 Enter 不触发发送。发送期间输入框保持聚焦但只读，避免重复提交。发送按钮点击不抢走焦点，发送完成后可直接继续输入。回复不需要二次确认；提交后，由 Host 按正文解析并投递 mention。composer 卡片沿用 DSH 默认静态表面描边（`border: 0` + l2 elevation 发丝线 + `--dsw-elevation-soft`）。`focus-within` 不改它的颜色。
 - mention 弹层向上展开，`role="listbox"`。textarea 以 `aria-controls/aria-activedescendant/aria-expanded` 关联弹层。↑↓ 循环、Tab/Enter 接受候选、Escape 关闭。外点关闭复用 `useDismissOnOutsidePointer`。高度钳制复用 `useAnchoredMaxHeight`（cap 320px）。高亮行始终通过 `scrollIntoView`（`block: 'nearest'`）保持在弹层可视区内，Member 多时键盘选中的候选不会被折叠隐藏。Thread 面通过 Human-only 的 `threadObservations` 读取当前关注者集合。读取时机是首屏并行一轮，加每次 thread 域 wake。
 - 候选集是整个 Workspace 可点名的人——由生命周期决定资格、与在线与否无关，离线 Member 回来照样读到 durable mention。行按与 Project 的关系分组，落在 `data-mention-group`：负责人 → 本 Thread 关注者 → Workspace 其余成员（规则版本 9 下 Project catalog 名册即 Workspace 名册，不再是按 Project 记的成员关系）→ 名册之外剩余候选。规则版本 9 下 mention 不再加入任何人：它给任意 enabled 的 Workspace 参与者送去一个 direct marker，最后一组不表示「加入」。Thread 面通过 Human-only 的 `threadObservations` 读关注者集合（首屏一轮 + 每次 thread 域 wake）；Project 顶层发送没有关注者集合，只有负责人 / Workspace 其余。
 - 所有候选都可选；组内顺序是「在线优先、再按 handle 字母序」，不再随名册到达顺序乱跳。手打的 `@all` 在版本 2 下是普通文本、不展开，因此菜单不提供。接受候选后光标落在插入文本之后；删除提及文本会让「将通知」集合缩小。
@@ -33,9 +36,9 @@
 - Member Session 输入面即 shipped composer 本身，不做任何修改。Team 不注册任何 Member Session 的 composer 表面：无接管、无 trigger sources、无 dock 提示条。键盘合同、命令与引用菜单、附件与普通会话完全一致。
 - 收件人提示行：通知集合非空时在草稿与工具栏之间渲染 quiet 提示行（`.notifyRow`，`composerNotify` 文案 + `{ids}` 句柄列表）。发送前即可看到"将通知谁"。集合由正文手打的 `@Handle` 派生（`mentionedMemberIds`，与 Host 同一套大小写不敏感、ASCII 词边界的规则），回复时再加上被引用 Message 的作者。正文是唯一的投递依据，请求不再携带任何显式收件人列表，所以提示行与发送读出的是同一个集合。空集合不占位。
 - 点名读者这件事只在行上表达一次，不在 chip 上：所有 mention chip 同样式，卡片上给出「提到了你」提示。正文写的是读者改名前的 handle 时，行与提示一样成立 —— 判定跟着身份走，不跟着拼写走。
-- Project composer 发到 Main stream，工具区是 `讨论/任务` 开关。它是 pressed button；打开后出现原生复选框 `作为任务`。关闭时发 `postMainMessage`（引用 Main 消息时带 `replyToMessageRef`）；打开时发 `startThread`，勾选则建 Task，否则建讨论；Task 提交后页面切到 `看板` 页签并把焦点放上去。引用会关掉开关，打开开关会丢掉引用，因为新 Thread 没有引用目标。Host 返回 `main_unread_required` 时保留草稿，刷新并读取主对话，用状态行提示 Human 先看一下再发；重发是新的 operation。版本 2 的回复不再要求确认；Main stream 与 Thread composer 都不提供 `@all`，也不把它展开为 recipients，手打的 `@all` 就是普通文本。
+- Project composer 发到 Main stream，工具区是 `讨论/任务` 开关。它是 pressed button；打开后出现原生复选框 `作为任务`。关闭时发 `postMainMessage`（引用 Main 消息时带 `replyToMessageRef`）；打开时发 `startThread`，勾选则建 Task，否则建讨论；Task 提交后切到「看板」，焦点落在新卡片上；卡片不可用时才聚焦页签。引用会关掉开关，打开开关会丢掉引用，因为新 Thread 没有引用目标。Host 返回 `main_unread_required` 时保留草稿，刷新并读取主对话，用状态行提示 Human 先看一下再发；重发是新的 operation。Main stream 与 Thread composer 都不提供 `@all`，也不把它展开为 recipients，手打的 `@all` 就是普通文本。
 - 文件有三条进草稿的路，落进同一份列表：选择器、携带文件的粘贴、拖到 composer 上。携带文件的拖动先用 composer 自己的状态行说明松开会发生什么；落下时取消浏览器默认，所以在 composer 旁边松手也不会把页面导航到那个文件。
-- 草稿按 `project:<projectRef>` / `thread:<threadRef>` 存放，每 Client 一份 `TeamDraftStore`。localStorage 最多保留 50 条正文与保存时刻；旧版的 `recipientIds` 字段会被忽略。确认成功只清除提交时那份未改动的草稿；失败保留。新草稿的「作为任务」默认关闭，提交成功后复位，不写入 localStorage。
+- 草稿按 `project:<projectRef>` / `thread:<threadRef>` 存放，每 Client 一份 `TeamDraftStore`。localStorage 最多保留 50 条正文与保存时刻；旧版的 `recipientIds` 字段会被忽略。确认成功只清除提交时那份未改动的草稿；失败保留。新草稿默认向主对话发送。发送模式不写入 localStorage，提交成功后恢复为主对话模式。
 - 在同一 Client 内重新打开输入框，可以继续未改动的 Project 发送或 Thread 回复。发送还在途时，再点发送只等待同一次结果；结果不确定时，重试复用原请求以及适用的模式、修订、引用和附件。改动正文或选择会开始一次新提交。Host 明确拒绝未读或旧修订时，仍先读取，再由用户重发。刷新浏览器只恢复正文草稿。
 - 在同一侧栏切换讨论时，在途写入只占用原 Thread，回执不改变另一条讨论。只有发起 Task 的那次打开仍然有效时，成功回执才打开看板。
 - 只有 Human 可以把讨论转为 Task，结果以 Host 确认的提交为准。仍在原讨论时，侧栏转入新 Task，完整 Thread 页重新读取。已切到别处时，Task 仍归原 Project，页面不自动跳转。未读或旧修订的拒绝只刷新仍打开的原讨论。

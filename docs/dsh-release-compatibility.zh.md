@@ -94,17 +94,18 @@ npm 的 prerelease 版本范围不是普通的连续区间。比如：
 
 在该 checkout 中执行 `pnpm install --frozen-lockfile` 并完成构建。先跑 `pnpm run build:lib`。测试会加载的 native system addon，用 `pnpm run build:native-system` 构建。浏览器车道需要的 `apps/web/dist`，用 `pnpm run build:web` 构建。
 
-还要把日常仓库 `node_modules/@deepseek-ai/*` 的软链阵整份镜像到候选 checkout，并把 bundle 自链指向副本。类型检查走 facade，测试套件与浏览器车道走这些软链。
-
-再在隔离 Team 副本中运行：
+在隔离 Team 副本中安装依赖，让所有命令都指向候选 Harness。链接脚本从候选 checkout 建立包链接和 Team 自身的引用，不要复制日常开发目录里的链接。
 
 ```sh
+export DSH_HARNESS_DIR=deepseek-harness-CANDIDATE
+corepack pnpm install --frozen-lockfile
+node scripts/link-harness-packages.mjs
 node scripts/sync-paths.mjs
 npm run generate:typert
 npm run typecheck
 ```
 
-Typert 生成结果必须稳定。若结果变化，先审查生成物和 Remote contract，再决定是否修改 Team 源码。不要手改 `packages/agent-team/lib/typert.*`。
+将 `CANDIDATE` 换成实际 checkout 的目录后缀，后续认证命令也在同一 shell 中执行。Typert 生成结果必须稳定。若结果变化，先审查生成物和 Remote contract，再决定是否修改 Team 源码。不要手改 `packages/agent-team/lib/typert.*`。
 
 ### 3.3 自动验证
 
@@ -132,7 +133,7 @@ git diff --check
 只要 bundle、Client module、Remote activation、slot 或 DSH Client 包发生变化，都必须运行：
 
 ```sh
-npm run test:browser
+npm run test:browser -- --deep
 ```
 
 该命令必须在候选 Harness checkout 上运行，并验证：
@@ -247,15 +248,15 @@ Member 工具策略测试在 Member 激活前或激活后挂载真实的官方 T
 
 当前 Team bundle 的已认证基线是 DSH `0.2.2-rc.2`；以下几段保留产生前几条基线的历史。
 
-DSH peers 正好声明这条已认证线：`>=0.2.2-rc.2 <0.2.3`。本仓库尚未验证的线会落在声明区间之外，而不是在未经核实的兼容声明下被装上。Team 面向模型的工具面去掉 session-local todo 工具时，被移除的 `@deepseek-ai/dsh-tool-todo` peer 随它指名的 preset row 一并删除。其余 peers 仍保持唯一一条已认证区间。
+DSH peers 正好声明这条已认证线：`>=0.2.2-rc.2 <0.2.3`。区间下限是 CI 固定验证的版本，不是认证过的最高版本；区间内逐个候选版本的结论和证据见下文。
 
 被移除的 `@deepseek-ai/dsh-invariants` peer 同样随它指名的 registry row 一并删除：invariant companion 此后自持校验。
 
-现在已经没有依赖落在 DSH 线之外：外部的 context 引擎与它的 `jev` judge 随使用它们的工具一并移除，本 bundle 自己的 dependencies 只剩 `yaml` 与 `zod`，两者都不往树里带 DSH peer 声明。
+Team 的直接运行时依赖是 `@botiverse/oar`、`yaml` 和 `zod`，与 Harness peers 分列。Worker 运行时通过 OAR 启动引擎并读取其运行记录。
 
 `zod` 用精确锁（`4.6.6`），不是区间。Typert 生成会把本 bundle 的包放进宿主工作区做类型分析，而 DSH `0.2.2-rc.2` 的 bundle 声明的正是这个精确版本；此处用 caret 会解析出第二份拷贝，把 `ZodType` 劈成两个互不兼容的声明。所以 zod 的每次补丁都由认证那一轮有意识地移动这个钉，而不是靠 caret 漂移进来。
 
-经路由的 sqlite 后端是 vendored fork，根本不是 dependency（GitHub issue #28）。上游包只以 devDependency 钉在 fork 来源版本 0.1.5-rc.2，用作字节兼容 fixture 参照。每次兼容认证先把 fork 与该版本文件对一遍 diff，再做其他事。
+经路由的 sqlite 后端是 vendored fork，根本不是 dependency（GitHub issue #28）。上游包只以 devDependency 钉在 fork 来源版本 `0.2.2-rc.1`，用作字节兼容 fixture 参照。每次兼容认证先把 fork 与该版本文件对一遍 diff，再做其他事。
 
 本基线取代的 `0.1.5-rc.1` 认证覆盖 Typert 生成、完整类型检查、499 个测试（1 个跳过）、构建、打包检查、lint，以及真实 browser composition（外部发布布局安装、Remote mount、Team mode 进入与退出、普通 DSH 恢复），peers 为 `>=0.1.5-rc.1 <0.1.6`。
 

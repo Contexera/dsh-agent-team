@@ -37,7 +37,9 @@ Under `packages/agent-team/src/`, the main responsibilities are:
 | `member-tool-policy.ts` | Member tool restrictions, turn grants, and capability warnings. |
 | `ledger.ts` | Durable commits, authorization, replay validation, and projections. |
 | `spec.ts` | Stored operation schemas and the Team storage-domain specification. |
-| `types.ts` | Public type barrel over `types/entities.ts` (ids and entities), `types/operations.ts` (ledger records), and `types/requests-results.ts` (Remote requests, results, receipts, and views, one file per surface). |
+| `types.ts` | Public type barrel over `types/entities.ts` (ids and entities), `types/operations.ts` (ledger records), and the Remote catalog barrel `types/requests-results.ts`. |
+| `types/*-requests.ts` | Remote requests, results, and views, grouped by surface. |
+| `types/operation-receipt.ts` | The operation receipt shared across Remote surfaces. |
 | `invariant.ts` | Companion plugin that validates the ledger at mount and rechecks it after commits. |
 
 `MemberRuntimeDeps` keeps the runtime seam to three dependencies: Host `ctx`, a `liveMemberContext` resolver, and the shared read-only `runningAgents` set. The Host retains the ledger, Agent handles, notifications, and recovery orchestration.

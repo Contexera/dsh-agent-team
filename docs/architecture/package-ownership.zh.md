@@ -37,7 +37,9 @@ agent-team       → neither tool nor Client implementation
 | `member-tool-policy.ts` | Member 的工具限制、Turn 授权与能力警告。 |
 | `ledger.ts` | 持久提交、授权、重放校验与投影。 |
 | `spec.ts` | 已存 operation 的 schema 与 Team 存储 domain 定义。 |
-| `types.ts` | 公开类型入口，重新导出 `types/entities.ts`（id 与实体）、`types/operations.ts`（ledger 记录）和 `types/requests-results.ts`（按表面分文件的 Remote 请求、结果、回执与视图）。 |
+| `types.ts` | 公开类型入口，重新导出 `types/entities.ts`（id 与实体）、`types/operations.ts`（ledger 记录）和 Remote 类型目录入口 `types/requests-results.ts`。 |
+| `types/*-requests.ts` | 按表面划分的 Remote 请求、结果与视图。 |
+| `types/operation-receipt.ts` | 各 Remote 表面共享的 operation 回执。 |
 | `invariant.ts` | companion 插件，在挂载时校验 ledger，并在提交后复查。 |
 
 `MemberRuntimeDeps` 将运行时边界限定为三项依赖：Host `ctx`、`liveMemberContext` 解析函数，以及共享的只读 `runningAgents` 集合。ledger、Agent handle、通知与恢复编排仍由 Host 持有。

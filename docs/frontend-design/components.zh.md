@@ -2,6 +2,8 @@
 
 [English](components.md) | 中文
 
+按组件定位实现，再看调用方和状态测试：[消息行测试](../../packages/client-agent-team/tests/team-message.client.spec.tsx) 验证消息渲染，[讨论面板测试](../../packages/client-agent-team/tests/team-project-panel.client.spec.tsx) 验证 Project 内打开的讨论。颜色、间距等通用约定见 [设计语言](principles-and-language.zh.md)。
+
 ## TeamMessage（消息行）
 - Props 有五组：`senderName`、`memberId`、`human`、`body`、`grouped`。
 - 可选 `occurredAt`：名字行时间元信息。
@@ -113,7 +115,7 @@
 - 卡片按「人数」分两种人的角色：负责人只有一个人，就由 `TeamOwnerSeat` 把他当一个人画——卡片上到处都在用的 18px 头像，接上光秃秃的角色词：`负责`、读者本人写 `你负责`（来自 `humanMemberId`）、暂停中写 `负责 · 已暂停`。脸已经说出了是谁，再写 handle 只是往一行 12px 里塞进第三种字号。座位是一个 `role="img"`，标签与悬停 `title` 写完整那句 `负责人 @handle`；卡片的无障碍名由同一个函数给出同一句。认领者是 0–N 个人、扫一眼即可，所以画头像堆叠、后接「认领」——与「待认领」同一个词根，一格两态用同一套词；词在脸后面，一堆脸才不会被读成更多负责人。堆叠只列座位还没画过的人，所以一行里每个人只出现一次：负责人自己认领了这条 Task 时，那一行就只剩座位，因为状态已经说了工作在动。未完成且无人认领写「待认领」；已了结的卡片整段撤掉这一格，而不是在它上面说「没人在做」。
 - 头像彼此重叠 4px，不戴任何描边：描边必须是它下面那一层的颜色，而卡片或行换上的每一种底色——悬停、焦点、当前选中——都会把这层猜测变成一圈白边。重叠浅，才不会压住邻居的首字母；成组是因为圆本身相交，而不是被一条边裁开。
 - 凡是说出一条 Task 归谁的面——看板卡、Main stream 卡、Thread 页的顶层栏——都画同一个 `TeamOwnerSeat`，所以「归谁」不会是同一个人的三张图。措辞是一对函数：`accountableWord` 写那一截短句，`accountableLabel` 写标签与悬停的整句，两者不可能把同一条 Task 说成两样。卡片与顶层栏用 roster 解析这个人（`rosterAccountableOwner`，与这两个面上其他所有人 ref 同一条解析），roster 答不出的 id 就保持成 id、不编一个名字；跨 Workspace 的看板没有 roster，所以读 Host 自己投影的 `accountableOwner`。
-- 从 composer 发起 Task 会把 Project 切到看板，键盘焦点落在该 Task 新建的那张卡上，而不是「看板」页签。输入框随切换卸载，焦点必须落定；读者刚创建的卡就是落点，回车即打开该 Task。鼠标发送时卡片获得焦点但不显示环；落点沿用看板卡共用的 `:focus-visible` 焦点环，不再给页签加环。
+- 从 composer 发起 Task 会把 Project 切到看板，焦点落在新 Task 卡片上；卡片不可用时才聚焦「看板」页签。输入框随切换卸载，焦点必须落定；读者刚创建的卡就是落点，回车即打开该 Task。鼠标发送时卡片获得焦点但不显示环；落点沿用看板卡共用的 `:focus-visible` 焦点环，不再给页签加环。
 - 同一卡片家族也服务唯一的跨 Workspace 看板（`TeamTaskBoardPage`，从侧栏「任务看板」入口进入，见 [sidebar-browser.zh.md](sidebar-browser.zh.md)）：所有可见 Workspace 的 open Task 摆进三个未完结状态列，每张卡带 Project 名前缀，空态同一条规则（空态文案独站，列头不并立），不带未读徽标——那仍是 Project 面上按 Thread 计的未读事实。
 - 第一个页签是 `主对话`，即 Project 的 Main stream（`TeamMainStream`）：从 `mainStreamHistory` 先读最新一页，更早的页用 `beforeSequence`。
 

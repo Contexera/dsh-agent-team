@@ -2,6 +2,8 @@
 
 English | [中文](components.zh.md)
 
+Start with the component's caller and state tests. The [Message tests](../../packages/client-agent-team/tests/team-message.client.spec.tsx) cover message rendering; the [discussion panel tests](../../packages/client-agent-team/tests/team-project-panel.client.spec.tsx) cover discussions opened inside a Project. Use the [design language](principles-and-language.md) for shared tokens and spacing.
+
 ## TeamMessage
 Props include sender identity, body, optional time, mention handles, sender title, grouping, and children. Only adjacent same-sender Message rows group; Activity rows break runs. Grouped rows hide avatar/name while preserving grid alignment. The initial of the sender name (without `@`) is shown.
 
@@ -25,7 +27,7 @@ That pulse is the only layer the Main stream's rows take: under the pointer they
 
 Bodies over the 600-character formatter threshold use a persistent wrapper with an approximately eight-line/176px preview and quiet “expand/collapse” button carrying `aria-expanded`. Keep the wrapper mounted so Markdown-injected refs and mention chips survive. Attachments, fallback chips, Task cards, and children stay outside the collapsible body.
 
-That same wrapper carries `data-document`: the threshold that folds a body also calls it a document, so its Markdown reads on the document rhythm (Typography table above) while short messages keep the chat grid, and the preview stays eight lines of whatever the content-font axis sets.
+That same wrapper carries `data-document`: the threshold that folds a body also calls it a document, so its Markdown reads on the document rhythm (see [Typography and identity](layout-and-typography.md#typography-and-identity)) while short messages keep the chat grid, and the preview stays eight lines of whatever the content-font axis sets.
 
 ## Attachments
 A Message's files render as one strip under its body: a wrapping row at a 6px gap, thumbnails and chips mixed. The strip is a flex item of the body column, so it takes the column's width rather than its own — a filename with no break opportunity would otherwise give the strip a fit-content width past the column and push the timeline into horizontal scroll.
@@ -205,7 +207,7 @@ The cards and the band resolve the person from the roster (`rosterAccountableOwn
 
 A `待验收` badge rides the cards the reader may accept.
 
-A Task started from the composer switches the Project to the board, and the keyboard focus lands on that Task's own new card rather than the `看板` tab. The composer unmounts with the switch, so focus has to move somewhere; the card the reader just created is that place, and Enter on it opens the Task. A pointer-driven send focuses the card without a visible ring, and the landing takes the same `:focus-visible` ring every board card draws — the tab is not rung.
+A Task started from the composer switches the Project to the board, and focus goes to the new Task card (or to `看板` if the card isn't available). The composer unmounts with the switch, so focus has to move somewhere; the card the reader just created is that place, and Enter on it opens the Task. A pointer-driven send focuses the card without a visible ring, and the landing takes the same `:focus-visible` ring every board card draws — the tab is not rung.
 
 The same card family serves the one cross-Workspace board (`TeamTaskBoardPage`, reached from the sidebar's 任务看板 entry — see [sidebar-browser.md](sidebar-browser.md)): three open-status columns over every visible Workspace, each card prefixed with its Project name. It answers to the same empty rule — the empty message stands alone, no column heads beside it — and carries no unread badges, which stay per-Thread facts on the Project face.
 

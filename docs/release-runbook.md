@@ -2,7 +2,7 @@
 
 English | [中文](release-runbook.zh.md)
 
-This document is the procedure for publishing a version of `@contexera/dsh-agent-team`. It exists so that a maintainer can run a release from this page alone, including checks added because a defect once reached users. It is not a behaviour specification: source and tests define behaviour, and [`dsh-release-compatibility.md`](dsh-release-compatibility.md) owns the separate question of *which* DSH line the bundle supports. Certification decides the peer range; this runbook decides how a version carrying that decision reaches npm.
+Use this runbook to publish `@contexera/dsh-agent-team`. Confirm [DSH compatibility certification](dsh-release-compatibility.md) first, then follow this page to review release copy, gather evidence, and publish. Certification decides which DSH line is supported; this runbook delivers the Team version that carries that decision.
 
 ## 1. Who decides what
 
@@ -25,16 +25,16 @@ This document is the procedure for publishing a version of `@contexera/dsh-agent
 
 ## 3. Check ladder
 
-Run in this order; a failure stops the release, and a fix re-runs from the failed step.
+Run in order. Build before testing because preset tests load built packages. A failure stops the release; after fixing it, restart from the earliest affected step.
 
 | Command | It refuses |
 | --- | --- |
 | `npm run typecheck` | Type errors against the certified harness checkout. |
-| `npm test` | Test failures, and the six mechanical gates it bundles: `check:facades`, `check:docs`, `check:core-skills`, `check:boundaries`, `check:versions`, `check:comments`. |
 | `npm run build` | Build errors; also what `prepack` will run at publish time. |
+| `npm test` | Generates Typert, checks facades, docs, E2E docs, core skills, boundaries, versions, comments, and scratch, then runs Vitest. |
 | `npm run lint` | Lint errors. The command runs without `--deny-warnings`, so warnings do not fail it. |
-| `npm run test:browser -- --deep` | Broken composition, Remote mounting, slot takeover, complete cross-surface regressions, or ordinary-DSH restoration. Needs the adjacent `../deepseek-harness` checkout; browser acceptance is a local step and never runs in CI. |
-| `npm pack --dry-run` | Nothing by itself — record the file count for the release report. |
+| `npm run test:browser -- --deep` | Broken composition, Remote mounting, slot takeover, complete cross-surface regressions, or ordinary-DSH restoration. Use the certified Harness checkout. This is a local release gate, not a CI job. |
+| `npm pack --dry-run` | Nothing by itself — record the file count and review the npm package contents; the next step validates the artifact. |
 | `npm run check:artifact` | An artifact that would ship broken: stray `.ts`/`.tsx`, a missing `cordis.patch.yml`, or a runtime relative import whose target is not in the tarball. Run it *after* `npm run build`. |
 | `npm run check:public-baseline` | A public surface that drifted from the manifest's certified baseline (both READMEs and the pinned compatibility discussion). It reads that discussion through `gh`, so the operator needs an authenticated `gh`; `--offline` is for local iteration and cannot stand in before a publish. |
 | `git diff --check v<previous>..HEAD` | Whitespace damage anywhere in the release's change set. The bare `git diff --check` inspects only *unstaged* work, so it passes silently once the release is committed — which is when the ladder runs. |
@@ -66,9 +66,11 @@ Assert all five release-semantics facts **before** pushing or publishing:
 
 1. The tag is exactly `v<package.json version>` — no drift between manifest and tag.
 2. A prerelease suffix matches the GitHub Release's prerelease flag; a stable release is not flagged prerelease.
-3. Publishing names the dist-tag explicitly — `npm publish --tag <dist-tag> --access public`, with `<dist-tag>` `latest` for a stable version and the prerelease's own tag otherwise. npm refuses a prerelease published under the default tag, so an omitted `--tag` cannot express this release at all: the run stops there rather than moving `latest`.
+3. Name the dist-tag explicitly. Use the prerelease tag for a prerelease. For a stable version, check rule 5 before choosing `latest`; otherwise use `next`. Do not rely on npm's default tag.
 4. Publishing a version as `latest` never moves the tag backwards: the current `latest` must be semver-lower than the version being published.
 5. A stable release holds `latest` only while its declared range admits the version DSH's `latest` resolves to ([§2.4](dsh-release-compatibility.md)). When certification moves past that version, publish under `next`, leave `latest` where it is, and re-point it once DSH's own `latest` arrives.
+
+Verify that `origin` is the authorised release repository. Stage only release files; if pre-flight corrected compatibility or installation docs, add those paths explicitly too. Verify the release commit contains all intended changes.
 
 ```sh
 git add package.json CHANGELOG.md
@@ -86,7 +88,7 @@ git push origin vX.Y.Z
 npm publish --tag <dist-tag> --access public
 ```
 
-The explicit refspecs and their dry-run fences are load-bearing, not ceremony. A clone can carry pre-rewrite backup branches and local-only tags whose commits are deliberately absent from the remote, and `--all` / `--tags` publish them silently. This repository is public: a stray ref cannot be withdrawn. If a dry run lists a third ref, stop and find out whose it is.
+The explicit refspecs and their dry-run fences are load-bearing, not ceremony. A clone can carry pre-rewrite backup branches and local-only tags whose commits are deliberately absent from the remote, and `--all` / `--tags` publish them silently. This repository is public: a stray ref cannot be withdrawn. If either dry run lists any unexpected ref, stop and find out whose it is.
 
 Pushing master before the tag costs nothing and keeps the tag's evidence honest: the run that certifies a tag is the run of the commit the tag names. A tag may be re-pointed only while nothing references it yet — no GitHub Release, no npm version, no consumer.
 
