@@ -1,13 +1,10 @@
-import type { TeamChangeListener, TeamChangeScope, TeamChangeUpdate } from './team-changes.ts'
-import type { TeamChangeStream } from './team-changes.ts'
+import type { TeamChangeListener, TeamChangeScope, TeamChangeStream, TeamChangeUpdate } from './team-changes.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
-/** The scope kinds a rule can name; `scopeLess` is the stream without a scope, whose deliveries already woke every Workspace. */
-export type TeamQueryScopeKind = 'workspace' | 'presence' | 'project' | 'thread' | 'scopeLess'
+type TeamQueryScopeKind = 'workspace' | 'presence' | 'project' | 'thread' | 'scopeLess'
 
 /**
- * A query's invalidation policy in comparable form. `covers` closures are rebuilt on every render, so the rule that
- * decides them carries its own identity: two reads of one key must name the same kinds and the same Workspace.
+ * Two reads sharing a key must also agree on what invalidates it, even when their callers construct separate rules.
  */
 export interface TeamQueryRule {
   readonly kinds: readonly TeamQueryScopeKind[]
@@ -19,7 +16,7 @@ export interface TeamQueryRule {
  * The stable identity of a rule: what it admits, not which closure computed it. Sorted so the order a factory lists
  * kinds in cannot make two equivalent rules look different.
  */
-export function describeRule(rule: TeamQueryRule): string {
+function describeRule(rule: TeamQueryRule): string {
   return `${[...rule.kinds].sort().join(',')}|${rule.workspaceId ?? '*'}`
 }
 
@@ -44,20 +41,11 @@ export function teamQueryKey<Result>(key: string): TeamQueryKey<Result> {
 
 export type WorkspaceScopeKind = 'workspace' | 'presence'
 
-/**
- * Whether a change scope names one of the query's scope kinds in its Workspace. The scope-less stream is excluded:
- * every delivery touching such data has already woken the Workspace scope, so admitting it only adds redundant reads.
- */
-export function coversWorkspaceScope(scope: TeamChangeScope, workspaceId: WorkspaceId | undefined, kind: WorkspaceScopeKind): boolean {
-  return scope !== undefined && scope.kind === kind && scope.workspaceId === workspaceId
-}
-
-/** Whether a rule admits a change scope. Derived from the rule, so no per-read closure can disagree with it. */
-export function coversRule(scope: TeamChangeScope, rule: TeamQueryRule): boolean {
+function coversRule(scope: TeamChangeScope, rule: TeamQueryRule): boolean {
   if (scope === undefined) return rule.kinds.includes('scopeLess')
   if (!rule.kinds.includes(scope.kind)) return false
   if (scope.kind !== 'workspace' && scope.kind !== 'presence') return true
-  return rule.workspaceId === undefined || coversWorkspaceScope(scope, rule.workspaceId, scope.kind)
+  return rule.workspaceId === undefined || scope.workspaceId === rule.workspaceId
 }
 
 /** Per-query read counters. Diagnostics record identity and counts only — never response bodies. */
@@ -102,8 +90,16 @@ interface Waiter<Result> {
 
 type Outcome<Result> = { readonly ok: true; readonly value: Result } | { readonly ok: false; readonly error: unknown }
 
-const answeredFailure = (outcome: Outcome<unknown>): boolean =>
-  outcome.ok && typeof outcome.value === 'object' && outcome.value !== null && (outcome.value as { readonly ok?: unknown }).ok === false
+function isFailed(outcome: Outcome<unknown>): boolean {
+  if (!outcome.ok) return true
+  const { value } = outcome
+  return typeof value === 'object' && value !== null && (value as { readonly ok?: unknown }).ok === false
+}
+
+function deliverOutcome<Result>(waiter: Waiter<Result>, outcome: Outcome<Result>): void {
+  if (outcome.ok) waiter.resolve(outcome.value)
+  else waiter.reject(outcome.error)
+}
 
 interface InFlight<Result> {
   readonly key: TeamQueryKey<Result>
@@ -138,23 +134,18 @@ export class TeamQueries {
 
   read<Result>(identity: TeamQueryIdentity<Result>, load: () => Promise<Result>): Promise<Result> {
     const state = this.state(identity)
+    // The brand pairs this key with its loader; the heterogeneous map cannot express that association.
     const existing = this.inFlight.get(identity.key)
-    if (existing !== undefined && !existing.superseded) {
-      existing.state.counters.shared += 1
-      // The key's brand is what makes this re-type sound: `state` already confirmed this key's result type matches.
-      const entry = existing as InFlight<Result>
-      return new Promise<Result>((resolve, reject) => {
-        const waiter: Waiter<Result> = { resolve, reject }
-        if (entry.outcome !== undefined) {
-          if (entry.outcome.ok) waiter.resolve(entry.outcome.value)
-          else waiter.reject(entry.outcome.error)
-          return
-        }
-        entry.waiters.push(waiter as Waiter<unknown>)
-      })
-    }
+    const entry = existing as InFlight<Result> | undefined
     return new Promise<Result>((resolve, reject) => {
-      this.issue(identity, state, load).waiters.push({ resolve, reject } as Waiter<unknown>)
+      const waiter = { resolve, reject }
+      if (entry === undefined || entry.superseded) {
+        this.issue(identity, state, load).waiters.push(waiter)
+        return
+      }
+      entry.state.counters.shared += 1
+      if (entry.outcome === undefined) entry.waiters.push(waiter)
+      else deliverOutcome(waiter, entry.outcome)
     })
   }
 
@@ -222,8 +213,10 @@ export class TeamQueries {
   private state<Result>(identity: TeamQueryIdentity<Result>): QueryState<Result> {
     const existing = this.states.get(identity.key)
     if (existing !== undefined) {
-      if (describeRule(existing.rule) !== describeRule(identity.rule)) {
-        throw new Error(`query ${identity.key} was registered with a different invalidation rule: ${describeRule(existing.rule)} then ${describeRule(identity.rule)}`)
+      const registeredRule = describeRule(existing.rule)
+      const readRule = describeRule(identity.rule)
+      if (registeredRule !== readRule) {
+        throw new Error(`query ${identity.key} was registered with a different invalidation rule: ${registeredRule} then ${readRule}`)
       }
       return existing as QueryState<Result>
     }
@@ -261,7 +254,7 @@ export class TeamQueries {
   private settle<Result>(entry: InFlight<Result>, outcome: Outcome<Result>): void {
     const current = this.inFlight.get(entry.key) === entry
     const state = entry.state
-    if (!outcome.ok || answeredFailure(outcome)) state.counters.failed += 1
+    if (isFailed(outcome)) state.counters.failed += 1
     if (entry.issuance <= state.applied) {
       this.dropStale(entry, current)
       return
@@ -329,9 +322,6 @@ export class TeamQueries {
       for (const waiter of waiters) waiter.reject(new Error('read superseded before any result landed'))
       return
     }
-    for (const waiter of waiters) {
-      if (outcome.ok) waiter.resolve(outcome.value)
-      else waiter.reject(outcome.error)
-    }
+    for (const waiter of waiters) deliverOutcome(waiter, outcome)
   }
 }

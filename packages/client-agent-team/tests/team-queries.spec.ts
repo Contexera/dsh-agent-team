@@ -69,24 +69,46 @@ describe('TeamQueries', () => {
     expect(queries.diagnostics()['members:w1']).toMatchObject({ issued: 2, superseded: 1 })
   })
 
-  it('collapses one dispatch across scopes: repeated consumers join the read that dispatch issued', async () => {
+  it('invalidates before listeners read, so consumers of one dispatch share its replacement', async () => {
+    const { changes, emit } = hub()
+    const queries = new TeamQueries(changes)
+    const load = vi.fn(async () => 'roster')
+    const reads: Promise<string>[] = []
+    const refresh = () => { reads.push(queries.read(roster(), load)) }
+    queries.subscribeChanges(workspace, refresh)
+    queries.subscribeChanges(workspace, refresh)
+    const held = Promise.withResolvers<string>()
+    const before = queries.read(roster(), () => held.promise)
+
+    // Baselines bypass version deduplication, so only folding the dispatch once prevents double invalidation.
+    emit(workspace, { type: 'changed', version: 5, baseline: true })
+    expect(await Promise.all(reads)).toEqual(['roster', 'roster'])
+    held.resolve('old roster')
+    expect(await before).toBe('roster')
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(queries.diagnostics()['members:w1']).toMatchObject({ issued: 2, shared: 1, superseded: 1 })
+  })
+
+  it('deduplicates a version within its domain, not across presence and projection', async () => {
     const { changes, emit } = hub()
     const queries = new TeamQueries(changes)
     queries.subscribeChanges(workspace, () => {})
-    const load = vi.fn(async () => 'roster')
-    // Seed the query state, then let a dispatch land with nothing in flight.
-    expect(await queries.read(roster(), load)).toBe('roster')
+    queries.subscribeChanges(presence, () => {})
+    await queries.read(roster(), async () => 'initial')
     emit(workspace, { type: 'changed', version: 5 })
-    // Consumers reacting to that dispatch share one read: the same version
-    // carries no new data, so it supersedes nothing.
-    const joined = queries.read(roster(), load)
-    const second = queries.read(roster(), load)
-    expect(await joined).toBe('roster')
-    expect(await second).toBe('roster')
-    // The same version arriving again does not supersede anything either.
+    const held = Promise.withResolvers<string>()
+    const before = queries.read(roster(), () => held.promise)
     emit(workspace, { type: 'changed', version: 5 })
-    expect(load).toHaveBeenCalledTimes(2)
-    expect(queries.diagnostics()['members:w1']).toMatchObject({ issued: 2, shared: 1, superseded: 0 })
+    const shouldNotLoad = vi.fn(async () => 'unexpected')
+    const joined = queries.read(roster(), shouldNotLoad)
+    expect(shouldNotLoad).not.toHaveBeenCalled()
+
+    emit(presence, { type: 'changed', version: 5 })
+    const after = queries.read(roster(), async () => 'fresh')
+    expect(await after).toBe('fresh')
+    held.resolve('old')
+    expect(await Promise.all([before, joined])).toEqual(['fresh', 'fresh'])
+    expect(queries.diagnostics()['members:w1']).toMatchObject({ issued: 3, shared: 1, superseded: 1 })
   })
 
   it('always invalidates on a stream-opening baseline, even at the same version', async () => {
